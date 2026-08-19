@@ -309,7 +309,9 @@ The three that must never merge are `ports/`, `adapters/`, and `sdk/`.
 
 ### 3.1 The error hierarchy
 
-One base, organized by meaning, mapped to exit codes in exactly one table (`cli/exit_codes.py`).
+One base, organized by meaning, mapped to exit codes in exactly one table — declared **as data
+alongside the hierarchy in `ports/errors.py`**, so a class and its code cannot drift apart.
+`cli/exit_codes.py` consumes that table and adds nothing to it.
 Adapters translate vendor exceptions at their boundary; nothing above an adapter sees one.
 
 ```
@@ -324,6 +326,10 @@ AglError
 ├── Stop                  → 7   run ended deliberately; results persist, resume continues
 └── InternalError         → 70  our bug
 ```
+
+**`Stop` descends from `AglError`, so any handler must catch it first.** A bare `except AglError`
+swallows a deliberate stop and reports exit 6 or 70 where the contract promises 7. That ordering is
+a stage-10 acceptance criterion, not a convention.
 
 `Stop` is the framework's terminal-end mechanism and carries no domain vocabulary. Workflows raise
 their own subclasses (`ReviewNotConverging`, `BacklogStalled`). Exit 7 lets a script tell "needs
@@ -473,16 +479,53 @@ One write path, one ledger.
 - **Reporting step** — declares a reporting tool. Its result is that tool's payload. If the agent
   returns without firing it, there is no result and the step re-runs. (This is
   `RoleIncompleteError`, now automatic.)
-- **Effect step** — no reporting tool. Result is `null`; the effect is commits in the worktree.
+- **Effect step** — no reporting tool. Result is `null`; the effect is commits in the worktree,
+  made by the framework at step end when `commit=` is given (below).
 
 A malformed payload is rejected by the tool **back to the agent within the same conversation**, so
 the model corrects itself. Not an adapter retry, not a workflow retry.
+
+#### `commit=` decides what happens to the worktree
+
+Every step ends with the framework doing one of exactly two things, chosen by whether the call
+passed `commit=`:
+
+| | Framework does | Then |
+|---|---|---|
+| `commit="implement T-01"` | commits anything dirty with that message | records `head` |
+| omitted | `git reset --hard` to `last_good`, then `git clean -fd` | records `head` (unchanged) |
+
+**Why it is a parameter and not a separate call.** A `run.commit()` after the step would run *after*
+the entry was written, so the recorded `head` would predate the commit — and `head` is the reset
+target, so the next step to miss its fingerprint would delete the work. Committing has to be inside
+the step's atomic unit.
+
+**Why omitting it wipes rather than errors.** It makes read-only genuinely read-only. A reviewer that
+scribbles a scratch file, or an agent that leaves a `.pytest_cache`, cannot contaminate the next step
+or reach the merge. The absence of the parameter becomes a guarantee instead of a convention. Note
+that `reset --hard` alone is not enough — untracked files survive it, which is exactly the case this
+exists for, hence `clean -fd` as well. The wipe runs whether the step succeeded or raised.
+
+This is the same reset primitive §3.6 already uses before re-running a step, applied at a second
+moment. One operation, used consistently.
+
+**Pairing is the author's job, by convention and not enforcement.** A step without `commit=` should
+use a role declaring `Restriction.NO_VCS_WRITES`; otherwise an agent that commits during its own run
+will have that work discarded. The framework does not check the combination and does not inspect
+whether HEAD moved — it does the one predictable thing either way. This is the single place in AGL
+where a mistake destroys work rather than merely costing a re-run, so the SDK docs state it plainly,
+and an IDE lint plugin is the right place to catch it.
+
+**The message is outside the fingerprint** (§3.6). It is cosmetic, so changing it must not invalidate
+a step and re-run an agent. Consequence: edit the message, replay, and the existing commit keeps the
+old one.
 
 #### The whole public surface
 
 ```
 run.params                        the workflow's typed params
-run.step(name, role, **inputs)    the only unit of work — fingerprinted and replayed
+run.step(name, role, commit=None, **inputs)
+                                  the only unit of work — fingerprinted and replayed
 run.worktree(name, base=None)     a child Run: new worktree, new namespace
 run.integrate()                   land this Run's branch into its parent's — serialized, gated
 run.activity                      current agent activity string, or None
@@ -495,13 +538,14 @@ attribute.
 **`run.params`** — the typed dataclass, parsed and validated. mypy knows `run.params.concurrent` is
 an `int`. Validation failure is `InputError` → exit 2, before anything runs.
 
-**`run.step(name, role, **inputs)`** — the only thing that persists anything. Resolves an entry from
+**`run.step(name, role, commit=None, **inputs)`** — the only thing that persists anything. Resolves an entry from
 `(label, namespace, name)` plus a fingerprint (§3.6). On a hit it returns the stored value without
 running. On a miss it resets the worktree to the last good head, builds an `AgentTask` from the
-Role, dispatches to that model's provider, and stores the result. `**inputs` are ordinary Python
-values interpolated into the prompt, and they *are* part of the fingerprint.
+Role, dispatches to that model's provider, commits or wipes per `commit=`, and stores the result.
+`**inputs` are ordinary Python values interpolated into the prompt, and they *are* part of the
+fingerprint; `commit` is a real keyword on the signature, not an input, and is not.
 
-**`run.worktree(name, base=None)`** — a child `Run` on branch `agl/<label>/<name>`, cut from `base`
+**`run.worktree(name, base=None)`** — a child `Run` on branch `agl/_work/<label>/<name>`, cut from `base`
 (another `Run`, or a ref string) or, when `base` is omitted, from this Run's branch. A workflow with
 a dependency graph resolves its own blockers and passes the resulting `Run`; the framework never
 reads a `blocked_by` field and never learns that a graph exists. Its own worktree and its own namespace, so `implement` in two children
@@ -528,10 +572,11 @@ is serving it, or `None` when nothing is running. Never persisted; purely visual
 ```python
 @workflow(name="fix", params=FixParams)
 async def fix(run: Run) -> None:
-    await run.step("implement", implementer)
-    findings = await run.step("review", reviewer)
+    await run.step("implement", implementer, commit="implement fix")
+    findings = await run.step("review", reviewer)          # no commit= — worktree wiped
     if findings.high():
-        await run.step("repair", implementer, findings=findings.high())
+        await run.step("repair", implementer, findings=findings.high(),
+                       commit="address review findings")
 ```
 
 No `worktree()`, no `integrate()`. Multiple agents working in one worktree is just multiple steps
@@ -568,10 +613,10 @@ async def ticket_pass(parent: Run, backlog: Backlog, ticket: Ticket,
     blocker = children.get(ticket.blocked_by[0]) if ticket.blocked_by else None
     w = parent.worktree(ticket.id, base=blocker)       # workflow resolves its own graph;
                                                        # framework only derives the branch name
-    await w.step("implement", implementer)             # prompt instructs TDD; the agent runs
-                                                       # its own tests, repeatedly, unbounded
-    findings = await gather(
-        w.step("review_quality", review_quality),
+    await w.step("implement", implementer,             # prompt instructs TDD; the agent runs
+                 commit=f"implement {ticket.id}")      # its own tests, repeatedly, unbounded
+    findings = await gather(                           # reviewers take no commit= — their
+        w.step("review_quality", review_quality),      # worktree is restored on the way out
         w.step("review_spec",    review_spec),
     )
     if highs := high(findings):
@@ -595,8 +640,18 @@ framework behaves identically.** Contrast `runtime/display.py`'s `Board`, which 
 workflow.
 
 Two constraints, validated on the way in: names must be filesystem- and ref-safe (no slashes, no
-traversal, nonempty — `agl/auth/T-01` must be a legal ref), and unique among siblings.
-`worktree()` is the only thing that creates path depth.
+traversal, nonempty), and unique **within the run** — see §3.9 for why run-wide rather than
+sibling-wide. `worktree()` is the only thing that creates path depth in `AGL_HOME`.
+
+**Character set is deliberately narrower than git's.** Namespace names are frequently *agent
+output* — `decompose` invents ticket IDs — and `$`, backtick, `;` and `|` are all legal in a git
+ref and a POSIX filename. Restrict to `[A-Za-z0-9._-]`, non-empty, no leading or trailing `.` or
+`-`, capped at `NAME_MAX`. Nobody needs a shell metacharacter in a namespace, and the cost of
+allowing one is a class of problem rather than a bug.
+
+**Reserved names.** `_base` is refused as a namespace (it is the run's own worktree directory), and
+`_work` is refused as a label (it is the child-branch prefix). Both compared case- and
+normalisation-insensitively, per §3.9.
 
 #### Registration
 
@@ -724,7 +779,9 @@ the same Run cannot collide.
 }
 ```
 
-**`base_sha` pins the resolved commit, not just the ref name.** Otherwise a commit landing on `main`
+**`base_sha` is a full 40- or 64-character object name**, not an abbreviation — abbreviations stop
+being unique exactly when a repo is large enough for it to matter. **It pins the resolved commit,
+not just the ref name.** Otherwise a commit landing on `main`
 between run and resume changes the first step's starting head and invalidates the entire run.
 
 #### The entry
@@ -777,6 +834,10 @@ recorded `head` in that namespace, never from the physical worktree. Otherwise: 
 H0, children integrate and advance `_base` to H5, and on resume `spec` recomputes against H5,
 mismatches, and re-runs.
 
+**Why the commit message is not in it.** A message is cosmetic. Including it would mean editing the
+wording re-runs the agent, which is the opposite of what fingerprinting is for. The trade is that a
+replayed step keeps the commit it already made, message and all.
+
 **Why the counter.** A retry loop with nothing varying — same role, no inputs, no commits — would
 otherwise produce an identical fingerprint every iteration and hit its own cache forever. `n` is
 per-invocation and never persisted; replay walks the same calls in the same order and reproduces
@@ -799,7 +860,16 @@ for each step, in replay order:
 
     if last_good and worktree.head != last_good:
         worktree.reset_hard(last_good)          # discard a crashed step's leavings
+        worktree.clean()
+
     result = run_worker()
+
+    if commit is not None:                      # effect step
+        worktree.commit_all(message=commit)     # no-op if nothing is dirty
+    else:                                       # read-only step
+        worktree.reset_hard(last_good)          # same primitive, second moment
+        worktree.clean()
+
     write_atomic(path, {fingerprint, value: result, head: worktree.head, at: now()})
     last_good = worktree.head
     return result
@@ -811,6 +881,12 @@ resets to the last good head and starts clean.
 
 **Accepted cost:** an agent that commits and dies before its entry is written loses that commit.
 The window is milliseconds; the alternative is nondeterministic retries.
+
+**The wipe is the same operation.** A step without `commit=` resets to `last_good` and cleans
+untracked files on the way out, so a read-only role cannot leave anything behind — not a scratch
+file, not a cache directory, not a partial edit. Uncommitted work is invisible to every other
+worktree anyway (they share an object store, not a working tree), so nothing outside that worktree
+could have observed it.
 
 #### One file per step, and why
 
@@ -1054,8 +1130,9 @@ formatted string suffices, so it is no longer the mechanism for anything.
 |---|---|
 | Provision the run's `_base` worktree from `base_sha` | Decide how many worktrees exist, and their shape |
 | Provision a child worktree per `worktree()` call | Choose each child's base |
-| Derive branch names: `agl/<label>`, `agl/<label>/<name>` | — |
-| Validate names are filesystem- and ref-safe, unique among siblings | — |
+| Derive branch names: `agl/<label>` (deliverable), `agl/_work/<label>/<name>` (children) | — |
+| Validate names are filesystem- and ref-safe, and unique **within the run** | — |
+| Commit dirty state when `commit=` is given; wipe to `last_good` when it is not | Supply the commit message, or omit it deliberately |
 | Record head at each step completion; reset before a re-run | — |
 | Reopen existing worktrees on replay | — |
 | Remove worktrees and scope branches on `clear` | — |
@@ -1150,6 +1227,36 @@ repo/                     ← user's working dir. AGL never touches it.
 elsewhere — a branch may be *started from* anywhere, it just cannot be *checked out* twice.
 Concurrent runs share an object store and nothing else.
 
+**Branch names: `agl/<label>` for the deliverable, `agl/_work/<label>/<namespace>` for children.**
+The obvious scheme — `agl/auth` for the run and `agl/auth/T-01` for a child — **cannot exist in
+git**, in either creation order:
+
+```
+fatal: cannot lock ref 'refs/heads/agl/auth/T-01': 'refs/heads/agl/auth' exists
+fatal: cannot lock ref 'refs/heads/agl/auth': 'refs/heads/agl/auth/T-01' exists
+```
+
+Refs are files under `refs/heads/`, so `agl/auth` cannot be both a file and a directory.
+`git check-ref-format` passes each name individually, which is why "must be a legal ref" does not
+catch it. Routing children under `agl/_work/` keeps the deliverable branch cleanly named — the user
+pushes `agl/auth`, not `agl/auth/_base` — keeps everything under the `agl/*` invariant, and costs
+one extra glob at `clear`.
+
+**Worktree directories are flat; memo namespaces nest.** `AGL_HOME` nests `worktrees/` arbitrarily
+(§3.6), because it is recording the parent-child structure of the run. The trees root does **not**
+nest, because a worktree inside another worktree's working tree appears as untracked files to the
+parent — its `git status` and its build gate would both see the child's entire checkout.
+
+```
+.trees/<label>/_base/          .trees/<label>/T-01/          .trees/<label>/sub-b/
+```
+
+**Therefore namespace names are unique within the run, not merely among siblings.** A flat trees
+root cannot distinguish `T-01`'s child `sub-b` from a top-level `sub-b`; in `AGL_HOME` they are two
+scopes, in the trees root they are one directory. Uniqueness is checked run-wide, and the
+comparison is case- and normalisation-insensitive (casefold, then NFC): `T-01` and `t-01` are two
+refs to git and one directory on macOS, and `café` in NFC and NFD is the same hazard.
+
 **Base ref is a framework-level run parameter, not a workflow param.** `agl run tickets -n auth
 --from main`, defaulting to the repo's default branch. Every code-producing workflow needs one and
 the framework needs it independently. It costs a non-code workflow nothing.
@@ -1212,7 +1319,8 @@ Stored in `AGL_HOME`, not the repo, so AGL never appears in `git status`. Afterw
 works with no further setup. The standards-template writing in the current `_cmd_init` is dropped —
 that content is tickets-specific and belongs to the workflow.
 
-**`clear`** removes `.trees/<label>/`, the `agl/<label>/*` child branches, and the run directory. It
+**`clear`** removes `.trees/<label>/`, the `agl/_work/<label>/*` child branches, and the run
+directory. It
 deletes `agl/<label>` **only if merged into the base ref**; otherwise it warns and keeps it. `-f`
 deletes regardless — exactly `git branch -d` versus `-D`. The rationale is asymmetric cost: a
 retained branch costs a stale ref, a deleted one costs the entire run. It refuses while a run holds
@@ -1236,6 +1344,9 @@ a lock.
 | `done_when` / completion receipts | Every step stores its return value, even `null`. |
 | Stored status | Derivable from which entries exist. Two sources of truth is what forces `reconcile_on_resume.py` to exist. |
 | `Verify()` as a step worker | The framework runs one build, at the gate. Agent self-verification is a shell call inside a step, invisible by design. |
+| `run.commit()` as a separate call | It would run after the entry was written, so the recorded `head` would predate the commit — and `head` is the reset target, so the next fingerprint miss would delete the work. Committing belongs inside the step's atomic unit, hence `commit=`. |
+| Framework enforcement of the `commit=` / `NO_VCS_WRITES` pairing | Neither a call-site check nor a HEAD-moved detector. The framework does one predictable thing either way; the pairing is the author's judgement, documented in the SDK and catchable by an IDE lint plugin. Consistent with `blocked_by`, cycle detection, and loop termination all being the workflow's. |
+| An auto-generated commit message | The message is domain vocabulary — "implement T-01" is something only the workflow knows. Auto-generating it would cost readable history to save one keyword argument. |
 | `run.ask()` | Dissolved into `run.terminal.show()` with an interactive view. One entry point. |
 | `question_view` on the Role | Replaced by an `on_question` callback, so the workflow routes questions through the same single `show` entry point. |
 | Workflow-level approval loops | A loop re-invoking a step starts a fresh agent session per round, discarding the reasoning behind the proposal. Negotiation stays inside one step and one session. |
@@ -1305,7 +1416,7 @@ async def split(run: Run) -> None:
 
 async def do_chunk(parent: Run, c: Chunk) -> None:
     w = parent.worktree(c.id)
-    await w.step("implement", implementer)
+    await w.step("implement", implementer, commit=f"implement {c.id}")
     await w.integrate()
 ```
 
@@ -1337,7 +1448,7 @@ Two rules that matter more than the stage list:
 
 1. **Adding a workflow** touches one new package plus one entry-point line. No edits to `cli/`,
    `api.py`, `sdk/`, `config/`.
-2. **`fix` is ~6 lines** and gets fingerprinted replay, a worktree, preflight, and exit codes free;
+2. **`fix` is ~8 lines** and gets fingerprinted replay, a worktree, preflight, and exit codes free;
    **`split` is ~30** and adds concurrency, child worktrees, and integration with no framework
    change between them.
 3. **Adding an agent backend** touches one adapter package, one line in the container, one config

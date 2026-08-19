@@ -15,9 +15,10 @@ Each stage is one Claude Code session.
 
 - The **main agent never writes code.** It spawns one subagent per deliverable, in series, and
   verifies each before starting the next.
-- **Verification is mechanical, not by reading source**: run the test suite, run `mypy --strict`,
-  run `lint-imports`. The main agent reads *output*. Reading code is expensive in context and misses
-  precisely the layer violations a linter catches.
+- **Verification is mechanical, not by reading source**: run `scripts/check`, which gates on
+  `pytest`, `mypy --strict`, `ruff`, `lint-imports`, Codex-binary containment, module size, and an
+  import-free package root. The main agent reads *output*. Reading code is expensive in context and
+  misses precisely the layer violations a linter catches.
 - Failures spawn a **fixer subagent** with the failing output and the relevant deliverable only.
 - **Stop rule: if a fixer fails twice on the same deliverable, halt and report.** Do not spiral.
 - Every subagent receives `ARCHITECTURE.md` and the plan sections relevant to its deliverable. It
@@ -58,7 +59,7 @@ Pure, no I/O, no ABCs. Fast tests.
 | # | Deliverable |
 |---|---|
 | 1.1 | `ports/errors.py` — the hierarchy per §3.1, with the exit-code mapping as data |
-| 1.2 | `ports/ids.py` — `RunLabel`, `Namespace`, `ProjectName`; validation for filesystem- and git-ref-safety (§3.3) |
+| 1.2 | `ports/ids.py` — `RunLabel`, `Namespace`, `ProjectName`, `StepName`; validation for filesystem- and git-ref-safety, narrowed charset, reserved names (§3.3) |
 | 1.3 | `ports/home_layout.py` + `ports/tree_layout.py` — the two roots, never conflated (§3.5) |
 | 1.4 | `ports/run.py` — `RunSpec`, `RunStatus` |
 
@@ -136,7 +137,7 @@ gate 4.4 until it is listed.
 
 | # | Deliverable |
 |---|---|
-| 6.1 | `adapters/shell/verifier.py` + fake — timeout, output capture, exit status |
+| 6.1 | `adapters/shell/verifier.py` + fake — timeout, output capture, exit status. **Decide and record how the configured build command is executed**: a user writes `./gradlew build` or `npm test && npm run lint`, which wants a shell, but the working directory contains namespace names that originate as *agent output*. Pass the workspace via `cwd=`, never interpolated into a shell string; stage 1 narrowed the namespace charset as defence in depth |
 | 6.2 | `adapters/rich_terminal/terminal.py` — redraw loop, per-frame re-invocation, `Screen` diff, write-on-change (§3.7) |
 | 6.3 | `adapters/rich_terminal/queues.py` — slot, priority queues, FIFO within priority, preemption, `pending` |
 | 6.4 | `adapters/rich_terminal/headless.py` — no-op passive, raise `UpstreamUnavailable` on `Screen[T]`; doubles as the fake |
@@ -227,7 +228,8 @@ problems surface here rather than at stage 19.
 | 10.5 | `workflows/noop/` — a workflow that does nothing, used as the wiring probe. Deleted at stage 19 |
 
 **Accept:** `agl run noop -n x` exits 0. `agl run noop -n x` a second time exits 4 (label exists).
-An unknown workflow exits 3.
+An unknown workflow exits 3. **A raised `Stop` exits 7, not 6 or 70** — `Stop` descends from
+`AglError`, so the handler must catch it first, and a test must pin that ordering (§3.1).
 
 ---
 
@@ -253,13 +255,16 @@ property test as the acceptance criterion.
 
 | # | Deliverable |
 |---|---|
-| 12.1 | `Run.step()` — journal lookup, `AgentTask` construction from a `Role`, dispatch, entry write |
+| 12.1 | `Run.step()` — journal lookup, `AgentTask` construction from a `Role`, dispatch, **commit-or-wipe per `commit=`**, entry write in that order (§3.3). `commit=` given → commit dirty state with that message; omitted → `reset --hard` to `last_good` plus `clean -fd`, on success and on failure alike. No check of what the role declared, no comparison of HEAD before and after |
 | 12.2 | `sdk/roles.py` — `Role(instructions, model, restrictions, tools, requires, on_question)` |
 | 12.3 | `sdk/tools.py` — re-export of `ports.agent.Tool` plus the reporting-tool declaration helper that derives a payload schema from a workflow dataclass; **reporting vs effect step**; malformed payload rejected back to the agent in-session (§3.3) |
 | 12.4 | `Run.activity` — current string from the serving adapter, `None` when idle, never persisted |
 
 **Accept:** a workflow of three sequential steps replays correctly against fakes. An agent that
-never fires its reporting tool leaves no entry and re-runs.
+never fires its reporting tool leaves no entry and re-runs. A step with `commit=` records a `head`
+that includes the agent's changes; a step without it leaves the worktree byte-identical to
+`last_good`, **including untracked files** — assert on a fake agent that writes both a tracked edit
+and a new file. Changing only a commit message does not invalidate the entry.
 
 ---
 
@@ -267,13 +272,15 @@ never fires its reporting tool leaves no entry and re-runs.
 
 | # | Deliverable |
 |---|---|
-| 13.1 | `Run.worktree(name, base=None)` — child `Run`, branch derivation `agl/<label>/<name>`, idempotent reopen |
+| 13.1 | `Run.worktree(name, base=None)` — child `Run`, branch derivation `agl/_work/<label>/<name>` (**not** `agl/<label>/<name>` — that is a ref directory/file conflict, §3.9), idempotent reopen |
 | 13.2 | `sdk/_engine/worktrees.py` — nested namespace storage, `worktrees/<name>/steps/…`, arbitrary depth |
 | 13.3 | Per-namespace head chaining; concurrent lock-free entry writes from sibling children |
 | 13.4 | `_base` worktree provisioning from the pinned `base_sha` (§3.9) |
 
 **Accept:** two concurrent children write entries with no lock and no interference. Replay of a
-nested run reproduces every namespace.
+nested run reproduces every namespace. A namespace reused anywhere in the run — not merely among
+siblings — is refused, compared case- and normalisation-insensitively (§3.9). `agl/<label>` and
+`agl/_work/<label>/<ns>` coexist in a real repo.
 
 ---
 
@@ -323,7 +330,7 @@ deletes. A trivial workflow written against `sdk/testing.py` runs green with no 
 
 ## Stage 17 — `fix`
 
-**R1 is satisfied here if `fix` is ~6 lines.** If it is not, the SDK is wrong — report rather than
+**R1 is satisfied here if `fix` is ~8 lines.** If it is not, the SDK is wrong — report rather than
 work around it.
 
 | # | Deliverable |
