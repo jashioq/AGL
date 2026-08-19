@@ -1,0 +1,133 @@
+# AGL's import contracts - the executable form of ARCHITECTURE.md.
+#
+# Run them with `.venv/bin/lint-imports`, or (alongside every other gate) `scripts/check`.
+# A broken contract is a failing build, not a suggestion: if a contract here blocks a change,
+# either the change is in the wrong layer, or the architecture moved - and then
+# ARCHITECTURE.md is what changes first, and this file second.
+#
+# Contract numbers are stable. Stage briefs and failure reports refer to them by number.
+
+[importlinter]
+root_package = agl
+# Contract 3 forbids two *external* packages (claude_agent_sdk, rich), so the graph has to
+# extend past agl's own modules to see imports leaving the package.
+include_external_packages = True
+
+
+# 1. The one dependency rule, high to low. `sdk` and `adapters` sit at the same level and are
+#    independent of each other: `|` means neither may import the other (`:` would mean they may).
+[importlinter:contract:1]
+name = Layers flow one way only: cli -> api -> config -> workflows -> {sdk, adapters} -> ports, and sdk and adapters never import each other
+type = layers
+layers =
+    agl.cli
+    agl.api
+    agl.config
+    agl.workflows
+    agl.sdk | agl.adapters
+    agl.ports
+
+
+# 2. Ring 1 has an inner ring: a type an ABC speaks must not depend on the ABC that speaks it,
+#    so the pure types stay importable by anything without dragging in the port interfaces.
+[importlinter:contract:2]
+name = Pure types in agl.ports never import the ABCs that speak them
+type = forbidden
+source_modules =
+    agl.ports.errors
+    agl.ports.ids
+    agl.ports.run
+    agl.ports.home_layout
+    agl.ports.tree_layout
+    agl.ports.questions
+forbidden_modules =
+    agl.ports.agent
+    agl.ports.workspace
+    agl.ports.integration
+    agl.ports.history
+    agl.ports.verifier
+    agl.ports.store
+    agl.ports.terminal
+    agl.ports.clock
+
+
+# 3. Vendor containment: each vendor SDK is visible to exactly one adapter package, so
+#    installing one vendor never drags in the other's SDK.
+#    Fail-closed by construction - the source is the whole `agl` tree, so any package added in a
+#    later stage is covered the moment it exists; only the four expressions below escape.
+#    `allow_indirect_imports = True` makes this a rule about import statements, which is what
+#    "imported only inside X" means: the container legitimately reaches claude_agent_sdk
+#    *through* agl.adapters.claude_code, and that path is not a violation.
+[importlinter:contract:3]
+name = A vendor SDK is imported only by its own adapter: claude_agent_sdk only inside agl.adapters.claude_code, rich only inside agl.adapters.rich_terminal
+type = forbidden
+source_modules =
+    agl
+forbidden_modules =
+    claude_agent_sdk
+    rich
+allow_indirect_imports = True
+ignore_imports =
+    agl.adapters.claude_code -> claude_agent_sdk
+    agl.adapters.claude_code.** -> claude_agent_sdk
+    agl.adapters.rich_terminal -> rich
+    agl.adapters.rich_terminal.** -> rich
+# Those four are the only permitted vendor imports in the repo. None of them exists yet, and an
+# ignore expression that matches nothing is an error by default, so quieten that here.
+unmatched_ignore_imports_alerting = none
+
+
+# 4. Adapters are peers: each stands alone behind its port, and swapping one never disturbs
+#    another. agl.adapters.routing is deliberately excluded from this contract - it is the one
+#    adapter module permitted to import other adapters, because dispatching on
+#    task.model.provider to the vendor runners is its entire job.
+[importlinter:contract:4]
+name = No adapter package imports another adapter package (agl.adapters.routing is the one sanctioned exception)
+type = independence
+modules =
+    agl.adapters.claude_code
+    agl.adapters.openai
+    agl.adapters.git
+    agl.adapters.shell
+    agl.adapters.filesystem
+    agl.adapters.rich_terminal
+
+
+# 5. The composition root: config/container.py is the only module that says `new`.
+#    Fail-closed - the source is `agl.*`, every top-level package under agl, which re-expands as
+#    packages are added rather than being a hand-maintained list of modules that would silently
+#    miss agl/config/__init__.py and anything a later stage introduces.
+#    The (agl.adapters, agl.adapters) pair is skipped as self-overlapping, which is exactly why
+#    contract 4 exists to police imports *between* adapters.
+#    Blind spot: `agl.*` does not include `agl` itself, and adding it changes nothing - the pair
+#    (agl, agl.adapters) is skipped as overlapping too. So src/agl/__init__.py, and only that
+#    file, could import an adapter with every contract still kept; gate 6 of scripts/check - the
+#    package root holds no imports at all - is what guards it. Do not drop that gate.
+#    `allow_indirect_imports = True` for the same reason as contract 3: cli -> config.container
+#    -> adapters is the sanctioned wiring path, and only the direct import is the violation.
+[importlinter:contract:5]
+name = Only agl.config.container imports agl.adapters: the composition root is the one place that may name an adapter
+type = forbidden
+source_modules =
+    agl.*
+forbidden_modules =
+    agl.adapters
+allow_indirect_imports = True
+ignore_imports =
+    agl.config.container -> agl.adapters
+    agl.config.container -> agl.adapters.**
+# The container does not construct anything yet, so these do not match anything yet either.
+unmatched_ignore_imports_alerting = none
+
+
+# 6. A workflow is written against the SDK alone, which is what keeps it portable across
+#    vendors and testable on fakes. (The config half is implied by contract 1; it is restated
+#    here so the failure names the actual rule a workflow author broke.)
+[importlinter:contract:6]
+name = Workflows build on the sdk alone and never import agl.adapters or agl.config
+type = forbidden
+source_modules =
+    agl.workflows
+forbidden_modules =
+    agl.adapters
+    agl.config

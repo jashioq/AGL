@@ -1,0 +1,275 @@
+#!/usr/bin/env bash
+#
+# AGL's gates. Everything that can say "this build is wrong" says it here.
+#
+#   scripts/check
+#
+# Every gate runs, every time: the run does not stop at the first failure, because knowing
+# that three things are broken is worth more than knowing that one is. Each gate prints its
+# own output under its own heading, then a PASS/FAIL line; a summary repeats the verdicts at
+# the end. Exit status is 0 if every gate passed, 1 if any gate failed, 2 if the environment
+# is not set up (missing .venv tooling).
+#
+# Gate 5 is a warning: it prints, it never fails the build.
+#
+# The tools come from .venv/bin by explicit path, so no activated virtualenv is required and
+# the answer does not depend on what is on $PATH.
+
+set -uo pipefail
+
+REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)" || exit 2
+cd -- "$REPO_ROOT" || exit 2
+
+VENV_BIN="$REPO_ROOT/.venv/bin"
+TOTAL_GATES=6
+
+# Gate 4: the Codex CLI binary name, and the one directory allowed to contain it. The OpenAI
+# adapter shells out to this binary instead of importing a Python SDK, so there is no import
+# for .importlinter to contain - this grep is that contract's stand-in. See ARCHITECTURE.md §4.
+CODEX_BINARY="codex"
+CODEX_HOME="src/agl/adapters/openai/"
+
+# Gate 5: the project's own module size convention, in lines.
+MAX_MODULE_LINES=300
+
+# Gate 6: the package root, and what an import statement looks like at the start of a line.
+AGL_INIT="src/agl/__init__.py"
+IMPORT_STATEMENT='^[[:space:]]*(import|from)\b'
+
+case "${1:-}" in
+    -h | --help)
+        sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^#\{1,2\} \{0,1\}//'
+        exit 0
+        ;;
+    "") ;;
+    *)
+        printf 'scripts/check: unexpected argument %s (this script takes none)\n' "$1" >&2
+        exit 2
+        ;;
+esac
+
+# ---------------------------------------------------------------------------------------------
+# Presentation
+# ---------------------------------------------------------------------------------------------
+
+if [ -t 1 ]; then
+    BOLD=$'\033[1m'; DIM=$'\033[2m'; RESET=$'\033[0m'
+    RED=$'\033[31m'; GREEN=$'\033[32m'; YELLOW=$'\033[33m'
+else
+    BOLD=''; DIM=''; RESET=''; RED=''; GREEN=''; YELLOW=''
+fi
+
+RULE_HEAVY="=============================================================================="
+RULE_LIGHT="------------------------------------------------------------------------------"
+
+# Parallel arrays: bash 3.2 (the system bash on macOS) has no associative arrays.
+gate_names=()
+gate_verdicts=()
+gate_notes=()
+failures=0
+
+gate_header() { # number, title, command being run
+    printf '\n%s\n' "$RULE_LIGHT"
+    printf '%sGATE %s/%s  %s%s\n' "$BOLD" "$1" "$TOTAL_GATES" "$2" "$RESET"
+    printf '%s$ %s%s\n' "$DIM" "$3" "$RESET"
+    printf '%s\n\n' "$RULE_LIGHT"
+}
+
+record() { # name, verdict, note
+    gate_names+=("$1")
+    gate_verdicts+=("$2")
+    gate_notes+=("$3")
+    case "$2" in
+        PASS) printf '\n%s  PASS%s  %s\n' "$GREEN" "$RESET" "$1" ;;
+        WARN) printf '\n%s  WARN%s  %s - %s\n' "$YELLOW" "$RESET" "$1" "$3" ;;
+        FAIL) printf '\n%s  FAIL%s  %s\n' "$RED" "$RESET" "$1"; failures=$((failures + 1)) ;;
+    esac
+}
+
+record_status() { # name, exit-status, note
+    if [ "$2" -eq 0 ]; then record "$1" PASS "$3"; else record "$1" FAIL "$3"; fi
+}
+
+# ---------------------------------------------------------------------------------------------
+# Environment
+# ---------------------------------------------------------------------------------------------
+
+for tool in pytest mypy lint-imports; do
+    if [ ! -x "$VENV_BIN/$tool" ]; then
+        printf '%sscripts/check: %s/%s is missing or not executable.%s\n' \
+            "$RED" "$VENV_BIN" "$tool" "$RESET" >&2
+        printf 'The gates run out of this repo'"'"'s .venv. Create it, then re-run:\n' >&2
+        printf '    uv sync\n' >&2
+        exit 2
+    fi
+done
+
+printf '%s\n' "$RULE_HEAVY"
+printf '%s AGL gates%s  %s\n' "$BOLD" "$RESET" "$REPO_ROOT"
+printf '%s\n' "$RULE_HEAVY"
+
+# ---------------------------------------------------------------------------------------------
+# 1. Tests
+# ---------------------------------------------------------------------------------------------
+
+gate_header 1 "tests" ".venv/bin/pytest"
+"$VENV_BIN/pytest"
+record_status "pytest" $? ""
+
+# ---------------------------------------------------------------------------------------------
+# 2. Types
+# ---------------------------------------------------------------------------------------------
+
+gate_header 2 "types" ".venv/bin/mypy --strict src tests"
+"$VENV_BIN/mypy" --strict src tests
+record_status "mypy --strict" $? ""
+
+# ---------------------------------------------------------------------------------------------
+# 3. Import contracts
+# ---------------------------------------------------------------------------------------------
+
+gate_header 3 "import contracts" ".venv/bin/lint-imports"
+"$VENV_BIN/lint-imports"
+record_status "lint-imports" $? ""
+
+# ---------------------------------------------------------------------------------------------
+# 4. Codex CLI binary containment
+#
+# The name of the binary the OpenAI adapter shells out to must not appear in any .py file
+# outside src/agl/adapters/openai/. Matching is case-insensitive, so prose mentions count too.
+# Only src/ is searched: the repo root and docs/ name the binary legitimately.
+# ---------------------------------------------------------------------------------------------
+
+gate_header 4 "Codex CLI binary containment" \
+    "grep -rIn -i -e $CODEX_BINARY --include='*.py' src | grep -v ^$CODEX_HOME"
+
+codex_hits="$(grep -rIn -i -e "$CODEX_BINARY" --include='*.py' src 2>/dev/null || true)"
+codex_inside="$(printf '%s' "$codex_hits" | grep -c "^${CODEX_HOME}" || true)"
+codex_stray="$(printf '%s' "$codex_hits" | grep -v "^${CODEX_HOME}" || true)"
+
+printf '%s matches inside %s (expected: that is where the binary is named)\n' \
+    "$codex_inside" "$CODEX_HOME"
+
+if [ -n "$codex_stray" ]; then
+    printf '%s matches elsewhere under src/ - every one of these is a violation:\n\n' \
+        "$(printf '%s\n' "$codex_stray" | wc -l | tr -d ' ')"
+    printf '%s\n' "$codex_stray" | sed 's/^/    /'
+    printf '\nOnly %s may name the %s binary. Everywhere else, speak to it through the\n' \
+        "$CODEX_HOME" "$CODEX_BINARY"
+    printf 'AgentRunner port instead.\n'
+    record "codex containment" FAIL ""
+else
+    printf '0 matches elsewhere under src/.\n'
+    record "codex containment" PASS ""
+fi
+
+# ---------------------------------------------------------------------------------------------
+# 5. Module size ceiling (warning only)
+#
+# Nothing is excluded. A file over the ceiling is not a build failure; it is the project asking
+# whether that module is still holding one idea.
+# ---------------------------------------------------------------------------------------------
+
+gate_header 5 "module size ceiling (warning only)" \
+    "wc -l on every .py under src/ and tests/, ceiling ${MAX_MODULE_LINES}"
+
+py_files="$(find src tests -type f -name '*.py' 2>/dev/null | wc -l | tr -d ' ')"
+oversized="$(find src tests -type f -name '*.py' -exec wc -l {} + 2>/dev/null |
+    awk -v max="$MAX_MODULE_LINES" '$2 != "total" && $1 > max { printf "  %6d  %s\n", $1, $2 }' |
+    sort -rn || true)"
+
+if [ -n "$oversized" ]; then
+    over_count="$(printf '%s\n' "$oversized" | wc -l | tr -d ' ')"
+    printf 'Over %s lines (%s of %s files):\n\n' "$MAX_MODULE_LINES" "$over_count" "$py_files"
+    printf '%s\n' "$oversized"
+    printf '\nThis does not fail the build.\n'
+    record "module size" WARN "$over_count file(s) over $MAX_MODULE_LINES lines"
+else
+    printf 'All %s .py files under src/ and tests/ are at or under %s lines.\n' \
+        "$py_files" "$MAX_MODULE_LINES"
+    record "module size" PASS ""
+fi
+
+# ---------------------------------------------------------------------------------------------
+# 6. The package root holds no imports
+#
+# The one hole in contract 5. import-linter skips any (source, forbidden) pair where one module
+# is a descendant of the other, and agl.adapters is a descendant of agl - so an adapter imported
+# in src/agl/__init__.py leaves all six contracts kept. Nothing in .importlinter can express it.
+# Hence the blunt rule: that file holds no import statements at all. It is meant to stay a
+# docstring; a later stage that genuinely needs a re-export there comes here and changes this.
+# ---------------------------------------------------------------------------------------------
+
+gate_header 6 "package root holds no imports" \
+    "grep -nE '$IMPORT_STATEMENT' $AGL_INIT"
+
+if [ ! -f "$AGL_INIT" ]; then
+    printf '%s does not exist. This gate has nothing to check, which is itself wrong.\n' "$AGL_INIT"
+    record "package root" FAIL ""
+else
+    root_imports="$(grep -nE "$IMPORT_STATEMENT" "$AGL_INIT" || true)"
+    if [ -n "$root_imports" ]; then
+        printf '%s import statement(s) in %s - every one of these is a violation:\n\n' \
+            "$(printf '%s\n' "$root_imports" | wc -l | tr -d ' ')" "$AGL_INIT"
+        printf '%s\n' "$root_imports" | sed 's/^/    /'
+        printf '\n%s is invisible to contract 5, because import-linter skips source/forbidden\n' \
+            "$AGL_INIT"
+        printf 'pairs that overlap - so this gate is the only thing guarding the package root.\n'
+        printf 'The root package stays empty: put the import in the module that needs it.\n'
+        record "package root" FAIL ""
+    else
+        printf 'No import statements in %s.\n' "$AGL_INIT"
+        record "package root" PASS ""
+    fi
+fi
+
+# ---------------------------------------------------------------------------------------------
+# Summary
+# ---------------------------------------------------------------------------------------------
+
+printf '\n%s\n' "$RULE_HEAVY"
+printf '%s SUMMARY%s\n' "$BOLD" "$RESET"
+printf '%s\n' "$RULE_HEAVY"
+
+i=0
+while [ "$i" -lt "${#gate_names[@]}" ]; do
+    verdict="${gate_verdicts[$i]}"
+    note="${gate_notes[$i]}"
+    case "$verdict" in
+        PASS) colour="$GREEN" ;;
+        WARN) colour="$YELLOW" ;;
+        *) colour="$RED" ;;
+    esac
+    if [ -n "$note" ]; then
+        printf '  %s%s%s  %-16s %s\n' "$colour" "$verdict" "$RESET" "${gate_names[$i]}" "$note"
+    else
+        printf '  %s%s%s  %s\n' "$colour" "$verdict" "$RESET" "${gate_names[$i]}"
+    fi
+    i=$((i + 1))
+done
+
+warnings=0
+failed_names=""
+i=0
+while [ "$i" -lt "${#gate_names[@]}" ]; do
+    case "${gate_verdicts[$i]}" in
+        WARN) warnings=$((warnings + 1)) ;;
+        FAIL) failed_names="${failed_names:+$failed_names, }${gate_names[$i]}" ;;
+    esac
+    i=$((i + 1))
+done
+
+printf '\n'
+if [ "$failures" -eq 0 ]; then
+    if [ "$warnings" -gt 0 ]; then
+        printf '%sAll %s gates passed%s, with %s warning(s) above - nothing to fix, only to know.\n' \
+            "$GREEN" "$TOTAL_GATES" "$RESET" "$warnings"
+    else
+        printf '%sAll %s gates passed.%s\n' "$GREEN" "$TOTAL_GATES" "$RESET"
+    fi
+    exit 0
+fi
+
+printf '%s%s of %s gates failed: %s%s\n' "$RED" "$failures" "$TOTAL_GATES" "$failed_names" "$RESET"
+printf 'Each failure printed its own output above, under its GATE heading.\n'
+exit 1

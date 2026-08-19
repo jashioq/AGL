@@ -1,0 +1,57 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agl"
+version = "0.1.0"
+description = "A framework for running AI agent workflows against code repositories."
+requires-python = ">=3.14"
+# Deliberately empty: AGL's core is stdlib-only (TOML via stdlib `tomllib`).
+dependencies = []
+
+[project.optional-dependencies]
+claude = ["claude-agent-sdk>=0.2.140"]
+terminal = ["rich>=15.0.0"]
+all = ["agl[claude,terminal]"]
+# No `openai` extra by design: the OpenAI adapter wraps the Codex CLI binary, which is
+# installed separately and resolved at runtime preflight, so it has no Python dependency.
+
+[project.scripts]
+agl = "agl.cli.main:main"
+
+# Workflows register themselves here in later stages. Intentionally empty for now.
+[project.entry-points."agl.workflows"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "mypy>=2.3.1",
+    "ruff>=0.16.3",
+    "import-linter>=2.13",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agl"]
+
+[tool.mypy]
+python_version = "3.14"
+strict = true
+files = ["src", "tests"]
+mypy_path = "src"
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+src = ["src", "tests"]
+# `reference/` holds read-only extracts from the previous implementation; never lint it.
+extend-exclude = ["reference"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function"
