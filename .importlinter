@@ -101,8 +101,9 @@ modules =
 #    contract 4 exists to police imports *between* adapters.
 #    Blind spot: `agl.*` does not include `agl` itself, and adding it changes nothing - the pair
 #    (agl, agl.adapters) is skipped as overlapping too. So src/agl/__init__.py, and only that
-#    file, could import an adapter with every contract still kept; gate 6 of scripts/check - the
-#    package root holds no imports at all - is what guards it. Do not drop that gate.
+#    file, could import an adapter with every contract still kept; the package-root gate in
+#    scripts/check - that file holds no import statements at all - is what guards it. Do not
+#    drop that gate. (Named, not numbered: gates get inserted, and the numbers move.)
 #    `allow_indirect_imports = True` for the same reason as contract 3: cli -> config.container
 #    -> adapters is the sanctioned wiring path, and only the direct import is the violation.
 [importlinter:contract:5]

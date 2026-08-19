@@ -72,9 +72,9 @@ adapter. No module outside it may import from `agl.adapters.*`. Enforced by cont
 
 | Module | Holds |
 |---|---|
-| `errors.py` | The `AglError` hierarchy, organised by meaning, with the exit-code mapping as data |
-| `ids.py` | `RunLabel`, `Namespace`, `ProjectName` — validated filesystem- and git-ref-safe names |
-| `run.py` | `RunSpec` and `RunStatus` |
+| `errors.py` | The `AglError` hierarchy, organised by meaning, **and the one exception → exit-code table in the codebase**: `EXIT_CODES` as the data, plus `exit_code_for()`, which walks the MRO so a workflow's own `Stop` subclass resolves without being listed |
+| `ids.py` | `RunLabel`, `Namespace`, `ProjectName`, `StepName` — validated filesystem- and git-ref-safe names |
+| `run.py` | `RunSpec` — what `run.json` holds — and `JsonValue`, the shape a stored value keeps. **No `RunStatus`, deliberately**: status is derivable from which entries exist, so the only honest one is a computed view over entries that will live in `sdk/_engine/journal.py`, not here — and contract 2 forbids `ports.run` from importing `ports.store`. The module docstring makes the argument; do not add a placeholder enum |
 | `home_layout.py` | Paths under `AGL_HOME` — what `Store` addresses |
 | `tree_layout.py` | Paths under the trees root — what `Workspace` addresses. Never conflated with `home_layout` |
 | `questions.py` | `Question` and `Answer` — the lowest-common-denominator shape of a mid-run agent question, across vendors |
@@ -131,7 +131,7 @@ adapter. No module outside it may import from `agl.adapters.*`. Enforced by cont
 | `config/container.py` | The composition root, the only module that constructs adapters. Builds the typed services bundle and assembles the routing runner |
 | `config/registry.py` | Workflow discovery through the `agl.workflows` entry points. No `importlib`, no `getattr` |
 | `cli/main.py` | Parse argv, resolve config, build the container, dispatch |
-| `cli/exit_codes.py` | The exception → exit-code table, in exactly one place |
+| `cli/exit_codes.py` | Re-exports `EXIT_CODES` and `exit_code_for` from `ports/errors.py` and holds no table of its own — the table is there, in exactly one place. What to do with an exception that is **not** an `AglError` is this module's only decision |
 | `cli/commands/` | One module per subcommand: run, resume, clear, init, workflows |
 | `api.py` | run · resume · clear · init · list_workflows |
 
@@ -141,8 +141,16 @@ adapter. No module outside it may import from `agl.adapters.*`. Enforced by cont
 scripts/check
 ```
 
-It runs `pytest`, `mypy --strict` and `lint-imports`, plus a grep gate asserting the Codex CLI
-binary name appears only under `agl/adapters/openai/`, plus a warning for any `.py` over 300
-lines (the project's own convention). It exits non-zero if any gate fails.
+It runs `pytest`, `mypy --strict`, `ruff check` and `lint-imports`, plus a grep gate asserting
+the Codex CLI binary name appears only under `agl/adapters/openai/`, plus a gate asserting
+`src/agl/__init__.py` holds no import statements (the one blind spot `.importlinter` cannot
+express — see contract 5), plus a warning for any `.py` over 300 lines (the project's own
+convention). It exits non-zero if any gate fails.
 
-`scripts/check` is delivered by the next deliverable and does not exist yet.
+`ruff check` is a failing gate, not advice: unused imports and undefined names are cheap to
+catch and cheaper to fix early, and a lint that only warns stops being read. Its rules live in
+`pyproject.toml` under `[tool.ruff]`.
+
+Every gate runs every time — the run does not stop at the first failure — and a summary at the
+end repeats each verdict. Refer to gates by name, not by number: gates get inserted, and the
+numbering shifts under any cross-reference that names one.

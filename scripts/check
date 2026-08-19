@@ -10,7 +10,7 @@
 # the end. Exit status is 0 if every gate passed, 1 if any gate failed, 2 if the environment
 # is not set up (missing .venv tooling).
 #
-# Gate 5 is a warning: it prints, it never fails the build.
+# Gate 6 is a warning: it prints, it never fails the build.
 #
 # The tools come from .venv/bin by explicit path, so no activated virtualenv is required and
 # the answer does not depend on what is on $PATH.
@@ -21,24 +21,24 @@ REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)" || exit 2
 cd -- "$REPO_ROOT" || exit 2
 
 VENV_BIN="$REPO_ROOT/.venv/bin"
-TOTAL_GATES=6
+TOTAL_GATES=7
 
-# Gate 4: the Codex CLI binary name, and the one directory allowed to contain it. The OpenAI
+# Gate 5: the Codex CLI binary name, and the one directory allowed to contain it. The OpenAI
 # adapter shells out to this binary instead of importing a Python SDK, so there is no import
 # for .importlinter to contain - this grep is that contract's stand-in. See ARCHITECTURE.md §4.
 CODEX_BINARY="codex"
 CODEX_HOME="src/agl/adapters/openai/"
 
-# Gate 5: the project's own module size convention, in lines.
+# Gate 6: the project's own module size convention, in lines.
 MAX_MODULE_LINES=300
 
-# Gate 6: the package root, and what an import statement looks like at the start of a line.
+# Gate 7: the package root, and what an import statement looks like at the start of a line.
 AGL_INIT="src/agl/__init__.py"
 IMPORT_STATEMENT='^[[:space:]]*(import|from)\b'
 
 case "${1:-}" in
     -h | --help)
-        sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^#\{1,2\} \{0,1\}//'
+        sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^#\{1,2\} \{0,1\}//'
         exit 0
         ;;
     "") ;;
@@ -94,7 +94,7 @@ record_status() { # name, exit-status, note
 # Environment
 # ---------------------------------------------------------------------------------------------
 
-for tool in pytest mypy lint-imports; do
+for tool in pytest mypy ruff lint-imports; do
     if [ ! -x "$VENV_BIN/$tool" ]; then
         printf '%sscripts/check: %s/%s is missing or not executable.%s\n' \
             "$RED" "$VENV_BIN" "$tool" "$RESET" >&2
@@ -125,22 +125,35 @@ gate_header 2 "types" ".venv/bin/mypy --strict src tests"
 record_status "mypy --strict" $? ""
 
 # ---------------------------------------------------------------------------------------------
-# 3. Import contracts
+# 3. Lint
+#
+# Unused imports, undefined names, import order, dead style. Cheap to run and cheap to fix, and
+# the thing that keeps eighty separate authors writing one codebase instead of eighty. Rules and
+# exclusions live in pyproject.toml under [tool.ruff]; `reference/` is excluded there. This is a
+# gate, not advice: a lint finding fails the build. No --fix - the build reports, it does not edit.
 # ---------------------------------------------------------------------------------------------
 
-gate_header 3 "import contracts" ".venv/bin/lint-imports"
+gate_header 3 "lint" ".venv/bin/ruff check"
+"$VENV_BIN/ruff" check
+record_status "ruff check" $? ""
+
+# ---------------------------------------------------------------------------------------------
+# 4. Import contracts
+# ---------------------------------------------------------------------------------------------
+
+gate_header 4 "import contracts" ".venv/bin/lint-imports"
 "$VENV_BIN/lint-imports"
 record_status "lint-imports" $? ""
 
 # ---------------------------------------------------------------------------------------------
-# 4. Codex CLI binary containment
+# 5. Codex CLI binary containment
 #
 # The name of the binary the OpenAI adapter shells out to must not appear in any .py file
 # outside src/agl/adapters/openai/. Matching is case-insensitive, so prose mentions count too.
 # Only src/ is searched: the repo root and docs/ name the binary legitimately.
 # ---------------------------------------------------------------------------------------------
 
-gate_header 4 "Codex CLI binary containment" \
+gate_header 5 "Codex CLI binary containment" \
     "grep -rIn -i -e $CODEX_BINARY --include='*.py' src | grep -v ^$CODEX_HOME"
 
 codex_hits="$(grep -rIn -i -e "$CODEX_BINARY" --include='*.py' src 2>/dev/null || true)"
@@ -164,13 +177,14 @@ else
 fi
 
 # ---------------------------------------------------------------------------------------------
-# 5. Module size ceiling (warning only)
+# 6. Module size ceiling (warning only)
 #
 # Nothing is excluded. A file over the ceiling is not a build failure; it is the project asking
-# whether that module is still holding one idea.
+# whether that module is still holding one idea. The count carries onto the summary line either
+# way, so a reader who only reads the summary still sees a 400-line module appear.
 # ---------------------------------------------------------------------------------------------
 
-gate_header 5 "module size ceiling (warning only)" \
+gate_header 6 "module size ceiling (warning only)" \
     "wc -l on every .py under src/ and tests/, ceiling ${MAX_MODULE_LINES}"
 
 py_files="$(find src tests -type f -name '*.py' 2>/dev/null | wc -l | tr -d ' ')"
@@ -183,15 +197,15 @@ if [ -n "$oversized" ]; then
     printf 'Over %s lines (%s of %s files):\n\n' "$MAX_MODULE_LINES" "$over_count" "$py_files"
     printf '%s\n' "$oversized"
     printf '\nThis does not fail the build.\n'
-    record "module size" WARN "$over_count file(s) over $MAX_MODULE_LINES lines"
+    record "module size" WARN "$over_count over $MAX_MODULE_LINES lines"
 else
     printf 'All %s .py files under src/ and tests/ are at or under %s lines.\n' \
         "$py_files" "$MAX_MODULE_LINES"
-    record "module size" PASS ""
+    record "module size" PASS "0 over $MAX_MODULE_LINES lines"
 fi
 
 # ---------------------------------------------------------------------------------------------
-# 6. The package root holds no imports
+# 7. The package root holds no imports
 #
 # The one hole in contract 5. import-linter skips any (source, forbidden) pair where one module
 # is a descendant of the other, and agl.adapters is a descendant of agl - so an adapter imported
@@ -200,7 +214,7 @@ fi
 # docstring; a later stage that genuinely needs a re-export there comes here and changes this.
 # ---------------------------------------------------------------------------------------------
 
-gate_header 6 "package root holds no imports" \
+gate_header 7 "package root holds no imports" \
     "grep -nE '$IMPORT_STATEMENT' $AGL_INIT"
 
 if [ ! -f "$AGL_INIT" ]; then
