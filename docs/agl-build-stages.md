@@ -1,0 +1,379 @@
+# AGL — Build Stages
+
+Companion to `agl-refactor-plan.md`, which is the architecture and the source of truth for every
+design decision. This document is only about **the order things get built and how each stage is
+verified**.
+
+Scope is v1.1 per Part 4 of the plan: complete framework surface, Claude Code + OpenAI, `fix` and
+`split` workflows. Tickets is v1.2.
+
+---
+
+## How a stage runs
+
+Each stage is one Claude Code session.
+
+- The **main agent never writes code.** It spawns one subagent per deliverable, in series, and
+  verifies each before starting the next.
+- **Verification is mechanical, not by reading source**: run the test suite, run `mypy --strict`,
+  run `lint-imports`. The main agent reads *output*. Reading code is expensive in context and misses
+  precisely the layer violations a linter catches.
+- Failures spawn a **fixer subagent** with the failing output and the relevant deliverable only.
+- **Stop rule: if a fixer fails twice on the same deliverable, halt and report.** Do not spiral.
+- Every subagent receives `ARCHITECTURE.md` and the plan sections relevant to its deliverable. It
+  does not receive the whole plan and does not browse the old repo.
+
+**Deliverables are sized for the subagent (~200k). Stages are sized for the main agent**, which
+accumulates review output across the whole stage — hence 3–6 deliverables each.
+
+### Old-repo reference policy
+
+Four deliverables are explicitly pointed at named files in the old codebase. Everything else is
+written fresh. Referenced files are cited in the deliverable itself; no stage is told to "look at
+how AGL does it."
+
+---
+
+## Stage 0 — Skeleton and enforcement
+
+Nothing is built on an unenforced structure. Enforcement config exists before any code does, so a
+subagent that reaches across a layer gets a failing build rather than a review comment.
+
+| # | Deliverable |
+|---|---|
+| 0.1 | `pyproject.toml` — deps, `[claude]` extra (`claude-agent-sdk`) and `[terminal]` extra (`rich`); **no `[openai]` extra** — that adapter wraps the Codex CLI binary and needs no Python dependency (plan §3.2.1). `agl.workflows` entry-point group, `mypy --strict`, ruff, pytest config |
+| 0.2 | Full directory tree per plan §3.0 with `__init__.py`, plus `ARCHITECTURE.md`: the layer table, the dependency rule, and where each kind of thing goes |
+| 0.3 | `.importlinter` — layer contracts, vendor-SDK containment (`claude_agent_sdk` → `adapters/claude_code` only; `rich` → `adapters/rich_terminal` only), the pure-types-may-not-import-ABCs contract, module size ceiling. Plus a grep gate for the Codex CLI binary name, which has no Python import to contain. Plus `scripts/check` running all gates |
+| 0.4 | Unrunnable skeletons of `fix` and `split` — signatures and docstrings only, marked `# STAGE 17/18`. Every later stage can read the thing it ultimately serves |
+
+**Accept:** `scripts/check` passes on an empty tree. Contracts fail loudly when a deliberate
+violation is introduced and removed.
+
+---
+
+## Stage 1 — Ports: foundation types
+
+Pure, no I/O, no ABCs. Fast tests.
+
+| # | Deliverable |
+|---|---|
+| 1.1 | `ports/errors.py` — the hierarchy per §3.1, with the exit-code mapping as data |
+| 1.2 | `ports/ids.py` — `RunLabel`, `Namespace`, `ProjectName`; validation for filesystem- and git-ref-safety (§3.3) |
+| 1.3 | `ports/home_layout.py` + `ports/tree_layout.py` — the two roots, never conflated (§3.5) |
+| 1.4 | `ports/run.py` — `RunSpec`, `RunStatus` |
+
+**Accept:** unit tests; `lint-imports` proves this stage imports nothing but stdlib.
+
+---
+
+## Stage 2 — Ports: the ABCs
+
+Every ABC, no implementations. This is the stage that decides whether R2 holds.
+
+| # | Deliverable |
+|---|---|
+| 2.1 | `ports/agent.py` — `AgentRunner`, `Provider`, `ModelId`/`Claude`/`OpenAI`, `Restriction`, `Capability`, `AgentTask`, `AgentOutcome`, `Tool` (§3.2). Plus `ports/questions.py` — `Question`, `Answer` |
+| 2.2 | `ports/workspace.py` + `ports/history.py` (§3.4) |
+| 2.3 | `ports/integration.py` + `ports/verifier.py` — `Integrator`, `IntegrationOutcome`, `Conflict`, `Verifier` |
+| 2.4 | `ports/store.py` + `ports/clock.py` — store contract states atomic writes |
+| 2.5 | `ports/terminal.py` — `Terminal` ABC **and the component types its own methods speak**: `Screen[T]`, `Rows`, `Row`, `Text`, `Choice`, `TextInput` (§3.7). They live here, not in `sdk/`, or `ports` would have to import `sdk`; the `sdk` modules of the same name are re-export facades added at stage 15 |
+
+**Accept:** `mypy --strict`; no vendor string appears anywhere in the package.
+
+---
+
+## Stage 3 — Contract suites
+
+**Written before the adapters, deliberately.** A subagent that writes its own tests writes tests
+that pass. These suites are the objective answer to "did it work" for stages 4–8.
+
+| # | Deliverable |
+|---|---|
+| 3.1 | Store contract suite — including the atomic-write clause: a result exists complete or not at all |
+| 3.2 | Agent contract suite — including the **hermeticity fixture**: a repo carrying a poisoned config for *every* harness (`CLAUDE.md`/`.claude/`, `AGENTS.md`/`.codex/`), asserting each adapter ignored its own (§3.5). **No credential-environment assertion** — deferred, see plan §3.11 |
+| 3.3 | Workspace + History contract suites |
+| 3.4 | Integrator + Verifier contract suites — merge, conflict, revert-on-gate-failure |
+| 3.5 | Terminal contract suite — slot replacement, queue ordering, preemption, headless raising on `Screen[T]` |
+
+**Accept:** every suite runs and fails cleanly against a null implementation. A suite that passes
+against nothing is not testing anything.
+
+---
+
+## Stage 4 — Store and Clock adapters
+
+| # | Deliverable |
+|---|---|
+| 4.1 | `adapters/filesystem/store.py` — atomic via temp + `os.replace` |
+| 4.2 | `adapters/filesystem/memory_store.py` — the fake |
+| 4.3 | `adapters/system_clock.py` + fake clock |
+
+**Accept:** contract suite 3.1 passes for both real and fake.
+
+---
+
+## Stage 5 — Git adapters
+
+*Reference: old `core/vcs/impl/` for worktree edge cases and porcelain parsing.*
+
+| # | Deliverable |
+|---|---|
+| 5.1 | `adapters/git/_runner.py` — shared subprocess execution, timeouts, error mapping |
+| 5.2 | `adapters/git/workspace.py` — provision, **reopen-if-exists**, remove; `flock` on the worktree registry (§3.9) |
+| 5.3 | `adapters/git/history.py` — diff, changed files, ancestry; porcelain codes → `ChangeKind` |
+| 5.4 | `adapters/git/integrator.py` — merge, conflict detection, revert; git's merge state machine stays inside |
+| 5.5 | `adapters/git/fake.py` — in-memory, no git |
+
+**Accept:** contract suites 3.3 and 3.4 pass for real and fake.
+
+---
+
+## Stage 6 — Verifier and Terminal adapters
+
+*Reference: old `core/terminal/impl/` for the `rich.Live` stderr-corruption workaround.*
+
+| # | Deliverable |
+|---|---|
+| 6.1 | `adapters/shell/verifier.py` + fake — timeout, output capture, exit status |
+| 6.2 | `adapters/rich_terminal/terminal.py` — redraw loop, per-frame re-invocation, `Screen` diff, write-on-change (§3.7) |
+| 6.3 | `adapters/rich_terminal/queues.py` — slot, priority queues, FIFO within priority, preemption, `pending` |
+| 6.4 | `adapters/rich_terminal/headless.py` — no-op passive, raise `UpstreamUnavailable` on `Screen[T]`; doubles as the fake |
+
+**Accept:** contract suites 3.4 (verifier half) and 3.5 pass.
+
+---
+
+## Stage 7 — Claude Code adapter
+
+*Reference: old `core/agent/impl/options.py` for hermeticity settings — `setting_sources=[]`,
+`strict_mcp_config=True`, absolute settings path.*
+
+| # | Deliverable |
+|---|---|
+| 7.1 | `adapters/claude_code/translate.py` — `Restriction` → deny patterns, `ModelId` → model string, vendor exceptions → `AglError`, tool calls → activity strings (§3.7) |
+| 7.2 | `adapters/claude_code/runner.py` — session, tool supply, `Question` mapping, hermeticity, `capabilities()` |
+| 7.3 | `adapters/claude_code/fake.py` — scripted replies, scripted questions |
+
+**Accept:** contract suite 3.2 passes for real and fake, hermeticity fixture included.
+
+---
+
+## Stage 8 — OpenAI adapter (Codex CLI) and routing
+
+The stage that actually tests whether the port is vendor-neutral. If any deliverable here requires
+changing `ports/agent.py`, **stop and fix the port** — that is the R2 checkpoint.
+
+The adapter wraps the **Codex CLI binary via subprocess**, not the OpenAI completions API (plan
+§3.2.1). `AgentTask` is harness-shaped, and Codex CLI is the true analogue of Claude Code: it owns
+the tool loop, the file-edit protocol, and the sandbox the port assumes exist.
+
+**Begin with 8.0, a written finding, before any code.** Determine from the Codex CLI's own
+documentation and `--help`: the non-interactive invocation and its structured-output mode; how tool
+calls surface in that stream; the sandbox/approval flags that `Restriction` maps onto; whether it
+can ask the user a question mid-run (this decides `MID_RUN_QUESTIONS` in `capabilities()`); how it
+reports session identity and stop reason. Report the findings. If the harness cannot satisfy some part of the port,
+say so — `capabilities()` exists precisely to report that honestly rather than to fake it.
+
+| # | Deliverable |
+|---|---|
+| 8.0 | Codex CLI capability findings — written, no code. Blocks 8.1–8.3 |
+| 8.1 | `adapters/openai/translate.py` — `Restriction` → sandbox/approval flags, `ModelId` → model string, CLI exit codes and stderr → `AglError`, tool-call events → activity strings |
+| 8.2 | `adapters/openai/runner.py` — subprocess invocation, stream parsing, tool supply, hermeticity (ignore repo `AGENTS.md` / `.codex/`), `capabilities()` reporting whatever it genuinely cannot do |
+| 8.3 | `adapters/openai/fake.py` — scripted replies, no subprocess |
+| 8.4 | `adapters/routing.py` — `RoutingAgentRunner`, dispatch on `task.model.provider`, unknown provider fails loudly |
+
+**Shared subprocess helper — decide, don't assume.** Stage 5 built `adapters/git/_runner.py`. This
+stage is the second consumer of process execution, which by the plan's own rule (Part 2, rule 6) is
+when the general case may be built. If extraction is warranted, add `adapters/_process.py` and
+refactor git onto it in the same stage, and record it as the **one sanctioned exception** to
+adapter independence in `.importlinter`. If the two needs differ enough that sharing would distort
+either, say so and keep them separate. Either answer is acceptable; an unexamined default is not.
+
+**Accept:** contract suite 3.2 passes for **both** vendors and both fakes, hermeticity fixture
+included. Routing dispatch test. `ports/agent.py` unchanged since stage 2 — a diff here is a design
+failure worth reporting rather than absorbing.
+
+---
+
+## Stage 9 — Config, container, registry
+
+| # | Deliverable |
+|---|---|
+| 9.1 | `config/schema.py` — typed settings, per-connector nested sections |
+| 9.2 | `config/sources.py` — flags > env > file > defaults, resolved once into an immutable object |
+| 9.3 | `config/toml_file.py` — the only module that knows TOML; project resolution by walking up to the git root (§3.6) |
+| 9.4 | `config/container.py` — **the only place that says `new`**; builds the typed services bundle and assembles the routing runner from configured providers |
+| 9.5 | `config/registry.py` — entry-point workflow discovery, no `importlib`, no `getattr` |
+
+**Accept:** container builds an all-fakes bundle and an all-real bundle. Import-linter proves
+nothing outside `container.py` constructs an adapter.
+
+---
+
+## Stage 10 — Walking skeleton
+
+**`agl run noop -n x` exits 0 through the real wiring.** No steps, no worktrees, no persistence
+beyond `run.json`. Everything after this stage is incremental on a running system, and wiring
+problems surface here rather than at stage 19.
+
+| # | Deliverable |
+|---|---|
+| 10.1 | `sdk/params.py` — `arg()`, dataclass → named flags, no positionals (§3.3) |
+| 10.2 | `sdk/workflow.py` — `@workflow` decorator, `Stop`, minimal `Run` carrying `params` only |
+| 10.3 | `cli/exit_codes.py` + `api.py` — the five operations, exceptions mapped in one table |
+| 10.4 | `cli/main.py` + `cli/commands/run.py` — parse, resolve config, build container, dispatch |
+| 10.5 | `workflows/noop/` — a workflow that does nothing, used as the wiring probe. Deleted at stage 19 |
+
+**Accept:** `agl run noop -n x` exits 0. `agl run noop -n x` a second time exits 4 (label exists).
+An unknown workflow exits 3.
+
+---
+
+## Stage 11 — Journal: fingerprinting and replay
+
+The subtlest thing in the plan and the most expensive to get wrong quietly. Its own stage, with a
+property test as the acceptance criterion.
+
+| # | Deliverable |
+|---|---|
+| 11.1 | `sdk/_engine/journal.py` — fingerprint computation: canonical JSON over role/inputs/head, plus the per-invocation counter `n` and `digest = sha256(base:n)` (§3.6) |
+| 11.2 | Entry read/write — `{fingerprint, value, head, at}`, atomic, path derivation, `steps/` and `worktrees/` sibling subtrees |
+| 11.3 | Replay walk — `last_good` chained **logically from recorded entries, never the physical worktree**; reset-before-rerun |
+| 11.4 | Kill-and-resume property test — run to completion, kill at every step boundary, resume, assert identical final state |
+
+**Accept:** 11.4 passes. Specifically covered: a retry loop with identical role/inputs/head produces
+`n = 0, 1, 2`; a changed prompt invalidates downstream entries; a run whose `_base` advanced does
+**not** invalidate earlier root steps.
+
+---
+
+## Stage 12 — `run.step`
+
+| # | Deliverable |
+|---|---|
+| 12.1 | `Run.step()` — journal lookup, `AgentTask` construction from a `Role`, dispatch, entry write |
+| 12.2 | `sdk/roles.py` — `Role(instructions, model, restrictions, tools, requires, on_question)` |
+| 12.3 | `sdk/tools.py` — `Tool`, reporting-tool declaration; **reporting vs effect step**; malformed payload rejected back to the agent in-session (§3.3) |
+| 12.4 | `Run.activity` — current string from the serving adapter, `None` when idle, never persisted |
+
+**Accept:** a workflow of three sequential steps replays correctly against fakes. An agent that
+never fires its reporting tool leaves no entry and re-runs.
+
+---
+
+## Stage 13 — `run.worktree`
+
+| # | Deliverable |
+|---|---|
+| 13.1 | `Run.worktree(name, base=None)` — child `Run`, branch derivation `agl/<label>/<name>`, idempotent reopen |
+| 13.2 | `sdk/_engine/worktrees.py` — nested namespace storage, `worktrees/<name>/steps/…`, arbitrary depth |
+| 13.3 | Per-namespace head chaining; concurrent lock-free entry writes from sibling children |
+| 13.4 | `_base` worktree provisioning from the pinned `base_sha` (§3.9) |
+
+**Accept:** two concurrent children write entries with no lock and no interference. Replay of a
+nested run reproduces every namespace.
+
+---
+
+## Stage 14 — `run.integrate`
+
+| # | Deliverable |
+|---|---|
+| 14.1 | `sdk/_engine/integration.py` — serialized integration per target; lease acquire/release, released on run exit |
+| 14.2 | Merge → build gate → revert-on-failure, inside the lease |
+| 14.3 | `Conflict` outcome — framework **emits**, holds the lease, never asks; `retry()` / `abort()` |
+| 14.4 | `integrate()` raises on a parentless `Run` — `main` is unaddressable, not policy-protected |
+
+**Accept:** concurrent children serialize into one `_base`. A failing gate leaves the branch
+unmerged and the tree clean. Root `integrate()` raises.
+
+---
+
+## Stage 15 — Terminal surface and questions
+
+| # | Deliverable |
+|---|---|
+| 15.1 | `Run.terminal` wiring — `show()` registers view + args; `pending` map. Plus `sdk/terminal.py` and `sdk/questions.py` as re-export facades over the `ports` types |
+| 15.2 | `on_question` plumbing — framework supplies the asking tool, maps the vendor payload to `Question`, calls the handler, serializes the `Answer` back |
+| 15.3 | Priority integration — agent questions and conflicts at distinct priorities; preemption verified end to end |
+
+**Accept:** a fake agent asking mid-step reaches a workflow-defined screen and the answer returns
+into the same session. A higher-priority screen preempts and restores.
+
+---
+
+## Stage 16 — Preflight, remaining commands, test harness
+
+| # | Deliverable |
+|---|---|
+| 16.1 | Preflight — provider availability (**harness binary on `PATH`, version, authenticated session** — not merely a credential), capability match, `on_question` requires a provider that can ask (§3.2) |
+| 16.2 | `cli/commands/resume.py` — label only, params from `run.json` |
+| 16.3 | `cli/commands/clear.py` — `git branch -d` semantics, refuses while locked (§3.10) |
+| 16.4 | `cli/commands/init.py` + `workflows.py` |
+| 16.5 | `sdk/testing.py` — the harness workflow authors test against: run a workflow on an all-fakes bundle, script agent replies and questions, drive kill-and-resume. Part of the public SDK surface, so it needs the same care as the rest of it |
+
+**Accept:** a role naming a provider whose harness is missing, out of date, or logged out fails at
+second zero with `UpstreamUnavailable`. `clear` on an unmerged branch warns and keeps it; `-f`
+deletes. A trivial workflow written against `sdk/testing.py` runs green with no network and no git
+— this is what stages 17 and 18 build their end-to-end tests on.
+
+---
+
+## Stage 17 — `fix`
+
+**R1 is satisfied here if `fix` is ~6 lines.** If it is not, the SDK is wrong — report rather than
+work around it.
+
+| # | Deliverable |
+|---|---|
+| 17.1 | `workflows/fix/` — params, roles (**Claude implements, OpenAI reviews**), prompts with build commands written in literally |
+| 17.2 | `workflows/fix/views/` — one board, one question screen |
+| 17.3 | End-to-end on fakes: run, kill mid-step, resume, assert identical |
+
+**Accept:** target #2 and target #4 from the plan.
+
+---
+
+## Stage 18 — `split`
+
+| # | Deliverable |
+|---|---|
+| 18.1 | `workflows/split/` — params, roles, prompts, `TaskGroup` concurrency |
+| 18.2 | `workflows/split/views/` — live board over N concurrent chunks reading `run.activity` |
+| 18.3 | End-to-end on fakes: concurrent child worktrees, serialized integration, conflict path |
+
+**Accept:** **no framework change was required by this stage.** A diff outside `workflows/split/`
+means an abstraction was missing and should be reported, not patched around.
+
+---
+
+## Stage 19 — Hardening and target verification
+
+| # | Deliverable |
+|---|---|
+| 19.1 | Three concurrent runs on one repo — two `split`, one `fix`, different base refs |
+| 19.2 | Real-adapter smoke suite against a scratch repo, both harnesses |
+| 19.3 | Verify all twelve measurable targets from plan Part 5, one assertion each |
+| 19.4 | Enforcement audit — every contract in place and firing; delete `workflows/noop/` |
+
+**Accept:** all twelve targets pass in CI.
+
+---
+
+## Notes on the shape
+
+**Stage 8 is the R2 checkpoint.** If the Codex CLI adapter cannot satisfy `ports/agent.py`
+unchanged, the port absorbed Claude Code's assumptions and the fix belongs there, not in the
+adapter. This is the one place worth stopping the build. Note that both adapters now wrap CLI
+harnesses, which makes the test slightly weaker than two structurally different backends would —
+so scrutinise anything in the port that assumes a *session*, an *approval mode*, or a *config
+file*, since those are harness concepts shared by both and could leak unnoticed.
+
+**Stage 10 is the halfway wiring probe.** Everything before it is verified only by contract suites;
+everything after runs end to end.
+
+**Stage 18 is the R1 checkpoint.** `split` should be pure workflow code. A framework diff means the
+abstraction is wrong.
+
+**`workflows/noop/` is scaffolding** and is deleted at 19.4. It exists so stage 10 can prove wiring
+before `Run.step` exists.
