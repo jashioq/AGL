@@ -233,6 +233,7 @@ src/agl/
 │   ├── tree_layout.py          paths under trees_root     ─┘ never conflated (§3.5)
 │   ├── agent.py                AgentRunner · Provider · ModelId · Claude.* · OpenAI.*
 │   │                           · Restriction · Capability · AgentTask · AgentOutcome
+│   │                           · Tool          (crosses the port — see below)
 │   ├── workspace.py            WorkspaceProvider · Workspace
 │   ├── integration.py          Integrator · IntegrationOutcome · Conflict
 │   ├── history.py              History
@@ -256,7 +257,8 @@ src/agl/
 │   ├── workflow.py             @workflow · Run · Stop
 │   ├── roles.py                Role(instructions, model, restrictions, tools,
 │   │                                requires, on_question)
-│   ├── tools.py                Tool · reporting-tool declaration (§3.3)
+│   ├── tools.py                re-exports ports Tool + the reporting-tool
+│   │                           declaration helper (§3.3) — this one has logic
 │   ├── params.py               arg()
 │   ├── terminal.py             re-export of ports.terminal ─┐ so authors import from
 │   ├── questions.py            re-export of ports.questions ─┘ agl.sdk, never agl.ports
@@ -280,17 +282,28 @@ src/agl/
 └── api.py                  run · resume · clear · init · list_workflows
 ```
 
-**Why `Screen` and `Question` live in `ports/`, not `sdk/`.** The ports layer test is *"it's an ABC,
+**Why `Screen`, `Question`, and `Tool` live in `ports/`, not `sdk/`.** The ports layer test is *"it's an ABC,
 or a type an ABC speaks."* `Terminal.show()` takes a view returning `Screen[T]`, and `AgentRunner`
 maps a vendor payload into `Question` — so both types cross a port and must sit below it, or
 `ports` would import `sdk` and invert the layering. The `sdk` modules of the same name are pure
 re-export facades, present so workflow authors write `from agl.sdk import Screen` and never reach
-into `ports` directly. They contain no logic.
+into `ports` directly. `Tool` is the same case — `AgentTask.tools` carries it across the agent port
+— with one difference: `sdk/tools.py` is not a pure facade, because it also holds the ergonomic
+reporting-tool declaration that derives a payload schema from the workflow's dataclass. Re-export
+plus helper, no port types redefined.
 
 `ports/` absorbed what would otherwise be a `domain/` package, and `config/` absorbed the
 composition root. Recover both boundaries with import-linter `forbidden` contracts rather than
 directories: pure types may not import ABCs; nothing outside `config/container.py` may construct an
 adapter.
+
+**One gap, found empirically at stage 0 and closed outside import-linter.** A `forbidden` contract
+cannot police a package importing its own descendant — import-linter skips source/forbidden pairs
+where the forbidden module descends from the source, so `src/agl/__init__.py` could import an
+adapter with every contract green. Grimp sees the import; import-linter declines to judge it. The
+rule therefore lives in `scripts/check` as a separate gate: **the package root holds no imports at
+all.** Keep it that strict — authors import from `agl.sdk`, and a root that re-exports nothing is
+one less place for a cycle to start.
 
 The three that must never merge are `ports/`, `adapters/`, and `sdk/`.
 
@@ -1332,9 +1345,11 @@ Two rules that matter more than the stage list:
 4. **One run addresses two providers** — `fix` uses Claude to implement and OpenAI to review, in
    one run, with both preflight checks passing.
 5. **Vendor containment, tested two ways.** `grep -rn "^from claude_agent_sdk\|^import
-   claude_agent_sdk" src/` hits only `adapters/claude_code/`; the string `codex` appears only in
-   `adapters/openai/`. These are *import and invocation* tests, not name tests — `Claude.OPUS` in a
-   workflow is correct and expected.
+   claude_agent_sdk" src/` hits only `adapters/claude_code/`; the Codex binary name appears in no
+   `.py` file under `src/` outside `adapters/openai/`. Scope matters: docs *must* name the binary to
+   document the rule, so the gate covers source only. These are *import and invocation* tests, not
+   name tests — `Claude.OPUS` and `OpenAI.GPT5` in a workflow are correct and expected, and are the
+   sanctioned way for a workflow to express provider choice without naming a harness.
 6. **Deleting a connector** means deleting its adapter package, its port, its config section, and
    its container entry — nothing else breaks.
 7. **Every port has a contract suite** its real adapter and its fake both pass.

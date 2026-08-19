@@ -72,7 +72,7 @@ Every ABC, no implementations. This is the stage that decides whether R2 holds.
 
 | # | Deliverable |
 |---|---|
-| 2.1 | `ports/agent.py` — `AgentRunner`, `Provider`, `ModelId`/`Claude`/`OpenAI`, `Restriction`, `Capability`, `AgentTask`, `AgentOutcome`, `Tool` (§3.2). Plus `ports/questions.py` — `Question`, `Answer` |
+| 2.1 | `ports/agent.py` — `AgentRunner`, `Provider`, `ModelId`/`Claude`/`OpenAI`, `Restriction`, `Capability`, `AgentTask`, `AgentOutcome`, and **`Tool`** — settled at stage 0: `Tool` crosses the port via `AgentTask.tools`, so it is defined here and `sdk/tools.py` re-exports it. Do **not** define `Tool` in `sdk/`. Plus `ports/questions.py` — `Question`, `Answer` |
 | 2.2 | `ports/workspace.py` + `ports/history.py` (§3.4) |
 | 2.3 | `ports/integration.py` + `ports/verifier.py` — `Integrator`, `IntegrationOutcome`, `Conflict`, `Verifier` |
 | 2.4 | `ports/store.py` + `ports/clock.py` — store contract states atomic writes |
@@ -107,8 +107,10 @@ against nothing is not testing anything.
 | 4.1 | `adapters/filesystem/store.py` — atomic via temp + `os.replace` |
 | 4.2 | `adapters/filesystem/memory_store.py` — the fake |
 | 4.3 | `adapters/system_clock.py` + fake clock |
+| 4.4 | Test asserting every directory under `adapters/` appears in the `.importlinter` independence contract. That contract is a hand-maintained list and **fails open** — a package added at stage 5, 6, 7, or 8 is unpoliced until someone edits it (stage-0 finding). This is the first stage that adds an adapter package, so the guard lands here |
 
-**Accept:** contract suite 3.1 passes for both real and fake.
+**Accept:** contract suite 3.1 passes for both real and fake. Adding a dummy `adapters/xyz/` fails
+gate 4.4 until it is listed.
 
 ---
 
@@ -253,7 +255,7 @@ property test as the acceptance criterion.
 |---|---|
 | 12.1 | `Run.step()` — journal lookup, `AgentTask` construction from a `Role`, dispatch, entry write |
 | 12.2 | `sdk/roles.py` — `Role(instructions, model, restrictions, tools, requires, on_question)` |
-| 12.3 | `sdk/tools.py` — `Tool`, reporting-tool declaration; **reporting vs effect step**; malformed payload rejected back to the agent in-session (§3.3) |
+| 12.3 | `sdk/tools.py` — re-export of `ports.agent.Tool` plus the reporting-tool declaration helper that derives a payload schema from a workflow dataclass; **reporting vs effect step**; malformed payload rejected back to the agent in-session (§3.3) |
 | 12.4 | `Run.activity` — current string from the serving adapter, `None` when idle, never persisted |
 
 **Accept:** a workflow of three sequential steps replays correctly against fakes. An agent that
@@ -354,7 +356,7 @@ means an abstraction was missing and should be reported, not patched around.
 | 19.1 | Three concurrent runs on one repo — two `split`, one `fix`, different base refs |
 | 19.2 | Real-adapter smoke suite against a scratch repo, both harnesses |
 | 19.3 | Verify all twelve measurable targets from plan Part 5, one assertion each |
-| 19.4 | Enforcement audit — every contract in place and firing; delete `workflows/noop/` |
+| 19.4 | Enforcement audit — every contract in place and firing; delete `workflows/noop/`. Two debts carried from stage 0: flip `unmatched_ignore_imports_alerting` back to the default on the vendor-containment and composition-root contracts, now that the permitted vendor imports actually exist (it was set to `none` because the expressions matched nothing in an empty tree, which means a stale ignore is currently never reported); and confirm the adapter-independence list covers every package, including `adapters/_process.py` if stage 8 sanctioned it |
 
 **Accept:** all twelve targets pass in CI.
 
