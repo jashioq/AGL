@@ -1,17 +1,18 @@
-"""What the trees root promises: the plan's tree, the branches, and the `_base` name it spends.
+"""What the trees root promises: the plan's tree, the branches, and the two words it spends.
 
 Three things are checked here that nothing else can check. That every path stays under the
 trees root, over the shared corpus, in every segment position - the same property
 `test_home_layout.py` states about AGL_HOME, and the reason both files exist. That the derived
 branch names are the plan's and are ones real `git check-ref-format` accepts, asked of git
-rather than of a regex. And that `_base`, which is a directory name here and a perfectly legal
-`Namespace` in `ids.py`, cannot be reached twice.
+rather than of a regex. And that `_base` and `_work`, the two words this layout spends on
+itself, are the two words `ids.py` refuses as names, so that neither can be reached twice.
 
-The last test in the git section records a collision this deliverable did not create and could
-not fix: `agl/<label>` and `agl/<label>/<namespace>` are both legal names and cannot exist in
-one repository at the same time. It is pinned against real git so that the next person to meet
-it finds it already written down - and so that the day the naming changes, this test fails and
-says where to look.
+The git section at the end is the one to read first. `agl/<label>` and `agl/<label>/<namespace>`
+- the naming any reader would reach for - cannot both exist in one repository, and §3.9 designs
+that collision out with the `_work` infix rather than documenting it. So the tests there create
+real branches in real repositories: the deliverable branch and two children coexisting, in both
+creation orders, and then the same collision one level down, which is the demonstrated reason
+`_work` is a reserved label rather than an asserted one.
 """
 
 import os
@@ -42,11 +43,11 @@ _TREES: Final = TreesRoot(Path("/repo/.trees"))
 _AUTH: Final = RunLabel("auth")
 _T01: Final = Namespace("T-01")
 
-# The name the layout spends on the run's own checkout, and what a `Namespace` is compared by
-# when the question is whether it would land on that directory. Written out here rather than
-# imported from the module, so that the test states the rule instead of echoing it.
+# The two words the layout spends: the run's own checkout, and the infix every child branch is
+# created under. Written out here rather than imported from the module, so that the test states
+# the rule instead of echoing it - which is the whole of what the drift test below is worth.
 _BASE: Final = "_base"
-_BASE_KEY: Final = Namespace(_BASE).collision_key
+_WORK: Final = "_work"
 
 _NO_GIT: Final = "git is not on PATH, so the git-ref properties went UNVERIFIED"
 
@@ -78,39 +79,53 @@ def test_the_checkouts_of_one_run_are_siblings_and_never_contain_each_other() ->
 
 
 def test_the_branch_derivations_are_the_plan_s() -> None:
-    """`agl/<label>` for the run, `agl/<label>/<namespace>` for a child. Nothing else."""
+    """`agl/<label>` for the run, `agl/_work/<label>/<namespace>` for a child. Nothing else."""
     assert run_branch(_AUTH) == "agl/auth"
-    assert worktree_branch(_AUTH, _T01) == "agl/auth/T-01"
+    assert worktree_branch(_AUTH, _T01) == "agl/_work/auth/T-01"
     assert run_branch(RunLabel("billing")) == "agl/billing"
-    assert worktree_branch(RunLabel("billing"), Namespace("T-02")) == "agl/billing/T-02"
-    assert worktree_branch(_AUTH, _T01).startswith(f"{run_branch(_AUTH)}/")
+    assert worktree_branch(RunLabel("billing"), Namespace("T-02")) == "agl/_work/billing/T-02"
 
 
-# --- `_base`: a directory name here, and a legal Namespace in ids.py ---------------------------
+def test_the_run_branch_is_not_a_prefix_of_its_children_which_is_the_point_of_the_infix() -> None:
+    """The one property the obvious naming had and this one deliberately does not.
+
+    Under `agl/<label>/<namespace>` a child's ref path ran through the run's own, which is
+    exactly why git could hold one or the other and never both. Anything that reconstructs a
+    child branch by appending to `run_branch` reintroduces that, so the absence is pinned here
+    rather than left to be noticed.
+    """
+    run, child = run_branch(_AUTH), worktree_branch(_AUTH, _T01)
+    assert not child.startswith(f"{run}/")
+    assert child.startswith(f"agl/{_WORK}/")
+    assert run.split("/")[0] == child.split("/")[0] == "agl", "every ref AGL creates is agl/*"
 
 
-def test_base_is_a_name_ids_accepts_which_is_the_whole_problem() -> None:
-    """The premise. If this ever fails, the guard below is dead code and should go."""
-    assert str(Namespace(_BASE)) == _BASE
+# --- `_base` and `_work`: this layout's words, refused as names by ids.py -----------------------
+
+
+def test_the_words_this_layout_spends_are_the_words_ids_refuses() -> None:
+    """Two constants here and two reservations there are one decision written in two modules.
+
+    `ids.py` is underneath this module and cannot import it, so each spells its own literal and
+    this is what keeps the copies honest. `_base` is a directory name here and refused as a
+    namespace there; `_work` is a branch infix here and refused as a label there. If a rename
+    ever moves one and not the other, a reservation becomes a reservation against nothing, and
+    this is the test that says so.
+    """
     assert base_worktree(_TREES, _AUTH).name == _BASE
-
-
-@pytest.mark.parametrize("spelling", ["_base", "_BASE", "_Base", "_bAsE"])
-def test_no_child_worktree_may_be_called_base_in_any_spelling(spelling: str) -> None:
-    """Case-folded, because `_BASE` and `_base` are one directory on a case-insensitive volume."""
-    namespace = Namespace(spelling)
-    with pytest.raises(InputError, match="base worktree") as caught:
-        worktree_dir(_TREES, _AUTH, namespace)
-    assert repr(spelling) in str(caught.value), "the message quotes what the caller passed"
     with pytest.raises(InputError, match="base worktree"):
-        worktree_branch(_AUTH, namespace)
+        Namespace(_BASE)
+
+    assert worktree_branch(_AUTH, _T01).split("/")[1] == _WORK
+    with pytest.raises(InputError, match="child branch"):
+        RunLabel(_WORK)
 
 
-@pytest.mark.parametrize("spelling", ["base", "_bases", "__base", "_base-1", "T-01"])
-def test_only_the_name_that_actually_collides_is_refused(spelling: str) -> None:
-    """The cost is one name, not a family of them: over-refusing here costs a workflow author."""
-    assert worktree_dir(_TREES, _AUTH, Namespace(spelling)).name == spelling
-    assert worktree_branch(_AUTH, Namespace(spelling)) == f"agl/auth/{spelling}"
+def test_neither_reservation_costs_the_other_layout_a_name() -> None:
+    """`agl/_base` collides with nothing, and `.trees/<label>/_work/` is a directory like any."""
+    assert run_branch(RunLabel(_BASE)) == "agl/_base"
+    assert worktree_dir(_TREES, _AUTH, Namespace(_WORK)) == Path("/repo/.trees/auth/_work")
+    assert worktree_branch(_AUTH, Namespace(_WORK)) == "agl/_work/auth/_work"
 
 
 # --- The property, over the corpus -------------------------------------------------------------
@@ -120,29 +135,23 @@ def test_property_no_accepted_name_in_any_position_escapes_the_trees_root(tmp_pa
     """Every accepted value as the label and as the namespace, resolved before it is asked.
 
     The parts are pinned as well as the containment: a segment that silently vanished, or one
-    that turned into two, would stay inside the root while addressing something else. The
-    refusals are pinned too - the guard's extent is exactly the names that fold onto `_base`,
-    which is the rule stated as a set rather than as a sentence.
+    that turned into two, would stay inside the root while addressing something else. Nothing is
+    refused here any more - the one name this module used to turn away is a name `ids.py` no
+    longer lets anybody build, so by the time a value reaches these functions the question has
+    been settled.
     """
     root = tmp_path.resolve()
     trees = TreesRoot(root)
-    refused: list[str] = []
     for value in ACCEPTED:
         label = RunLabel(value)
         base = base_worktree(trees, label).resolve()
         assert base.is_relative_to(root), f"{value!r} escapes the trees root: {base}"
         assert base.relative_to(root).parts == (value, _BASE)
-        try:
-            checkout = worktree_dir(trees, label, Namespace(value)).resolve()
-        except InputError:
-            refused.append(value)
-            continue
+        checkout = worktree_dir(trees, label, Namespace(value)).resolve()
         assert checkout.is_relative_to(root), f"{value!r} escapes the trees root: {checkout}"
         assert checkout.relative_to(root).parts == (value, value), (
             f"{value!r} does not land where the layout says: {checkout}"
         )
-    assert refused == [v for v in ACCEPTED if Namespace(v).collision_key == _BASE_KEY]
-    assert refused, "the corpus no longer contains a spelling of _base, so nothing was proved"
 
 
 # --- The branches, asked of real git -----------------------------------------------------------
@@ -155,8 +164,7 @@ def test_property_every_derived_branch_name_is_one_real_git_accepts() -> None:
     for value in REF_SAMPLE:
         label = RunLabel(value)
         refnames.append(f"refs/heads/{run_branch(label)}")
-        if Namespace(value).collision_key != _BASE_KEY:
-            refnames.append(f"refs/heads/{worktree_branch(label, Namespace(value))}")
+        refnames.append(f"refs/heads/{worktree_branch(label, Namespace(value))}")
     rejected = git_rejects(refnames)
     assert not rejected, f"git rejects {len(rejected)} of {len(refnames)}: {rejected[:10]}"
 
@@ -186,30 +194,85 @@ def _repo_with_one_commit(parent: Path, name: str) -> Path:
     return repo
 
 
+def _agl_branches(repo: Path) -> list[str]:
+    """Every ref AGL made, read back from git instead of assumed from the calls that made them.
+
+    Scoped to `refs/heads/agl/`, which is both what these tests are about and the invariant the
+    `_work` infix was chosen to keep: the user's own branches are not AGL's to list.
+    """
+    listed = _git(repo, "for-each-ref", "--format=%(refname:strip=2)", "refs/heads/agl/")
+    assert listed.returncode == 0, listed.stderr
+    return sorted(listed.stdout.decode().split())
+
+
+def _resolved(repo: Path, branch: str) -> str:
+    """The commit a branch points at, so that "intact" can mean more than "still listed"."""
+    found = _git(repo, "rev-parse", f"refs/heads/{branch}")
+    assert found.returncode == 0, found.stderr
+    return found.stdout.decode().strip()
+
+
 @pytest.mark.skipif(shutil.which("git") is None, reason=_NO_GIT)
-def test_the_run_branch_and_a_child_branch_cannot_both_exist_in_one_repository(
+def test_the_run_branch_and_its_children_all_coexist_in_one_repository(tmp_path: Path) -> None:
+    """What the `_work` infix buys, asked of real git rather than of the plan.
+
+    `agl/auth` and `agl/auth/T-01` cannot both exist - `refs/heads/agl/auth` would have to be a
+    file and a directory at once - and §3.9 designs that out by routing children under
+    `agl/_work/<label>/`. Both creation orders are tried, because the old naming failed in both
+    and a scheme that only worked in one would be no fix. Deleting the children is the other
+    half of it: `agl/auth` is what the user pushes, so it has to survive the worktrees it fed,
+    still pointing where it did, which is what `clear` will lean on.
+    """
+    run = run_branch(_AUTH)
+    children = [worktree_branch(_AUTH, _T01), worktree_branch(_AUTH, Namespace("T-02"))]
+    assert not git_rejects([run, *children]), "each name is legal on its own"
+
+    for name, order in (("run-first", [run, *children]), ("children-first", [*children, run])):
+        repo = _repo_with_one_commit(tmp_path, name)
+        for branch in order:
+            made = _git(repo, "update-ref", f"refs/heads/{branch}", "HEAD")
+            assert made.returncode == 0, f"{name}: git refused {branch}: {made.stderr!r}"
+        assert _agl_branches(repo) == sorted([run, *children]), f"{name}: git kept fewer"
+
+        head = _resolved(repo, run)
+        for child in children:
+            removed = _git(repo, "update-ref", "-d", f"refs/heads/{child}")
+            assert removed.returncode == 0, f"{name}: {removed.stderr!r}"
+        assert _agl_branches(repo) == [run], f"{name}: the deliverable branch did not survive"
+        assert _resolved(repo, run) == head, f"{name}: it survived, pointing somewhere else"
+        assert _resolved(repo, "main") == head, f"{name}: the user's own branch was touched"
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason=_NO_GIT)
+def test_a_run_labelled_work_would_collide_with_every_child_branch_there_is(
     tmp_path: Path,
 ) -> None:
-    """A defect recorded, not a defect fixed - see this module's docstring and the module's.
+    """The reason `_work` is reserved: the identical collision, one level down.
 
-    Refs are paths: `refs/heads/agl/auth` is a file, so `refs/heads/agl/auth/T-01` needs
-    `agl/auth` to be a directory, and git refuses whichever of the two is created second. Both
-    names pass `check-ref-format` on their own, which is why the property above is happy and
-    why nothing in `ids.py` could have caught this. The derivations are the plan's, verbatim;
-    the day they change, this test fails, which is the entire point of writing it down.
+    A run labelled `_work` would want `refs/heads/agl/_work` as its own branch - a file - while
+    every child branch of every run needs `agl/_work` to be the directory above it. Each name
+    passes `check-ref-format` alone, exactly as the pair §3.9 designed out did, so the
+    reservation is not a matter of taste. It is refused at construction, which means the pair
+    cannot be derived here at all and the offending name has to be spelled by hand to be shown -
+    and showing it is the point: the reservation has a demonstrated reason, not an asserted one.
     """
-    run, child = run_branch(_AUTH), worktree_branch(_AUTH, _T01)
-    assert not git_rejects([run, child]), "each name is legal on its own"
+    with pytest.raises(InputError, match="child branch"):
+        RunLabel(_WORK)
 
-    forwards = _repo_with_one_commit(tmp_path, "forwards")
-    assert _git(forwards, "update-ref", f"refs/heads/{run}", "HEAD").returncode == 0
+    would_be = f"agl/{_WORK}"  # what run_branch would have returned for that label
+    child = worktree_branch(_AUTH, _T01)
+    assert child.startswith(f"{would_be}/"), "the run's branch would be a directory of children"
+    assert not git_rejects([would_be, child]), "each name is legal on its own"
+
+    forwards = _repo_with_one_commit(tmp_path, "work-forwards")
+    assert _git(forwards, "update-ref", f"refs/heads/{would_be}", "HEAD").returncode == 0
     clash = _git(forwards, "update-ref", f"refs/heads/{child}", "HEAD")
-    assert clash.returncode != 0, f"git took {child} beside {run}: the collision is gone"
+    assert clash.returncode != 0, f"git took {child} beside {would_be}: the collision is gone"
 
-    backwards = _repo_with_one_commit(tmp_path, "backwards")
+    backwards = _repo_with_one_commit(tmp_path, "work-backwards")
     assert _git(backwards, "update-ref", f"refs/heads/{child}", "HEAD").returncode == 0
-    reverse = _git(backwards, "update-ref", f"refs/heads/{run}", "HEAD")
-    assert reverse.returncode != 0, f"git took {run} beside {child}: the collision is gone"
+    reverse = _git(backwards, "update-ref", f"refs/heads/{would_be}", "HEAD")
+    assert reverse.returncode != 0, f"git took {would_be} beside {child}: the collision is gone"
 
 
 # --- The two roots -----------------------------------------------------------------------------

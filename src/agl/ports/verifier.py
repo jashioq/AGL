@@ -144,11 +144,14 @@ class Verifier(ABC):
         **The working directory is given as the working directory, and is never interpolated into
         the command text.** Path components under it can originate as agent output - a workflow's
         namespaces are named by whatever the workflow passed, and one shipped workflow passes
-        identifiers a model invented. `ids.py` narrowed the character set those names may use as
-        defence in depth, and says plainly what it is defending: it accepts `$`, backtick, `;` and
-        `|` because they are perfectly legal in a name, and that is safe exactly as long as nothing
-        composes such a name into a string that something else then parses. Joining the two here
-        would be that composition, and it would be reached by a path AGL does not control.
+        identifiers a model invented. `ids.py` narrowed the character set those names may use to
+        §3.3's allowlist as defence in depth, and refuses `$`, backtick, `;` and `|` at
+        construction although every one of them is perfectly legal in a name - so no name AGL
+        holds can carry a shell metacharacter into anything that later grows a shell. The two
+        defences agree rather than one leaning on the other: that one stops such a name being
+        spelled at all, and this one covers what a character set cannot reach - the trees root a
+        user chose, and every other component of a path this process did not compose. Joining the
+        two here would be that composition, and it would be reached by a path AGL does not control.
 
         Async because the answer takes minutes and the framework has other work in flight. There is
         no way to cancel it; the deadline is configuration - see the module docstring.

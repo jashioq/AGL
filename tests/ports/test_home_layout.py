@@ -181,11 +181,19 @@ def test_a_project_name_that_fits_the_cap_but_whose_toml_file_would_not_is_refus
         scope_dir(_HOME, RunScope(over, RunLabel("auth")))
 
 
-def test_the_headroom_is_measured_in_bytes_because_that_is_what_the_limit_counts() -> None:
-    """`é` is one character and two bytes, and NAME_MAX has never counted characters."""
-    assert project_config(_HOME, ProjectName("\xe9" * 125)).name == "\xe9" * 125 + ".toml"
-    with pytest.raises(InputError, match="257"):
-        project_config(_HOME, ProjectName("\xe9" * 126))
+def test_the_headroom_is_measured_in_bytes_though_no_name_can_show_that_any_more() -> None:
+    """`é` is one character and two bytes - and since §3.3 no name may carry one at all.
+
+    The count here stays in bytes because NAME_MAX counts bytes, and this is the module that
+    composes a name into a filename: the day the character set widens again is not the day to
+    discover that the count had quietly become characters. What is left to assert is that the
+    difference is currently unobservable - every name `ids.py` accepts is ASCII, so its two
+    lengths are one number - and that the name which used to prove the point is now refused
+    before this module is reached.
+    """
+    with pytest.raises(InputError, match="LATIN SMALL LETTER E WITH ACUTE"):
+        ProjectName("\xe9" * 125)
+    assert all(len(value.encode("utf-8")) == len(value) for value in ACCEPTED)
 
 
 # --- The root, and the other root --------------------------------------------------------------

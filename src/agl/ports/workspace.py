@@ -97,10 +97,11 @@ class WorkspaceProvider(ABC):
         name, and forcing one form would make one of those two callers resolve on the port's behalf.
 
         **`namespace=None` means the run's own workspace**, the `_base` of §3.9, and `None` is the
-        only way to name it. That is not an arbitrary encoding: §3.3's layout reserves that name,
-        and `tree_layout` refuses any `Namespace` that collides with it, so there is deliberately no
-        `Namespace` value that could be passed instead. It has no default, for `AgentOutcome`'s
-        reason - which of the two workspaces a caller means is a thing to state, not to fall into.
+        only way to name it. That is not an arbitrary encoding: §3.3 reserves that name, and
+        `ids.py` refuses it at construction in every spelling, so there is deliberately no
+        `Namespace` value that could be passed instead - a caller cannot even build the name. It
+        has no default, for `AgentOutcome`'s reason - which of the two workspaces a caller means
+        is a thing to state, not to fall into.
 
         Raises `ConflictError` if a line of work under this name already exists and is not this
         workspace's: §3.10 has `run` refuse an existing label rather than adopt it, because

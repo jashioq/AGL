@@ -18,9 +18,26 @@ The layout, from the plan:
         _base/                <- worktree, branch agl/billing
         T-01/
 
-and the branches that go with it: **`agl/<label>` for the run, `agl/<label>/<namespace>` for a
-child**. Which directory `.trees/` itself is - beside the repo, or inside it - is `config/`'s
-answer at stage 9, exactly as `$AGL_HOME` is. `TreesRoot` is that answer once it has been given.
+and the branches that go with it: **`agl/<label>` for the run, `agl/_work/<label>/<namespace>`
+for a child**. The `_work` infix is not decoration, and it is the one derivation here worth
+reading twice. Refs are files under `refs/heads/`, so the obvious scheme - `agl/auth` for the
+run and `agl/auth/T-01` for its child - **cannot exist in git**, in either creation order:
+
+    fatal: cannot lock ref 'refs/heads/agl/auth/T-01': 'refs/heads/agl/auth' exists
+    fatal: cannot lock ref 'refs/heads/agl/auth': 'refs/heads/agl/auth/T-01' exists
+
+`agl/auth` would have to be a file and a directory at once. `git check-ref-format` passes each
+name on its own, which is why "must be a legal ref" does not catch it and why nothing in
+`ids.py` could have: the fix belongs in the naming, and this is it. Routing children under
+`agl/_work/` keeps the deliverable branch cleanly named - the user pushes `agl/auth`, not
+`agl/auth/_base` - keeps every ref AGL creates under the `agl/*` invariant, and costs one extra
+glob at `clear`. `tests/ports/test_tree_layout.py` pins the whole scheme against real git, in
+both creation orders, so that the day it changes the test says where to look.
+
+The two words this layout spends on itself, `_base` and `_work`, are refused as names by
+`ids.py` - `_base` as a namespace, `_work` as a label, each in every spelling (§3.3). They are
+refused there rather than here because a name that cannot be constructed cannot reach a
+composition site at all, and because a downstream re-check that can never fire is not a guard.
 
 **The trees layout is flat, and `home_layout` nests.** That asymmetry is deliberate and it is
 the one thing to read twice before adding a function here. AGL's own state nests, because
@@ -34,16 +51,10 @@ Everything here is a pure function of its arguments. Nothing creates a worktree,
 one exists, reads the environment, or consults the current working directory: `Workspace` does
 the first, and this module only says where.
 
-Two hazards are *not* solved here. Both need a repository, or state about the run's other
-namespaces, and this module is pure and knows only its arguments - so both are recorded, as
-`ids.py` records its two, for the stage that has what they need.
+One hazard is *not* solved here. It needs state about the run's other namespaces, and this
+module is pure and knows only its arguments - so it is recorded, as `ids.py` records its one,
+for the stage that has what it needs:
 
-  * **The run branch and a child branch cannot coexist in git.** Refs are paths:
-    `refs/heads/agl/auth` is a file, and `refs/heads/agl/auth/T-01` needs `agl/auth` to be a
-    directory, so creating the second while the first exists fails with "cannot lock ref".
-    `git check-ref-format` passes each of them on its own, which is why nothing in `ids.py`
-    catches it. The derivations here are the plan's, verbatim; `tests/ports/test_tree_layout.py`
-    pins the collision against real git so that it cannot be discovered twice.
   * **Two namespaces at different depths flatten onto one directory.** `T-01/worktrees/sub-b`
     and a top-level `sub-b` are different scopes under `AGL_HOME` and the same
     `.trees/<label>/sub-b` here, because the checkouts are flat. Sibling uniqueness is not
@@ -51,7 +62,6 @@ namespaces, and this module is pure and knows only its arguments - so both are r
     the run's namespace table - the same place `ids.py` sends its `collision_key`.
 """
 
-import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -69,16 +79,12 @@ __all__ = [
 ]
 
 
-# The layout's own words. `_BASE_DIRNAME` is the one that a `Namespace` could also spell.
+# The layout's own words. `_BASE_DIRNAME` and `_WORK_INFIX` are the two that a name could also
+# spell, and `ids.py` is where each is refused - as a namespace and as a label respectively.
 _BASE_DIRNAME: Final = "_base"
+_WORK_INFIX: Final = "_work"
 _BRANCH_PREFIX: Final = "agl"
 _BRANCH_SEPARATOR: Final = "/"
-
-# What `_BASE_DIRNAME` would be compared by if it were a name - see `_checked_namespace`. It is
-# `Namespace.collision_key`'s formula and not that property, because calling the property means
-# constructing `Namespace("_base")`, which is the very thing this constant exists to refuse.
-# The test suite pins the two against each other, so the copy cannot drift unnoticed.
-_BASE_COLLISION_KEY: Final = unicodedata.normalize("NFC", _BASE_DIRNAME.casefold())
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,15 +116,16 @@ def run_trees_dir(trees: TreesRoot, label: RunLabel) -> Path:
 def base_worktree(trees: TreesRoot, label: RunLabel) -> Path:
     """`.trees/<label>/_base/` - the run's own checkout, on `agl/<label>`, cut from its base.
 
-    It takes no namespace, and `worktree_dir` refuses the one namespace that would land here.
-    The two are disjoint by construction rather than by care.
+    It takes no namespace, and no `Namespace` can spell `_base`: `ids.py` refuses that name at
+    construction, so the run's own checkout and its children are disjoint before anything
+    reaches this module.
     """
     return run_trees_dir(trees, label) / _BASE_DIRNAME
 
 
 def worktree_dir(trees: TreesRoot, label: RunLabel, namespace: Namespace) -> Path:
     """`.trees/<label>/<namespace>/` - one child checkout, a sibling of `_base` and of the rest."""
-    return run_trees_dir(trees, label) / _checked_namespace(namespace)
+    return run_trees_dir(trees, label) / str(namespace)
 
 
 def run_branch(label: RunLabel) -> str:
@@ -131,13 +138,19 @@ def run_branch(label: RunLabel) -> str:
 
 
 def worktree_branch(label: RunLabel, namespace: Namespace) -> str:
-    """`agl/<label>/<namespace>` - the branch a child worktree is on, cut from `agl/<label>`.
+    """`agl/_work/<label>/<namespace>` - a child worktree's branch, cut from `agl/<label>`.
 
-    See the module docstring: git cannot hold this and `run_branch(label)` at the same time.
-    That is the plan's naming, reproduced exactly, and it is recorded there rather than quietly
-    changed here.
+    Not `agl/<label>/<namespace>`, which is the scheme a reader expects and which git cannot
+    hold beside `run_branch(label)` in either order - see the module docstring. The infix moves
+    every child one level out of the deliverable branch's way, which is what makes the pair
+    legal rather than merely lucky, and it is why `ids.py` refuses `_work` as a label.
+
+    Composed from `run_branch`'s parts rather than from `run_branch` itself: the run's branch is
+    not a prefix of this one, and writing it as though it were is how the two would drift back
+    into the collision the infix exists to prevent.
     """
-    return f"{run_branch(label)}{_BRANCH_SEPARATOR}{_checked_namespace(namespace)}"
+    parts = (_BRANCH_PREFIX, _WORK_INFIX, str(label), str(namespace))
+    return _BRANCH_SEPARATOR.join(parts)
 
 
 def _root(trees: TreesRoot) -> Path:
@@ -153,31 +166,3 @@ def _root(trees: TreesRoot) -> Path:
             f"and AGL_HOME are different directories, and their layouts are never conflated"
         )
     return trees.path
-
-
-def _checked_namespace(namespace: Namespace) -> str:
-    """A namespace, refused if it is the name this layout has already spent on the base worktree.
-
-    `_base` is a literal directory in the trees layout and `Namespace("_base")` breaks none of
-    `ids.py`'s rules, so `worktree("_base")` would hand a workflow the run's own base checkout
-    and its own branch under the name of a child - silently, and only in this layout, since
-    `AGL_HOME` has no `_base` in it. Refusing it is one line here; noticing it later is a
-    worktree writing over the branch every other worktree was cut from.
-
-    Refused at this composition site rather than in `ids.py`, because `_base` is this module's
-    word: `ids.py` states that all its types accept exactly the same language from one
-    validator, and `RunLabel("_base")` and `ProjectName("_base")` are perfectly good names that
-    collide with nothing. The cost is that nobody may name a worktree `_base`, which is the
-    same shape of cost as `ids.py`'s own "nobody may name a run `-fix`".
-
-    Compared by `collision_key` rather than by string, because on a case-insensitive volume -
-    macOS by default - `_BASE` and `_base` are one directory, and a check that let `_BASE`
-    through would be a check that only failed on other people's machines.
-    """
-    if namespace.collision_key == _BASE_COLLISION_KEY:
-        raise InputError(
-            f"namespace {str(namespace)!r} cannot be used: {_BASE_DIRNAME!r} is the run's own "
-            f"base worktree in the trees layout, so a child worktree of that name would be the "
-            f"same directory - and on a case-insensitive filesystem, so is any spelling of it"
-        )
-    return str(namespace)
