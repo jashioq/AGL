@@ -389,7 +389,11 @@ class AgentTask:
 **Three preflight checks, before the run starts:**
 
 1. **Provider availability.** Collect the providers named by the workflow's roles; for each, verify
-   its harness is **installed, on `PATH`, and authenticated** (§3.2.1). A Claude+OpenAI run dies at
+   its harness is **installed, on `PATH`, and authenticated** (§3.2.1) via
+   `AgentRunner.check_ready(model)`. Only an adapter can answer that question — config cannot — so
+   it is a port member rather than preflight logic. Both `check_ready` and `capabilities` take a
+   `ModelId` and are async: `RoutingAgentRunner` implements the same ABC, and with no model
+   argument it could only answer for "some provider," which is a lie in either direction. A Claude+OpenAI run dies at
    second zero on a missing binary or a logged-out session — not forty minutes in at the review
    step.
 2. **Capability match.** A role declaring `requires={FILE_EDIT, MID_RUN_QUESTIONS}` is checked
@@ -708,6 +712,16 @@ knob, which is what that knob is for.
 The `Verifier` port therefore has a single call site — the integration gate. One consumer, several
 implementations (shell now; container, remote runner, or CI later), plus a fake.
 
+**Landing is synchronous, and that is a real limit.** `IntegrationOutcome` has two cases —
+landed, or conflicted. There is no spelling for *"opened, and waiting for a human reviewer,"* so a
+pull-request integrator must either block inside the landing call or misreport an open request as a
+conflict. The second is a lie. A third case was considered and rejected: it would put a scheduling
+concept the framework has no vocabulary for into the port, and it collides with the same boundary
+§3.11 closes on — a PR is a non-idempotent external write, so it breaks the memoization model
+independently. Note the distinction from §1.3: that criticism was about git's *merge state machine*
+leaking into the port, which this split fixes. Synchronous landing is a different axis, and it is
+the one v1.1 accepts.
+
 **On conflict the framework does not ask.** It returns a `Conflict` outcome and holds the lease;
 the workflow shows its own screen and decides. The lease is scoped to this run's integration
 target, so a human deliberating in one run never blocks another, and it is released if the run
@@ -935,10 +949,16 @@ term.show(view, **params, priority=0)     awaited; priority only meaningful on S
 term.pending                              {5: 2, 10: 0} — priority → queued count
 ```
 
-**Headless.** A terminal with no TTY attached no-ops a passive `Screen` and raises
-`UpstreamUnavailable` on a `Screen[T]` — a workflow needing human input genuinely cannot run
-headless, and saying so immediately beats blocking forever. That behaviour doubles as the fake, so
-every command runs end-to-end without a terminal.
+**Headless.** A terminal that **cannot take input** no-ops a passive `Screen` and raises
+`UpstreamUnavailable` on a `Screen[T]` — a workflow needing human input genuinely cannot run that
+way, and saying so immediately beats blocking forever. The rule is phrased on input rather than on
+"no TTY attached" deliberately: a plain log stream has output and no input, and the TTY wording
+gives it no rule at all. That behaviour doubles as the fake, so every command runs end-to-end
+without a terminal.
+
+**The terminal is an async context manager.** A redraw loop has to be started and stopped and a
+display handed back; an ABC with no way to stop it pushes terminal restoration into an exit handler
+outside the port.
 
 #### One slot, two queues
 
@@ -956,7 +976,7 @@ between levels.
 
 ```python
 await term.show(views.agent_question, question=q,          priority=5)
-await term.show(views.conflict,       paths=out.paths,     priority=10)
+await term.show(views.conflict,       outcome=out,         priority=10)
 ```
 
 Queues are FIFO within a priority, so simultaneous questions from several agents stack and wait.
@@ -1346,6 +1366,9 @@ a lock.
 | `Verify()` as a step worker | The framework runs one build, at the gate. Agent self-verification is a shell call inside a step, invisible by design. |
 | `run.commit()` as a separate call | It would run after the entry was written, so the recorded `head` would predate the commit — and `head` is the reset target, so the next fingerprint miss would delete the work. Committing belongs inside the step's atomic unit, hence `commit=`. |
 | Framework enforcement of the `commit=` / `NO_VCS_WRITES` pairing | Neither a call-site check nor a HEAD-moved detector. The framework does one predictable thing either way; the pairing is the author's judgement, documented in the SDK and catchable by an IDE lint plugin. Consistent with `blocked_by`, cycle detection, and loop termination all being the workflow's. |
+| A third `IntegrationOutcome` case for asynchronous landing | Would put a scheduling concept the framework has no vocabulary for into the port, and a PR is a non-idempotent external write that breaks memoization independently (§3.4). v1.1 lands synchronously. |
+| `Integrator.revert()` | Revert-on-gate-failure undoes a successful landing, which is `Workspace.restore(head)` — the same primitive at a third moment, alongside reset-before-rerun and wipe-on-omitted-`commit=`. |
+| A timeout parameter on `Verifier.verify` | `build_timeout` is project configuration and reaches an implementation where implementations are configured. A hosted verifier with its own deadline would otherwise carry a parameter it can only ignore. |
 | An auto-generated commit message | The message is domain vocabulary — "implement T-01" is something only the workflow knows. Auto-generating it would cost readable history to save one keyword argument. |
 | `run.ask()` | Dissolved into `run.terminal.show()` with an interactive view. One entry point. |
 | `question_view` on the Role | Replaced by an `on_question` callback, so the workflow routes questions through the same single `show` entry point. |

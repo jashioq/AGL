@@ -79,7 +79,7 @@ Every ABC, no implementations. This is the stage that decides whether R2 holds.
 | 2.4 | `ports/store.py` + `ports/clock.py` — store contract states atomic writes |
 | 2.5 | `ports/terminal.py` — `Terminal` ABC **and the component types its own methods speak**: `Screen[T]`, `Rows`, `Row`, `Text`, `Choice`, `TextInput` (§3.7). They live here, not in `sdk/`, or `ports` would have to import `sdk`; the `sdk` modules of the same name are re-export facades added at stage 15 |
 
-**Accept:** `mypy --strict`; no vendor string appears anywhere in the package.
+**Accept:** `mypy --strict`; no vendor **import or invocation** anywhere in the package, per target #5. Model members (`Claude.OPUS`) and prose naming a vendor in a workflow docstring are sanctioned and expected — the gate is on imports and on the harness binary name, not on the word.
 
 ---
 
@@ -90,14 +90,17 @@ that pass. These suites are the objective answer to "did it work" for stages 4�
 
 | # | Deliverable |
 |---|---|
+| 3.0 | **Stage-1 spec-drift fixes.** §3.3 and §3.9 were amended *after* stage 1 ran, so its code is correct against the old spec and wrong against the current one. Three fixes, all in `ports/`: (i) `tree_layout.worktree_branch` must compose `agl/_work/<label>/<ns>`, not `agl/<label>/<ns>` — the existing test that asserts git rejects the old pair must be **inverted** to assert git accepts the new triple; (ii) `ids.py` must enforce §3.3's allowlist `[A-Za-z0-9._-]` with no leading or trailing `.` or `-`, replacing the current blocklist that accepts `$(whoami)`, `a;b`, `a\|b`; (iii) `RunLabel("_work")` and `Namespace("_base")` must be refused in `ids.py` itself, not caught downstream |
 | 3.1 | Store contract suite — including the atomic-write clause: a result exists complete or not at all |
 | 3.2 | Agent contract suite — including the **hermeticity fixture**: a repo carrying a poisoned config for *every* harness (`CLAUDE.md`/`.claude/`, `AGENTS.md`/`.codex/`), asserting each adapter ignored its own (§3.5). **No credential-environment assertion** — deferred, see plan §3.11 |
 | 3.3 | Workspace + History contract suites |
 | 3.4 | Integrator + Verifier contract suites — merge, conflict, revert-on-gate-failure |
-| 3.5 | Terminal contract suite — slot replacement, queue ordering, preemption, headless raising on `Screen[T]` |
+| 3.5 | Terminal contract suite — slot replacement, queue ordering, preemption, and the headless rule as **"a terminal that cannot take input raises `UpstreamUnavailable` on `Screen[T]`"** (§3.7 — phrased on input, not on TTY presence, so a log stream has a rule). Also pin the async-context-manager lifecycle |
 
 **Accept:** every suite runs and fails cleanly against a null implementation. A suite that passes
-against nothing is not testing anything.
+against nothing is not testing anything. Plus, for 3.0: `agl/<label>` and `agl/_work/<label>/<ns>`
+coexist in a real repo; every metacharacter §3.3 names is refused by `Namespace`; `_work` and
+`_base` are refused at construction.
 
 ---
 
@@ -122,7 +125,7 @@ gate 4.4 until it is listed.
 | # | Deliverable |
 |---|---|
 | 5.1 | `adapters/git/_runner.py` — shared subprocess execution, timeouts, error mapping |
-| 5.2 | `adapters/git/workspace.py` — provision, **reopen-if-exists**, remove; `flock` on the worktree registry (§3.9) |
+| 5.2 | `adapters/git/workspace.py` — provision, **reopen-if-exists**, remove; `flock` on the worktree registry (§3.9). Depends on 3.0(i): branch derivation must already be `agl/_work/<label>/<ns>` or every worktree this creates is unopenable |
 | 5.3 | `adapters/git/history.py` — diff, changed files, ancestry; porcelain codes → `ChangeKind` |
 | 5.4 | `adapters/git/integrator.py` — merge, conflict detection, revert; git's merge state machine stays inside |
 | 5.5 | `adapters/git/fake.py` — in-memory, no git |
