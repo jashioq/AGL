@@ -31,7 +31,8 @@ the strings, which is what the next four sections are.
 
 Nothing below was written from memory. Four sources, in increasing order of how much they settle:
 
-1. **`claude --help`** (CLI 2.1.220). `--disallowedTools <tools...>`: "Comma or space-separated
+1. **`claude --help`** (CLI 2.1.220, the packaged binary's own `--version` - a session started from
+   it announces 2.1.235, see `_tools.py`). `--disallowedTools <tools...>`: "Comma or space-separated
    list of tool names to deny (e.g. "Bash(git *) Edit")". That fixes the shape - `Tool`, or
    `Tool(specifier)` - and nothing else.
 2. **The published permission reference** (`code.claude.com/docs/en/permissions`). Rules resolve
@@ -111,8 +112,9 @@ they are demonstrably not the whole of it:
     strip list all walk past it.
   * **`NO_SHELL`.** The bare-name denials are the strongest thing here and the probe shows the
     tools vanish - but the set of tools that can run a command is Claude Code's to grow, and this
-    file names the ones that existed at 2.1.220. `Monitor` is in the list only because the
-    PowerShell tool's own refusal message says so ("Monitor runs bash"); nothing announced it.
+    file names the ones that existed at 2.1.220 (`claude --version`; the session that probe starts
+    reports itself as 2.1.235). `Monitor` is in the list only because the PowerShell tool's own
+    refusal message says so ("Monitor runs bash"); nothing announced it.
 
 **Rejected: producing the instruction only where a gap is known.** It is the tempting design and it
 would have made `NO_SHELL` silent, since bare-name denial removes the tool rather than pattern-

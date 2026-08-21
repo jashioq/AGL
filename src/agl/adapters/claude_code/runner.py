@@ -160,7 +160,12 @@ from claude_agent_sdk import (
 from claude_agent_sdk.types import SystemPromptPreset
 
 from agl.adapters.claude_code._session import Stderr, outcome_of
-from agl.adapters.claude_code._tools import ASKING_MECHANISMS_DENIED, Asking, servers
+from agl.adapters.claude_code._tools import (
+    ASKING_MECHANISMS_DENIED,
+    ASKING_TOOL,
+    Asking,
+    servers,
+)
 from agl.adapters.claude_code.translate import Restraint, model_name, restraint, unready
 from agl.ports.agent import (
     ActivityReporter,
@@ -214,6 +219,28 @@ _PLAN_ONLY: Final = (
     "AGL is asking you to examine and propose, and to change nothing: work out what should be "
     "done and report it, rather than doing it. This is what is being asked of you, not a "
     "restriction placed on you - anything you are actually forbidden to do is listed separately."
+)
+
+# What a run that has somewhere to send a question tells the agent, and the one place §3.7's
+# "agents are instructed to use it" is said in the prompt rather than left to a tool's own
+# `description` field - which a model reads once it is already considering that tool, and which
+# therefore cannot be what makes it consider it.
+#
+# The qualified name is the vendor's `mcp__<server>__<tool>` and so is the spelling of two names
+# `_tools.py` owns - which is why it arrives from there as `ASKING_TOOL` rather than being written
+# out here. Naming a tool the session does not register would be worse than naming none, and a
+# copy of the name in this module is exactly the drift `_tools.servers` argues against: renaming
+# either half now moves this line with it instead of silently invalidating it.
+#
+# `tests/adapters/test_claude_code_runner.py` still reads the advertised name off the wire and pins
+# the prompt to it, and that is still worth doing rather than redundant. The shared constant proves
+# only that these two modules agree with each other; what nothing in this process can prove is that
+# the SDK actually registers an in-process MCP tool under `mcp__<server>__<tool>` - that is the
+# vendor's convention, and only a session advertising the tool says it is still theirs.
+_MAY_ASK: Final = (
+    "There is a person running this task and you can put a question to them and wait for their "
+    f"answer: call the tool `{ASKING_TOOL}`. Use it when a decision is genuinely theirs to make "
+    "rather than guessing at what they would want."
 )
 
 # How a composed prompt introduces the standing context it was given. `AgentTask.context` is kept
@@ -315,14 +342,16 @@ class ClaudeCodeRunner(AgentRunner):
         everything the agent is told is in `_prompt`; the reading of the stream is `_session.py`'s.
         `on_question` is bound into an `Asking` built for this call alone, which is what lets one
         runner serve a workflow's two concurrent reviewers without either seeing the other's
-        handler.
+        handler. Whether there *is* one is the only thing about it `_prompt` is told, and it is
+        told as a bool rather than handed the handler: composing a prompt is not a place from which
+        anything should be callable.
         """
         limits = restraint(task.restrictions)
         asking = Asking(on_question)
         stderr = Stderr()
         return await outcome_of(
             task,
-            _prompt(task, limits),
+            _prompt(task, limits, may_ask=on_question is not None),
             _options(task, limits, servers(task.tools, asking), self._cli_path, stderr),
             asking=asking,
             on_activity=on_activity,
@@ -361,22 +390,32 @@ def _options(
     )
 
 
-def _prompt(task: AgentTask, limits: Restraint) -> str:
+def _prompt(task: AgentTask, limits: Restraint, *, may_ask: bool) -> str:
     """What the agent is asked, as one string: the standing parts first, the task last.
 
-    **A task with no context, no restrictions and no `plan_only` produces the instructions
-    verbatim**, byte for byte, with nothing added. That is deliberate rather than an optimisation:
-    a workflow author's prompt is the whole of what they wrote, and a framework that always wrapped
-    it in headings would be editing every prompt in the system to say something about three fields
-    that were empty.
+    **A task with no context, no restrictions and no `plan_only`, run with no question handler,
+    produces the instructions verbatim**, byte for byte, with nothing added. That is deliberate
+    rather than an optimisation: a workflow author's prompt is the whole of what they wrote, and a
+    framework that always wrapped it in headings would be editing every prompt in the system to say
+    something about four things that were not there.
+
+    **`may_ask` is the fourth, and it is a parameter rather than a field of `task` because it is
+    not one**: whether a question can be answered is decided per call, by whoever passed
+    `on_question` to `run`. §3.7 puts the asking tool in the framework's hands and says in the same
+    sentence that agents are *instructed* to use it; until this, the whole of that instruction was
+    the tool's own `description`, which a model reads once it is already considering the tool. So a
+    run given a handler is told here that it can ask and what to call, and a run given none is told
+    nothing - the tool is registered either way, and an agent that asks with nobody listening spends
+    a turn to be told that no answer is available.
 
     The task goes last because it is what the agent acts on and the closest thing to its first
     move; the standing parts go above it in the order they constrain - context, then limits, then
-    what is being asked for.
+    what the session makes available, then what is being asked for.
     """
     standing = [
         f"{_CONTEXT_HEADING}\n\n{task.context}" if task.context else "",
         limits.in_words,
+        _MAY_ASK if may_ask else "",
         _PLAN_ONLY if task.plan_only else "",
     ]
     return "\n\n".join([*(part for part in standing if part), task.instructions])

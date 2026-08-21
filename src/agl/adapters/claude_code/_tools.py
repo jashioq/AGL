@@ -13,12 +13,15 @@ Claude Code offers two candidates and only one of them survives being looked at.
 **Rejected: intercepting the built-in `AskUserQuestion`.** Three separate reasons, any one of them
 sufficient:
 
-  * **It is not there.** A live probe against the installed CLI (2.1.235, `claude_agent_sdk`
-    0.2.140) read the session's registered tool list off the `init` system message, with no deny
-    rules at all, and `AskUserQuestion` was absent - on a machine whose environment carries
-    `CLAUDE_CODE_ENABLE_ASK_USER_QUESTION_TOOL`. So its availability is a build-and-flag question
-    this adapter cannot answer, and `capabilities()` has to answer `MID_RUN_QUESTIONS` the same way
-    on every machine or it is not a precondition anybody can check.
+  * **It is not there.** A live probe against the installed CLI (2.1.235 as the *running session*
+    announced itself, in `init`'s `claude_code_version` and in its `claude-cli/2.1.235` User-Agent
+    - `claude --version` on the same machine says 2.1.220, because Claude Code updates its own
+    bundle in place; `claude_agent_sdk` 0.2.140) read the session's registered tool list off the
+    `init` system message, with no deny rules at all, and `AskUserQuestion` was absent - on a
+    machine whose environment carries `CLAUDE_CODE_ENABLE_ASK_USER_QUESTION_TOOL`. So its
+    availability is a build-and-flag question this adapter cannot answer, and `capabilities()` has
+    to answer `MID_RUN_QUESTIONS` the same way on every machine or it is not a precondition
+    anybody can check.
   * **It is unavailable to a subagent**, which §1.1 records as the vendor limitation that reshaped
     a workflow's concurrency: *"Both reviewers run as top-level calls, never subagents:
     `AskUserQuestion` is unavailable to a subagent."* The whole point of this stage is that such a
@@ -77,7 +80,7 @@ from agl.ports.agent import QuestionHandler, Tool
 from agl.ports.questions import Question
 from agl.ports.run import JsonValue
 
-__all__ = ["ASKING_MECHANISMS_DENIED", "Asking", "servers"]
+__all__ = ["ASKING_MECHANISMS_DENIED", "ASKING_TOOL", "Asking", "servers"]
 
 # Claude Code's own mid-run asker, denied for every run - see the module docstring. A tuple rather
 # than one string because a harness may grow a second such tool and this is the list to add it to.
@@ -89,6 +92,16 @@ _SUPPLIED: Final = "agl"
 _ASKING: Final = "agl_ask"
 
 _ASK: Final = "ask"
+
+# How the asker is addressed: the one string in this module that a *model* is told, rather than
+# one the SDK is handed. It is composed from the two names above and exported, instead of being
+# spelled out again beside the prompt that names it, for the reason `servers` gives about server
+# names - `mcp__<server>__<tool>` is the wire, both of its halves are this module's, and a second
+# module holding a copy of one is a copy that can drift. `runner.py` tells an agent it may ask by
+# naming this tool; composing that line from this constant is what makes renaming either half
+# above move the prompt with it, rather than leaving a prompt that instructs a model to call a
+# tool no session registers.
+ASKING_TOOL: Final = f"mcp__{_ASKING}__{_ASK}"
 
 _ASK_DESCRIPTION: Final = (
     "Ask the person running this task a question, and wait for their answer. Use it when a "

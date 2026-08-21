@@ -4,21 +4,45 @@ The first class is the port in full: `AgentContract` with its two fixtures overr
 else touched. That suite was written at stage 3, against the port's docstrings and before any
 adapter existed (§1.9), which is why nothing below re-asserts any of it.
 
-**Six of its eight tests start a real agent, and on this machine they cannot.** The `claude` CLI
-here answers `Failed to authenticate: OAuth session expired and could not be refreshed`, so those
-six are gated on two things at once: the opt-in environment variable `AGL_LIVE_AGENT=1`, *and*
-`check_ready` returning. Both, not either - an opt-in on a logged-out machine would turn a skip into
-a suite of failures that say nothing, and readiness without an opt-in would spend somebody's money
-the first time they ran `scripts/check`. The gate is delivered by the `runner` fixture handing back
-a runner whose `run` skips: the criterion is "does this test start an agent", and that is a fact
-about the *port member* rather than about a test's name, so no list here goes stale when a test in
-that suite is renamed. `capabilities` and `check_ready` are the real thing in every case and run
-unconditionally - `check_ready` especially, since a logged-out machine is exactly the world its one
-error path describes, and it is the only error path the suite can see.
+**Six of its eight tests start a real agent, and none of them runs - anywhere, on any machine.**
+Every one of the six reads a *model's* conduct as its evidence: that it called a tool, that it
+answered a question, that it ignored a repository's instructions. No free instrument can supply
+that, so running them means a paid turn, and the build's rule is that no test spends tokens, ever -
+"not gated, not opt-in, not 'only when you set the env var'". They are deferred to the manual QA
+pass instead. The gate is delivered by the `runner` fixture handing back a runner whose `run`
+skips: the criterion is "does this test start an agent", and that is a fact about the *port member*
+rather than about a test's name, so no list here goes stale when a test in that suite is renamed.
+`capabilities` and `check_ready` are the real thing in every case and run unconditionally - and
+`check_ready` now genuinely starts a CLI on every `scripts/check`, because the far side is the
+loopback described next. It used to be the one paid call in this build.
 
-The skip reason says all of that out loud. `tests/contracts/agent.py` is written against the
-failure mode where a suite passes against nothing, and a skip that reads like a pass is that
-failure mode wearing a green tick.
+**Every test in this module points a `claude` process at a loopback**, and that is what makes the
+rest of the file free. `instruments/loopback.py` binds `127.0.0.1`, answers the two paths a session
+touches, and forwards nothing anywhere; the module-scoped `harness` fixture below exports
+`ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY` at it for the whole file, always, not only for the
+tests that spawn something. So "no test here reaches a model" is structural rather than a promise:
+there is no outbound socket in the instrument, and one test below asserts the redirection itself
+rather than leaving it to be believed.
+
+Two things follow, and both are wanted. `check_ready` is now exercised on the branch where it
+**returns** - a success path this project had never observed, because the only machine that had ever
+run it was logged out - and it costs nothing. And the four tests below that read a real session's
+`init` now run a session **to completion**, where they used to wrap themselves in
+`pytest.raises(UpstreamUnavailable)` and pass because a logged-out machine could not authenticate.
+That is the failure `docs/agl-build-stages.md` records against this stage by name: "four tests were
+green because the harness could not authenticate - they asserted the run would fail, and would have
+passed with no harness installed at all." No test in this file passes because a run failed.
+
+**`AGL_LIVE_AGENT=1` is still the opt-in, and it now buys something real - but only what it says.**
+It gates the tests that spawn a CLI, together with `claude` being on `PATH`, and it means exactly
+those two things: the binary is installed and the operator agreed to have processes started. It is
+*not* an authentication gate, and there is nothing here that could make it one: the spike proved the
+`init` message is byte-identical whether the far side authenticates or refuses, and `init`'s
+`apiKeySource` reports `"none"` for a perfectly good subscription session (see the comment above
+`_READY_PROMPT` in `runner.py`), so no free instrument can tell logged in from logged out. The skip
+reasons say that and claim no more. `tests/contracts/agent.py` is written against the failure mode
+where a suite passes against nothing, and a skip that reads like a pass is that failure mode wearing
+a green tick.
 
 What follows the contract subclass is what the suite lists as beyond it, in roughly its order:
 
@@ -27,7 +51,10 @@ What follows the contract subclass is what the suite lists as beyond it, in roug
     which arrives before any model call and so needs no authentication: a repository carrying the
     contract suite's poison *plus* a `.mcp.json`, a project subagent and a project slash command,
     and an `init` that registers none of them. Plus the options the real `run` actually built,
-    captured on the way past rather than rebuilt by this file.
+    captured on the way past rather than rebuilt by this file. And plus the composed request itself,
+    read off the loopback: the poison is absent from what actually left the machine, with the
+    workspace's own `CLAUDE.md` proved present as the control, which is the measurement that settled
+    the question in the first place.
   * **That the workspace path never reaches a command line** (§3.5, and no gap of the suite's
     because the suite chooses no hostile path). Fired first as a control, then handed to the
     adapter, in the shape `tests/adapters/test_shell_verifier.py` established at stage 6.
@@ -53,6 +80,7 @@ two files of one name under different directories would collide at import.
 
 import ast
 import asyncio
+import ipaddress
 import json
 import os
 import shutil
@@ -61,6 +89,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Mappin
 from functools import cache
 from pathlib import Path
 from typing import Any, Final, NoReturn
+from urllib.parse import urlsplit
 
 import pytest
 from claude_agent_sdk import ClaudeAgentOptions, ProcessError
@@ -89,94 +118,232 @@ from agl.ports.run import JsonValue
 from contracts._agent_hermeticity import CONFIGURATIONS, markers_in, plant
 from contracts._agent_tasks import Notes, workspace
 from contracts.agent import AgentContract
+from instruments.loopback import DUMMY_KEY, REPLY, Loopback, wire_text
 
-# The opt-in. Both halves of the gate are named in the skip reason below, so a reader who sees a
-# skip learns what to set and why it was not enough on its own.
+# The opt-in. It turns on the tests that spawn a real `claude` process against the loopback, and it
+# does not turn on the six contract tests that read a model's conduct - nothing can, because no free
+# instrument produces conduct. Two gates rather than one, because "the operator agreed to have
+# processes started" and "there is a binary to start" are different facts with different fixes.
 LIVE = "AGL_LIVE_AGENT"
 
-# What a person is told when the six live tests do not run. Long on purpose: the whole point of
-# this suite is that a green run means something, and a skip that reads like a pass is the failure
-# `tests/contracts/agent.py` is written against.
+# What a person is told when the six live tests do not run, which is always. Long on purpose: the
+# whole point of this suite is that a green run means something, and a skip that reads like a pass
+# is the failure `tests/contracts/agent.py` is written against.
 _SKIPPED: Final = (
     "UNVERIFIED: this run did not start a real agent, so the ClaudeCodeRunner's entire run-path - "
     "the outcome, the refused tool call, the activity, both question clauses and the poisoned "
-    f"repository - is unverified by this run. Set {LIVE}=1 to run them, and note that the opt-in "
-    "alone is not enough: the Claude Code CLI on this machine must also be installed, on PATH and "
-    "authenticated, which check_ready decides. It is not, here - the CLI answers 'Failed to "
-    "authenticate: OAuth session expired and could not be refreshed' - which is why this is a "
-    "skip and not a failure. The tests below the contract subclass still ran, and they cover the "
-    "options, the argv discipline and the tool and question plumbing; they do not cover a model."
+    "repository - is unverified by this run, and by every run. DEFERRED TO THE MANUAL QA PASS, "
+    "with no switch here that changes it: each of these six reads a model's conduct as its "
+    "evidence - that it called a tool, that it answered a question, that it ignored a poisoned "
+    "repository - which no free instrument can supply, so running one costs a paid turn and no "
+    "test in this build spends tokens. Run them by hand against an authenticated CLI, or do not "
+    "believe them. What did run is everything below the contract subclass: a real CLI composing a "
+    "real session against a loopback endpoint, so the options, the argv discipline, the registered "
+    "tools and the request that left the machine are all asserted for real - plus the tool and "
+    "question plumbing driven offline through a scripted transport. None of that covers a model "
+    "deciding anything, and this skip is not a pass."
 )
 
-# What a person is told when the CLI itself is missing. A different gate from the one above and
-# kept separate on purpose: these tests need a process that starts and prints its `init` message,
-# which costs nothing and needs no session, so the only thing that can stop them is the binary not
-# being there at all.
+# The one extra sentence a machine carrying the opt-in gets. Appended rather than folded in, because
+# it is true of one reader's environment and not of the deferral itself.
+_OPTED_IN: Final = (
+    f" ({LIVE}=1 is set here and it did turn on the live tests further down, which spawn a real "
+    f"CLI against a loopback endpoint. It does not turn these six on and no variable can: what "
+    f"they read is a model's conduct, and a loopback answers with whatever it was told to say.)"
+)
+
+# What a person is told when the CLI itself is missing. A different gate from the one above and kept
+# separate on purpose: these tests need a process that starts, composes a session and prints its
+# `init` message, which costs nothing and needs no authentication, so the only thing that can stop
+# them is the binary not being there at all.
 _NO_CLI: Final = (
     "UNVERIFIED: the Claude Code CLI is not on PATH, so nothing here could start it and read back "
-    "the session it composed. The hermeticity options (§3.5) and the argv discipline are asserted "
-    "against the CLI's own `init` message, which arrives before any model call and needs no "
-    "authentication - install Claude Code and these run again, on any machine, logged in or not."
+    "the session it composed. The hermeticity options (§3.5), the argv discipline and the composed "
+    "request are asserted against a real CLI driven at a loopback endpoint that answers out of "
+    "canned data - install Claude Code and these run again, on any machine, logged in or not, "
+    "because the far side is a socket this suite owns and no model is behind it."
+)
+
+# What a person is told when the CLI is there and the opt-in is not. Honest about what the opt-in
+# means, which is less than an opt-in usually means: these tests spend nothing, and asking for it is
+# about spawning processes on somebody's machine rather than about spending their allowance. It
+# cannot be an authentication gate either - `init` is byte-identical logged in or out, and
+# `apiKeySource` says `"none"` for a working subscription - so nothing here claims to know.
+_NOT_OPTED_IN: Final = (
+    f"UNVERIFIED: {LIVE}=1 is not set, so no `claude` process was spawned and the hermeticity "
+    f"options (§3.5), the argv discipline and the composed request are unverified by this run. "
+    f"They cost nothing to check - the CLI is pointed at a loopback endpoint that answers out of "
+    f"canned data, so no model is reached and no tokens are spent - and the opt-in is about "
+    f"starting processes on this machine, not about paying for them. It says nothing about whether "
+    f"the CLI is authenticated, because nothing free can: run `{LIVE}=1 pytest` on this file."
 )
 
 
 @cache
 def _live() -> bool:
-    """Whether a real agent may be started: the opt-in is set **and** the harness is ready.
+    """Whether the operator asked for `claude` processes to be spawned. Half of the live gate.
 
-    Cached because both halves cost something - an environment read is free, but `check_ready`
-    starts a process and exchanges one turn with the far side - and six tests ask the same
-    question. `asyncio.run` rather than an async fixture: this is asked while a fixture is being
-    set up, outside the loop pytest-asyncio runs the test in, and a runner is not needed to answer
-    it.
+    An environment read and nothing else - deliberately, and this is the second time that has had to
+    be said. It used to be this *and* `check_ready` returning, which made deciding whether to spend
+    a paid turn cost a paid turn; and it never even reached that, because `_live()` awaited
+    `check_ready` through `asyncio.run` from inside the loop pytest-asyncio was already running, so
+    `AGL_LIVE_AGENT=1` produced six errors rather than six runs. There is nothing to probe now: the
+    far side is a loopback this suite starts, so the only questions left are whether there is a
+    binary (`_cli`) and whether the operator wants it started (this).
 
-    The opt-in is checked first and short-circuits, so a machine that has not opted in never pays
-    for the probe and never spends anything.
+    Cached because a dozen tests ask it and the answer cannot change inside one run.
     """
-    if os.environ.get(LIVE) != "1":
-        return False
-    try:
-        asyncio.run(ClaudeCodeRunner().check_ready(Claude.HAIKU))
-    except UpstreamUnavailable:
-        return False
-    return True
+    return os.environ.get(LIVE) == "1"
 
 
 def _cli() -> bool:
-    """Whether there is a `claude` binary to start at all. The other gate, and a different one."""
+    """Whether there is a `claude` binary to start at all. The other half, and a different fix."""
     return shutil.which("claude") is not None
 
 
+@pytest.fixture(scope="module", autouse=True)
+def harness() -> Iterator[Loopback]:
+    """Every test in this file, pointed at a loopback endpoint. Autouse, and not only for the gated.
+
+    This is the fixture that makes "no test here reaches a model" a fact rather than a habit. It
+    binds `instruments.loopback` on `127.0.0.1` and exports `ANTHROPIC_BASE_URL` at it for the whole
+    module, so a test that spawns a CLI cannot reach a paid endpoint whatever it was written to do -
+    including a test somebody adds later without reading this docstring, which is the case the
+    autouse is for.
+
+    **`ANTHROPIC_API_KEY` is load-bearing and not belt-and-braces.** With the base URL redirected
+    and the key left unset, the CLI falls back to the operator's own subscription credential and
+    sends `Authorization: Bearer sk-ant-…` to whatever is listening on that socket. Any non-empty
+    dummy makes it send `x-api-key: <dummy>` instead. Anyone deleting that line is handing a live
+    token to a local port, and `instruments/loopback.py` redacts what arrives precisely because this
+    line can be deleted.
+
+    Module-scoped because starting a listener per test would be a hundred binds for no gain, and
+    hand-rolled around `pytest.MonkeyPatch.context()` because `monkeypatch` itself is
+    function-scoped and cannot be asked for here. The environment is restored on the way out by
+    that context, so it does not leak into the rest of the suite - which matters, because the rest
+    of the suite has no loopback listening.
+    """
+    with Loopback() as endpoint, pytest.MonkeyPatch.context() as environment:
+        environment.setenv("ANTHROPIC_BASE_URL", endpoint.url)
+        environment.setenv("ANTHROPIC_API_KEY", DUMMY_KEY)
+        yield endpoint
+
+
+@pytest.fixture(autouse=True)
+def _one_test_at_a_time(harness: Loopback) -> Iterator[None]:
+    """One test's traffic is never another's, and no test leaves a live credential behind it.
+
+    The loopback outlives every test in the module, so without the clear `composed()` would be
+    reading whichever run happened to go first. Function-scoped and autouse, so a test cannot
+    forget.
+
+    The teardown is the second half of the `ANTHROPIC_API_KEY` argument, measured rather than
+    argued. Every request every test caused is checked for an `Authorization` header, which is what
+    the CLI sends when it falls back to the operator's own subscription credential - and which
+    therefore appears the moment the dummy key stops being set, whatever anyone believed about it.
+    The value is never read: `instruments.loopback` redacts it on the way in, and the assertion is
+    about the header being there at all.
+    """
+    harness.clear()
+    harness.says = REPLY
+    yield
+    bearer = [
+        seen.path
+        for seen in harness.requests
+        if any(name.lower() == "authorization" for name in seen.headers)
+    ]
+    assert not bearer, (
+        f"a `claude` this test started sent an Authorization header to {bearer}. That is the "
+        f"operator's own OAuth bearer token: the CLI falls back to it whenever ANTHROPIC_API_KEY "
+        f"is unset or empty, and with the base URL redirected it goes to whatever is listening on "
+        f"the port. It landed on this suite's own loopback, which redacts it - but the next reader "
+        f"to point that variable somewhere else would be shipping a live credential"
+    )
+
+
+def test_no_test_in_this_module_can_reach_a_paid_endpoint(harness: Loopback) -> None:
+    """The guard, asserted rather than promised. Everything else in this file rests on it.
+
+    A docstring saying "these tests are free" is worth nothing on the day the fixture above is
+    edited, renamed, or quietly dropped from a `conftest` reshuffle - and the failure would be
+    silent, because a test that spends money looks exactly like a test that does not until the bill
+    arrives. So the redirection is a checked fact: the variable the CLI reads is set, it names an
+    address that is a loopback literal, and it is the address of the endpoint this module started.
+
+    `127.0.0.1` is asserted by parsing rather than by prefix, and the hostname has to be an IP
+    literal: `localhost` would pass a string comparison and resolve through whatever the machine's
+    resolver says it means. `ANTHROPIC_API_KEY` is checked in the same breath because an unset one
+    is not a missing precaution but an active leak - see the fixture.
+    """
+    base = os.environ.get("ANTHROPIC_BASE_URL", "")
+    host = urlsplit(base).hostname or ""
+    try:
+        loopback = ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        loopback = False
+
+    assert loopback, (
+        f"ANTHROPIC_BASE_URL is {base!r}, whose host {host!r} is not a loopback address. Every "
+        f"test in this file spawns or may spawn a real `claude`, and the only thing standing "
+        f"between that and a paid model call is this variable pointing at a socket this suite owns"
+    )
+    assert base == harness.url, (
+        f"ANTHROPIC_BASE_URL is {base!r} and this module's loopback is listening on "
+        f"{harness.url!r}. A CLI pointed at some other loopback is a CLI whose requests this file "
+        f"cannot read, and whatever is on that port was not started here"
+    )
+    assert os.environ.get("ANTHROPIC_API_KEY"), (
+        f"ANTHROPIC_API_KEY is {os.environ.get('ANTHROPIC_API_KEY')!r}, which the CLI treats as no "
+        f"key at all: it then falls back to the operator's own OAuth bearer token and sends it to "
+        f"whatever is listening on the redirected base URL. Non-empty is the whole requirement, "
+        f"and it is asserted separately from the value below because emptiness is the failure mode"
+    )
+    assert os.environ.get("ANTHROPIC_API_KEY") == DUMMY_KEY, (
+        f"ANTHROPIC_API_KEY is {os.environ.get('ANTHROPIC_API_KEY')!r}. Unset, the CLI sends the "
+        f"operator's real OAuth bearer token to whatever is listening on the redirected base URL - "
+        f"so this is not a second layer of protection, it is the line that keeps a live credential "
+        f"off a local socket"
+    )
+
+
 class _NeverRuns(ClaudeCodeRunner):
-    """The runner the contract suite gets when no agent may be started: real, except for `run`.
+    """The runner the contract suite gets: real, except that `run` skips and always skips.
 
     Subclassed rather than mocked, so `capabilities` and `check_ready` are the adapter's own and
     the two tests that ask them are testing the real thing. `run` skips, loudly, which puts the
     gate on the *port member that starts an agent* instead of on a list of test names - the suite's
     tests can be renamed, split or added to and this keeps deciding correctly.
+
+    Unconditionally, because there is no condition worth writing: what the six tests behind it
+    assert is a model's conduct, the only instrument that can answer is a paid one, and a test that
+    spends money on a flag is still a test that spends money. They are deferred to the manual QA
+    pass and the skip reason says so.
     """
 
     async def run(self, *args: object, **kwargs: object) -> NoReturn:
-        pytest.skip(_SKIPPED)
+        pytest.skip(_SKIPPED + (_OPTED_IN if _live() else ""))
 
 
 class TestClaudeCodeRunner(AgentContract):
-    """The port in full, against the real adapter and the real Claude Code CLI.
+    """The port in full, against the real adapter: two of its eight tests today, and six deferred.
 
-    Two overrides and nothing else, which is what the suite asks for. The live gate lives inside
-    the `runner` fixture because that is one of the two, and because the alternative - marking
+    Two overrides and nothing else, which is what the suite asks for. The gate lives inside the
+    `runner` fixture because that is one of the two, and because the alternative - marking
     individual tests - would mean this file naming tests that belong to a suite it does not own.
     """
 
     @pytest.fixture
     def runner(self) -> AgentRunner:
-        """The adapter, resolving `claude` from `PATH`, with `run` gated on the opt-in.
+        """The adapter, resolving `claude` from `PATH`, with `run` skipping.
 
         Nothing else is configured, because there is nothing else: the model, the workspace, the
         tools and the restrictions all arrive per call, and the hermeticity settings are not
-        settings but obligations the adapter carries whoever built it.
+        settings but obligations the adapter carries whoever built it. `check_ready` and
+        `capabilities` are reached through this object exactly as they would be through a
+        `ClaudeCodeRunner`, because that is what it is.
         """
-        return ClaudeCodeRunner() if _live() else _NeverRuns()
+        return _NeverRuns()
 
     @pytest.fixture
     def model(self) -> ModelId:
@@ -200,6 +367,19 @@ NOTE_SCHEMA: Final[Mapping[str, JsonValue]] = {
     "properties": {"note": {"type": "string"}},
     "required": ["note"],
 }
+
+# How the model addresses AGL's asker: `mcp__<server>__<tool>`, and both halves of it are spelled in
+# `_tools.py`. Written out here rather than imported because it is what a *model* sees, and the
+# three tests using it check it against what the session advertises, what the composed request
+# carries and what the prompt names - rather than against each other.
+#
+# Against a *list of names* this matches exactly; against prompt *text* it would be a substring, and
+# a substring match is satisfied by any longer name beginning with this one - `_ASK` renamed to
+# `ask_person` leaves `mcp__agl_ask__ask in prompt` green while naming a tool no session registers.
+# `_MAY_ASK` renders the name inside backticks, so a prompt assertion matches `ASK_TOOL_NAMED`
+# below: the closing delimiter is what makes it exact, and it needs no regex to be so.
+ASK_TOOL: Final = "mcp__agl_ask__ask"
+ASK_TOOL_NAMED: Final = f"`{ASK_TOOL}`"
 
 
 def poisoned(root: Path) -> Path:
@@ -282,21 +462,33 @@ def watched(monkeypatch: pytest.MonkeyPatch) -> Iterator[Watched]:
     yield watcher
 
 
-async def watch(watcher: Watched, task: AgentTask, **kwargs: Any) -> None:
-    """Run `task` for real and swallow the one failure a logged-out machine always produces.
+async def spawn(task: AgentTask, **kwargs: Any) -> AgentOutcome:
+    """Run `task` for real against the loopback, and insist that the run finished.
 
-    `UpstreamUnavailable` is the *expected* end of every run in this file: the CLI starts, composes
-    its session, announces it, fails to authenticate, and this adapter translates that. Everything
-    asserted afterwards happened before the far side was reached. Any other exception is a real
-    failure and is left to propagate.
+    This replaces a helper called `watch`, which wrapped the same call in
+    `pytest.raises(UpstreamUnavailable)` and called the failure "the expected end of every run in
+    this file". It was, on the machine it was written on - a logged-out one - and that is the whole
+    problem: the four tests underneath it were green because the environment was broken, and would
+    have been green with no `claude` installed at all. Nothing here is allowed to pass because a run
+    failed, so the outcome is asserted whole. If a run legitimately cannot happen, the gates above
+    skip it with a reason; there is no third option where a failure counts as evidence.
+
+    Equality against `REPLY` and not merely `COMPLETED`: the text is what the loopback was told to
+    say, so getting it back is proof the run went end to end through the harness this suite owns,
+    rather than ending somewhere plausible on the way.
     """
-    with pytest.raises(UpstreamUnavailable):
-        await ClaudeCodeRunner().run(task, **kwargs)
-    assert watcher.options is not None, "the adapter never opened a session"
+    outcome = await ClaudeCodeRunner().run(task, **kwargs)
+    assert outcome == AgentOutcome(stop_reason=StopReason.COMPLETED, text=REPLY), (
+        f"the run answered {outcome!r} and the loopback was told to say {REPLY!r}, completing. "
+        f"Everything this file asserts afterwards is about a session that ran; a run that ended "
+        f"any other way is a failure to report and not a fixture to work around"
+    )
+    return outcome
 
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(not _cli(), reason=_NO_CLI)
+@pytest.mark.skipif(not _live(), reason=_NOT_OPTED_IN)
 async def test_no_configuration_in_the_workspace_reaches_the_session_it_composes(
     tmp_path: Path, watched: Watched
 ) -> None:
@@ -307,6 +499,20 @@ async def test_no_configuration_in_the_workspace_reaches_the_session_it_composes
     slash command and a project MCP server planted in the workspace are all things the CLI reports
     by name on its `init` message, before a model exists to ignore them.
 
+    The run **completes**, against the loopback, and the outcome is asserted before anything here is
+    read. It used to end in `UpstreamUnavailable` and this test used to require that - which meant
+    it passed on a machine with no session, and would have passed on a machine with no CLI.
+
+    **The caveat, stated so that the next reader does not "tighten" this into a flaky test.**
+    `init.agents`, `init.slash_commands` and `init.skills` all come back **non-empty**, and that is
+    correct rather than a leak: what is in them is the *operator's own* machine-level configuration,
+    which §3.11 puts out of scope for v1.1 in as many words - "v1.1 inherits the parent environment"
+    - and some of it may not even be settings discovery, since this test process is itself running
+    inside a Claude Code session and a spawned CLI inherits an environment. §3.5's claim is about
+    **the target repository**, so what is asserted is that the three *planted* names are absent.
+    `assert not announced["agents"]` would be asserting something §3.5 never said, against a value
+    that changes with whoever is running the suite.
+
     The fixture is asserted before the runner is touched, for the reason the contract suite gives
     about its own: a test whose failure mode is to pass has to prove its poison is loaded.
     """
@@ -315,7 +521,7 @@ async def test_no_configuration_in_the_workspace_reaches_the_session_it_composes
         "the poisoned repository was not planted, so this test proves nothing"
     )
 
-    await watch(watched, task_in(repo))
+    await spawn(task_in(repo))
 
     announced = watched.init()
     assert announced.get("cwd") == str(repo), (
@@ -333,8 +539,12 @@ async def test_no_configuration_in_the_workspace_reaches_the_session_it_composes
     )
     servers = [entry.get("name") for entry in announced.get("mcp_servers", [])]
     assert LEAKY_SERVER not in servers, (
-        f"the workspace's .mcp.json server reached the session: {servers}. strict_mcp_config=True "
-        f"is what refuses it and the SDK's dataclass default is False"
+        f"the workspace's .mcp.json server reached the session: {servers}. Two options refuse it "
+        f"and the four combinations were measured apart rather than assumed: with "
+        f"setting_sources=[] the server stays out whatever strict_mcp_config says, and with "
+        f"setting_sources=None it stays out only while strict_mcp_config is True. So this rule is "
+        f"the second lock and not the first - which is the reason to keep setting it, since the "
+        f"day setting_sources changes it is the only thing still holding"
     )
     assert sorted(servers) == ["agl", "agl_ask"], (
         f"the session's MCP servers are {servers}, and AGL supplies exactly two: the workflow's "
@@ -344,6 +554,7 @@ async def test_no_configuration_in_the_workspace_reaches_the_session_it_composes
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(not _cli(), reason=_NO_CLI)
+@pytest.mark.skipif(not _live(), reason=_NOT_OPTED_IN)
 async def test_the_options_the_run_actually_built_are_the_hermetic_ones(
     tmp_path: Path, watched: Watched
 ) -> None:
@@ -353,8 +564,12 @@ async def test_the_options_the_run_actually_built_are_the_hermetic_ones(
     leaky SDK default (`setting_sources=None`, `strict_mcp_config=False`) and one is a channel that
     exists only if something opens it (`settings`), which is why each is asserted by value rather
     than by "it was set to something".
+
+    The run is a real one and it finishes. An options object could be captured from a run that died
+    on its first message, and that is what this test used to do - so the options were asserted, the
+    session was not, and a set of options the CLI would have refused would have read as a pass.
     """
-    await watch(watched, task_in(poisoned(tmp_path)))
+    await spawn(task_in(poisoned(tmp_path)))
     options = watched.options
     assert options is not None
 
@@ -384,6 +599,7 @@ async def test_the_options_the_run_actually_built_are_the_hermetic_ones(
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(not _cli(), reason=_NO_CLI)
+@pytest.mark.skipif(not _live(), reason=_NOT_OPTED_IN)
 async def test_the_tools_a_task_carries_are_registered_and_the_denied_ones_are_gone(
     tmp_path: Path, watched: Watched
 ) -> None:
@@ -393,22 +609,223 @@ async def test_the_tools_a_task_carries_are_registered_and_the_denied_ones_are_g
     removes the tool from the session - checked here through the adapter that composes the rules
     rather than through a hand-built options object. `Read` is the control: nothing denies it, and
     a session that had simply registered nothing would fail on it rather than passing quietly.
+
+    The session runs to the end, so the tool list read here belongs to a session that worked. A
+    deny rule the CLI rejects outright would previously have looked identical to one it honoured.
+
+    **One of the four names below is weaker than the other three and it is worth knowing which.**
+    Removing `Bash` from `NO_SHELL`'s rules makes `Bash` appear here, and removing `WebFetch` and
+    `WebSearch` from `NO_NETWORK`'s makes both of those appear - measured. Removing
+    `AskUserQuestion` from `ASKING_MECHANISMS_DENIED` changes nothing, because the CLI measured here
+    does not offer that tool to an SDK session at all: the assertion is true today whether or not
+    the deny rule exists. It is kept because a later CLI may start offering it and this is where
+    that would be caught, and the deny rule itself is pinned where it *can* fail - on
+    `disallowed_tools` in `test_the_options_the_run_actually_built_are_the_hermetic_ones`.
     """
     notes = Notes()
-    await watch(watched, task_in(poisoned(tmp_path), tools=(notes.tool,)))
+    await spawn(task_in(poisoned(tmp_path), tools=(notes.tool,)))
     registered = watched.init().get("tools", [])
 
     assert f"mcp__agl__{notes.tool.name}" in registered, (
         f"the task's own tool is not in the session's tool list: {registered}. A tool the model "
         f"cannot see is a tool no handler will ever be called for"
     )
-    assert "mcp__agl_ask__ask" in registered, "AGL's asking tool is what MID_RUN_QUESTIONS rests on"
+    assert ASK_TOOL in registered, "AGL's asking tool is what MID_RUN_QUESTIONS rests on"
     assert "Read" in registered, "nothing denies Read, so a session missing it registered nothing"
     for gone in ("Bash", "WebFetch", "WebSearch", "AskUserQuestion"):
         assert gone not in registered, (
             f"{gone} is registered for a task declaring NO_SHELL and NO_NETWORK, and the harness's "
             f"own asker is denied for every task: {registered}"
         )
+
+
+# --- What the loopback makes free: a check_ready that returns, and the request that left ---------
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not _cli(), reason=_NO_CLI)
+@pytest.mark.skipif(not _live(), reason=_NOT_OPTED_IN)
+async def test_check_ready_returns_against_a_harness_that_answers(harness: Loopback) -> None:
+    """The branch of `check_ready` this project had never seen: the one where nothing is wrong.
+
+    `check_ready` has been exercised, in this suite and by hand, only ever *refusing* - because the
+    machine it was written on had no session, and because the contract suite's preflight clauses are
+    about how it refuses. "It returns when the harness works" was therefore an untested claim about
+    the member whose whole job is to decide whether a forty-minute run is allowed to start, and a
+    `check_ready` that raised unconditionally would have passed every test in the build.
+
+    Free because the far side is the loopback: the probe is one turn of a few hundred tokens against
+    an endpoint answering out of canned data. `runner.py` argues that this turn is the only honest
+    test of "is this session authenticated", and that remains true - what is asserted here is that a
+    *working* far side produces a clean return, not that this machine is logged in.
+
+    The turn is read back afterwards so that the test cannot pass vacuously: a `check_ready` that
+    returned by doing nothing at all would satisfy `await` and nothing else.
+    """
+    await ClaudeCodeRunner().check_ready(Claude.HAIKU)
+
+    sent = wire_text(harness.composed())
+    assert runner_module._READY_PROMPT in sent, (
+        f"check_ready returned without the readiness probe reaching the far side: the loopback was "
+        f"handed {[(seen.method, seen.path) for seen in harness.requests]}. A probe that answers "
+        f"'ready' without asking anything is a preflight that admits a run it knows nothing about"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not _cli(), reason=_NO_CLI)
+@pytest.mark.skipif(not _live(), reason=_NOT_OPTED_IN)
+async def test_the_composed_request_carries_the_asking_tool_with_a_usable_schema(
+    tmp_path: Path, harness: Loopback
+) -> None:
+    """§3.7's asking tool, in the request that actually left the machine.
+
+    **Why this and `test_the_asking_tool_is_advertised_with_a_schema_a_model_could_call`, which
+    looks like the same assertion.** That one drives a scripted transport and reads a `tools/list`
+    answered by AGL's own in-process MCP server: it proves `_tools.py` advertises the right thing to
+    whoever asks. This one reads what the CLI composed and sent, which is a different fact with a
+    whole harness in between - the MCP server has to be started, connected, enumerated, and its
+    tools folded into the request under the API's own `input_schema` spelling rather than MCP's
+    `inputSchema`. Any of that could go wrong with `_tools.py` perfectly correct, and the offline
+    test would still be green. Two tests, because there are two claims.
+
+    The properties are `Question`'s three fields, asserted by shape rather than by comparing the
+    whole schema, so that a reworded description stays a rewording.
+    """
+    await spawn(task_in(workspace(tmp_path)))
+
+    composed = harness.composed()
+    offered = {
+        entry.get("name"): entry
+        for entry in composed.get("tools", [])
+        if isinstance(entry, dict)
+    }
+    assert ASK_TOOL in offered, (
+        f"the request that left the machine offers {sorted(name for name in offered if name)} and "
+        f"{ASK_TOOL} is not among them. `capabilities()` answers MID_RUN_QUESTIONS unconditionally "
+        f"for every task on every machine, and this is the request that has to make that true"
+    )
+
+    schema = offered[ASK_TOOL]["input_schema"]
+    assert schema.get("type") == "object" and "question" in schema.get("required", []), (
+        f"the asking tool reached the model as {schema!r}. `question` has to be required: it is "
+        f"the whole of what a person is shown, and a call that omits it is one `Asking` can only "
+        f"refuse back into the conversation after the turn has been spent"
+    )
+    properties = schema.get("properties", {})
+    assert properties.get("question", {}).get("type") == "string", (
+        f"`question` reached the model as {properties.get('question')!r} and `Question.prompt` is "
+        f"text. A model handed any other type here would send something no view can render"
+    )
+    assert properties.get("options", {}).get("items", {}).get("type") == "string", (
+        f"`options` reached the model as {properties.get('options')!r}. Without an array of "
+        f"strings a model has no way to offer choices, so every question arrives as free text and "
+        f"`Choice` "
+        f"components have nothing to render"
+    )
+    assert properties.get("allow_free_text", {}).get("type") == "boolean", (
+        f"`allow_free_text` reached the model as {properties.get('allow_free_text')!r}. It is the "
+        f"third of `Question`'s three fields and the only way a model can say it is asking for a "
+        f"choice among the options rather than for an opinion"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not _cli(), reason=_NO_CLI)
+@pytest.mark.skipif(not _live(), reason=_NOT_OPTED_IN)
+async def test_the_composed_request_names_the_asking_tool_when_somebody_can_answer(
+    tmp_path: Path, harness: Loopback
+) -> None:
+    """§3.7's "agents are instructed to use it", asserted against what actually leaves.
+
+    This is the measurement `_MAY_ASK` exists because of. Before it, `agl_ask` occurred **exactly
+    once** in the whole 140 KB request - inside the tool's own definition - and running the same
+    task with `on_question` supplied produced a byte-identical prompt. So the framework supplied the
+    tool and instructed nobody: a workflow's `on_question` would be called only if a model went
+    looking through its tool list for something it had never been told existed.
+
+    Both halves, on one task run twice, because each is the other's control - the same shape as the
+    offline `test_the_prompt_names_the_asking_tool_exactly_when_somebody_can_answer`, and a
+    different claim: that one reads the string the adapter composed, this one reads the request the
+    CLI assembled out of it. A harness that dropped the prompt on the way would fail here alone.
+
+    The count is asserted on the run with no handler, not just the absence of the instruction: one
+    occurrence is the tool definition, and pinning it is what keeps this test honest if `_MAY_ASK`
+    is ever reworded into something that no longer contains the tool's name.
+    """
+    repo = workspace(tmp_path)
+    task = task_in(repo)
+
+    async def answer(question: Question) -> Answer:
+        raise AssertionError("this run never asks; the handler is here to be counted, not called")
+
+    await spawn(task, on_question=answer)
+    told = wire_text(harness.composed())
+
+    harness.clear()
+    await spawn(task)
+    untold = wire_text(harness.composed())
+
+    assert runner_module._MAY_ASK in told, (
+        f"a run carrying a question handler sent {len(told)} bytes to the model and none of them "
+        f"said it could ask. §3.7 has the framework supplying the asking tool *and* the agent "
+        f"instructed to use it, and an agent that never learns the tool is there is a workflow "
+        f"whose on_question is never called"
+    )
+    assert runner_module._MAY_ASK not in untold and untold.count("agl_ask") == 1, (
+        f"a run with no question handler mentioned agl_ask {untold.count('agl_ask')} time(s). "
+        f"Exactly one is right and it is the tool's own definition: the tool is registered either "
+        f"way, and an agent told to ask when nobody is listening spends a turn to be told that no "
+        f"answer is available"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not _cli(), reason=_NO_CLI)
+@pytest.mark.skipif(not _live(), reason=_NOT_OPTED_IN)
+async def test_nothing_the_repository_wrote_reaches_the_model_in_the_request_that_leaves(
+    tmp_path: Path, harness: Loopback
+) -> None:
+    """The measurement that settled §3.5's `CLAUDE.md` question, run again on every build.
+
+    `runner.py`'s docstring records it: a repository carrying a `CLAUDE.md` with a unique marker, a
+    local endpoint standing in for the model API, and the marker present under
+    `setting_sources=None` and under `["user","project","local"]` and absent under `[]` - injected
+    as `<system-reminder> ... # claudeMd ... Contents of <repo>/CLAUDE.md (project instructions,
+    checked into the codebase)`. That was a one-off spike and this is the same measurement wired
+    into the suite, which is the difference between a claim that was true once and one that stays
+    true.
+
+    It is the third and outermost of three hermeticity assertions, and each sees something the
+    others cannot. The contract suite sees a leak an agent *acted on*. `init` above sees a
+    configuration channel the harness *registered*. This sees what was actually put in front of the
+    model - the case where nothing was registered, nothing was acted on, and the file's contents
+    went out in a system reminder anyway.
+
+    The workspace's own `CLAUDE.md` is asserted present first, and with its marker in it. Without
+    that control, "no marker in the request" and "no marker anywhere to find" are the same green.
+    """
+    repo = poisoned(tmp_path)
+    planted = (repo / "CLAUDE.md").read_text(encoding="utf-8")
+    assert markers_in(planted), (
+        f"the workspace's CLAUDE.md carries none of the {len(CONFIGURATIONS)} markers, so this "
+        f"test would report a clean request whether or not anything is being kept out of it"
+    )
+
+    await spawn(task_in(repo))
+    sent = wire_text(harness.composed())
+
+    assert not markers_in(sent), (
+        f"the request that left the machine carries {markers_in(sent)}, planted in the workspace "
+        f"by the contract suite's own fixture. §3.5: the target repo contributes source code and "
+        f"nothing else, and there are {len(CONFIGURATIONS)} rows in that table which are none of "
+        f"AGL's to forward"
+    )
+    assert "claudeMd" not in sent, (
+        "the request carries a `# claudeMd` block, which is how Claude Code injects a repository's "
+        "CLAUDE.md into a session - the exact shape `setting_sources=[]` was measured to suppress. "
+        "A marker-free block would be this leak with nothing planted in it to notice"
+    )
 
 
 # --- §3.5: the workspace path is a directory and never program text ------------------------------
@@ -423,6 +840,7 @@ LOADED_NAME: Final = f"agl $(touch {MARKER}); echo leaked | cat & 'q' \"d\" --ou
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(not _cli(), reason=_NO_CLI)
+@pytest.mark.skipif(not _live(), reason=_NOT_OPTED_IN)
 async def test_a_workspace_whose_name_would_run_a_command_never_runs_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, watched: Watched
 ) -> None:
@@ -437,6 +855,9 @@ async def test_a_workspace_whose_name_would_run_a_command_never_runs_it(
     a substitution reaching any shell would leave; and the CLI's own `init` echoing the directory
     back **whole**, which is what tells `cwd=` from a path that was split on spaces, truncated at
     the semicolon, or quietly ignored.
+
+    The third witness is that the run completes. A session that never started could not have run a
+    command either, so "no marker appeared" is only evidence once there was a session to leave one.
     """
     monkeypatch.chdir(tmp_path)
     repo = workspace(tmp_path / LOADED_NAME)
@@ -451,7 +872,7 @@ async def test_a_workspace_whose_name_would_run_a_command_never_runs_it(
     for stray in fired:
         stray.unlink()
 
-    await watch(watched, task_in(repo))
+    await spawn(task_in(repo))
 
     assert not sorted(tmp_path.rglob(MARKER)), (
         f"a session ran with a workspace holding `$(touch {MARKER})` in its name and the file "
@@ -950,6 +1371,78 @@ async def test_activity_is_the_tools_own_name_and_one_line_of_its_payload(
 
 
 @pytest.mark.asyncio
+async def test_the_asking_tool_is_advertised_with_a_schema_a_model_could_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """§3.7's asking tool, read off the wire: one tool, and a schema that describes a question.
+
+    `capabilities()` answers `MID_RUN_QUESTIONS` unconditionally, on every machine and for every
+    task, and this is what that answer rests on - so it is asserted where the model would see it,
+    on the `tools/list` the session's own MCP server answers, rather than on the dict `_tools.py`
+    holds. The run carries **no** handler on purpose: the tool is registered either way, which is
+    the fact that makes the prompt's instruction conditional and the tool's registration not.
+
+    The three properties are `Question`'s three fields and nothing more - prompt text, the options
+    offered, whether free text is allowed - which §3.7 calls the lowest common denominator across
+    vendors. A property missing here is a field `Asking` can never be handed, however well the
+    mapping below it is written. Asserted by shape rather than by comparing the whole schema, so
+    that a reworded description stays a rewording.
+
+    `test_the_composed_request_carries_the_asking_tool_with_a_usable_schema` asserts what looks like
+    the same thing against a real CLI, and its docstring says why both are here: this one covers
+    what `_tools.py` advertises to whoever asks, and that one covers what survives a whole harness
+    on the way out. Neither subsumes the other, and this one runs on a machine with no CLI at all.
+    """
+    repo = workspace(tmp_path)
+    seen: list[dict[str, Any]] = []
+
+    async def play(cli: Scripted) -> None:
+        await cli.say(init(repo))
+        seen.extend(await cli.listed("agl_ask"))
+        await cli.say(ends(result="done", terminal_reason="completed"))
+
+    await offline(play, task_in(repo), monkeypatch)
+
+    advertised = {entry["name"]: entry for entry in seen}
+    assert list(advertised) == ["ask"], (
+        f"the asking server advertises {sorted(advertised)}. It holds exactly one tool, addressed "
+        f"as {ASK_TOOL}: a second one there is a second way to ask, and the whole reason the "
+        f"harness's own asker is denied by name is that there should be exactly one"
+    )
+    assert advertised["ask"]["description"].strip(), (
+        "the asking tool has no description, which is what a model reads to decide whether this "
+        "is the tool for what it wants"
+    )
+
+    schema = advertised["ask"]["inputSchema"]
+    assert schema.get("type") == "object" and "question" in schema.get("required", []), (
+        f"the asking tool's advertised schema is {schema!r}. `question` has to be required: it is "
+        f"the whole of what a person is shown, and a call that omits it is one `Asking` can only "
+        f"refuse back into the conversation after the turn has been spent"
+    )
+    properties = schema.get("properties", {})
+    assert properties.get("question", {}).get("type") == "string", (
+        f"`question` is advertised as {properties.get('question')!r} and `Question.prompt` is "
+        f"text. A model handed any other type here would send something no view can render"
+    )
+    assert properties.get("options", {}).get("type") == "array", (
+        f"`options` is advertised as {properties.get('options')!r}. Without it a model has no way "
+        f"to offer choices, so every question reaches the workflow as free text and `Choice` "
+        f"components have nothing to render"
+    )
+    assert properties["options"].get("items", {}).get("type") == "string", (
+        f"`options` does not say its items are strings: {properties['options']!r}. An option is "
+        f"the exact text that comes back as the answer, and `_tools.py` drops anything that is not "
+        f"a non-empty string - silently, because by then the turn is already spent"
+    )
+    assert properties.get("allow_free_text", {}).get("type") == "boolean", (
+        f"`allow_free_text` is advertised as {properties.get('allow_free_text')!r}. It is the "
+        f"third of `Question`'s three fields and the only way a model can say it is asking for a "
+        f"choice among the options rather than for an opinion"
+    )
+
+
+@pytest.mark.asyncio
 async def test_two_questions_and_two_answers_inside_one_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1305,6 +1798,83 @@ async def test_a_prompt_with_nothing_standing_around_it_is_the_instructions_verb
 
 
 @pytest.mark.asyncio
+async def test_the_prompt_names_the_asking_tool_exactly_when_somebody_can_answer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """§3.7: "The framework supplies the asking tool (agents are instructed to use it)".
+
+    The instructing is the half that lives in `runner.py`. Supplying it is `_tools.py`'s and is
+    asserted above; a tool's own `description` field is what a model reads once it is already
+    considering that tool, so on its own it cannot be what makes the tool considered.
+
+    Both halves here, on one task run twice, because each is the other's control. A run with a
+    handler is told; a run without one is told nothing at all, since the tool is registered either
+    way and an agent that asks with nobody listening spends a turn to be told no answer is
+    available. That second half is also what keeps
+    `test_a_prompt_with_nothing_standing_around_it_is_the_instructions_verbatim` a statement about
+    ordinary tasks rather than about tasks that happen to have no handler.
+
+    The name is checked against the one the session actually advertises and not only against a
+    string in this file. `mcp__<server>__<tool>` is composed from two names `_tools.py` owns, and
+    nothing in `runner.py` would notice either of them being renamed - a prompt naming a tool the
+    model cannot call is worse than a prompt naming none.
+
+    `test_the_composed_request_names_the_asking_tool_when_somebody_can_answer` makes the same pair
+    of assertions one layer out, against what a real CLI actually sent. This one stops at the string
+    `run` handed the SDK, and is the half that runs on a machine with no CLI.
+    """
+    repo = workspace(tmp_path)
+    seen: list[str] = []
+    advertised: set[str] = set()
+
+    async def play(cli: Scripted) -> None:
+        await cli.say(init(repo))
+        advertised.update(f"mcp__agl_ask__{tool['name']}" for tool in await cli.listed("agl_ask"))
+        await cli.say(ends(result="done", terminal_reason="completed"))
+
+    def capture(*, prompt: str, options: ClaudeAgentOptions) -> AsyncIterator[Any]:
+        from claude_agent_sdk import query
+
+        seen.append(prompt)
+        return query(prompt=prompt, options=options, transport=Scripted(play))
+
+    async def answer(question: Question) -> Answer:
+        raise AssertionError("this script never asks; the handler is here to be counted, not run")
+
+    bare = AgentTask(
+        instructions="Work out what to do about the failing build, and do it.",
+        workspace=repo,
+        model=Claude.HAIKU,
+        restrictions=frozenset(),
+        tools=(),
+    )
+    monkeypatch.setattr(_session, "query", capture)
+    await ClaudeCodeRunner().run(bare, on_question=answer)
+    await ClaudeCodeRunner().run(bare)
+    told, untold = seen
+
+    assert ASK_TOOL_NAMED in told, (
+        f"a run carrying a question handler was told nothing about how to ask: {told!r}. §3.7 has "
+        f"the framework supplying the asking tool *and* the agent instructed to use it, and an "
+        f"agent that never learns the tool is there is a workflow whose on_question is never called"
+    )
+    assert ASK_TOOL in advertised, (
+        f"the prompt names {ASK_TOOL} and the session advertises {sorted(advertised)}: the agent "
+        f"was instructed to call a tool that is not registered, which costs it a turn and AGL the "
+        f"answer it was waiting for"
+    )
+    assert told.endswith(bare.instructions), (
+        f"the instructions are no longer last in the composed prompt: {told!r}. Everything AGL "
+        f"adds stands above what the workflow author wrote"
+    )
+    assert ASK_TOOL not in untold and "agl_ask" not in untold, (
+        f"a run with no question handler was told to ask anyway: {untold!r}. Nobody is listening, "
+        f"so the whole of what that turn buys is being told that no answer is available - and this "
+        f"is also what keeps a bare task's prompt the instructions byte for byte"
+    )
+
+
+@pytest.mark.asyncio
 async def test_no_marker_from_the_contract_suites_own_poison_is_in_what_the_agent_is_told(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1314,6 +1884,10 @@ async def test_no_marker_from_the_contract_suites_own_poison_is_in_what_the_agen
     hermeticity test: those two cover what the *harness* loaded, and this covers what this adapter
     itself put in front of the model. It would fail an adapter that read a `CLAUDE.md` and helpfully
     prepended it - which is a thing an adapter could do without any harness option being wrong.
+
+    `test_nothing_the_repository_wrote_reaches_the_model_in_the_request_that_leaves` asserts the
+    same absence in the request a real CLI sent, which is where the harness's own injection would
+    show up. This one is the adapter's half alone, and it needs no CLI to run.
     """
     repo = poisoned(tmp_path)
     seen: list[str] = []

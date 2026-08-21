@@ -40,9 +40,14 @@ model call and no tokens:
 - **The init message**, emitted when a session opens, before any model call. Lists registered tools,
   MCP servers, subagents, slash commands by name. This verifies hermeticity *and* that deny rules
   actually removed something — the two claims most worth checking.
-- **A loopback endpoint** reading the composed request before it leaves. This is what settled the
-  `CLAUDE.md` question, with two controls and one measurement.
-- **`check_ready`** — queries auth state, does not spend it.
+- **A loopback endpoint** (`tests/instruments/loopback.py`) reading the composed request before it
+  leaves. This is what settled the `CLAUDE.md` question, with two controls and one measurement.
+- **`check_ready`** — free *only* because of the loopback, which the whole of
+  `tests/adapters/test_claude_code_runner.py` is now pointed at. It is not a cheap query: it costs
+  one real turn against the far side, by design, because `init`'s `apiKeySource` reports `"none"`
+  for a working subscription session and nothing cheaper distinguishes logged in from logged out.
+  Until stage 7 that turn was paid on **every `scripts/check` run** on an authenticated machine,
+  through the contract suite's own `check_ready` test.
 - **A scripted transport** through the SDK's own injection point: no CLI, no model, fully
   deterministic. Registration, payload mapping, handler invocation, answer serialised back into the
   same session — the adapter's entire half of `on_question` lives here.
