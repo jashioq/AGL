@@ -734,7 +734,8 @@ target, so a human deliberating in one run never blocks another.
 **The hold must be durable, not in-memory.** A run that dies holding a target can only be released
 by a later invocation, so the hold has to be readable from the repository — an in-memory hold makes
 a resumed run's `abort()` a silent no-op and leaves the target half-combined forever. A contract
-suite cannot catch this, since both implementations pass.
+suite cannot catch this, since both implementations pass. The requirement binds the real integrator
+only — for the fake, in-memory is the premise rather than a defect.
 
 ### 3.5 AGL lives outside the target repo (R3)
 
@@ -760,6 +761,24 @@ Put it in the agent port's **contract suite**: a fixture repo carrying a poisone
 harness, asserting each adapter ignored its own.
 
 Environment isolation is a *second* channel and is deliberately out of scope for v1.1 (§3.11).
+
+**The same rule binds the git adapter, and it is not theoretical.** A user's own git configuration
+changes what a merge means, found by experiment at stage 5: `pull.twohead = ours` makes a merge exit
+0, report a head, and land **none** of the child's work — silent loss; `merge.verifySignatures`
+refuses every landing; `rerere.enabled` replays a resolution recorded on another machine and lands a
+combination nobody in the run ever saw. Every invocation therefore pins the settings it depends on
+rather than inheriting them.
+
+**Refs are arguments, and arguments are an injection surface.** `--end-of-options` is load-bearing
+beyond shell safety: a ref spelled `--output=/path` makes `diff-tree` write a file from a port whose
+whole promise is that it changes nothing, and a branch spelled `--file=…` makes `merge` land
+somebody else's upstream and report success. Both reproduced at stage 5. Namespace values are
+constrained by §3.3's allowlist, but `--from` is user input and is not.
+
+**The generalisation, which governs every adapter and not only git:** every value reaching a command
+line is hostile regardless of where it came from. Stage 6's verifier passes the workspace via `cwd=`
+and never interpolates it into a shell string; stages 7 and 8's harness adapters inherit the same
+obligation.
 
 ### 3.6 Persistence, fingerprints, and replay
 
@@ -1300,8 +1319,8 @@ dirty-repo refusal exist only because AGL worked in the user's directory. A work
 from a *ref*, so what the user has checked out, and whether it is dirty, are both irrelevant.
 `Preflight` as a workflow-declared policy object disappears entirely.
 
-**One contention point.** `git worktree add` / `prune` mutate `.git/worktrees/`, so a short
-repo-level mutex guards those two operations only — milliseconds, never across a merge or a human
+**One contention point.** `git worktree add`, `prune` **and `remove`** all mutate
+`.git/worktrees/`, so a short repo-level mutex guards those operations only — milliseconds, never across a merge or a human
 decision. It must be **cross-process**: two `agl run` invocations are two processes, so use
 `flock(2)` on a file in the trees root, which releases automatically when the holder dies.
 
