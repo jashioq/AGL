@@ -126,11 +126,13 @@ gate 4.4 until it is listed.
 |---|---|
 | 5.1 | `adapters/git/_runner.py` — shared subprocess execution, timeouts, error mapping |
 | 5.2 | `adapters/git/workspace.py` — provision, **reopen-if-exists**, remove; `flock` on the worktree registry (§3.9). Depends on 3.0(i): branch derivation must already be `agl/_work/<label>/<ns>` or every worktree this creates is unopenable |
-| 5.3 | `adapters/git/history.py` — diff, changed files, ancestry; porcelain codes → `ChangeKind` |
+| 5.3 | `adapters/git/history.py` — diff, changed files, ancestry; porcelain codes → `ChangeKind`. Its fixture necessarily drags in a `WorkspaceProvider`: `History` has no member that adds to a repository's past, correctly, so it must borrow `commit_all`. Sequence after 5.2 |
 | 5.4 | `adapters/git/integrator.py` — merge, conflict detection, revert; git's merge state machine stays inside |
 | 5.5 | `adapters/git/fake.py` — in-memory, no git |
 
-**Accept:** contract suites 3.3 and 3.4 pass for real and fake.
+**Accept:** contract suite 3.3 passes for real and fake, and **3.4's integrator half** — the
+Verifier adapter is deliverable 6.1, and stage 6 claims the verifier half. The two suites were built
+with no shared fixture precisely so this splits.
 
 ---
 

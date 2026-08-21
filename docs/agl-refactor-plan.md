@@ -396,6 +396,10 @@ class AgentTask:
    argument it could only answer for "some provider," which is a lie in either direction. A Claude+OpenAI run dies at
    second zero on a missing binary or a logged-out session — not forty minutes in at the review
    step.
+An adapter handed a `ModelId` it does not serve raises `InputError`; it never silently substitutes.
+`capabilities()` must be **stable for the duration of a run** — preflight asks once and a workflow
+then runs for an hour on that answer.
+
 2. **Capability match.** A role declaring `requires={FILE_EDIT, MID_RUN_QUESTIONS}` is checked
    against `runner.capabilities()`. This is the principled version of *"reviewers are never
    subagents because `AskUserQuestion` isn't available"* — a vendor limitation becomes a checked
@@ -724,8 +728,12 @@ the one v1.1 accepts.
 
 **On conflict the framework does not ask.** It returns a `Conflict` outcome and holds the lease;
 the workflow shows its own screen and decides. The lease is scoped to this run's integration
-target, so a human deliberating in one run never blocks another, and it is released if the run
-exits.
+target, so a human deliberating in one run never blocks another.
+
+**The hold must be durable, not in-memory.** A run that dies holding a target can only be released
+by a later invocation, so the hold has to be readable from the repository — an in-memory hold makes
+a resumed run's `abort()` a silent no-op and leaves the target half-combined forever. A contract
+suite cannot catch this, since both implementations pass.
 
 ### 3.5 AGL lives outside the target repo (R3)
 
@@ -810,6 +818,10 @@ Every step file holds the same four fields:
   "at": "2026-08-18T09:16:41Z"
 }
 ```
+
+The `Store` **copies any mapping it is handed** and returns copies on read, matching `Tool`'s
+handling of `payload_schema`. Otherwise a caller reusing a builder dict silently edits an entry
+already on the ledger.
 
 - **`value`** — always JSON, because it can only come from a reporting tool's payload (JSON by
   construction — it arrived as a tool call), a human response, or `null` for an effect step. The
@@ -1274,8 +1286,9 @@ parent — its `git status` and its build gate would both see the child's entire
 **Therefore namespace names are unique within the run, not merely among siblings.** A flat trees
 root cannot distinguish `T-01`'s child `sub-b` from a top-level `sub-b`; in `AGL_HOME` they are two
 scopes, in the trees root they are one directory. Uniqueness is checked run-wide, and the
-comparison is case- and normalisation-insensitive (casefold, then NFC): `T-01` and `t-01` are two
-refs to git and one directory on macOS, and `café` in NFC and NFD is the same hazard.
+comparison is case-insensitive (casefold): `T-01` and `t-01` are two refs to git and one directory
+on macOS. The NFC half of `collision_key` is **vestigial** — §3.3's ASCII allowlist admits no
+character with two spellings, so it can never fire. Keep it only if the allowlist is ever widened.
 
 **Base ref is a framework-level run parameter, not a workflow param.** `agl run tickets -n auth
 --from main`, defaulting to the repo's default branch. Every code-producing workflow needs one and
