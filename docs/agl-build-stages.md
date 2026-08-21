@@ -24,6 +24,42 @@ Each stage is one Claude Code session.
 - Every subagent receives `ARCHITECTURE.md` and the plan sections relevant to its deliverable. It
   does not receive the whole plan and does not browse the old repo.
 
+### No test spends tokens. Ever.
+
+**Hard rule for every stage: no automated test may make a paid model call.** Not gated, not
+opt-in, not "only when you set the env var." Anything that would require one is **deferred to a
+manual QA pass** at the end of the build (19.2) — record it where it arises, do not build it.
+
+Found the hard way at stage 7, where four tests were green because the harness could not
+authenticate — they asserted the run would fail, and would have passed with no harness installed at
+all.
+
+**Free, and covers most of what you want.** These need the CLI and possibly an auth check, but no
+model call and no tokens:
+
+- **The init message**, emitted when a session opens, before any model call. Lists registered tools,
+  MCP servers, subagents, slash commands by name. This verifies hermeticity *and* that deny rules
+  actually removed something — the two claims most worth checking.
+- **A loopback endpoint** reading the composed request before it leaves. This is what settled the
+  `CLAUDE.md` question, with two controls and one measurement.
+- **`check_ready`** — queries auth state, does not spend it.
+- **A scripted transport** through the SDK's own injection point: no CLI, no model, fully
+  deterministic. Registration, payload mapping, handler invocation, answer serialised back into the
+  same session — the adapter's entire half of `on_question` lives here.
+
+**Deferred to manual QA.** Anything whose assertion depends on a *model* deciding something — the
+agent asks a question, fires its reporting tool, edits a file — plus `stop_reason` mapping and
+activity strings from real tool calls. These are nondeterministic or paid or both. Cover the
+adapter's half with the scripted transport and record the rest.
+
+**How a deferral is recorded.** A stage that hits a model-dependent claim appends an entry to
+`docs/manual-qa.md` and moves on: what was assumed, the command a human would run to check it, and
+what it would mean if it is wrong. 19.2 assembles those entries into the single ordered pass — it
+does not go looking for them, so a stage that defers silently loses the item.
+
+Three standing rules: a run that cannot happen is a **skip with a reason**, never a green; no test
+may pass because something failed; and no test spends tokens.
+
 **Deliverables are sized for the subagent (~200k). Stages are sized for the main agent**, which
 accumulates review output across the whole stage — hence 3–6 deliverables each.
 
@@ -194,6 +230,13 @@ say so — `capabilities()` exists precisely to report that honestly rather than
 | 8.3 | `adapters/openai/fake.py` — scripted replies, no subprocess |
 | 8.4 | `adapters/routing.py` — `RoutingAgentRunner`, dispatch on `task.model.provider`, unknown provider fails loudly |
 
+**Expect pressure to hoist the approval mode, and refuse it.** Stage 7 set
+`permission_mode="bypassPermissions"` because a framework run has nobody to approve a tool call;
+`--sandbox` / `--ask-for-approval` is the same decision here. Two harnesses agreeing will make
+hoisting look obviously right — it is §1.1's charge verbatim, and the self-hosted HTTP backend that
+has no approval concept at all is the third implementation that would pay for it. Measure the local
+decision safe, as stage 7 did, rather than assuming it.
+
 **Shared subprocess helper — decide, don't assume.** Stage 5 built `adapters/git/_runner.py`. This
 stage is the second consumer of process execution, which by the plan's own rule (Part 2, rule 6) is
 when the general case may be built. If extraction is warranted, add `adapters/_process.py` and
@@ -328,7 +371,7 @@ into the same session. A higher-priority screen preempts and restores.
 | 16.2 | `cli/commands/resume.py` — label only, params from `run.json` |
 | 16.3 | `cli/commands/clear.py` — `git branch -d` semantics, refuses while locked (§3.10) |
 | 16.4 | `cli/commands/init.py` + `workflows.py` |
-| 16.5 | `sdk/testing.py` — the harness workflow authors test against: run a workflow on an all-fakes bundle, script agent replies and questions, drive kill-and-resume. Part of the public SDK surface, so it needs the same care as the rest of it |
+| 16.5 | `sdk/testing.py` — note the constraint stage 7 found: `sdk/` and `adapters/` are siblings and may not import each other, so this module **cannot name the fake's scripting types**. The workflow-facing scripting vocabulary lives here and `config/container.py` compiles it into the callable the fake consumes. The harness workflow authors test against: run a workflow on an all-fakes bundle, script agent replies and questions, drive kill-and-resume. Part of the public SDK surface, so it needs the same care as the rest of it |
 
 **Accept:** a role naming a provider whose harness is missing, out of date, or logged out fails at
 second zero with `UpstreamUnavailable`. `clear` on an unmerged branch warns and keeps it; `-f`
@@ -369,10 +412,10 @@ means an abstraction was missing and should be reported, not patched around.
 
 | # | Deliverable |
 |---|---|
-| 19.1 | Three concurrent runs on one repo — two `split`, one `fix`, different base refs |
-| 19.2 | Real-adapter smoke suite against a scratch repo, both harnesses |
+| 19.1 | Three concurrent runs on one repo — two `split`, one `fix`, different base refs. **Fake agents, real git**: the claim is about worktree and ref concurrency, not model behaviour, so this spends nothing |
+| 19.2 | Assemble `docs/manual-qa.md` into a single ordered checklist — every harness assumption accumulated since stage 7, each with what was assumed, the command to check it, and what to do if it is wrong. **Not an automated suite**: this is the one pass a human runs against real models, at the end, once |
 | 19.3 | Verify all twelve measurable targets from plan Part 5, one assertion each |
-| 19.4 | Enforcement audit — plus three stage-5 items: import-linter's `exhaustive = True` would close contract 1's hole natively (needs a `containers` rewrite); `src/agl/ports/__init__.py` is guarded by nothing; module size drifting (32 over 300 at stage 5). — every contract in place and firing; delete `workflows/noop/`. Two debts carried from stage 0: flip `unmatched_ignore_imports_alerting` back to the default on the vendor-containment and composition-root contracts, now that the permitted vendor imports actually exist (it was set to `none` because the expressions matched nothing in an empty tree, which means a stale ignore is currently never reported); and confirm the adapter-independence list covers every package, including `adapters/_process.py` if stage 8 sanctioned it |
+| 19.4 | Enforcement audit — every contract in place and firing; delete `workflows/noop/`. Three stage-5 items: import-linter's `exhaustive = True` would close contract 1's hole natively (needs a `containers` rewrite); `src/agl/ports/__init__.py` is guarded by nothing; and module size is drifting badly — 14 over 300 at stage 3, 46 by stage 7 — so this is an audit of a backlog, not a check. Two debts carried from stage 0: flip `unmatched_ignore_imports_alerting` back to the default on the vendor-containment and composition-root contracts, now that the permitted vendor imports actually exist (it was set to `none` because the expressions matched nothing in an empty tree, which means a stale ignore is currently never reported); and confirm the adapter-independence list covers every package, including `adapters/_process.py` if stage 8 sanctioned it |
 
 **Accept:** all twelve targets pass in CI.
 
