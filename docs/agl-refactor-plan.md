@@ -1354,7 +1354,9 @@ works with no further setup. The standards-template writing in the current `_cmd
 that content is tickets-specific and belongs to the workflow.
 
 **`clear`** removes `.trees/<label>/`, the `agl/_work/<label>/*` child branches, and the run
-directory. It
+directory. Note that removing the run's whole trees directory is **not expressible through
+`WorkspaceProvider`** — `remove` takes back one checkout, `discard` deletes one branch. Stage 9
+either gains a verb or does it directly; either way it is a decision, not an oversight. It
 deletes `agl/<label>` **only if merged into the base ref**; otherwise it warns and keeps it. `-f`
 deletes regardless — exactly `git branch -d` versus `-D`. The rationale is asymmetric cost: a
 retained branch costs a stale ref, a deleted one costs the entire run. It refuses while a run holds

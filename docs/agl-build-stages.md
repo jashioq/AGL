@@ -131,7 +131,7 @@ gate 4.4 until it is listed.
 | 5.1 | `adapters/git/_runner.py` — shared subprocess execution, timeouts, error mapping |
 | 5.2 | `adapters/git/workspace.py` — provision, **reopen-if-exists**, remove; `flock` on the worktree registry (§3.9). Depends on 3.0(i): branch derivation must already be `agl/_work/<label>/<ns>` or every worktree this creates is unopenable |
 | 5.3 | `adapters/git/history.py` — diff, changed files, ancestry; porcelain codes → `ChangeKind`. Its fixture necessarily drags in a `WorkspaceProvider`: `History` has no member that adds to a repository's past, correctly, so it must borrow `commit_all`. Sequence after 5.2 |
-| 5.4 | `adapters/git/integrator.py` — merge, conflict detection, revert; git's merge state machine stays inside |
+| 5.4 | `adapters/git/integrator.py` — merge, conflict detection, durable hold; git's merge state machine stays inside. **No `revert()`** — §3.11 records it as deliberately not built; revert-on-gate-failure is `Workspace.restore(head)` |
 | 5.5 | `adapters/git/fake.py` — in-memory, no git |
 
 **Accept:** contract suite 3.3 passes for real and fake, and **3.4's integrator half** — the
@@ -372,7 +372,7 @@ means an abstraction was missing and should be reported, not patched around.
 | 19.1 | Three concurrent runs on one repo — two `split`, one `fix`, different base refs |
 | 19.2 | Real-adapter smoke suite against a scratch repo, both harnesses |
 | 19.3 | Verify all twelve measurable targets from plan Part 5, one assertion each |
-| 19.4 | Enforcement audit — every contract in place and firing; delete `workflows/noop/`. Two debts carried from stage 0: flip `unmatched_ignore_imports_alerting` back to the default on the vendor-containment and composition-root contracts, now that the permitted vendor imports actually exist (it was set to `none` because the expressions matched nothing in an empty tree, which means a stale ignore is currently never reported); and confirm the adapter-independence list covers every package, including `adapters/_process.py` if stage 8 sanctioned it |
+| 19.4 | Enforcement audit — plus three stage-5 items: import-linter's `exhaustive = True` would close contract 1's hole natively (needs a `containers` rewrite); `src/agl/ports/__init__.py` is guarded by nothing; module size drifting (32 over 300 at stage 5). — every contract in place and firing; delete `workflows/noop/`. Two debts carried from stage 0: flip `unmatched_ignore_imports_alerting` back to the default on the vendor-containment and composition-root contracts, now that the permitted vendor imports actually exist (it was set to `none` because the expressions matched nothing in an empty tree, which means a stale ignore is currently never reported); and confirm the adapter-independence list covers every package, including `adapters/_process.py` if stage 8 sanctioned it |
 
 **Accept:** all twelve targets pass in CI.
 
