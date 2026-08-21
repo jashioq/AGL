@@ -81,8 +81,16 @@ unmatched_ignore_imports_alerting = none
 #    another. agl.adapters.routing is deliberately excluded from this contract - it is the one
 #    adapter module permitted to import other adapters, because dispatching on
 #    task.model.provider to the vendor runners is its entire job.
+#    A member here is an adapter, not a directory: agl.adapters.system_clock is a single module
+#    because its port is one method, and it is listed for the same reason every package is. Being
+#    one file makes it no kind of exception - it is an ordinary peer that happens not to need a
+#    directory, and leaving it out would have left it free to import agl.adapters.git with all six
+#    contracts still kept, since contract 5 skips the (agl.adapters, agl.adapters) pair.
+#    Fails open, unlike contracts 3 and 5: this list is hand-maintained, so an adapter added at a
+#    later stage is unpoliced until someone edits it. tests/test_adapter_independence.py is what
+#    notices - it walks src/agl/adapters/ and fails if anything there is missing from this list.
 [importlinter:contract:4]
-name = No adapter package imports another adapter package (agl.adapters.routing is the one sanctioned exception)
+name = No adapter imports another adapter (agl.adapters.routing is the one sanctioned exception)
 type = independence
 modules =
     agl.adapters.claude_code
@@ -91,6 +99,7 @@ modules =
     agl.adapters.shell
     agl.adapters.filesystem
     agl.adapters.rich_terminal
+    agl.adapters.system_clock
 
 
 # 5. The composition root: config/container.py is the only module that says `new`.
