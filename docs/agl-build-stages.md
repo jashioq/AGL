@@ -97,6 +97,9 @@ that pass. These suites are the objective answer to "did it work" for stages 4�
 | 3.4 | Integrator + Verifier contract suites — merge, conflict, revert-on-gate-failure |
 | 3.5 | Terminal contract suite — slot replacement, queue ordering, preemption, and the headless rule as **"a terminal that cannot take input raises `UpstreamUnavailable` on `Screen[T]`"** (§3.7 — phrased on input, not on TTY presence, so a log stream has a rule). Also pin the async-context-manager lifecycle |
 
+*(A `ClockContract` is missing from this list and is added at 5.0 — target #7 admits no
+exceptions, and the omission was found at stage 4.)*
+
 **Accept:** every suite runs and fails cleanly against a null implementation. A suite that passes
 against nothing is not testing anything. Plus, for 3.0: `agl/<label>` and `agl/_work/<label>/<ns>`
 coexist in a real repo; every metacharacter §3.3 names is refused by `Namespace`; `_work` and
@@ -124,6 +127,7 @@ gate 4.4 until it is listed.
 
 | # | Deliverable |
 |---|---|
+| 5.0 | **Stage-4 carry-overs.** (i) Generalise gate 4.4: contracts **1, 2 and 3 fail open the same way contract 4 did** — contract 2 has two hand-maintained lists so a new `ports/` module is unpoliced either way, contract 1's `layers =` would let a new top-level package sit outside the stack, contract 3's vendor list contains a third SDK not at all. One guard, all four contracts. (ii) `ports/run.py::_checked_json` refuses non-finite floats and non-str keys so they fail at write time, but passes a lone surrogate that then fails in the store — `ids.py` already handles surrogates for names; make the two agree. (iii) Add a two-assertion `ClockContract` (target #7 admits no exceptions). (iv) Comment in `.importlinter` that `unmatched_ignore_imports_alerting = none` must be flipped at 19.4 — the existing comment says only "none of them exists yet" |
 | 5.1 | `adapters/git/_runner.py` — shared subprocess execution, timeouts, error mapping |
 | 5.2 | `adapters/git/workspace.py` — provision, **reopen-if-exists**, remove; `flock` on the worktree registry (§3.9). Depends on 3.0(i): branch derivation must already be `agl/_work/<label>/<ns>` or every worktree this creates is unopenable |
 | 5.3 | `adapters/git/history.py` — diff, changed files, ancestry; porcelain codes → `ChangeKind`. Its fixture necessarily drags in a `WorkspaceProvider`: `History` has no member that adds to a repository's past, correctly, so it must borrow `commit_all`. Sequence after 5.2 |

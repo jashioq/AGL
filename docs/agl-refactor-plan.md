@@ -250,6 +250,7 @@ src/agl/
 │   ├── routing.py              RoutingAgentRunner — dispatch on model.provider
 │   ├── git/                    _runner · workspace · integrator · history · fake
 │   ├── shell/                  verifier · fake
+│   ├── system_clock.py         clock · fake clock
 │   ├── filesystem/             store · memory_store (= the fake)
 │   └── rich_terminal/          terminal · headless (= the fake)
 │
@@ -1499,7 +1500,9 @@ Two rules that matter more than the stage list:
    sanctioned way for a workflow to express provider choice without naming a harness.
 6. **Deleting a connector** means deleting its adapter package, its port, its config section, and
    its container entry — nothing else breaks.
-7. **Every port has a contract suite** its real adapter and its fake both pass.
+7. **Every port has a contract suite** its real adapter and its fake both pass — *every* port,
+   including ones that promise little. `Clock`'s suite is two assertions; the value is the parity,
+   not the coverage.
 8. **Every command runs end-to-end on fakes alone** — no network, no git.
 9. **Three runs, one repo, concurrently** — two `split` and one `fix`, different base refs —
    complete without contention and leave three independent local branches.
