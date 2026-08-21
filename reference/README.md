@@ -14,7 +14,7 @@ hard-won details that are expensive to rediscover.
 | `git_runner.py` | subprocess invocation shape only — **see warning below** | stage 5 | ⚠ partly wrong |
 | `git.py` | worktree edge cases, and the **worktree** porcelain parser | stage 5 | ⚠ partly wrong |
 | `git_merges.py` | merge state machine, conflict detection | stage 5 | verified at stage 5 |
-| `rich_terminal.py` | the `rich.Live` stderr-corruption workaround | stage 6 | unverified |
+| `rich_terminal.py` | `rich.Live` cadence handling — see correction below | stage 6 | ⚠ wrong as originally cited |
 
 ## Corrections found at stage 5
 
@@ -26,6 +26,18 @@ nothing here to take on that subject.
 name — raw git porcelain codes crossing a port boundary. It is the single thing in this directory
 that must not be copied. It is left in place rather than edited, because these are extracts and
 editing them would make the remaining rows untrustworthy in a different way.
+
+**`rich_terminal.py` contains no stderr workaround.** Stage 6 read all 244 lines: the strings
+`stderr` and `stdout` do not appear, and `Console()` is constructed with no arguments. What the file
+*does* hold, and is worth having: `Live(auto_refresh=False, transient=False)` with `start(refresh=False)`
+and a separate repaint task — without which `Live` spawns its own `_RefreshThread` and races the
+asyncio loop; `console.is_terminal and not console.is_dumb_terminal` as the animate test; and
+stopping the display to read input, then restarting.
+
+The stderr obligation is real but comes from rich itself, not from this file: `Live.__init__`
+defaults to `redirect_stdout=True, redirect_stderr=True`, and `start()` swaps the process-global
+streams for a `FileProxy`. So `stop()` must run on every exit path or `sys.stderr` stays pointed at
+a dead live region for the rest of the process.
 
 **`git.py` holds the worktree porcelain parser, not the status-code parser.** The original row cited
 it for "porcelain parsing" without qualification. Stage 5.3's `ChangeKind` mapping was written fresh

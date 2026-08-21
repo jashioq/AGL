@@ -142,7 +142,7 @@ with no shared fixture precisely so this splits.
 
 ## Stage 6 — Verifier and Terminal adapters
 
-*Reference: old `core/terminal/impl/` for the `rich.Live` stderr-corruption workaround.*
+*Reference: old `core/terminal/impl/` for `rich.Live` cadence handling — `auto_refresh=False` with an owned repaint task, the animate test, and stopping the display to read input. **Not** for a stderr workaround: stage 6 read all 244 lines and the file contains none. Rich's own `redirect_stdout`/`redirect_stderr` defaults are the real mechanism, and the obligation is that `stop()` runs on every exit path.*
 
 | # | Deliverable |
 |---|---|

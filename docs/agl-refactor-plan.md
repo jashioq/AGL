@@ -1445,8 +1445,12 @@ first such connector arrives, this design needs a new idea.
 every port is respecified, `cli.py` splits five ways, and fingerprinted replay did not exist at
 all. The old repo stays as a **read-only reference that specific stages are pointed at for specific
 files**, never browsed: the Claude Code hermeticity settings (`setting_sources=[]`,
-`strict_mcp_config=True`), git worktree edge cases, and the `rich.Live` stderr-corruption
-workaround are hard-won and expensive to rediscover. Everything else is written fresh, because the
+`strict_mcp_config=True`), git worktree edge cases, and `rich.Live`'s cadence handling
+(`auto_refresh=False` plus an owned repaint task, the `is_terminal and not is_dumb_terminal`
+animate test, and stopping the display to read input) are hard-won and expensive to rediscover.
+Note that this list has been **wrong three times out of five** — stage 5 corrected two rows and
+stage 6 found the third citation described something the file does not contain at all. Verify
+before relying on a citation; the extracts are a starting point, not a specification. Everything else is written fresh, because the
 danger in the old code is not that it is bad — it is that it is *coherent*, and a subagent that
 browses will pattern-match to a well-written `RunContext`.
 
