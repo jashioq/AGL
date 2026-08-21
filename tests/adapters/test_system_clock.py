@@ -1,9 +1,20 @@
-"""`SystemClock` and `ManualClock`: aware readings, a frozen fake, and the record both must feed.
+"""`SystemClock` and `ManualClock`: the contract suite run twice, and what only these two can be
+asked.
 
-There is no `tests/contracts/clock.py` to subclass here. Stage 3 wrote none - the port is one
-method and promises almost nothing about it - so this file is the whole of what holds the two
-implementations to it, and everything the port does say is below: a reading is aware; two readings
-may be equal; nothing is promised about their order, so nothing here asserts one.
+The two classes at the top are the whole of the port: `ClockContract` with its one fixture
+overridden and nothing else touched, the same two assertions against each implementation. That is
+the mechanism §1.9 asks for - the real adapter and the fake held to one suite written by somebody
+with no stake in either - and plan target #7 admits no exception for a port that promises little.
+**Both subclasses live here**, because both clocks live in one adapter module
+(`agl/adapters/system_clock.py`) and this file is named for that module: the convention in
+`tests/adapters/` is one test file per adapter module, which is also why `MemoryStore` and
+`FilesystemStore` are in two files and these two are in one.
+
+What is below the subclasses is what those two assertions deliberately do not reach, and two of
+them the suite now also makes. Those two stay. A contract suite is a floor, and deleting a local
+assertion because a shared class currently happens to cover it would make this file's coverage
+depend on a class written to be disinterested about these implementations - which is the one thing
+that class is for.
 
 **No test asserts that `SystemClock` moves between two readings, or that one is later than
 another.** The port refuses that clause outright - "Nothing is promised about two readings... Nor
@@ -11,14 +22,17 @@ are they promised to increase" - so such a test would pin something the port dec
 and that a frozen `Clock` is entitled to fail while being an honest one. What is asserted instead
 is that the *fake* moves exactly when told, which is that property where it really is promised.
 
-**The assertion that carries this file is the `RunSpec` round trip**, not the `tzinfo` check above
-it. The port's "Aware, never naive" section exists because a clock reading ends up in `run.json`,
-and `RunSpec` is where a value that is not a moment is refused - so a unit test on `tzinfo` alone
-would still pass on a reading that record rejects. Both clocks are put through it, because a fake
-that is not usable everywhere the real one is, is not a `Clock`.
+**The assertion that carries this file is the `RunSpec` round trip**, not the `tzinfo` check beside
+it, and it is `ClockContract`'s second assertion for the same reason. The port's "Aware, never
+naive" section exists because a clock reading ends up in `run.json`, and `RunSpec` is where a value
+that is not a moment is refused - so a unit test on `tzinfo` alone would still pass on a reading
+that record rejects. What this file adds past the suite is the *wire* half: which text `to_json`
+produces, and that `ManualClock`'s default is plan §3.6's own `created_at`.
 
 `Clock.now()` is sync, so these tests are sync and carry no asyncio marker; there is no
-`pytestmark` here for that reason and its absence is deliberate rather than forgotten.
+`pytestmark` here for that reason and its absence is deliberate rather than forgotten. The suite
+says the same of itself, and neither statement is a copy of the other: this file could hold an
+async test tomorrow and that class could not.
 
 Named `test_system_clock.py`, for the module it covers: `tests/` carries no `__init__.py` (see
 `tests/conftest.py` for why it must not), so pytest's module names are the bare filenames and two
@@ -36,6 +50,7 @@ from agl.ports.clock import Clock
 from agl.ports.errors import InputError, InternalError
 from agl.ports.ids import RunLabel
 from agl.ports.run import RunSpec
+from contracts.clock import ClockContract
 
 # Plan §3.6's `run.json` pin, doubled to a full sha1: `RunSpec` refuses an abbreviated one.
 _SHA: Final = "8c19f7ae4d2b0913e5f6" * 2
@@ -87,6 +102,29 @@ def _record_at(moment: datetime) -> RunSpec:
 def _public(clock: type[Clock]) -> set[str]:
     """The members a class of clock offers a caller - its own, not the ABC's."""
     return {name for name in vars(clock) if not name.startswith("_")}
+
+
+# --- The port, asserted of both ----------------------------------------------------------------
+
+
+class TestTheSystemClock(ClockContract):
+    """The real adapter against the `Clock` contract. One fixture, and nothing else touched."""
+
+    @pytest.fixture
+    def clock(self) -> Clock:
+        return SystemClock()
+
+
+class TestTheManualClock(ClockContract):
+    """The fake against the same two assertions, which is the whole reason the suite exists.
+
+    Built with its default moment, because that is what an all-fakes bundle hands the framework -
+    a fake configured specially for its own contract suite would be a fake nobody runs.
+    """
+
+    @pytest.fixture
+    def clock(self) -> Clock:
+        return ManualClock()
 
 
 # --- The real clock ---------------------------------------------------------------------------

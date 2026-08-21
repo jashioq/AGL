@@ -61,6 +61,7 @@ this layer those are indistinguishable. Exit 70 reads as "file a bug", right for
 survivable for the second; the message names the field either way.
 """
 
+import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -95,6 +96,12 @@ _WIRE_TIME: Final = "%Y-%m-%dT%H:%M:%SZ"
 # A git object id: sha1 is 40 characters of lowercase hexadecimal, sha256 is 64.
 _SHA_CHARACTERS: Final = frozenset("0123456789abcdef")
 _SHA_LENGTHS: Final = frozenset({40, 64})
+
+# Unicode's category for a surrogate: the one kind of code point a `str` may hold and UTF-8 cannot
+# encode at all. `ids.py` refuses these too, among the much wider set of invisibles a name may not
+# spell; `_checked_text` is where this module says why the shared part is the whole of what it
+# takes from that rule.
+_SURROGATE: Final = "Cs"
 
 
 @dataclass(frozen=True, slots=True)
@@ -260,26 +267,64 @@ def _checked_params(params: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
 
 
 def _checked_key(key: object) -> str:
-    """A JSON object's keys are strings. `json` would coerce anything else, and so rename it."""
+    """A JSON object's keys are strings. `json` would coerce anything else, and so rename it.
+
+    Held to `_checked_text` as well, because a key is the same boundary as a value: it is written
+    to the same file by the same encoder, and a key nothing can encode loses the whole document
+    rather than one field of it.
+    """
     if not isinstance(key, str):
         raise InternalError(
             f"the param key {key!r} is a {type(key).__name__}, and a JSON object is keyed by "
             f"strings - writing this record would silently rename it"
         )
-    return key
+    return _checked_text(key, f"the param key {key!r}")
+
+
+def _checked_text(value: str, where: str) -> str:
+    """`value` itself, if it is text AGL can write down - which is every `str` but one kind.
+
+    A surrogate is a code point a `str` may hold and UTF-8 has no encoding for whatsoever, and the
+    store refuses one at the write for exactly that reason - `adapters/filesystem/store.py`'s
+    `_encoded` makes the whole argument, down to why `ensure_ascii=True` is not the way out of it.
+    Refused here too so that the two agree, and so that the refusal costs the call that produced
+    the value rather than the one that stores it, which is the same trade the two refusals above
+    already take: write time beats read time, and the moment the value was handed over beats both.
+
+    Surrogates, and **only** surrogates. `ids.py` refuses far more than this - every Unicode `C*`
+    and `Z*` category - and is right to, because a name becomes a path segment and a git ref
+    component. A workflow's params are arbitrary text: a newline, a tab, a zero-width space and an
+    emoji are all values somebody is entitled to pass and all of them survive the round trip. The
+    overlap between the two rules is category `Cs`, and that overlap is the whole of what is taken.
+
+    The message names the code point rather than the character: a surrogate has no Unicode name to
+    print, and putting the character itself into the message would hand the same unencodable value
+    to whatever ends up writing the message out.
+    """
+    for index, character in enumerate(value):
+        if unicodedata.category(character) == _SURROGATE:
+            raise InternalError(
+                f"{where} holds U+{ord(character):04X} at position {index}, which is a surrogate: "
+                f"UTF-8 has no encoding for one at all, so the store refuses the write and this "
+                f"refuses it here, where the caller still knows what it handed over"
+            )
+    return value
 
 
 def _checked_json(value: object, where: str) -> JsonValue:
     """A copy of `value`, if it is one this module can write down and read back unchanged.
 
     Shape only, never meaning: it cannot tell you `concurrent` should be a number, only that
-    whatever `concurrent` holds survives the round trip. Two refusals are worth naming, since both
-    would otherwise surface at read time rather than write time - a non-finite float, which `json`
-    writes as a bare `NaN` or `Infinity` token that is not JSON and comes back unequal to itself,
-    and a non-string key, which `json` renames. Containers are rebuilt, which is what makes this a
-    copy, and a tuple becomes the list it would be on the way back."""
-    if value is None or isinstance(value, bool | int | str):
+    whatever `concurrent` holds survives the round trip. Three refusals are worth naming, since
+    every one of them would otherwise surface later than here - a non-finite float, which `json`
+    writes as a bare `NaN` or `Infinity` token that is not JSON and comes back unequal to itself;
+    a non-string key, which `json` renames; and a surrogate, which nothing can encode and which
+    `_checked_text` argues about. Containers are rebuilt, which is what makes this a copy, and a
+    tuple becomes the list it would be on the way back."""
+    if value is None or isinstance(value, bool | int):
         return value
+    if isinstance(value, str):
+        return _checked_text(value, where)
     if isinstance(value, float):
         if not isfinite(value):
             raise InternalError(

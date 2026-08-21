@@ -11,15 +11,16 @@ reused for labels: a name `ids.py` accepts and this cannot read back is a run th
 """
 
 import json
+import unicodedata
 from dataclasses import FrozenInstanceError, replace
 from datetime import UTC, datetime, timedelta, timezone
 from typing import Final
 
 import pytest
-from _corpus import ACCEPTED, imported_modules, impurities
+from _corpus import ACCEPTED, CORPUS, imported_modules, impurities
 
 from agl.ports import run
-from agl.ports.errors import InternalError
+from agl.ports.errors import InputError, InternalError
 from agl.ports.ids import RunLabel
 from agl.ports.run import JsonValue, RunSpec
 
@@ -157,6 +158,81 @@ def test_a_param_key_that_is_not_a_string_is_refused_rather_than_renamed() -> No
         replace(_SPEC, params={1: "a"})  # type: ignore[dict-item]
 
 
+# --- The one string that cannot be written down -------------------------------------------------
+
+
+def _has_surrogate(value: str) -> bool:
+    """Category `Cs`, asked of Unicode rather than of either module.
+
+    Both modules under comparison below spell this rule for themselves - `ids.py` inside a set of
+    categories a name may not hold, `run.py` as the only one a param may not - and a test that
+    imported either private constant would agree with whichever of them was wrong.
+    """
+    return any(unicodedata.category(character) == "Cs" for character in value)
+
+
+def test_a_surrogate_is_refused_at_write_time_wherever_it_sits() -> None:
+    """The one `str` UTF-8 cannot encode, refused as a value, as a key, and at any depth.
+
+    `JsonValue` admits any `str`, and `json.loads('"\\ud800"')` hands back an unpaired UTF-16 code
+    unit without complaining, so an agent's reporting-tool payload really can carry one this far.
+    `FilesystemStore._encoded` refuses it at the write and argues the whole of why; this refuses it
+    at the call that produced it, which is the trade the non-finite float and the non-string key
+    above already take. Keys as well as values, because a key reaches the same encoder and takes
+    the whole document down rather than one field of it.
+    """
+    for surrogate in ("\ud800", "\udfff", "before \udc00 after"):
+        with pytest.raises(InternalError, match="surrogate"):
+            replace(_SPEC, params={"p": surrogate})
+        with pytest.raises(InternalError, match="surrogate"):
+            replace(_SPEC, params={surrogate: "in a key"})
+
+    with pytest.raises(InternalError, match="surrogate"):
+        replace(_SPEC, params={"nested": [{"deep": "\ud800"}]})
+    with pytest.raises(InternalError, match="surrogate"):
+        replace(_SPEC, params={"nested": [{"\ud800": "a key three containers down"}]})
+
+    assert replace(_SPEC, params={"astral": "\U0001f34c"}).params == {"astral": "\U0001f34c"}, (
+        "a character outside the BMP is a surrogate *pair* in UTF-16 and perfectly good UTF-8; "
+        "refusing it would refuse the emoji a workflow's summary is entitled to hold"
+    )
+
+
+def test_a_surrogate_ids_refuses_in_a_name_is_refused_here_too_and_nothing_else_is() -> None:
+    """The parity, in both directions, over the corpus `ids.py`'s own suite is checked against.
+
+    One rule, two layers, two error classes: `ids.py` says `InputError` because a user typed a
+    name that has to become a path segment, and this says `InternalError` because AGL built a
+    record that has to be writable. The values are the same values, and the corpus is what holds
+    the two together - so the day either door widens or narrows, the disagreement shows up here.
+
+    The second half is the one that matters more, because the two rules are deliberately *not*
+    equal. `ids.py` turns away almost the whole corpus - a space, a shell metacharacter, `café`, a
+    banana - and every one of those is a param somebody is entitled to pass. What this asserts is
+    that the shared rule is category `Cs` and that nothing else came across with it.
+    """
+    refused = [value for value in CORPUS if _has_surrogate(value)]
+    assert len(refused) > 1, "the corpus carries no surrogate, so this compares two empty sets"
+    for value in refused:
+        with pytest.raises(InputError, match="cannot be used"):
+            RunLabel(value)
+        with pytest.raises(InternalError, match="surrogate"):
+            replace(_SPEC, params={"p": value})
+        with pytest.raises(InternalError, match="surrogate"):
+            replace(_SPEC, params={value: "in a key"})
+
+    kept = {value: value for value in CORPUS if not _has_surrogate(value)}
+    assert len(kept) > len(ACCEPTED), "the corpus accepted here must exceed what a name may be"
+    assert replace(_SPEC, params=kept).params == kept
+    assert json.loads(json.dumps(replace(_SPEC, params=kept).to_json()))["params"] == kept
+
+    for legal_param in ("a b", "café", "🍌", "a\nb", "$(whoami)", ".hidden", "", "_work"):
+        with pytest.raises(InputError):
+            RunLabel(legal_param)
+        one_param: dict[str, JsonValue] = {legal_param: legal_param}
+        assert replace(_SPEC, params=one_param).params == one_param
+
+
 # --- The pin ------------------------------------------------------------------------------------
 
 
@@ -288,9 +364,11 @@ def test_there_is_no_run_status() -> None:
 def test_the_module_never_opens_the_file_it_describes() -> None:
     """It defines `run.json`'s shape and does not import `json`, know a path, or touch a disk. Read
     off the parsed source, so prose may name what the code may not. `home_layout` is absent for the
-    same reason: where a record lives is `Store`'s business, not the record type's."""
+    same reason: where a record lives is `Store`'s business, not the record type's. `unicodedata`
+    is a table and not a world - `ids.py` reads the same one, and `_corpus.PURE_IMPORTS` already
+    counts it among what a pure module may import."""
     allowed = {"collections.abc", "dataclasses", "datetime", "math", "types", "typing"}
-    allowed |= {"agl.ports.errors", "agl.ports.ids"}
+    allowed |= {"unicodedata", "agl.ports.errors", "agl.ports.ids"}
     assert impurities(run) == set()
     assert imported_modules(run) <= allowed
     assert "json" not in imported_modules(run)

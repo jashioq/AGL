@@ -16,6 +16,9 @@ include_external_packages = True
 
 # 1. The one dependency rule, high to low. `sdk` and `adapters` sit at the same level and are
 #    independent of each other: `|` means neither may import the other (`:` would mean they may).
+#    Fails open, like contracts 2, 3 and 4: a top-level member nobody adds below is not at the
+#    bottom of the stack but outside it, free to import anything, with all six contracts kept.
+#    tests/test_contract_listings.py is what notices - it walks src/agl/ and compares.
 [importlinter:contract:1]
 name = Layers flow one way only: cli -> api -> config -> workflows -> {sdk, adapters} -> ports, and sdk and adapters never import each other
 type = layers
@@ -30,6 +33,9 @@ layers =
 
 # 2. Ring 1 has an inner ring: a type an ABC speaks must not depend on the ABC that speaks it,
 #    so the pure types stay importable by anything without dragging in the port interfaces.
+#    Fails open twice over, these being two hand-maintained lists: a ports/ module missing from
+#    `source_modules` may import any ABC, and one missing from `forbidden_modules` may be imported
+#    by every pure type. tests/test_contract_listings.py requires every one of them on exactly one.
 [importlinter:contract:2]
 name = Pure types in agl.ports never import the ABCs that speak them
 type = forbidden
@@ -53,8 +59,11 @@ forbidden_modules =
 
 # 3. Vendor containment: each vendor SDK is visible to exactly one adapter package, so
 #    installing one vendor never drags in the other's SDK.
-#    Fail-closed by construction - the source is the whole `agl` tree, so any package added in a
-#    later stage is covered the moment it exists; only the four expressions below escape.
+#    Fail-closed on its source side - that is the whole `agl` tree, so any package added in a
+#    later stage is covered the moment it exists; only the four expressions below escape. The
+#    forbidden side is the hand-maintained half and fails open: a third vendor SDK is contained by
+#    nothing at all. tests/test_contract_listings.py is what notices - it reads the extras in
+#    pyproject.toml, which is where a vendor SDK actually gets added, and compares.
 #    `allow_indirect_imports = True` makes this a rule about import statements, which is what
 #    "imported only inside X" means: the container legitimately reaches claude_agent_sdk
 #    *through* agl.adapters.claude_code, and that path is not a violation.
@@ -74,6 +83,10 @@ ignore_imports =
     agl.adapters.rich_terminal.** -> rich
 # Those four are the only permitted vendor imports in the repo. None of them exists yet, and an
 # ignore expression that matches nothing is an error by default, so quieten that here.
+# A debt, not a setting. `none` silences the report for *any* unmatched expression, not only for
+# the four that do not exist yet - so from the moment stages 7-9 write these imports, an ignore
+# that has since gone stale is never mentioned again either, and a stale ignore is an exception
+# nobody is being asked about. Build stage 19.4 flips this back to the default; it names this.
 unmatched_ignore_imports_alerting = none
 
 
@@ -86,9 +99,10 @@ unmatched_ignore_imports_alerting = none
 #    one file makes it no kind of exception - it is an ordinary peer that happens not to need a
 #    directory, and leaving it out would have left it free to import agl.adapters.git with all six
 #    contracts still kept, since contract 5 skips the (agl.adapters, agl.adapters) pair.
-#    Fails open, unlike contracts 3 and 5: this list is hand-maintained, so an adapter added at a
-#    later stage is unpoliced until someone edits it. tests/test_adapter_independence.py is what
-#    notices - it walks src/agl/adapters/ and fails if anything there is missing from this list.
+#    Fails open, like contracts 1 and 2 and like contract 3's forbidden half, and unlike contract
+#    5: this list is hand-maintained, so an adapter added at a later stage is unpoliced until
+#    someone edits it. tests/test_contract_listings.py is what notices - it walks
+#    src/agl/adapters/ and fails if anything there is missing from this list.
 [importlinter:contract:4]
 name = No adapter imports another adapter (agl.adapters.routing is the one sanctioned exception)
 type = independence
@@ -127,6 +141,9 @@ ignore_imports =
     agl.config.container -> agl.adapters
     agl.config.container -> agl.adapters.**
 # The container does not construct anything yet, so these do not match anything yet either.
+# A debt, not a setting, exactly as on contract 3: `none` also silences an ignore that has gone
+# stale, and stage 10 onwards is what gives these two expressions something to match. Build stage
+# 19.4 flips this back to the default; it names this one too.
 unmatched_ignore_imports_alerting = none
 
 
