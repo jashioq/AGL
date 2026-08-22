@@ -526,7 +526,8 @@ the step's atomic unit.
 scribbles a scratch file, or an agent that leaves a `.pytest_cache`, cannot contaminate the next step
 or reach the merge. The absence of the parameter becomes a guarantee instead of a convention. Note
 that `reset --hard` alone is not enough — untracked files survive it, which is exactly the case this
-exists for, hence `clean -fd` as well. The wipe runs whether the step succeeded or raised.
+exists for, which is why `Workspace.restore(head)` is a single method rather than two: it makes the
+half-done version unrepresentable. The wipe runs whether the step succeeded or raised.
 
 This is the same reset primitive §3.6 already uses before re-running a step, applied at a second
 moment. One operation, used consistently.
@@ -744,6 +745,15 @@ the one v1.1 accepts.
 the workflow shows its own screen and decides. The lease is scoped to this run's integration
 target, so a human deliberating in one run never blocks another.
 
+**A resumed run must be able to find a hold it did not take.** The durable hold is what makes a
+crash-during-conflict recoverable — but `integrate()` is not a step, so nothing journals it, and a
+resumed run calls `land()` into a target still holding the previous process's merge. Stage 14 must
+resolve this, and **`abort()` before every land is the forbidden shortcut**: it is three lines and
+needs no port change, and it silently discards partial human resolutions, which `retry()` exists to
+preserve. Either the adapter reports a pre-existing hold as a `Conflict` outcome — the state *is* a
+conflict, and the workflow already knows how to route one — or `Integrator` gains a `held(target)`
+predicate. Not exit 70 on resume.
+
 **The hold must be durable, not in-memory.** A run that dies holding a target can only be released
 by a later invocation, so the hold has to be readable from the repository — an in-memory hold makes
 a resumed run's `abort()` a silent no-op and leaves the target half-combined forever. A contract
@@ -787,7 +797,9 @@ Environment isolation is a *second* channel and is deliberately out of scope for
 changes what a merge means, found by experiment at stage 5: `pull.twohead = ours` makes a merge exit
 0, report a head, and land **none** of the child's work — silent loss; `merge.verifySignatures`
 refuses every landing; `rerere.enabled` replays a resolution recorded on another machine and lands a
-combination nobody in the run ever saw. Every invocation therefore pins the settings it depends on
+combination nobody in the run ever saw; and **`core.hooksPath`** runs an operator's own hook inside
+a landing, which is target-repo configuration reaching the run by another door. `merge.ff` and
+`commit.gpgsign` belong in the same set. Every invocation therefore pins the settings it depends on
 rather than inheriting them.
 
 **Refs are arguments, and arguments are an injection surface.** `--end-of-options` is load-bearing
@@ -881,11 +893,29 @@ base    = sha256(canonical_json({
               inputs: inputs,
               head:   worktree head BEFORE this step runs,
           }))
-n       = times `base` was used earlier in this invocation (0, 1, 2, …)
+n       = times `base` was used earlier **in this namespace, for this step name** (0, 1, 2, …)
 digest  = sha256(base + ":" + str(n))        ← the filename
 ```
 
 Match on path **and** fingerprint, else re-run.
+
+**Canonicalisation is load-bearing and none of it fails loudly.** Three rules, all measured at the
+post-stage-8 review:
+
+- **Sets must be sorted.** `frozenset[Restriction]` has no stable iteration order across processes —
+  `Restriction` is a `StrEnum`, `Enum.__hash__` hashes the member name, and `PYTHONHASHSEED`
+  randomises it. Three fresh interpreters produced three different orders. The port is right to
+  promise no ordering, which makes sorting the journal's obligation.
+- **`**inputs` must be JSON-serialisable**, and the framework canonicalises dataclasses through
+  `dataclasses.asdict` and refuses anything else with `InputError`. §3.3's own tickets example
+  passes `findings=highs` — a list of the workflow's own dataclasses — and the deadline shortcut is
+  `repr()`, whose default embeds an object id and is therefore silently unstable.
+- **`Tool.payload_schema` is a `MappingProxyType`** and `JsonValue` deliberately excludes `Mapping`,
+  so hashing tool schemas raises `TypeError` on the first call. One `dict()` at the top level. This
+  one at least fails loudly.
+
+Each of these presents as *replay simply never hits* rather than as an error, which is why the rule
+is written here rather than left to stage 11.
 
 **Why the role is in it.** Halt, edit the implement prompt, resume — without this you replay results
 produced by the old prompt, which is exactly when you are iterating and least want stale output.
@@ -895,6 +925,13 @@ re-runs → different tickets → downstream input fingerprints change → those
 **Why the starting head is in it.** `review` takes no inputs — it reviews the worktree. Without the
 head term, a re-run of `implement` producing different code would leave review's fingerprint
 unchanged and it would wrongly replay. The workspace *is* an input; it just isn't a named one.
+
+**`integrate()` advances the parent's `last_good`.** A child landing moves the parent's physical
+head, but `last_good` is chained from step entries and `integrate()` is not a step — so the parent's
+next step to miss its fingerprint would `restore()` to a commit *before* every landed child and
+delete all of it. `IntegrationOutcome.head` carries the value; the engine must write it into the
+parent's chain. This is the one path in the design that destroys work rather than costing a re-run,
+alongside a mispaired `commit=`.
 
 **The starting head is chained logically, not read from disk.** It comes from the previous step's
 recorded `head` in that namespace, never from the physical worktree. Otherwise: root runs `spec` at
@@ -907,8 +944,16 @@ replayed step keeps the commit it already made, message and all.
 
 **Why the counter.** A retry loop with nothing varying — same role, no inputs, no commits — would
 otherwise produce an identical fingerprint every iteration and hit its own cache forever. `n` is
-per-invocation and never persisted; replay walks the same calls in the same order and reproduces
-the same values. Where inputs genuinely vary, each call is `n=0` and the counter is invisible.
+never persisted; replay walks the same calls in the same order and reproduces the same values.
+
+**Why it is scoped per namespace and step name, not per invocation.** Concurrent siblings produce
+identical `base` values — `T-01` and `T-02` both call `step("implement", implementer)` with the same
+role, no inputs, and the same parent head. A per-invocation counter lets the interleaving decide who
+gets `n = 0`, and the interleaving differs on resume, so each child looks in its own scope for a
+digest that is not there and **both re-run, forever, silently**. Scoping the counter to
+`(namespace, step name)` makes it deterministic under concurrency, because siblings occupy different
+namespaces. A per-invocation counter is correct for sequential workflows and for no concurrent
+one. Where inputs genuinely vary, each call is `n=0` and the counter is invisible.
 
 **What it costs:** a genuinely stuck loop no longer fails loudly — it writes `n=0,1,2,…` until
 something else stops it. Loop termination is therefore the workflow's job, which tickets' `drive`
@@ -925,22 +970,26 @@ for each step, in replay order:
         last_good = entry.head
         return deserialize(entry.value)
 
-    if last_good and worktree.head != last_good:
-        worktree.reset_hard(last_good)          # discard a crashed step's leavings
-        worktree.clean()
+    if last_good:
+        worktree.restore(last_good)             # unconditional: reset --hard + clean -fd
 
     result = run_worker()
 
     if commit is not None:                      # effect step
         worktree.commit_all(message=commit)     # no-op if nothing is dirty
     else:                                       # read-only step
-        worktree.reset_hard(last_good)          # same primitive, second moment
-        worktree.clean()
+        worktree.restore(last_good)             # same primitive, third moment
 
     write_atomic(path, {fingerprint, value: result, head: worktree.head, at: now()})
     last_good = worktree.head
     return result
 ```
+
+**The pre-run restore is unconditional, not guarded on HEAD.** A crashed read-only step leaves
+untracked files without moving HEAD, so a `worktree.head != last_good` guard is false and the
+leavings survive into the next step — the exact contamination the wipe exists to prevent.
+`Workspace` deliberately exposes no `is_dirty`, so the guard cannot be widened; restoring
+unconditionally is both correct and cheaper than asking.
 
 Ordering is free — replay walks the workflow in order, so nothing needs sequence numbers on disk.
 `last_good` is per namespace and held in memory. A crashed step leaves no entry, so the next run
@@ -1394,9 +1443,12 @@ works with no further setup. The standards-template writing in the current `_cmd
 that content is tickets-specific and belongs to the workflow.
 
 **`clear`** removes `.trees/<label>/`, the `agl/_work/<label>/*` child branches, and the run
-directory. Note that removing the run's whole trees directory is **not expressible through
-`WorkspaceProvider`** — `remove` takes back one checkout, `discard` deletes one branch. Stage 9
-either gains a verb or does it directly; either way it is a decision, not an oversight. It
+directory. Stage 5 closed the directory half of this within the port: `remove` takes the run's own directory
+away once the last checkout in it is gone, so `clear` is a namespace loop over `remove` and
+`discard` with no new verb. **The ref half is still open** — no port can enumerate `agl/_work/<label>/*`,
+by design, and a crash between `open()` and the first entry write leaks both a branch and a
+directory, with the leaked directory then blocking the rmdir. Do not add a ref-listing verb to
+`History` to close it. It
 deletes `agl/<label>` **only if merged into the base ref**; otherwise it warns and keeps it. `-f`
 deletes regardless — exactly `git branch -d` versus `-D`. The rationale is asymmetric cost: a
 retained branch costs a stale ref, a deleted one costs the entire run. It refuses while a run holds
@@ -1423,7 +1475,7 @@ a lock.
 | `run.commit()` as a separate call | It would run after the entry was written, so the recorded `head` would predate the commit — and `head` is the reset target, so the next fingerprint miss would delete the work. Committing belongs inside the step's atomic unit, hence `commit=`. |
 | Framework enforcement of the `commit=` / `NO_VCS_WRITES` pairing | Neither a call-site check nor a HEAD-moved detector. The framework does one predictable thing either way; the pairing is the author's judgement, documented in the SDK and catchable by an IDE lint plugin. Consistent with `blocked_by`, cycle detection, and loop termination all being the workflow's. |
 | A third `IntegrationOutcome` case for asynchronous landing | Would put a scheduling concept the framework has no vocabulary for into the port, and a PR is a non-idempotent external write that breaks memoization independently (§3.4). v1.1 lands synchronously. |
-| `Integrator.revert()` | Revert-on-gate-failure undoes a successful landing, which is `Workspace.restore(head)` — the same primitive at a third moment, alongside reset-before-rerun and wipe-on-omitted-`commit=`. |
+| `Integrator.revert()` | Revert-on-gate-failure undoes a successful landing, which is `Workspace.restore(head)` — one primitive at four moments: reset-before-rerun, wipe-on-omitted-`commit=`, revert-on-gate-failure, and abort-on-conflict. |
 | A timeout parameter on `Verifier.verify` | `build_timeout` is project configuration and reaches an implementation where implementations are configured. A hosted verifier with its own deadline would otherwise carry a parameter it can only ignore. |
 | An auto-generated commit message | The message is domain vocabulary — "implement T-01" is something only the workflow knows. Auto-generating it would cost readable history to save one keyword argument. |
 | `run.ask()` | Dissolved into `run.terminal.show()` with an interactive view. One entry point. |
@@ -1514,7 +1566,7 @@ wrong.
 
 ### Build process
 
-See `agl-build-stages.md`. Twenty stages, each executed by a Claude Code session in which the main
+See `agl-build-stages.md`. Twenty-one stages, each executed by a Claude Code session in which the main
 agent **never writes code** — it spawns one subagent per deliverable, in series, and verifies
 mechanically (test suite, `mypy --strict`, import-linter) rather than by reading source.
 

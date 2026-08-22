@@ -270,6 +270,31 @@ failure worth reporting rather than absorbing.
 
 ---
 
+## Stage 8.5 — Review fixes
+
+Not a build stage. Six holes found by mutation at the post-stage-8 review, all in shipped code from
+stages 4–8. Each is a place where the invariant currently holds and **nothing protects it** — so
+none of them is urgent today and all of them are cheap now and expensive once more code leans on
+them.
+
+The pattern behind five of the six, in the reviewer's words: *believe the noun, doubt the
+quantifier.* Each is proven at the one site somebody was thinking about, and unproven everywhere
+else.
+
+| # | Deliverable |
+|---|---|
+| 8.5.1 | **Claude hermeticity is asserted by keyword *name*, not value.** Flipping `setting_sources` to `["user","project","local"]` and `strict_mcp_config` to `False` leaves the default gate green — 150 passed. The three tests that catch it cost nothing (loopback, canned data) but sit behind `AGL_LIVE_AGENT=1`, which means "spawns processes," not "spends money." Move them off the gate, or assert values in the AST test. The OpenAI adapter is already symmetric here and fires in the default gate |
+| 8.5.2 | **`--end-of-options` is behaviourally witnessed at 1 of 12 call sites.** Removing it from the other 10 leaves 114 tests green. `history.py` is the unguarded half and carries the `--from` ref, which §3.3's allowlist does not constrain, plus `diff-tree --patch` — the `--output=` hazard §3.5 names by name. An AST test; the repo has invented this shape twice already |
+| 8.5.3 | **Pin `merge.ff`, `commit.gpgsign`, `core.hooksPath`** alongside the three §3.5 already names. `core.hooksPath` is the interesting one — an operator hook running inside a landing is target-repo configuration reaching the run by another door. Removing `--no-ff`, `--no-gpg-sign` or `--no-verify` individually currently fires nothing |
+| 8.5.4 | **Store: two holes.** A module-level `asyncio.Lock` around every write leaves all 60 store tests green — AST test, since a timing assertion would be flaky and would fail honest slow implementations. And real-store *write-side* aliasing is tested only in `test_memory_store.py`; move those two clauses into `StoreContract`, where they need no filesystem knowledge |
+| 8.5.5 | **Three fake divergences.** The git fake accepts an empty commit message; git refuses it — a step whose `commit=` template renders empty passes `--dry-run` and dies exit 70 in anger. The Claude fake accepts a workspace that does not exist; the runner raises. And the Claude fake propagates a raising tool handler while its runner carries on — deliberate, but the reasoning lives only in `openai/fake.py`, not in the file it is asymmetric with. Add a parity clause for each |
+| 8.5.6 | **`displayed()` can report a frame never rendered.** Moving `self._written = screen` above `if self._taken: return` leaves 83 terminal tests green — the test that owns that window asserts substrings of the cumulative buffer and never reads `terminal.written` during the take. The ordinary off-by-one does fire, so the invariant is half-covered |
+
+**Accept:** every mutation above now fires. Re-run each, confirm red, restore, checksum. Nothing
+else changes — this stage adds no behaviour.
+
+---
+
 ## Stage 9 — Config, container, registry
 
 | # | Deliverable |
@@ -312,9 +337,9 @@ property test as the acceptance criterion.
 
 | # | Deliverable |
 |---|---|
-| 11.1 | `sdk/_engine/journal.py` — fingerprint computation: canonical JSON over role/inputs/head, plus the per-invocation counter `n` and `digest = sha256(base:n)` (§3.6) |
+| 11.1 | `sdk/_engine/journal.py` — fingerprint computation: canonical JSON over role/inputs/head, plus the counter `n` scoped **per (namespace, step name)** — not per invocation, or concurrent siblings with identical `base` re-run forever (§3.6). Three canonicalisation rules, each of which fails as *replay never hits* rather than as an error: sort every set (`frozenset[Restriction]` order varies with `PYTHONHASHSEED`); require `**inputs` to be JSON-serialisable, `asdict` dataclasses, refuse the rest with `InputError`; `dict()` `Tool.payload_schema` out of its `MappingProxyType` |
 | 11.2 | Entry read/write — `{fingerprint, value, head, at}`, atomic, path derivation, `steps/` and `worktrees/` sibling subtrees |
-| 11.3 | Replay walk — `last_good` chained **logically from recorded entries, never the physical worktree**; reset-before-rerun |
+| 11.3 | Replay walk — `last_good` chained **logically from recorded entries, never the physical worktree**; the pre-run `restore(last_good)` is **unconditional**, not guarded on HEAD (a crashed read-only step leaves untracked files without moving HEAD, and `Workspace` exposes no `is_dirty` by design) |
 | 11.4 | Kill-and-resume property test — run to completion, kill at every step boundary, resume, assert identical final state |
 
 **Accept:** 11.4 passes. Specifically covered: a retry loop with identical role/inputs/head produces
@@ -330,7 +355,7 @@ property test as the acceptance criterion.
 | 12.1 | `Run.step()` — journal lookup, `AgentTask` construction from a `Role`, dispatch, **commit-or-wipe per `commit=`**, entry write in that order (§3.3). `commit=` given → commit dirty state with that message; omitted → `reset --hard` to `last_good` plus `clean -fd`, on success and on failure alike. No check of what the role declared, no comparison of HEAD before and after |
 | 12.2 | `sdk/roles.py` — `Role(instructions, model, restrictions, tools, requires, on_question)` |
 | 12.3 | `sdk/tools.py` — re-export of `ports.agent.Tool` plus the reporting-tool declaration helper that derives a payload schema from a workflow dataclass; **reporting vs effect step**; malformed payload rejected back to the agent in-session (§3.3) |
-| 12.4 | `Run.activity` — current string from the serving adapter, `None` when idle, never persisted |
+| 12.4 | `Run.activity` — current string from the serving adapter, `None` when idle, never persisted. Note: `await workspace.restore(...)` in a `finally` inside a cancelling task re-raises `CancelledError` before it runs, so the wipe needs `asyncio.shield` |
 
 **Accept:** a workflow of three sequential steps replays correctly against fakes. An agent that
 never fires its reporting tool leaves no entry and re-runs. A step with `commit=` records a `head`
@@ -360,7 +385,7 @@ siblings — is refused, compared case- and normalisation-insensitively (§3.9).
 
 | # | Deliverable |
 |---|---|
-| 14.1 | `sdk/_engine/integration.py` — serialized integration per target; lease acquire/release, released on run exit |
+| 14.1 | `sdk/_engine/integration.py` — serialized integration per target; lease acquire/release, released on run exit. **A resumed run must find a hold it did not take** (§3.4): `integrate()` is not a step, so nothing journals it, and today `land()` into a held target raises `InternalError`. `abort()` before every land is the forbidden shortcut — it discards partial human resolutions. **And `integrate()` must write `IntegrationOutcome.head` into the parent's `last_good`**, or the parent's next fingerprint miss restores past every landed child and deletes it |
 | 14.2 | Merge → build gate → revert-on-failure, inside the lease |
 | 14.3 | `Conflict` outcome — framework **emits**, holds the lease, never asks; `retry()` / `abort()` |
 | 14.4 | `integrate()` raises on a parentless `Run` — `main` is unaddressable, not policy-protected |
