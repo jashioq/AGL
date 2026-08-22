@@ -1437,6 +1437,16 @@ auth`."* `resume` takes the label only; params come from `run.json`. `resume` on
 errors symmetrically. Keeping both verbs makes a typo'd label a loud error rather than a silent
 replay of something unrelated.
 
+**Composition is per-command, not universal.** `main.py` resolves settings and dispatches; each
+operation then resolves its own prerequisites. `run`, `resume` and `clear` resolve a project and
+build a container; `init` takes settings alone; `list_workflows` takes neither.
+
+`init` *cannot* have a container, because it writes the very project file a container needs in order
+to be constructible — so a `main.py` that composes before dispatching makes `init` unreachable, and
+makes `workflows` demand a registered repository to list what is merely installed. A command
+invoked in an unregistered repository gets `NotFoundError` → exit 3, naming `agl init`, which is run
+once per project and never again.
+
 **`init`** is lightweight and runs once per repo. It detects the git root, asks for the build
 command (`_BUILD_GUESSES` exists because inferring it is unreliable), picks a trees root, and
 writes `AGL_HOME/projects/<name>.toml`:
@@ -1449,7 +1459,7 @@ build = "./gradlew build"
 build_timeout = 600
 ```
 
-Alongside it, `AGL_HOME/settings.toml` carries what §1.10 found missing — per-connector sections,
+Alongside it, `AGL_HOME/config.toml` carries what §1.10 found missing — per-connector sections,
 so R2 is reachable by configuration at all:
 
 ```toml
