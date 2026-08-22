@@ -324,10 +324,10 @@ problems surface here rather than at stage 19.
 | # | Deliverable |
 |---|---|
 | 10.1 | `sdk/params.py` — `arg()`, dataclass → named flags, no positionals (§3.3) |
-| 10.2 | `sdk/workflow.py` — `@workflow` decorator, `Stop`, minimal `Run` carrying `params` only |
+| 10.2 | `sdk/workflow.py` — `@workflow` decorator, `Stop`, minimal `Run` carrying `params` only. **Decided at stage 9:** the services bundle `Run` will hold lives in `sdk/_engine/` over port types and is constructed by `container.py` — `config` may import `sdk`, not the reverse. Not `ports/` (a bundle of ABCs is neither an ABC nor a type an ABC speaks) and not eight loose parameters (a ninth port would touch every site) |
 | 10.3 | `cli/exit_codes.py` + `api.py` — the five operations, exceptions mapped in one table |
 | 10.4 | `cli/main.py` + `cli/commands/run.py` — parse, resolve config, build container, dispatch |
-| 10.5 | `workflows/noop/` — a workflow that does nothing, used as the wiring probe. Deleted at stage 19 |
+| 10.5 | `workflows/noop/` — a workflow that does nothing, used as the wiring probe. Deleted at stage 19. Flip stage 9's `test_the_real_entry_point_group_is_readable_and_empty_today` — its name says *today* |
 
 **Accept:** `agl run noop -n x` exits 0. `agl run noop -n x` a second time exits 4 (label exists).
 An unknown workflow exits 3. **A raised `Stop` exits 7, not 6 or 70** — `Stop` descends from
@@ -421,7 +421,7 @@ into the same session. A higher-priority screen preempts and restores.
 | 16.2 | `cli/commands/resume.py` — label only, params from `run.json` |
 | 16.3 | `cli/commands/clear.py` — `git branch -d` semantics, refuses while locked (§3.10) |
 | 16.4 | `cli/commands/init.py` + `workflows.py` |
-| 16.5 | `sdk/testing.py` — note the constraint stage 7 found: `sdk/` and `adapters/` are siblings and may not import each other, so this module **cannot name the fake's scripting types**. The workflow-facing scripting vocabulary lives here and `config/container.py` compiles it into the callable the fake consumes. The harness workflow authors test against: run a workflow on an all-fakes bundle, script agent replies and questions, drive kill-and-resume. Part of the public SDK surface, so it needs the same care as the rest of it |
+| 16.5 | **Split across two modules — stage 9 found `sdk/testing.py` unbuildable as one.** Contract 1 puts `sdk` below `config`, so it cannot import the container and cannot build a bundle at all; building one is a composition act. The scripting *vocabulary* stays in `sdk/testing.py`, port-typed. The *builder* becomes a new top-level `agl/testing.py` beside `api.py`, above `config`. Note also the constraint stage 7 found: `sdk/` and `adapters/` are siblings and may not import each other, so the vocabulary module **cannot name the fake's scripting types**. The workflow-facing scripting vocabulary lives here and `config/container.py` compiles it into the callable the fake consumes. The harness workflow authors test against: run a workflow on an all-fakes bundle, script agent replies and questions, drive kill-and-resume. Part of the public SDK surface, so it needs the same care as the rest of it |
 
 **Accept:** a role naming a provider whose harness is missing, out of date, or logged out fails at
 second zero with `UpstreamUnavailable`. `clear` on an unmerged branch warns and keeps it; `-f`

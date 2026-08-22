@@ -280,7 +280,10 @@ src/agl/
 │
 ├── cli/                    main · exit_codes · commands/{run,resume,clear,init,workflows}
 │
-└── api.py                  run · resume · clear · init · list_workflows
+├── api.py                  run · resume · clear · init · list_workflows
+└── testing.py              builds an all-fakes bundle for a workflow's own tests
+                            (the builder is a composition act, so it sits above
+                            config; the scripting vocabulary is in sdk/testing.py)
 ```
 
 **Why `Screen`, `Question`, and `Tool` live in `ports/`, not `sdk/`.** The ports layer test is *"it's an ABC,
@@ -836,7 +839,13 @@ AGL_HOME/
 
 **Runs are stored per project.** Labels are scoped to a repo, so `agl resume feat1` finds repo A's
 run and reports no such label in repo B. The project is resolved from cwd by walking up to the git
-root and looking it up by path — which also removes the current glob-scan-every-config behaviour.
+root and matching a project file's `repo` against that path.
+
+A project's on-disk identity is its **name**; the lookup key is its **path**, so nothing short of a
+second file makes this O(1) — and a path-to-name index would be a second source of truth about which
+repo a project is, free to go stale on a hand-rename. The repair §1.10 actually asks for is
+**resolved once per invocation**, not resolved in constant time: one directory listing, parse until
+the first `repo` matches, and never again for the life of the process.
 
 `steps/` and `worktrees/` are sibling subtrees so `worktree("review")` and `step("review", …)` in
 the same Run cannot collide.
@@ -1439,6 +1448,20 @@ trees_root = "/Users/jan/dev/.agl-trees/myapp"
 build = "./gradlew build"
 build_timeout = 600
 ```
+
+Alongside it, `AGL_HOME/settings.toml` carries what §1.10 found missing — per-connector sections,
+so R2 is reachable by configuration at all:
+
+```toml
+[agent.claude]
+enabled  = true
+cli_path = "/opt/homebrew/bin/claude"
+```
+
+`enabled` defaults true, because configured and available are different questions (§3.2.1) and
+availability is `check_ready` at preflight. `AGL_HOME` is deliberately not a key — the file lives
+inside it — which is why home resolves through three precedence layers and everything else through
+four.
 
 Stored in `AGL_HOME`, not the repo, so AGL never appears in `git status`. Afterwards every workflow
 works with no further setup. The standards-template writing in the current `_cmd_init` is dropped —
