@@ -133,7 +133,9 @@ def test_the_enum_values_are_the_strings_a_fingerprint_holds() -> None:
         "OPUS": "claude:opus",
         "SONNET": "claude:sonnet",
         "HAIKU": "claude:haiku",
-        "GPT5": "openai:gpt-5",
+        "SOL": "openai:sol",
+        "TERRA": "openai:terra",
+        "LUNA": "openai:luna",
     }
 
 

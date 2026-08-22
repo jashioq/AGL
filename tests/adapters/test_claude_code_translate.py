@@ -252,7 +252,7 @@ class TestModelNames:
 
         `adapters/routing.py` dispatches on `task.model.provider` and should never send one of
         these here, so arriving is already a bug - but the honest answer to it is a refusal naming
-        what this adapter does serve, not a quiet run of Opus in place of GPT-5. The message is
+        what this adapter does serve, not a quiet run of Opus in place of Sol. The message is
         checked for the model's own spelling because a refusal that does not name what it refused
         sends the reader to the wrong declaration.
         """
@@ -263,7 +263,7 @@ class TestModelNames:
     def test_the_refusal_says_what_is_served(self) -> None:
         """A person reading exit 2 needs the alternatives, not only the rejection."""
         with pytest.raises(InputError) as refused:
-            model_name(OpenAI.GPT5)
+            model_name(OpenAI.SOL)
         message = str(refused.value)
         for served in Claude:
             assert str(served) in message

@@ -125,9 +125,27 @@ class Claude(ModelId):
 
 
 class OpenAI(ModelId):
-    """Another provider's models."""
+    """Another provider's models, in the same three tiers: deep judgement, everyday work, cheap.
 
-    GPT5 = "openai:gpt-5"
+    The names are AGL's own, taken from the slugs they stand for rather than copied from them. That
+    provider's harness publishes no `gpt-5` at all: its model list at CLI 0.149.0 - a local query
+    that costs nothing - puts `gpt-5.6-sol`, `gpt-5.6-terra` and `gpt-5.6-luna` at priorities 1, 2
+    and 3, described there as the latest frontier agentic coding model, a balanced one for everyday
+    work, and a fast and affordable one. So the tier is the vendor's own ordering rather than our
+    reading of it. What is dropped is the version, deliberately: these values are a stored format,
+    and a 5.7 release must not re-run every step recorded under one of them.
+
+    **One asymmetry with `Claude` above, worth stating rather than leaving to be found.** Anthropic
+    publishes `opus`, `sonnet` and `haiku` as aliases and resolves them itself, so that adapter
+    hands over the tier and stops. `sol`, `terra` and `luna` are AGL's own undated spelling of slugs
+    that carry their version, so this provider's adapter needs an edit on a release where the Claude
+    one does not. That edit is in an adapter, where a vendor's release schedule belongs, and not
+    here, where it would be a change to something already written down.
+    """
+
+    SOL = "openai:sol"
+    TERRA = "openai:terra"
+    LUNA = "openai:luna"
 
 
 class Restriction(StrEnum):

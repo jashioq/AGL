@@ -129,9 +129,20 @@ calls `/bin/sh`. Naming a shell here would mean this module deciding that the us
 what bash says it means, on a machine where their own terminal might disagree.
 
 **No general process helper.** §3.4's git runner is argv-only by design and this one is a shell by
-design; the two share a paragraph of reasoning and not a line of code. Part 2's rule 6 gives the
-extraction decision to a later stage, and there is nothing yet to extract that would not immediately
-need a flag saying which of the two it was being.
+design; the two share a paragraph of reasoning and not a line of code. This paragraph used to say
+that the extraction decision belonged to a later stage. That stage was stage 8, and it has decided.
+
+**The decision, taken at stage 8: there is no shared helper, and a fourth consumer arriving is not
+by itself a reason to build one.** Stage 8 added a third consumer - `adapters/openai/runner.py`,
+which drives an agent harness as a child process - and the three disagree on seven axes, with no
+two agreeing on all of them: shell or exec, buffered or streamed, `DEVNULL` or `PIPE` on standard
+input, merged or separate standard error, process or group signalling, deadline or none, and exit
+code or output stream as the failure signal. This module sits at one end of several of them - a
+shell, buffered, group-signalling, with a deadline - and a helper covering all three would take a
+flag per axis, each flag existing to say which of three callers it was being, which is the
+definition of an abstraction that has not found anything in common. The same paragraph, under the
+same heading, is in `adapters/git/_runner.py` and `adapters/openai/runner.py`, where stage 8's
+version of it is argued at length.
 """
 
 import asyncio

@@ -18,11 +18,17 @@ loopback described next. It used to be the one paid call in this build.
 
 **Every test in this module points a `claude` process at a loopback**, and that is what makes the
 rest of the file free. `instruments/loopback.py` binds `127.0.0.1`, answers the two paths a session
-touches, and forwards nothing anywhere; the module-scoped `harness` fixture below exports
-`ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY` at it for the whole file, always, not only for the
-tests that spawn something. So "no test here reaches a model" is structural rather than a promise:
-there is no outbound socket in the instrument, and one test below asserts the redirection itself
-rather than leaving it to be believed.
+touches, and forwards nothing anywhere; a session-scoped autouse fixture in `tests/conftest.py`
+exports `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY` at it for every test in the repository, always,
+not only for the tests that spawn something. So "no test here reaches a model" is structural rather
+than a promise: there is no outbound socket in the instrument, and one test below asserts the
+redirection itself rather than leaving it to be believed.
+
+That fixture was written here, at stage 7.1, and moved at 8.0a. A module-scoped autouse fixture
+protects the file it is written in and no other, so a second adapter test file inherited nothing;
+`harness` below is now an accessor onto the session's endpoint rather than a second listener. What
+this file still owns is the assertion that the guard reached *it* - the endpoint the CLI is pointed
+at being the same object these tests read their traffic off, which no repo-wide check can ask.
 
 Two things follow, and both are wanted. `check_ready` is now exercised on the branch where it
 **returns** - a success path this project had never observed, because the only machine that had ever
@@ -201,80 +207,43 @@ def _cli() -> bool:
     return shutil.which("claude") is not None
 
 
-@pytest.fixture(scope="module", autouse=True)
-def harness() -> Iterator[Loopback]:
-    """Every test in this file, pointed at a loopback endpoint. Autouse, and not only for the gated.
+@pytest.fixture
+def harness(loopback: Loopback) -> Loopback:
+    """*The* loopback - the session-scoped one from `tests/conftest.py` - under this file's name.
 
-    This is the fixture that makes "no test here reaches a model" a fact rather than a habit. It
-    binds `instruments.loopback` on `127.0.0.1` and exports `ANTHROPIC_BASE_URL` at it for the whole
-    module, so a test that spawns a CLI cannot reach a paid endpoint whatever it was written to do -
-    including a test somebody adds later without reading this docstring, which is the case the
-    autouse is for.
+    An accessor and deliberately nothing more. The redirection this file rests on used to be a
+    module-scoped autouse fixture right here, which protected this file and no other; stage 8 adds
+    a second adapter test file, so it moved to `tests/conftest.py` where a module that has not been
+    written yet is covered too. What did *not* move is the name: `harness` reads correctly in the
+    dozen tests below that ask this object what request left the machine.
 
-    **`ANTHROPIC_API_KEY` is load-bearing and not belt-and-braces.** With the base URL redirected
-    and the key left unset, the CLI falls back to the operator's own subscription credential and
-    sends `Authorization: Bearer sk-ant-…` to whatever is listening on that socket. Any non-empty
-    dummy makes it send `x-api-key: <dummy>` instead. Anyone deleting that line is handing a live
-    token to a local port, and `instruments/loopback.py` redacts what arrives precisely because this
-    line can be deleted.
-
-    Module-scoped because starting a listener per test would be a hundred binds for no gain, and
-    hand-rolled around `pytest.MonkeyPatch.context()` because `monkeypatch` itself is
-    function-scoped and cannot be asked for here. The environment is restored on the way out by
-    that context, so it does not leak into the rest of the suite - which matters, because the rest
-    of the suite has no loopback listening.
+    It returns the session's endpoint rather than starting one, and that is the whole safety
+    property. A second listener here would leave the CLI pointed at conftest's address while these
+    tests read a different one - the failure
+    `test_no_test_in_this_module_can_reach_a_paid_endpoint` catches by asserting the two are equal.
     """
-    with Loopback() as endpoint, pytest.MonkeyPatch.context() as environment:
-        environment.setenv("ANTHROPIC_BASE_URL", endpoint.url)
-        environment.setenv("ANTHROPIC_API_KEY", DUMMY_KEY)
-        yield endpoint
-
-
-@pytest.fixture(autouse=True)
-def _one_test_at_a_time(harness: Loopback) -> Iterator[None]:
-    """One test's traffic is never another's, and no test leaves a live credential behind it.
-
-    The loopback outlives every test in the module, so without the clear `composed()` would be
-    reading whichever run happened to go first. Function-scoped and autouse, so a test cannot
-    forget.
-
-    The teardown is the second half of the `ANTHROPIC_API_KEY` argument, measured rather than
-    argued. Every request every test caused is checked for an `Authorization` header, which is what
-    the CLI sends when it falls back to the operator's own subscription credential - and which
-    therefore appears the moment the dummy key stops being set, whatever anyone believed about it.
-    The value is never read: `instruments.loopback` redacts it on the way in, and the assertion is
-    about the header being there at all.
-    """
-    harness.clear()
-    harness.says = REPLY
-    yield
-    bearer = [
-        seen.path
-        for seen in harness.requests
-        if any(name.lower() == "authorization" for name in seen.headers)
-    ]
-    assert not bearer, (
-        f"a `claude` this test started sent an Authorization header to {bearer}. That is the "
-        f"operator's own OAuth bearer token: the CLI falls back to it whenever ANTHROPIC_API_KEY "
-        f"is unset or empty, and with the base URL redirected it goes to whatever is listening on "
-        f"the port. It landed on this suite's own loopback, which redacts it - but the next reader "
-        f"to point that variable somewhere else would be shipping a live credential"
-    )
+    return loopback
 
 
 def test_no_test_in_this_module_can_reach_a_paid_endpoint(harness: Loopback) -> None:
     """The guard, asserted rather than promised. Everything else in this file rests on it.
 
-    A docstring saying "these tests are free" is worth nothing on the day the fixture above is
-    edited, renamed, or quietly dropped from a `conftest` reshuffle - and the failure would be
-    silent, because a test that spends money looks exactly like a test that does not until the bill
-    arrives. So the redirection is a checked fact: the variable the CLI reads is set, it names an
-    address that is a loopback literal, and it is the address of the endpoint this module started.
+    A docstring saying "these tests are free" is worth nothing on the day the fixture in
+    `tests/conftest.py` is edited, renamed, or quietly dropped from a reshuffle - and the failure
+    would be silent, because a test that spends money looks exactly like a test that does not until
+    the bill arrives. So the redirection is a checked fact: the variable the CLI reads is set, it
+    names an address that is a loopback literal, and it is the address of the endpoint the tests
+    here read their traffic off.
+
+    That last clause is what stops the guard from moving out of this file and quietly stopping
+    covering it. `scripts/check`'s paid-endpoint gate asks the wider question - whether a module
+    added today inherits anything at all - and it cannot ask this one, because it knows nothing
+    about which endpoint *these* tests read.
 
     `127.0.0.1` is asserted by parsing rather than by prefix, and the hostname has to be an IP
     literal: `localhost` would pass a string comparison and resolve through whatever the machine's
     resolver says it means. `ANTHROPIC_API_KEY` is checked in the same breath because an unset one
-    is not a missing precaution but an active leak - see the fixture.
+    is not a missing precaution but an active leak - see `tests/conftest.py`.
     """
     base = os.environ.get("ANTHROPIC_BASE_URL", "")
     host = urlsplit(base).hostname or ""
@@ -289,9 +258,9 @@ def test_no_test_in_this_module_can_reach_a_paid_endpoint(harness: Loopback) -> 
         f"between that and a paid model call is this variable pointing at a socket this suite owns"
     )
     assert base == harness.url, (
-        f"ANTHROPIC_BASE_URL is {base!r} and this module's loopback is listening on "
+        f"ANTHROPIC_BASE_URL is {base!r} and the loopback these tests read is listening on "
         f"{harness.url!r}. A CLI pointed at some other loopback is a CLI whose requests this file "
-        f"cannot read, and whatever is on that port was not started here"
+        f"cannot read, and whatever is on that port was not started by this suite"
     )
     assert os.environ.get("ANTHROPIC_API_KEY"), (
         f"ANTHROPIC_API_KEY is {os.environ.get('ANTHROPIC_API_KEY')!r}, which the CLI treats as no "
@@ -1945,6 +1914,6 @@ def test_a_model_this_adapter_does_not_serve_is_refused_by_both_query_members() 
     to run, which is a preflight that admits a run and kills it at second one.
     """
     with pytest.raises(InputError):
-        asyncio.run(ClaudeCodeRunner().capabilities(OpenAI.GPT5))
+        asyncio.run(ClaudeCodeRunner().capabilities(OpenAI.SOL))
     with pytest.raises(InputError):
-        asyncio.run(ClaudeCodeRunner().check_ready(OpenAI.GPT5))
+        asyncio.run(ClaudeCodeRunner().check_ready(OpenAI.SOL))

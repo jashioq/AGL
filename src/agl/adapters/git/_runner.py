@@ -109,9 +109,23 @@ or `GIT_WORK_TREE` - which exists only when AGL is itself run from inside a git 
 redirect every command below past `cwd=` to another repository. Hermeticity is an agent-port
 contract (§3.5) rather than a git one, and the day this bites, the fix is two more keys here.
 
-**No general process helper.** Stage 8 is the second consumer of process execution and Part 2's
-rule 6 gives it, not this stage, the decision about extracting one. So everything here is git's:
-git's exit-code conventions, git's plumbing probe, git on `PATH`.
+**No general process helper.** This paragraph was written at stage 5 saying stage 8 would be the
+*second* consumer of process execution and would take the decision about extracting one. It was
+already wrong by stage 6, which added `adapters/shell/verifier.py`, and stage 8 makes three - so the
+count is corrected here and the decision is recorded rather than left to be re-litigated from a
+false premise.
+
+**The decision, taken at stage 8: there is no shared helper, and a fourth consumer arriving is not
+by itself a reason to build one.** The three disagree on seven axes and no two agree on all of them:
+shell or exec, buffered or streamed, `DEVNULL` or `PIPE` on standard input, merged or separate
+standard error, process or group signalling, deadline or none, and exit code or output stream as the
+failure signal. This module sits at one end of most of them - argv-only, buffered, `DEVNULL`,
+separate, process, deadline, exit code - and a helper covering all three would take a flag per axis,
+each flag existing to say which of three callers it was being. The same paragraph, under the same
+heading, is in `adapters/shell/verifier.py` and `adapters/openai/runner.py`, where stage 8's version
+of it is argued at length.
+
+So everything here is git's: git's exit-code conventions, git's plumbing probe, git on `PATH`.
 """
 
 import asyncio

@@ -21,13 +21,16 @@ REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)" || exit 2
 cd -- "$REPO_ROOT" || exit 2
 
 VENV_BIN="$REPO_ROOT/.venv/bin"
-TOTAL_GATES=7
+TOTAL_GATES=8
 
 # Gate 5: the Codex CLI binary name, and the one directory allowed to contain it. The OpenAI
 # adapter shells out to this binary instead of importing a Python SDK, so there is no import
 # for .importlinter to contain - this grep is that contract's stand-in. See ARCHITECTURE.md §4.
+# Not called CODEX_HOME: that is a real environment variable naming the Codex CLI's configuration
+# and credential directory, which the paid-endpoint gate below redirects, and one file holding two
+# meanings of that name is one `export` away from pointing a real `codex` at a source directory.
 CODEX_BINARY="codex"
-CODEX_HOME="src/agl/adapters/openai/"
+CODEX_ADAPTER_DIR="src/agl/adapters/openai/"
 
 # Gate 6: the project's own module size convention, in lines.
 MAX_MODULE_LINES=300
@@ -35,6 +38,12 @@ MAX_MODULE_LINES=300
 # Gate 7: the package root, and what an import statement looks like at the start of a line.
 AGL_INIT="src/agl/__init__.py"
 IMPORT_STATEMENT='^[[:space:]]*(import|from)\b'
+
+# Gate 8: the environment variables the repo-wide guard owns, the one file allowed to write them,
+# and the path a throwaway probe module is written to and deleted from.
+GUARDED_VARS="ANTHROPIC_BASE_URL ANTHROPIC_API_KEY OPENAI_BASE_URL OPENAI_API_KEY CODEX_HOME"
+GUARD_OWNER="tests/conftest.py"
+PROBE="tests/test_written_by_scripts_check_and_deleted_again.py"
 
 case "${1:-}" in
     -h | --help)
@@ -154,21 +163,21 @@ record_status "lint-imports" $? ""
 # ---------------------------------------------------------------------------------------------
 
 gate_header 5 "Codex CLI binary containment" \
-    "grep -rIn -i -e $CODEX_BINARY --include='*.py' src | grep -v ^$CODEX_HOME"
+    "grep -rIn -i -e $CODEX_BINARY --include='*.py' src | grep -v ^$CODEX_ADAPTER_DIR"
 
 codex_hits="$(grep -rIn -i -e "$CODEX_BINARY" --include='*.py' src 2>/dev/null || true)"
-codex_inside="$(printf '%s' "$codex_hits" | grep -c "^${CODEX_HOME}" || true)"
-codex_stray="$(printf '%s' "$codex_hits" | grep -v "^${CODEX_HOME}" || true)"
+codex_inside="$(printf '%s' "$codex_hits" | grep -c "^${CODEX_ADAPTER_DIR}" || true)"
+codex_stray="$(printf '%s' "$codex_hits" | grep -v "^${CODEX_ADAPTER_DIR}" || true)"
 
 printf '%s matches inside %s (expected: that is where the binary is named)\n' \
-    "$codex_inside" "$CODEX_HOME"
+    "$codex_inside" "$CODEX_ADAPTER_DIR"
 
 if [ -n "$codex_stray" ]; then
     printf '%s matches elsewhere under src/ - every one of these is a violation:\n\n' \
         "$(printf '%s\n' "$codex_stray" | wc -l | tr -d ' ')"
     printf '%s\n' "$codex_stray" | sed 's/^/    /'
     printf '\nOnly %s may name the %s binary. Everywhere else, speak to it through the\n' \
-        "$CODEX_HOME" "$CODEX_BINARY"
+        "$CODEX_ADAPTER_DIR" "$CODEX_BINARY"
     printf 'AgentRunner port instead.\n'
     record "codex containment" FAIL ""
 else
@@ -235,6 +244,194 @@ else
         printf 'No import statements in %s.\n' "$AGL_INIT"
         record "package root" PASS ""
     fi
+fi
+
+# ---------------------------------------------------------------------------------------------
+# 8. No test module can reach a paid endpoint
+#
+# A test that spends a token is indistinguishable from one that does not: same green, a second
+# slower. Stage 7.1 found the last one by accident. So "no test in this repository reaches a paid
+# endpoint" is not left to a docstring, and not left to a fixture either - it is measured here, on
+# every run, in the two shapes it can fail.
+#
+# **A passing fixture is not evidence, and neither half below is one.** tests/conftest.py exports a
+# loopback base URL, a dummy key and a scratch CODEX_HOME for every test in the suite; a gate that
+# ran the suite and read the green tick would be asserting that the fixture which just ran, ran.
+# Both halves are chosen because they fail in cases where every existing test still passes.
+#
+# Half one - the guard deleted, renamed, or lost in a conftest reshuffle. A probe module is written
+# into tests/ now, run, and deleted. It imports nothing from the guard, names no fixture and opts
+# into nothing, so it *is* the claim - a file added today is protected by default - rather than a
+# restatement of it, and it does not care where the fixture lives or what it is called. It runs
+# with the environment poisoned: ANTHROPIC_BASE_URL set to the real vendor endpoint,
+# ANTHROPIC_API_KEY emptied (which is what makes the CLI reach for the operator's own OAuth bearer
+# token), and CODEX_HOME pointed at a scratch directory holding a stand-in auth.json. The poison is
+# what makes the probe non-vacuous: the machine this was written on already had
+# ANTHROPIC_BASE_URL=https://api.anthropic.com in the ambient shell, so "the variable looked fine"
+# would have been luck. Passing means the guard *overrode* a live endpoint. Nothing here starts a
+# CLI or opens a socket to anything: the probe reads three environment variables and one file path.
+#
+# Half two - a test module quietly re-pointing a guarded variable. An AST scan of every .py under
+# tests/ except the one file allowed to write them. It flags setenv/delenv/putenv/unsetenv naming a
+# guarded variable, a subscript assignment or `del` keyed by one, os.environ.pop/setdefault/update
+# naming one, any os.environ.clear(), and a dict literal keyed by one - which is the
+# subprocess.run(env=...) shape. Parsed rather than grepped because the interesting version of this
+# spans lines. What it cannot see is a variable name assembled at runtime, and nothing cheap could.
+#
+# **Codex is covered by credential removal and not by endpoint redirection**, and the probe checks
+# the half that was measured: CODEX_HOME names a directory with no auth.json in it, so a `codex`
+# any test starts has no ChatGPT token to send anywhere. There is deliberately no assertion about
+# where Codex would send one - `codex --help` documents no endpoint environment variable, the
+# endpoint is configuration, and proving a redirect works costs a `codex exec`. Deliverable 8.0.
+#
+# (Named, not numbered: gates get inserted, and the numbers move. tests/conftest.py and
+# tests/adapters/test_claude_code_runner.py refer to this one as the paid-endpoint gate.)
+# ---------------------------------------------------------------------------------------------
+
+gate_header 8 "no test module can reach a paid endpoint" \
+    "ast scan of tests/ for writes to the guarded variables, then $VENV_BIN/pytest on a probe module written into tests/ with the real endpoints poisoned"
+
+guard_writes="$(
+    AGL_GUARDED_VARS="$GUARDED_VARS" AGL_GUARD_OWNER="$GUARD_OWNER" "$VENV_BIN/python" - <<'PY'
+import ast
+import os
+import pathlib
+
+guarded = set(os.environ["AGL_GUARDED_VARS"].split())
+owner = pathlib.Path(os.environ["AGL_GUARD_OWNER"])
+writers = {"setenv", "delenv", "putenv", "unsetenv"}
+mutators = {"pop", "setdefault", "update", "clear"}
+
+
+def literals(call: ast.Call) -> set[str]:
+    return {a.value for a in call.args if isinstance(a, ast.Constant) and isinstance(a.value, str)}
+
+
+def is_environ(node: object) -> bool:
+    return (isinstance(node, ast.Attribute) and node.attr == "environ") or (
+        isinstance(node, ast.Name) and node.id == "environ"
+    )
+
+
+def bound(node: ast.AST) -> list[ast.expr]:
+    if isinstance(node, ast.Assign | ast.Delete):
+        return list(node.targets)
+    if isinstance(node, ast.AnnAssign | ast.AugAssign):
+        return [node.target]
+    return []
+
+
+found: list[tuple[str, int, str]] = []
+for source in sorted(pathlib.Path("tests").rglob("*.py")):
+    if source == owner:
+        continue
+    for node in ast.walk(ast.parse(source.read_text(encoding="utf-8"))):
+        at = int(getattr(node, "lineno", 0))
+        if isinstance(node, ast.Call):
+            called = getattr(node.func, "attr", None) or getattr(node.func, "id", None)
+            named = sorted(guarded & literals(node))
+            if called in writers and named:
+                found.append((str(source), at, f"{called}({named[0]!r}, ...)"))
+            elif called in mutators and is_environ(getattr(node.func, "value", None)):
+                if named or called == "clear":
+                    found.append((str(source), at, f"os.environ.{called}({', '.join(named)})"))
+        for target in bound(node):
+            key = target.slice if isinstance(target, ast.Subscript) else None
+            if isinstance(key, ast.Constant) and key.value in guarded:
+                found.append((str(source), at, f"{key.value!r} rebound or deleted as a key"))
+        if isinstance(node, ast.Dict):
+            for key in node.keys:
+                if isinstance(key, ast.Constant) and key.value in guarded:
+                    found.append((str(source), at, f"{{{key.value!r}: ...}} - a composed environment"))
+
+for where, at, what in sorted(set(found)):
+    print(f"{where}:{at}: {what}")
+raise SystemExit(1 if found else 0)
+PY
+)"
+scan_status=$?
+
+if [ -n "$guard_writes" ]; then
+    printf '%s place(s) under tests/ write a guarded environment variable outside %s:\n\n' \
+        "$(printf '%s\n' "$guard_writes" | wc -l | tr -d ' ')" "$GUARD_OWNER"
+    printf '%s\n' "$guard_writes" | sed 's/^/    /'
+    printf '\nOnly %s may write these: %s\n' "$GUARD_OWNER" "$GUARDED_VARS"
+    printf 'A module that re-points one of them sends its subprocesses wherever it said, and the\n'
+    printf 'guard cannot see it happen - the loopback records nothing and the teardown passes.\n'
+else
+    printf 'No module under tests/ writes any of these outside %s:\n    %s\n' \
+        "$GUARD_OWNER" "$GUARDED_VARS"
+fi
+
+probe_home="$(mktemp -d)"
+printf '{"note":"a stand-in for the operator credential store, written by scripts/check"}\n' \
+    >"$probe_home/auth.json"
+trap 'rm -f "$REPO_ROOT/$PROBE"; rm -rf "$probe_home"' EXIT INT TERM
+
+cat >"$PROBE" <<'PY'
+"""Written by `scripts/check` and deleted again: a module that did not exist when the guard did.
+
+The claim is that a test file added today inherits the repo-wide paid-endpoint guard without
+asking. Nothing here imports the guard, names its fixture, or opts into anything - so if this
+passes, `tests/conftest.py` reached a module it has never heard of. `scripts/check` runs it with
+the real endpoints poisoned into the environment, which is what makes passing mean the guard
+*overrode* them rather than that this machine happened to be clean.
+"""
+
+import ipaddress
+import os
+from pathlib import Path
+from urllib.parse import urlsplit
+
+
+def test_a_module_written_today_inherits_the_paid_endpoint_guard() -> None:
+    base = os.environ.get("ANTHROPIC_BASE_URL", "")
+    host = urlsplit(base).hostname or ""
+    try:
+        loopback = ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        loopback = False
+
+    assert loopback, (
+        f"ANTHROPIC_BASE_URL is {base!r} in a module that asked for nothing. scripts/check "
+        f"poisoned it with the real vendor endpoint and the repo-wide guard did not override it, "
+        f"so a `claude` started from any newly added test file goes straight to a paid endpoint"
+    )
+    assert os.environ.get("ANTHROPIC_API_KEY"), (
+        "ANTHROPIC_API_KEY is empty here. That is not a missing precaution: it is what makes the "
+        "CLI fall back to the operator's own OAuth bearer token and send it to whatever is "
+        "listening on the redirected base URL"
+    )
+    home = os.environ.get("CODEX_HOME", "")
+    assert home and not (Path(home) / "auth.json").is_file(), (
+        f"CODEX_HOME is {home!r} and there is an auth.json in it. scripts/check poisoned it with a "
+        f"stand-in for the operator's own credential store and the guard did not redirect it, so a "
+        f"`codex` started from any newly added test file can read live ChatGPT tokens"
+    )
+PY
+
+printf '\nProbe: %s, run with the endpoints poisoned.\n\n' "$PROBE"
+
+ANTHROPIC_BASE_URL="https://api.anthropic.com" \
+    ANTHROPIC_API_KEY= \
+    CODEX_HOME="$probe_home" \
+    "$VENV_BIN/pytest" "$PROBE" -q -p no:cacheprovider
+probe_status=$?
+
+rm -f "$PROBE"
+rm -rf "$probe_home"
+trap - EXIT INT TERM
+
+if [ "$scan_status" -eq 0 ] && [ "$probe_status" -eq 0 ]; then
+    record "paid-endpoint guard" PASS ""
+else
+    if [ "$probe_status" -ne 0 ]; then
+        printf '\nThe probe module was written into tests/ moments ago and asked for nothing. It\n'
+        printf 'inherits whatever %s gives every test - and on this run that was not\n' "$GUARD_OWNER"
+        printf 'enough to keep a paid endpoint out of reach. Every test file in the repository is\n'
+        printf 'in the same position, including the ones that spawn a CLI.\n'
+    fi
+    record "paid-endpoint guard" FAIL ""
 fi
 
 # ---------------------------------------------------------------------------------------------
