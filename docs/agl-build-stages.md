@@ -40,14 +40,14 @@ model call and no tokens:
 - **The init message**, emitted when a session opens, before any model call. Lists registered tools,
   MCP servers, subagents, slash commands by name. This verifies hermeticity *and* that deny rules
   actually removed something — the two claims most worth checking.
-- **A loopback endpoint** (`tests/instruments/loopback.py`) reading the composed request before it
-  leaves. This is what settled the `CLAUDE.md` question, with two controls and one measurement.
-- **`check_ready`** — free *only* because of the loopback, which the whole of
-  `tests/adapters/test_claude_code_runner.py` is now pointed at. It is not a cheap query: it costs
-  one real turn against the far side, by design, because `init`'s `apiKeySource` reports `"none"`
-  for a working subscription session and nothing cheaper distinguishes logged in from logged out.
-  Until stage 7 that turn was paid on **every `scripts/check` run** on an authenticated machine,
-  through the contract suite's own `check_ready` test.
+- **A loopback endpoint** reading the composed request before it leaves. This is what settled the
+  `CLAUDE.md` question, with two controls and one measurement.
+- **Harness version, `--help`, config discovery** — pure CLI introspection.
+
+**One that looks free and is not:** `check_ready` **makes a real turn**. Nothing cheaper
+distinguishes logged-in from logged-out — the CLI's own `apiKeySource` reports `"none"` for a
+working subscription. Stage 7.1 found it had been spending a token on every `scripts/check` run
+since the machine was authenticated. Treat readiness as paid and gate it accordingly.
 - **A scripted transport** through the SDK's own injection point: no CLI, no model, fully
   deterministic. Registration, payload mapping, handler invocation, answer serialised back into the
   same session — the adapter's entire half of `on_question` lives here.
@@ -61,6 +61,12 @@ adapter's half with the scripted transport and record the rest.
 `docs/manual-qa.md` and moves on: what was assumed, the command a human would run to check it, and
 what it would mean if it is wrong. 19.2 assembles those entries into the single ordered pass — it
 does not go looking for them, so a stage that defers silently loses the item.
+
+**The guard must be repo-wide, not per-file.** A loopback fixture scoped to one module protects one
+module; the next adapter test file inherits nothing. Session-scoped autouse in `tests/conftest.py`,
+an Authorization-header teardown (a redirected base URL with no API key makes the CLI send the
+operator's real OAuth token to whatever is listening), and a `scripts/check` gate asserting no module
+can reach a paid endpoint. A test that spends a token looks exactly like one that does not.
 
 Three standing rules: a run that cannot happen is a **skip with a reason**, never a green; no test
 may pass because something failed; and no test spends tokens.
@@ -207,7 +213,10 @@ with no shared fixture precisely so this splits.
 | 7.2 | `adapters/claude_code/runner.py` — session, tool supply, `Question` mapping, hermeticity, `capabilities()` |
 | 7.3 | `adapters/claude_code/fake.py` — scripted replies, scripted questions |
 
-**Accept:** contract suite 3.2 passes for real and fake, hermeticity fixture included.
+**Accept:** contract suite 3.2 passes for the fake in full. **Six of its eight tests read a model's
+conduct**, so under the no-tokens rule they skip for the real adapter and move to `docs/manual-qa.md`
+— the two that remain (`capabilities`, and the free half of readiness) plus the free instruments
+(init message, loopback) carry hermeticity, tool registration and deny-rule enforcement.
 
 ---
 
@@ -229,6 +238,7 @@ say so — `capabilities()` exists precisely to report that honestly rather than
 
 | # | Deliverable |
 |---|---|
+| 8.0a | Make the paid-endpoint guard repo-wide, before anything else. Stage 7.1's loopback and guard test are scoped to one module by a *module*-scoped autouse fixture; this stage adds a second adapter test file and Codex has the same redirectable-base-URL shape. Session-scoped fixture in `tests/conftest.py`, Authorization-header teardown generalised, and a `scripts/check` gate so the claim is verified rather than trusted |
 | 8.0 | Codex CLI capability findings — written, no code. Blocks 8.1–8.3 |
 | 8.1 | `adapters/openai/translate.py` — `Restriction` → sandbox/approval flags, `ModelId` → model string, CLI exit codes and stderr → `AglError`, tool-call events → activity strings |
 | 8.2 | `adapters/openai/runner.py` — subprocess invocation, stream parsing, tool supply, hermeticity (ignore repo `AGENTS.md` / `.codex/`), `capabilities()` reporting whatever it genuinely cannot do |
@@ -249,8 +259,9 @@ refactor git onto it in the same stage, and record it as the **one sanctioned ex
 adapter independence in `.importlinter`. If the two needs differ enough that sharing would distort
 either, say so and keep them separate. Either answer is acceptable; an unexamined default is not.
 
-**Accept:** contract suite 3.2 passes for **both** vendors and both fakes, hermeticity fixture
-included. Routing dispatch test. `ports/agent.py` unchanged since stage 2 — a diff here is a design
+**Accept:** contract suite 3.2 passes for **both fakes** in full, and for the real adapters as far as
+free instruments reach — the same six model-conduct tests that skip for Claude skip for Codex, and go
+to `docs/manual-qa.md`. Routing dispatch test. `ports/agent.py` unchanged since stage 2 — a diff here is a design
 failure worth reporting rather than absorbing.
 
 ---
@@ -420,7 +431,7 @@ means an abstraction was missing and should be reported, not patched around.
 | 19.1 | Three concurrent runs on one repo — two `split`, one `fix`, different base refs. **Fake agents, real git**: the claim is about worktree and ref concurrency, not model behaviour, so this spends nothing |
 | 19.2 | Assemble `docs/manual-qa.md` into a single ordered checklist — every harness assumption accumulated since stage 7, each with what was assumed, the command to check it, and what to do if it is wrong. **Not an automated suite**: this is the one pass a human runs against real models, at the end, once |
 | 19.3 | Verify all twelve measurable targets from plan Part 5, one assertion each |
-| 19.4 | Enforcement audit — every contract in place and firing; delete `workflows/noop/`. Three stage-5 items: import-linter's `exhaustive = True` would close contract 1's hole natively (needs a `containers` rewrite); `src/agl/ports/__init__.py` is guarded by nothing; and module size is drifting badly — 14 over 300 at stage 3, 46 by stage 7 — so this is an audit of a backlog, not a check. Two debts carried from stage 0: flip `unmatched_ignore_imports_alerting` back to the default on the vendor-containment and composition-root contracts, now that the permitted vendor imports actually exist (it was set to `none` because the expressions matched nothing in an empty tree, which means a stale ignore is currently never reported); and confirm the adapter-independence list covers every package, including `adapters/_process.py` if stage 8 sanctioned it |
+| 19.4 | Enforcement audit — every contract in place and firing; delete `workflows/noop/`. Three stage-5 items: import-linter's `exhaustive = True` would close contract 1's hole natively (needs a `containers` rewrite); `src/agl/ports/__init__.py` is guarded by nothing; and module size is drifting badly — 14 over 300 at stage 3, 47 by stage 7 — so this is an audit of a backlog, not a check. Two debts carried from stage 0: flip `unmatched_ignore_imports_alerting` back to the default on the vendor-containment and composition-root contracts, now that the permitted vendor imports actually exist (it was set to `none` because the expressions matched nothing in an empty tree, which means a stale ignore is currently never reported); and confirm the adapter-independence list covers every package, including `adapters/_process.py` if stage 8 sanctioned it |
 
 **Accept:** all twelve targets pass in CI.
 
