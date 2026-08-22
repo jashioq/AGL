@@ -353,12 +353,24 @@ class Conversation:
         **A handler that raises is turned into a refusal carrying what it said**, which is
         `_tools._Route._called`'s own line and this module's sharpest piece of parity. That module
         catches it so that "the model is told, and the run carries on"; here the script is what
-        stands where the model stands, so the catch stands in the same place. It is a divergence
-        from `adapters/claude_code/fake.py`, which lets it propagate, and the divergence is on
-        purpose: there the catching is the vendor SDK's and outside AGL's source, here it is one
-        line of this adapter's own, and a fake of *this* adapter that killed a run its runner would
-        have carried through is a `--dry-run` reporting a failure that anger would not.
-        `BaseException` is deliberately not caught, for `Conversation.ask`'s reason.
+        stands where the model stands, so the catch stands in the same place.
+        `adapters/claude_code/fake.py` does the same, in the same shape and with the same sentence,
+        and its runner arrives at the same behaviour by another route - the vendor SDK's in-process
+        MCP server catches a handler's exception and hands the model an error result. All four
+        implementations of this port carry the run on.
+
+        **That used to be a divergence between the two fakes**, argued from where the catch is
+        written: one line of this adapter's own here, the vendor's over there and outside AGL's
+        source. The distinction does not survive contact with who a fake serves. `sdk/testing.py`
+        exists for workflow authors, both runners carry on, and whose `except` did it is invisible
+        from an author's side - what they observe is not. A fake that killed a run its runner would
+        have carried through is a `--dry-run` reporting a failure that anger would not, whichever
+        backend it stands in for, and **"stricter" is not a defence**: §1.9's rule is fidelity
+        rather than severity. The agreement is also what let `tests/contracts/agent.py` pin the
+        exception path at all - a contract clause can only exist where every implementation agrees,
+        and that suite's silence about it is how two fakes disagreed for a whole stage with
+        everything green. `BaseException` is deliberately not caught, for `Conversation.ask`'s
+        reason.
 
         **The payload makes a round trip through JSON on the way in**, which does three jobs at
         once. It refuses what a model could not have produced - a non-`str` key, a `NaN`, an object

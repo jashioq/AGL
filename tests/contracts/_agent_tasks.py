@@ -147,6 +147,18 @@ _REJECTION: Final = (
     "call record_note again."
 )
 _ACCEPTANCE: Final = "Noted. Nothing else is needed from this tool."
+_FAILURE: Final = "the notebook this tool writes into is not there"
+
+
+class ToolFailed(Exception):
+    """What a handler raises when a test asks it to fail rather than to refuse.
+
+    Its own class, and deliberately not one of `errors.py`'s: a handler is the *caller's* code, an
+    adapter is entitled to have no reading of what comes out of one, and an exception this suite
+    borrowed from the framework's own hierarchy would let an implementation recognise it. It is not
+    a `BaseException` either - both fakes decline to catch those on purpose, and a suite raising one
+    would be asking every implementation to swallow a cancellation.
+    """
 
 
 class Notes:
@@ -158,15 +170,22 @@ class Notes:
     *how* the refusal was carried - `ToolResult.rejected` is a channel a backend may not have, and
     the port explicitly lets an adapter render the refusal into the text the agent reads instead.
 
+    `raise_first` is the same provocation through the other door, and the two compose in the order
+    they are written: the handler raises that many times, then refuses `reject_first` times, then
+    accepts. A handler that raises is not a handler that refused politely - it is somebody's tool
+    hitting a bug - and every implementation of this port turns it into a refusal the agent reads,
+    so the clause it provokes is the same clause and the trace it leaves is the same trace.
+
     What arrives is kept as `object` rather than as a mapping. The port says a payload is a
     `Mapping[str, JsonValue]`, and an adapter that hands over the raw JSON string its backend
     produced is exactly the bug worth catching - which a list that already claimed to hold
     mappings could not report.
     """
 
-    def __init__(self, *, reject_first: int = 0) -> None:
+    def __init__(self, *, reject_first: int = 0, raise_first: int = 0) -> None:
         self.received: list[object] = []
         self._reject_first = reject_first
+        self._raise_first = raise_first
         self.tool = Tool(
             name=NOTE,
             description=(
@@ -179,7 +198,9 @@ class Notes:
 
     async def _record(self, payload: Mapping[str, JsonValue]) -> ToolResult:
         self.received.append(payload)
-        if len(self.received) <= self._reject_first:
+        if len(self.received) <= self._raise_first:
+            raise ToolFailed(_FAILURE)
+        if len(self.received) <= self._raise_first + self._reject_first:
             return ToolResult(text=_REJECTION, rejected=True)
         return ToolResult(text=_ACCEPTANCE)
 
@@ -241,6 +262,16 @@ CORRECT_A_REFUSED_NOTE: Final = (
     "3. If you are told the note was not accepted, read what you were told, correct the note, "
     f"and call {NOTE} again. Keep going until a note is accepted.\n"
     "4. Once a note has been accepted, stop and reply with the single word: done"
+)
+
+KEEP_CALLING_A_FAILING_NOTE: Final = (
+    "Record what the project in this workspace is, and keep at it until a note is recorded.\n"
+    "\n"
+    "1. Read README.md at the root of the workspace you were given.\n"
+    f"2. Call the {NOTE} tool once, with a note saying what the project does.\n"
+    "3. If the call comes back as an error, a failure or a refusal of any kind, read what you "
+    f"were told and call {NOTE} again. Keep going until a call is accepted.\n"
+    "4. Once a call has been accepted, stop and reply with the single word: done"
 )
 
 ASK_TWICE: Final = (

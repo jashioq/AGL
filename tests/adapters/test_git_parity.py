@@ -825,6 +825,64 @@ async def test_landing_over_unrecorded_work_in_the_target_is_refused_by_both(
     assert await _refused(pair, over_unrecorded_work) is UpstreamUnexpected
 
 
+async def test_a_commit_message_git_cleans_away_to_nothing_is_refused_by_both(
+    pair: Mapping[str, _Bundle],
+) -> None:
+    """`UpstreamUnexpected` on both sides of the boundary git's message cleanup actually draws.
+
+    A `commit=` template that renders empty is how a workflow reaches this, and it is exactly the
+    §1.9 failure: the step passes `--dry-run` and dies in anger with `Aborting commit due to empty
+    commit message.` - which `GitWorkspaceProvider` hands to `UpstreamUnexpected`, exit 70, on a
+    message the fake used to record without comment.
+
+    **Both halves are asserted, because refusing too much is the same drift facing backwards.**
+    `WHITESPACE_ONLY` is every shape whose characters are all drawn from the four git strips -
+    space, tab, carriage return, line feed - and `NOT_QUITE_EMPTY` is the boundary one character
+    to the other side: a vertical tab and a no-break space are `str.isspace()` in Python and
+    ordinary characters to git, a `#` line is kept because a `--message` is cleaned in git's
+    `whitespace` mode rather than `strip` mode, and padded prose is recorded with the padding
+    trimmed off. A fake reaching for `str.strip()` here would refuse three of those four, and a
+    workflow's ordinary commit line would stop on fakes and land in anger.
+
+    What the two record it *as* is deliberately not compared: git rewrites a message on the way in
+    and the fake keeps it verbatim, which no member of these three ports can see - nothing here
+    reads a message back - so there is nothing to compare that is not one implementation's private
+    business. The refusal is the observable half, and it is the half held to git.
+    """
+    def recording(message: str, at: str) -> Callable[[_Bundle], Awaitable[str]]:
+        """One step's worth of work in a namespace of its own, recorded under `message`.
+
+        A namespace per message, because a refusal leaves the checkout dirty and the next message
+        would then be asked about a commit the previous one had already failed to make.
+        """
+
+        async def scenario(bundle: _Bundle) -> str:
+            workspace = await bundle.provider.open(LABEL, Namespace(at), bundle.base)
+            _put(workspace, SCRATCH, _body(f"what the step in {at} did"))
+            return await workspace.commit_all(message)
+
+        return scenario
+
+    for index, message in enumerate(("", " ", "\t", "\n", "\r", "  \t\n \r\n", "\n\n")):
+        refusal = await _refused(pair, recording(message, f"T-1{index}"))
+        assert refusal is UpstreamUnexpected, (
+            f"a commit message of {message!r} was refused as {refusal.__name__}, and git's own "
+            f"refusal of it reaches a caller as UpstreamUnexpected: `GitWorkspaceProvider` hands "
+            f"every way `git commit` can say no to that one class, so a fake answering another "
+            f"sends a person looking for a different problem"
+        )
+
+    for index, message in enumerate(("\v", "\xa0", "# a note and nothing else", "  a step  ")):
+        for name, bundle in pair.items():
+            head = await recording(message, f"T-2{index}")(bundle)
+            assert head, (
+                f"the {name} implementation answered {head!r} for a commit under {message!r}, and "
+                f"git records that message: it is not whitespace to git's cleanup, whatever "
+                f"`str.isspace()` says about it. A fake stricter than the thing it stands in for "
+                f"stops a run anger would have carried through, which is §1.9 facing backwards"
+            )
+
+
 # --- Where the two deliberately disagree ----------------------------------------------------------
 
 

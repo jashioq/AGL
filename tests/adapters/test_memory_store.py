@@ -1,20 +1,20 @@
 """`MemoryStore` against the `Store` contract, plus the clauses only the fake can be asked about.
 
 The first class is the whole of the port: `StoreContract` with its one fixture overridden and
-nothing else touched, the same sixteen tests `FilesystemStore` runs. That is the mechanism §1.9
+nothing else touched, the same nineteen tests `FilesystemStore` runs. That is the mechanism §1.9
 asks for - the real adapter and the fake held to one suite, written at stage 3 before either
 existed - and nothing below re-asserts any of it.
 
-What is below is what the suite deliberately cannot see. Two of the three are things it lists in
-its own docstring as gaps, and the third is a property a store holding its state in a process has
-that a store holding it in files does not:
+**Copy-in used to be asserted here and is now three clauses of that suite**, where both stores run
+it: §3.6 has the store copy any mapping it is handed, the clause needs no knowledge of what a store
+is made of, and a fake proved to honour it beside a real adapter that was never asked is the drift
+§1.9's Rule 3 exists to stop. The suite's own list of what it cannot see named this and no longer
+does.
 
-  * **Copy-in.** The suite never edits a mapping it passed to a write, and says so (item 8): a
-    `Mapping` on the way in means a caller need not copy what it already has, and asserting either
-    answer would be inventing a clause the port does not have. §3.6 has the clause - the store
-    copies any mapping it is handed - so it is asserted here, where the implementation that has to
-    honour it lives. The edits reach into a nested object and a nested list, because a top-level
-    copy leaves the store's own state exposed one indirection deeper.
+What is left below is what that suite still deliberately cannot see. One of the two it lists in its
+own docstring as a gap, and the other is a property a store holding its state in a process has that
+a store holding it in files does not:
+
   * **Two stores share nothing.** The suite drives one store per test, so it cannot ask this at
     all. It is what makes an all-fakes bundle built twice two stores rather than one, and it is the
     fake's answer to two `agl` invocations over one `AGL_HOME`.
@@ -32,7 +32,6 @@ Named `test_memory_store.py` and not `test_store.py`: `tests/` carries no `__ini
 """
 
 import hashlib
-from copy import deepcopy
 from typing import Final
 
 import pytest
@@ -74,60 +73,6 @@ class TestMemoryStore(StoreContract):
         to `Store` is the first of the two, and no teardown is owed - the state goes when the
         object does."""
         return MemoryStore()
-
-
-# --- Copy-in, which the contract suite deliberately does not assert ---------------------------
-
-
-async def test_editing_the_mapping_a_write_was_handed_does_not_change_what_a_read_returns() -> None:
-    """§3.6: the store copies any mapping it is handed, so a caller reusing a builder dict cannot
-    silently edit an entry already on the ledger.
-
-    The edits below go three deep - the top-level mapping, the nested `params` object, the list
-    inside it, and an object inside *that* list - because a top-level copy passes an assertion that
-    only edits the top level while still holding the caller's own nested containers. This is the
-    clause the whole "hold documents serialised" decision exists for: `json.dumps` reads the
-    mapping once and produces a string that shares nothing with it, in one step and at every depth,
-    where a copy taken by hand is a copy somebody has to remember to take deeply enough.
-    """
-    store = MemoryStore()
-    rows: list[JsonValue] = [{"id": "T-01", "blocked_by": []}]
-    params: dict[str, JsonValue] = {"request": "add oauth", "tickets": rows}
-    written: dict[str, JsonValue] = {"workflow": "tickets", "params": params}
-    expected = deepcopy(written)
-
-    await store.write_record(RUN, written)
-    written["workflow"] = "edited"
-    params["request"] = "edited"
-    rows.append({"id": "T-99"})
-    first = rows[0]
-    assert isinstance(first, dict)
-    first["id"] = "edited"
-
-    assert await store.read_record(RUN) == expected, (
-        "the record on the ledger followed the mapping the caller went on editing"
-    )
-
-
-async def test_editing_the_mapping_an_entry_was_written_from_does_not_change_the_entry() -> None:
-    """The same clause on the write §3.6's ledger rests on, where getting it wrong is worse.
-
-    A step's status is derived from whether its entry exists, so an entry that quietly changes
-    after it was recorded is a completed step whose recorded result is not what the step produced,
-    with nothing anywhere to disagree.
-    """
-    store = MemoryStore()
-    tickets: list[JsonValue] = [{"id": "T-01"}]
-    value: dict[str, JsonValue] = {"tickets": tickets}
-    written: dict[str, JsonValue] = {"fingerprint": DIGEST, "value": value, "at": "2026-08-18"}
-    expected = deepcopy(written)
-
-    await store.write_entry(RUN, STEP, DIGEST, written)
-    written["fingerprint"] = "edited"
-    value["tickets"] = []
-    tickets.clear()
-
-    assert await store.read_entry(RUN, STEP, DIGEST) == expected
 
 
 # --- Two stores are two stores -----------------------------------------------------------------

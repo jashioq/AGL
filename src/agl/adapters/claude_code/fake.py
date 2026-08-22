@@ -146,6 +146,33 @@ what it is asked:
     authenticate against. Simulating `UpstreamUnavailable` on some invented condition would be
     inventing the one thing this class has no evidence about, which is `adapters/shell/fake.py`'s
     argument for the same absence.
+  * **`task.workspace` is carried and never looked at**, so a run whose workspace is not there
+    returns an outcome here and raises `UpstreamUnavailable` out of `ClaudeCodeRunner`. That is a
+    decision and not an oversight, and it is `adapters/shell/fake.py`'s, which faces the identical
+    question about `workdir` and settles it in as many words: "`ShellVerifier` raising
+    `UpstreamUnavailable` on a directory that is not there is a fact about a shell rather than a
+    clause of the port, and inventing an agreement with it here would mean this class asserting
+    something about the world it cannot see."
+
+    The port's own words are what settle it. `ports/agent.py` says one thing about `workspace` -
+    absolute, "refused otherwise", because "a relative path resolves against whatever directory
+    the adapter happens to start its work in" - and it says it in `AgentTask.__post_init__`, which
+    is where a clause about the value binds every implementation at once and is checked before any
+    of them is chosen. Existence could not be stated there even if somebody wanted it to be: a
+    frozen value is built once and run later, a worktree can be removed in between, so the one
+    place the port speaks about a workspace is the one place existence cannot be settled. Nothing
+    else in the port asks an implementation to check it.
+
+    What the real runner does is the same argument from the other end. `cwd=task.workspace` goes
+    to the process spawn, the vendor SDK's transport turns the failed `chdir` into
+    `CLIConnectionError("Working directory does not exist: ...")`, and `translate.translated`
+    reads that as `UpstreamUnavailable` - the class whose whole content is the promise that the
+    same call may succeed once the world changes. A promise about the world is not a violated
+    agreement, and a fake with no process to start has nothing to promise it about.
+
+    So the divergence stands, and what was wrong with it was that it stood in silence.
+    `test_claude_code_fake.py` now pins this end of it, beside the argv refusals, so that the next
+    reader finds a decision rather than an absence to re-derive.
 
 ## Hermeticity (§3.5) is satisfied by construction, and the contract suite says so about itself
 
@@ -297,6 +324,30 @@ class Conversation:
         `ports/agent.py` spends a paragraph on why an adapter must never learn which tool is the
         reporting one, and this module is built around it.
 
+        **A handler that raises is turned into a refusal carrying what it said**, because that is
+        what the session behind `ClaudeCodeRunner` does with the same situation: the vendor SDK's
+        in-process MCP server catches a handler's exception and hands the model an error result it
+        can read, so the model is told and the run carries on. `adapters/openai/_tools._Route.
+        _called` writes that same line by hand, in those words, and `adapters/openai/fake.py`
+        mirrors it. Here the script is what stands where the model stands, so the catch stands in
+        the same place, and the sentence it builds is the same sentence.
+
+        **Where the catch is written is not something a workflow author can see**, and that is what
+        settled this. It used to be the argument for letting an exception propagate from here while
+        the other fake caught: there the catching is that adapter's own line and here it is the
+        vendor's, outside AGL's source. But `sdk/testing.py` exists for workflow authors, both
+        runners carry on, and from an author's side the provenance of an `except` is invisible -
+        what they observe is not. A fake that killed a run its runner would have carried through is
+        a `--dry-run` reporting a failure that anger would not. **"Stricter" is not a defence**:
+        §1.9's rule is fidelity and not severity, and a fake that fails runs anger would have
+        completed is fiction in exactly the way one that passes runs anger would have failed is.
+
+        And a contract clause can only exist where the implementations agree. `tests/contracts/
+        agent.py` pinned the refusal path and was silent on the exception path, which is how two
+        fakes of one port came to disagree about it across a whole stage with every suite green;
+        agreeing is what closed the hole, and diverging would have left it open for good.
+        `BaseException` is deliberately not caught, for `Conversation.ask`'s reason.
+
         **The payload makes a round trip through JSON on the way in**, which does three jobs at
         once and is `memory_store.py`'s argument in another port's clothes. It refuses what a model
         could not have produced - a non-`str` key, a `NaN`, an object with no JSON spelling - so a
@@ -321,7 +372,15 @@ class Conversation:
                 f"a move any agent could have made, and a script that can make it is a script that "
                 f"proves a workflow works with a tool the workflow never declared"
             )
-        return await declared.handler(_as_json(payload, tool))
+        # Composed outside the `try`, and that placement is the whole of what keeps the two
+        # refusals apart: the JSON round trip is *this adapter's* refusal of a call no session
+        # could have carried, and catching it below would turn it into a refusal the handler
+        # appeared to make - a bug in a script reported as a bug in somebody's tool.
+        arguments = _as_json(payload, tool)
+        try:
+            return await declared.handler(arguments)
+        except Exception as raised:
+            return ToolResult(text=f"{declared.name} failed: {raised}", rejected=True)
 
     def report(self, line: str) -> None:
         """Say what is happening right now, or do nothing when nobody asked to be told.

@@ -598,6 +598,55 @@ async def test_a_task_carrying_every_restriction_runs_and_is_prevented_from_noth
     assert isinstance(outcome.text, str)
 
 
+@pytest.mark.asyncio
+async def test_a_workspace_that_is_not_there_is_run_in_here_and_would_stop_the_runner(
+    tmp_path: Path,
+) -> None:
+    """The second place this fake is deliberately more permissive, pinned rather than assumed.
+
+    A workflow reaches it by removing a worktree and then running an agent, or by computing
+    `AgentTask.workspace` itself; `FakeWorkspaceProvider.open` hands over a real directory, so it
+    is narrow, and narrow is not the same as decided. The decision is `adapters/shell/fake.py`'s,
+    which faces the identical question about `workdir`: a runner refusing a directory that is not
+    there is a fact about starting a process, not a clause of the port, and "inventing an agreement
+    with it here would mean this class asserting something about the world it cannot see".
+
+    `ports/agent.py` says exactly one thing about `workspace` - that it is absolute - and says it
+    in `AgentTask.__post_init__`, where a clause about the value binds every implementation at
+    once. Existence is not there and could not be: the task is frozen when it is built and run
+    later, and a worktree can go away in between. So the port is silent, and §1.9's rule about
+    silence has an answer only where the two implementations *could* agree.
+
+    **Only this end is asserted, and the other end is cited.** `ClaudeCodeRunner` reaches its
+    answer by starting a process - the SDK's transport raises `CLIConnectionError("Working
+    directory does not exist: ...")` when the spawn's `chdir` fails, and
+    `test_claude_code_translate.py` already pins that class to `UpstreamUnavailable`. Provoking it
+    for real would mean spawning a CLI, which every test in this file declines to do for free; a
+    stub `Transport` could not provoke it either, because it is the spawn itself that fails. What
+    a mutation of this fake can be caught by is this half, and this half is what is written down.
+
+    The direction matters more than the divergence. A fake that refused here would stop a
+    `--dry-run` on a `--dry-run`'s own terms - it starts no process and has no `chdir` to fail -
+    and that is §1.9 running backwards: a run failing on fakes that anger would have carried
+    through is fiction in the same way as one passing that anger would have stopped.
+    """
+    absent = tmp_path / "a-worktree-something-took-away"
+    assert not absent.exists(), "the fixture must begin with the directory genuinely not there"
+
+    outcome = await FakeAgentRunner().run(anything(absent))
+
+    assert isinstance(outcome.text, str), (
+        f"a run on a workspace that is not there answered {outcome!r}. This runner reads the "
+        f"workspace and never looks at it, because whether a directory can be entered is a fact "
+        f"about the process the real adapter starts and this one starts none"
+    )
+    assert not absent.exists(), (
+        f"{absent} exists after the run, so this fake made the directory it was pointed at. A "
+        f"workspace is provisioned by WorkspaceProvider and by nothing else, and a runner that "
+        f"created one would hide the very state this test is about"
+    )
+
+
 def test_this_fake_imports_on_a_machine_with_no_vendor_sdk() -> None:
     """The decision in the module's docstring, proved rather than asserted.
 

@@ -66,10 +66,37 @@ over is stated rather than hidden: a checkout's *directory* does outlive the pro
 leaves directories under the trees root that the next invocation's `FakeRepository` knows nothing
 about. `open` reads that the way git does, refusing to provision over a place that already holds
 files, and `remove` takes it away.
+
+## An empty commit message, and where the boundary actually is
+
+git refuses to record a commit whose message is empty *after it has cleaned it*, and a `commit=`
+template that renders to nothing is how a workflow reaches that: the step passes `--dry-run` and
+dies in anger with `Aborting commit due to empty commit message.` - exit 1 out of git, and
+`UpstreamUnexpected` out of `GitWorkspaceProvider`, whose `commit` call hands every refusal to
+that class. So `commit_all` refuses it here too, in the same class, and the boundary was measured
+against git 2.50.1 rather than reasoned about:
+
+  * **Refused**: `''`, `' '`, `'\\t'`, `'\\n'`, `'\\r'`, and every combination of those four - 71
+    refusals over 482 message shapes, every one of them with that same sentence.
+  * **Accepted**: anything with one other character in it, `'#'` and a bare `'\\x0b'` included. A
+    `-m` message is cleaned in git's `whitespace` mode rather than `strip` mode, so a comment line
+    is *not* removed and `'# note'` is an ordinary message.
+  * **Accepted, and rewritten**: `'   recorded by a step   '` is recorded as
+    `'   recorded by a step\\n'` - trailing whitespace off each line, empty lines off both ends,
+    runs of blank lines collapsed to one, and a final newline added.
+
+**Only the refusal is reproduced, and the rewriting deliberately is not.** No member of these three
+ports reads a message back - `_snapshots.py` says so where it stores one - so the cleaned form is
+unobservable from outside, and rewriting here would change nothing but this implementation's own
+content-addressed ids, which divergence 5 in `test_git_parity.py` already covers. What is
+observable is which messages are refused, and that is what is held to git exactly: not one message
+more, because a fake stricter than the thing it stands in for is the same fiction facing the other
+way.
 """
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Final
 
 from agl.adapters.git._conflicts import collided, unresolved
 from agl.adapters.git._merging import combined, contested
@@ -92,6 +119,13 @@ from agl.ports.tree_layout import (
 from agl.ports.workspace import Workspace, WorkspaceProvider
 
 __all__ = ["FakeHistory", "FakeIntegrator", "FakeRepository", "FakeWorkspaceProvider"]
+
+# What git's message cleanup takes away, and the whole of it: space, tab, carriage return and line
+# feed. Measured character by character rather than taken from a definition of "whitespace" - a
+# vertical tab, a form feed, U+0085 and a no-break space are all `str.isspace()` in Python and all
+# ordinary characters to git, so a message of one of them is a message git records. See the module
+# docstring for the measurement and for why being stricter here would be the same drift backwards.
+_CLEANED_AWAY: Final = " \t\r\n"
 
 
 class FakeWorkspaceProvider(WorkspaceProvider):
@@ -276,11 +310,18 @@ class _FakeWorkspace(Workspace):
         git would have left it out. That is the first of the divergences `test_git_parity.py`
         pins, and the reason is that parsing one program's ignore format would be putting that
         program back into the module whose whole claim is that there is none of it.
+
+        **A message git would clean away to nothing is refused, and the boundary below was
+        measured rather than assumed.** `_cleaned_away` is the whole of it. The refusal comes
+        *after* the no-op comparison because the real adapter's does: `GitWorkspaceProvider` asks
+        `diff --cached --quiet` first and returns the head without ever running `commit`, so a step
+        that changed nothing is not the place an empty template is caught.
         """
         at = await self.head()
         held = snapshot(self.path)
         if held == self._repository.tree_of(at):
             return at
+        _cleaned_away(message, self.path)
         recorded = self._repository.record(held, (at,), message)
         self._repository.move(self._at.branch, recorded)
         return recorded
@@ -548,3 +589,23 @@ def _merged(source: str, target: str) -> str:
     is about a message describing *work*, and this one describes an event.
     """
     return f"Merge branch '{source}' into {target}"
+
+
+def _cleaned_away(message: str, where: Path) -> None:
+    """`UpstreamUnexpected` if git would clean `message` away to nothing. See the module docstring.
+
+    `strip` and not `str.strip()`, and the difference is the whole of the care this needs.
+    Python's own strip is Unicode-aware and takes a vertical tab, a form feed, U+0085 and a
+    no-break space for whitespace; git's cleanup does not, and refusing a message git records
+    would be the drift §1.9 names running the other way - a `--dry-run` that stops a step anger
+    would have carried through. So the set is written out, and it is the four characters that
+    were measured, in the two places they are stripped from.
+    """
+    if message.strip(_CLEANED_AWAY) == "":
+        raise UpstreamUnexpected(
+            f"the message for this commit is {message!r}, and git cleans that away to nothing: it "
+            f"takes the trailing whitespace off every line of a `--message` and the empty lines "
+            f"off both ends, then refuses what is left when nothing is - `Aborting commit due to "
+            f"empty commit message.`, exit 1. Nothing in {where} has been recorded, and a step "
+            f"whose commit template renders to whitespace fails here exactly as it would in anger"
+        )

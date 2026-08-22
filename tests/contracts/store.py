@@ -73,11 +73,7 @@ own surface can be made to reveal, not a test somebody forgot.
    here provokes it. `remove` is also not asserted atomic, because the port explicitly does not
    ask for it.
 
-8. **Whether a write copies the mapping it was handed.** The suite never edits a mapping it passed
-   to a write. `Mapping` on the way in says a caller need not copy what it already has; it does
-   not say the store snapshots it, and asserting either answer would be inventing a clause.
-
-9. **Non-finite floats.** `JsonValue` admits a `float`, and NaN and the infinities are floats JSON
+8. **Non-finite floats.** `JsonValue` admits a `float`, and NaN and the infinities are floats JSON
    has no standard spelling for. An implementation may reasonably refuse them and the port has no
    opinion, so no test here writes one.
 
@@ -88,8 +84,21 @@ depends on it: that ownership of what a read hands back is ownership all the way
 level deep; that an overwrite may not be observed as a momentary absence; and that `namespaces`
 under a scope that recorded nothing answers with an empty tuple rather than raising - `clear`
 after a crash is its one caller, which settles it.
+
+There is a fourth, and it is of a different kind, so it is recorded here rather than left to be
+noticed. **The three copy-in clauses are §3.6's, not the port's.** §3.6 says it outright - the
+`Store` "copies any mapping it is handed" and returns copies on read, "otherwise a caller reusing a
+builder dict silently edits an entry already on the ledger" - and both implementations restate it
+in their own docstrings. The port states the read-side half ("a read hands back something the
+caller owns") and, on the way in, says only why a `Mapping` is accepted: "a caller should not have
+to copy what it already has in order to hand it over". That sentence is a courtesy to the caller
+and is silent on what the store then does, so these three assert a clause of the design that the
+port's own docstring does not carry. A suite here is otherwise written against a port's docstring
+and against nothing else; this is the one place that is not true of, and the honest fix is a
+sentence in `ports/store.py` rather than a quieter suite.
 """
 
+import asyncio
 from collections.abc import Iterator
 from copy import deepcopy
 
@@ -120,9 +129,10 @@ class StoreContract(StoreScopeContract, StoreConcurrencyContract):
     """The suite. Everything a `Store` promises, and nothing an implementation gets to choose.
 
     Its own tests are the four lookups: what an address answers with, what a document survives
-    being written as, and who owns what a read hands back. The two halves it inherits are
-    `_store_scopes` - `namespaces` and `remove`, which enumerate under a scope rather than fetch
-    by one - and `_store_concurrency`, the atomic-write clause and what it takes to watch it.
+    being written as, who owns what a read hands back, and who owns what a write was handed -
+    including *when* it stopped being the caller's. The two halves it inherits are `_store_scopes`
+    - `namespaces` and `remove`, which enumerate under a scope rather than fetch by one - and
+    `_store_concurrency`, the atomic-write clause and what it takes to watch it.
 
     `pytestmark` is on the class rather than on each method because subclasses inherit it, and
     because `asyncio_mode = "strict"` makes the marker the difference between a test that runs and
@@ -254,6 +264,153 @@ class StoreContract(StoreScopeContract, StoreConcurrencyContract):
         rows.clear()
         held_entry["fingerprint"] = "edited"
         assert await store.read_entry(RUN, STEP, digest("owned")) == unedited
+
+    async def test_editing_the_mapping_a_write_was_handed_does_not_change_what_a_read_returns(
+        self, store: Store
+    ) -> None:
+        """§3.6: the store copies any mapping it is handed, so a caller reusing a builder dict
+        cannot silently edit an entry already on the ledger.
+
+        The edits below go three deep - the top-level mapping, the nested `params` object, the list
+        inside it, and an object inside *that* list - because a top-level copy passes an assertion
+        that only edits the top level while still holding the caller's own nested containers. That
+        is the read-side clause's argument run in the other direction: the port's reason for it is
+        about editing and not about the depth the edit happened at, and a store holding the
+        caller's `params` is a store the caller edits one indirection further in.
+
+        *How* the copy is taken is nobody's business here. Serialising the document, copying it
+        deeply, or keeping nothing of it at all each satisfy this; what it forbids is holding the
+        caller's own containers, at any depth, after the write has returned.
+        """
+        rows: list[JsonValue] = [{"id": "T-01", "blocked_by": []}]
+        params: dict[str, JsonValue] = {"request": "add oauth", "tickets": rows}
+        written: dict[str, JsonValue] = {"workflow": "tickets", "params": params}
+        expected = deepcopy(written)
+
+        await store.write_record(RUN, written)
+        written["workflow"] = "edited"
+        params["request"] = "edited"
+        rows.append({"id": "T-99"})
+        first = rows[0]
+        assert isinstance(first, dict)
+        first["id"] = "edited"
+
+        assert await store.read_record(RUN) == expected, (
+            "the record on the ledger followed the mapping the caller went on editing"
+        )
+
+    async def test_editing_the_mapping_an_entry_was_written_from_does_not_change_the_entry(
+        self, store: Store
+    ) -> None:
+        """The same clause on the write §3.6's ledger rests on, where getting it wrong is worse.
+
+        A step's status is derived from whether its entry exists, so an entry that quietly changes
+        after it was recorded is a completed step whose recorded result is not what the step
+        produced, with nothing anywhere to disagree.
+        """
+        tickets: list[JsonValue] = [{"id": "T-01"}]
+        value: dict[str, JsonValue] = {"tickets": tickets}
+        written: dict[str, JsonValue] = {
+            "fingerprint": digest("handed"),
+            "value": value,
+            "at": "2026-08-18T09:16:41Z",
+        }
+        expected = deepcopy(written)
+
+        await store.write_entry(RUN, STEP, digest("handed"), written)
+        written["fingerprint"] = "edited"
+        value["tickets"] = []
+        tickets.clear()
+
+        assert await store.read_entry(RUN, STEP, digest("handed")) == expected
+
+    async def test_a_write_takes_its_copy_before_it_could_hand_control_anywhere_else(
+        self, store: Store
+    ) -> None:
+        """The *when* of the two clauses above, which on their own they cannot reach.
+
+        Both of them edit after awaiting the write to completion, so no yield point inside the
+        write is ever open while they edit. An implementation that stashes the caller's mapping,
+        awaits something, and encodes afterwards passes both of them and is still wrong: between
+        the two moments the document belongs to the caller and to the ledger at once, and a caller
+        that goes on filling in its builder dict in that window has edited a record already
+        written. So the condition is on *when* - the copy has to be taken on the caller's own line
+        of execution, before the method could hand control anywhere else.
+
+        **This refuses no honest implementation, including a slow one.** The write is started as a
+        task rather than awaited, and this loop then yields once - the write's first opportunity to
+        run. Copy-then-yield passes: an implementation that does all its work without awaiting has
+        finished, and one across a network has taken its copy and is waiting on a socket, and
+        neither can see the edits that follow. Yield-then-copy fails, and there is no third
+        outcome, so nothing here is a threshold and nothing here is a race. The question a reader
+        arrives with - does this fail an implementation for being slow? - has the answer that
+        slowness is not observable from this clause at all.
+
+        **Exactly one yield, and the number is the whole instrument.** Measured when this was
+        written, against throwaway implementations yielding K times before taking their copy and a
+        test yielding N times before editing: N=1 passes K=0 and catches every K from 1 up. N=0
+        fails K=0, because a task that has not started yet was handed a mapping the caller then
+        edited, which is the caller's doing and not the store's. N=2 misses K=1 - the write's one
+        yield is spent while this loop is spending its second, so it has already copied by the time
+        the edits land - and every larger N misses more. One is the only number that is both fair
+        and sharp.
+
+        Sibling to `_store_concurrency`, and it is the same fact from the other side. That module
+        says an implementation whose write does all its work without awaiting is never observed
+        part-way through, and asserts against that knowing it cannot fail. Here that same
+        implementation is the one this clause is silent about *by construction*: the single yield
+        is what lets it finish before the caller edits. What the two share is that neither reads
+        anything into a write it never saw the middle of. What differs is that this one is about
+        ownership rather than atomicity, so it sits with its two siblings above rather than with
+        the reader loops - and the machinery it needs is one task and one yield, not those.
+
+        Both writes, in that order and for the reason the second sibling gives: the entry is the
+        write §3.6's ledger rests on, and a copy taken late there is a completed step whose result
+        is not what the step produced.
+        """
+        rows: list[JsonValue] = [{"id": "T-01", "blocked_by": []}]
+        params: dict[str, JsonValue] = {"request": "add oauth", "tickets": rows}
+        written: dict[str, JsonValue] = {"workflow": "tickets", "params": params}
+        expected = deepcopy(written)
+
+        writing = asyncio.create_task(store.write_record(RUN, written))
+        await asyncio.sleep(0)
+        written["workflow"] = "edited"
+        params["request"] = "edited"
+        rows.append({"id": "T-99"})
+        first = rows[0]
+        assert isinstance(first, dict)
+        first["id"] = "edited"
+        await writing
+
+        read = await store.read_record(RUN)
+        assert read == expected, (
+            f"the write was started and this loop yielded once - the write's first opportunity to "
+            f"run - before the caller edited the mapping it had handed over, and the edits reached "
+            f"the ledger: {read}. So the copy is taken after the write has already handed control "
+            f"back, and in the window between those two moments the document is the caller's and "
+            f"the ledger's at the same time"
+        )
+
+        tickets: list[JsonValue] = [{"id": "T-01"}]
+        value: dict[str, JsonValue] = {"tickets": tickets}
+        handed: dict[str, JsonValue] = {"fingerprint": digest("in flight"), "value": value}
+        kept = deepcopy(handed)
+
+        recording = asyncio.create_task(store.write_entry(RUN, STEP, digest("in flight"), handed))
+        await asyncio.sleep(0)
+        handed["fingerprint"] = "edited"
+        value["tickets"] = []
+        tickets.clear()
+        await recording
+
+        recorded = await store.read_entry(RUN, STEP, digest("in flight"))
+        assert recorded == kept, (
+            f"the same window on the write the ledger rests on: the entry recorded is {recorded}, "
+            f"and it is what the caller went on editing after handing it over rather than what it "
+            f"handed over. A step's status is derived from whether its entry exists, so this is a "
+            f"completed step whose recorded result is not the result it produced"
+        )
 
     async def test_the_record_belongs_to_the_run_and_is_reached_from_anywhere_inside_it(
         self, store: Store

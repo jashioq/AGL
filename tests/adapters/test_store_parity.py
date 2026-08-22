@@ -200,7 +200,7 @@ async def test_a_non_finite_float_is_refused_by_both_and_neither_keeps_anything(
 ) -> None:
     """`JsonValue` admits a `float`, and NaN and the infinities are floats JSON cannot spell.
 
-    The contract suite writes none and says so (item 9): the port has no opinion and an
+    The contract suite writes none and says so (item 8): the port has no opinion and an
     implementation may reasonably refuse them. "May reasonably refuse" is exactly the shape of
     clause a fake drifts through, so the two are pinned to one answer here - refuse, with
     `InternalError`, because a bare `NaN` token is not JSON, no other reader accepts it, and it

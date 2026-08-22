@@ -121,6 +121,12 @@ SAY_MORE: Final = 1
 APPROVED: Final = "approved"
 TYPED: Final = "not yet - land the other one first"
 
+# What `_typed` prints when the second response is picked: the field's own label, and the colon the
+# terminal puts after it. No frame contains it - `_render` draws a `TextInput` as "<label> (type a
+# line)" - and nothing else in the package writes it, so finding it in the console is finding the
+# prompt that opened a read, and finding it is the terminal saying it has taken the screen.
+_PROMPTED: Final = "Say more:"
+
 # The questions and the dashboards. Sentences, because each one ends up in a failure message saying
 # what was on screen when something else should have been.
 EARLY: Final = "the question that was asked first"
@@ -186,6 +192,21 @@ def question(label: str) -> Screen[Answer]:
             TextInput("Say more", maps=lambda typed: Answer(asked=label, said=typed)),
         ],
     )
+
+
+def enquiry(label: str, rows: Mapping[str, str]) -> Screen[Answer]:
+    """`question`'s two responses over `board`'s live body: a question whose screen moves while up.
+
+    Neither of the two above will do for the one test that reads the terminal's record *during* a
+    read. `question` is built from a string, so every invocation of it returns an equal `Screen` and
+    a loop that kept drawing it is indistinguishable from one that stopped; `board` has no
+    responses, so nothing on it can be picked and no read is ever opened. This is both - a field to
+    pick, and a body that moves under it while the console belongs to somebody typing.
+
+    Composed from the two rather than spelling them again, so that the field a test picks and the
+    `maps` it answers through are the same ones every other test here uses.
+    """
+    return Screen(body=board(rows).body, responses=question(label).responses)
 
 
 def unreliable(label: str, wobbles: list[bool]) -> Screen:
@@ -475,13 +496,30 @@ async def test_picking_a_text_field_takes_the_screen_to_read_it_and_gives_the_sc
 
     Three things, and the last is the one an implementation can get wrong while looking right. The
     field's own label is what a person is prompted with, so they know which question the empty line
-    under their cursor belongs to. What they typed reaches the workflow through the screen's own
-    `maps`. And **the display comes back**: a terminal that took the screen and never gave it back
-    would answer this question correctly and then draw nothing for the rest of the run.
+    under their cursor belongs to - and it is prompted **by the pick**, which is asserted against
+    what the console received after the field was picked rather than against everything it has ever
+    been given. What they typed reaches the workflow through the screen's own `maps`. And **the
+    display comes back**: a terminal that took the screen and never gave it back would answer this
+    question correctly and then draw nothing for the rest of the run.
+
+    A fourth obligation of the same read is asserted next door instead of here, and
+    `test_the_record_of_what_was_written_stands_still_while_the_screen_is_taken_to_be_read` says
+    what it is: the record of what reached the display must not move while the console is handed
+    back. Catching that needs a screen that moves *under* the read, which is a view this one does
+    not use - so it is a second test rather than a fourth paragraph here.
     """
     async with terminal as term:
         asked = asyncio.create_task(term.show(question, label=EARLY))
         await _drawn(term, Text(EARLY))
+
+        unpicked = output.getvalue()
+        assert _PROMPTED not in unpicked, (
+            f"the field's label was prompted for before anybody picked the field: the console "
+            f"already holds {unpicked!r}. There is no field on the frame and no cursor in it - "
+            f"picking is what opens the read - so a prompt standing there beforehand is a terminal "
+            f"offering an editor nobody has opened, and it would satisfy the assertion below "
+            f"without a read ever happening"
+        )
 
         await keys.entered(str(SAY_MORE + 1), TYPED)
 
@@ -490,10 +528,14 @@ async def test_picking_a_text_field_takes_the_screen_to_read_it_and_gives_the_sc
             f"screen's own `maps`. The terminal collects a string and hands it straight over - it "
             f"never learns what the result is"
         )
-        assert "Say more:" in output.getvalue(), (
-            f"nothing prompted for the text: the console holds {output.getvalue()!r}. The field's "
-            f"label is the workflow author's own words for what to type, and a bare cursor under a "
-            f"screen that has just been taken away says nothing at all"
+        assert _PROMPTED in output.getvalue().removeprefix(unpicked), (
+            f"nothing prompted for the text: the console received "
+            f"{output.getvalue().removeprefix(unpicked)!r} from the moment the field was picked. "
+            f"The field's label is the workflow author's own words for what to type, and a bare "
+            f"cursor under a screen that has just been taken away says nothing at all. It is read "
+            f"as a delta because the buffer is cumulative and this whole test is about *when*: a "
+            f"prompt found anywhere in everything ever printed is one that may have gone up long "
+            f"before there was anything to type into"
         )
 
         await term.show(dashboard, line=LANDED)
@@ -503,6 +545,66 @@ async def test_picking_a_text_field_takes_the_screen_to_read_it_and_gives_the_sc
             "written says this frame went up, and the console never received it - which is a "
             "terminal drawing into a live region it stopped and never restarted"
         )
+
+
+async def test_the_record_of_what_was_written_stands_still_while_the_screen_is_taken_to_be_read(
+    terminal: RichTerminal, keys: Typing, output: io.StringIO
+) -> None:
+    """The other half of that read, and the half nothing in this file or the contract suite reads.
+
+    Picking a `TextInput` hands the console back for as long as the read lasts: the live region is
+    stopped, the prompt and the typing are ordinary output, and the redraw loop is held off. The
+    test above asserts the visible half of that - the label prompts, the typed line reaches `maps`,
+    the display comes back - and never once looks at `written` while the read is open.
+
+    That record is what `Presses.displayed` answers the contract suite with, and `written` promises
+    that "a screen this reports is a screen that reached the display". So for the length of a read
+    the last screen to have reached the console is the last screen this may report, and in
+    particular it may not follow a screen registered in the meantime, which reached nothing. A
+    `_draw` that computed its frame before looking at whether the screen had been taken would keep
+    the record moving right through the read - and every other assertion in this file would still
+    pass, because `_typed` clears the record on its way out: the drift lasts exactly as long as the
+    read and leaves nothing behind for anything else to find.
+
+    So the board moves *and* a dashboard is registered while the read is open, because a record
+    that cannot move cannot be caught standing still.
+    `test_a_live_argument_reaches_the_display_with_nothing_else_touching_the_terminal` is the
+    control: the same move of the same live argument, over the same `SETTLE`, reaches the display
+    when the screen is up. Here it must not, and the only difference between the two is that the
+    console has been handed back. The loop is shown running on both sides of the window - it drew
+    the frame before the pick, and it draws the dashboard registered during the read as soon as the
+    read ends - so those five frames' worth of time are frames it had and did not take.
+    """
+    rows = {TICKET: READING}
+    async with terminal as term:
+        asked = asyncio.create_task(term.show(enquiry, label=EARLY, rows=rows))
+        standing = await _drawn(term, Rows([Row(TICKET, READING)]))
+
+        unpicked = output.getvalue()
+        keys.enter(str(SAY_MORE + 1))
+        await _printed(output, unpicked, _PROMPTED)
+
+        rows[TICKET] = EDITING
+        await term.show(dashboard, line=LANDED)
+        await asyncio.sleep(SETTLE)
+
+        assert term.written == standing, (
+            f"the console has been handed back for a text read and the terminal reports "
+            f"{term.written!r} as what it wrote. The last thing to reach the display is "
+            f"{standing!r}, and nothing has been drawn since - the live region is stopped and "
+            f"somebody is typing under it. A record that follows the view through a read is a "
+            f"record of what would have been drawn, and it is what the contract suite answers "
+            f"`displayed()` with: every ordering claim in that suite would be synchronised "
+            f"against a screen nobody saw"
+        )
+
+        await keys.entered(TYPED)
+
+        assert await _within(asked) == Answer(asked=EARLY, said=TYPED), (
+            f"picking the field and typing {TYPED!r} did not reach the workflow, so the read this "
+            f"test held open was not the read it thought it was"
+        )
+        await _drawn(term, Text(LANDED))
 
 
 async def test_a_screen_that_has_not_changed_is_never_written_again_and_a_changed_one_is(
@@ -910,6 +1012,32 @@ async def _until(
     raise AssertionError(
         f"{what} was never written within {DEADLINE:.0f}s. The last frame this terminal wrote is "
         f"{terminal.written!r}"
+    )
+
+
+async def _printed(output: io.StringIO, since: str, text: str) -> str:
+    """Wait until `text` has reached the console since `since` was read off it, and hand back the
+    whole of what arrived in between.
+
+    A delta rather than the buffer, for the reason the two tests that read one give: `output` is
+    cumulative, so asking whether it holds something answers "at some point during this run", and
+    every question either of them asks about a taken screen is a question about *when*.
+
+    It is also how a test gets inside a read. `_typed` prints the field's own label after it has
+    taken the screen and before it waits on a line, so the label arriving here is the terminal
+    saying the console is handed back and the read is open - and the read stays open until the test
+    types, because nothing else will. Polled and deadlined like every other wait in this file.
+    """
+    loop = asyncio.get_running_loop()
+    expires = loop.time() + DEADLINE
+    while loop.time() < expires:
+        arrived = output.getvalue().removeprefix(since)
+        if text in arrived:
+            return arrived
+        await asyncio.sleep(TICK)
+    raise AssertionError(
+        f"{text!r} never reached the console within {DEADLINE:.0f}s. What it received since the "
+        f"caller last looked is {output.getvalue().removeprefix(since)!r}"
     )
 
 

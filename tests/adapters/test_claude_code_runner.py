@@ -68,7 +68,8 @@ What follows the contract subclass is what the suite lists as beyond it, in roug
     CLI path, and a deny rule - which the suite cannot provoke because it supplies none of them.
   * **That every session this package opens is opened hermetically**, asserted by parsing the
     package rather than by running it, so a second session added later (a readiness probe, a
-    version check) cannot quietly omit the two options whose SDK defaults are the leaky ones.
+    version check) cannot quietly omit the two options whose SDK defaults are the leaky ones -
+    nor name either one and hand it the leaky value, which naming alone does not rule out.
   * **That a tool call, a refusal, an activity line and a question round-trip work at all** (its
     gaps 7 and 12: most of that suite is behavioural and reads a model's conduct as evidence).
     Driven offline through a scripted `Transport`, which is the SDK's own injection point, so the
@@ -918,6 +919,13 @@ async def test_a_deny_rule_the_cli_tokenizer_would_ruin_is_refused(
     )
 
 
+# The two §3.5 settings whose SDK default is the leaky one, and the source text each has to be
+# given, as `ast.unparse` normalises it. Values and not merely names, because the name is satisfied
+# by the leak: `setting_sources=["user", "project", "local"]` names the option and is precisely
+# what the empty list exists to displace.
+HERMETIC: Final[Mapping[str, str]] = {"setting_sources": "[]", "strict_mcp_config": "True"}
+
+
 def test_every_session_this_package_opens_is_opened_hermetically() -> None:
     """A structural assertion, so that a session added later cannot quietly omit §3.5's settings.
 
@@ -927,9 +935,29 @@ def test_every_session_this_package_opens_is_opened_hermetically() -> None:
     `ClaudeAgentOptions` in the package, including `check_ready`'s and whatever a later stage adds,
     and it does it by parsing the source rather than by running anything.
 
+    **The value each is given, and not only that it was named.** This test began asserting presence
+    alone, which reads as a check and is not one: `setting_sources=["user", "project", "local"]`
+    satisfies "the keyword is there" and is the exact value the empty list displaces, so both
+    settings could have been flipped to their leaky spellings with this test still green. What is
+    compared now is the source text of the argument, `ast.unparse`d - which makes reformatting
+    invisible to it and a value spelled anywhere else visible: a name, a `list()`, a constant
+    imported from elsewhere all fail, deliberately, because a hermeticity setting whose value lives
+    in another module is one this test cannot read and a reviewer cannot see at the call site.
+
+    **Why this rather than moving the behavioural tests off their gate.**
+    `test_the_options_the_run_actually_built_are_the_hermetic_ones` asserts the same two values
+    against a session that really started, and where it runs it is the stronger evidence. But it
+    spawns a `claude` process, which is exactly what `AGL_LIVE_AGENT=1` is declared to mean, and it
+    is *also* behind the binary being on `PATH` - so taking it off the opt-in would still leave the
+    invariant unasserted on every machine with no CLI installed. This one needs no binary, no
+    socket and no opt-in, it runs on the default gate, and it holds for call sites that do not
+    exist yet. Where the property is structural, the structural assertion is the one that does not
+    go stale when a second session is added.
+
     `tests/adapters/test_shell_verifier.py` established the shape at stage 6, for the same kind of
     clause: a promise about how a module is written is worth more as a fact about the code than as
-    a paragraph in a docstring.
+    a paragraph in a docstring. `test_openai_runner.py` carries this test's sibling, over the `cwd=`
+    that every child of that package is started with.
     """
     package = Path(runner_module.__file__).parent
     sessions = 0
@@ -940,12 +968,23 @@ def test_every_session_this_package_opens_is_opened_hermetically() -> None:
             if getattr(node.func, "id", None) != "ClaudeAgentOptions":
                 continue
             sessions += 1
-            given = {keyword.arg for keyword in node.keywords}
-            assert {"setting_sources", "strict_mcp_config"} <= given, (
-                f"{source.name} opens a session without naming both of §3.5's settings: it passes "
-                f"{sorted(name for name in given if name)}. The SDK's defaults for the two missing "
-                f"here are None and False, and both of those read the target repository"
+            given = {keyword.arg: keyword.value for keyword in node.keywords}
+            assert HERMETIC.keys() <= given.keys(), (
+                f"{source.name}:{node.lineno} opens a session without naming both of §3.5's "
+                f"settings: it passes {sorted(name for name in given if name)}. The SDK's defaults "
+                f"for the two missing here are None and False, and both of those read the target "
+                f"repository"
             )
+            for setting, required in HERMETIC.items():
+                written = ast.unparse(given[setting])
+                assert written == required, (
+                    f"{source.name}:{node.lineno} opens a session with `{setting}={written}`, and "
+                    f"§3.5 wants `{setting}={required}`. Naming the option is not the guarantee: "
+                    f"`setting_sources=['user', 'project', 'local']` names it and hands the "
+                    f"session the repository's settings, its CLAUDE.md, its subagents and its "
+                    f"commands, and `strict_mcp_config=False` names it and loads the repository's "
+                    f".mcp.json"
+                )
     assert sessions >= 2, (
         f"only {sessions} ClaudeAgentOptions call(s) were found in {package}, and there are at "
         f"least two - the run and the readiness probe. This test found nothing to check, which "

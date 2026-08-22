@@ -17,10 +17,11 @@ subagent that writes its own tests writes tests that pass - and stages 4 to 8 ea
 contract suite passes", a sentence worth something only when the suite had no stake in the outcome.
 
 `AgentContract` is one class assembled from four modules, and only this name is public. Its own
-tests are the three things a `run` answers for that need no machinery: the outcome, a refused tool
-call, and the activity it may or may not report. The three it inherits follow seams the port draws
-itself. `_agent_preflight` holds the two members that are asked *about* an agent rather than running
-one; `_agent_questions` holds §3.7's negotiation and the two edge cases the port settles by hand;
+tests are the four things a `run` answers for that need no machinery: the outcome, a refused tool
+call, a tool call whose handler *failed*, and the activity it may or may not report. The three it
+inherits follow seams the port draws itself. `_agent_preflight` holds the two members that are asked
+*about* an agent rather than running one; `_agent_questions` holds §3.7's negotiation and the two
+edge cases the port settles by hand;
 `_agent_hermeticity` holds §3.5's poisoned repository and the table it is built from, and is the
 centrepiece. `_agent_tasks` under all of them holds the workspace, the tasks, the tool and the two
 callbacks every test is made of, and argues there why this suite touches a filesystem when the store
@@ -127,6 +128,7 @@ from ._agent_preflight import AgentPreflightContract
 from ._agent_questions import AgentQuestionContract
 from ._agent_tasks import (
     CORRECT_A_REFUSED_NOTE,
+    KEEP_CALLING_A_FAILING_NOTE,
     SAY_WHAT_THIS_IS,
     Activity,
     Notes,
@@ -139,11 +141,12 @@ from ._agent_tasks import (
 class AgentContract(AgentPreflightContract, AgentQuestionContract, AgentHermeticityContract):
     """The suite. Everything an `AgentRunner` promises, and nothing an implementation gets to pick.
 
-    Its own three tests are what a `run` answers for with no machinery around it: an outcome whose
+    Its own four tests are what a `run` answers for with no machinery around it: an outcome whose
     stop reason may be `None`, a refused tool call that goes back to the agent inside the same run,
-    and activity that may never arrive at all. The three halves it inherits are named in this
-    module's docstring, and `_agent_hermeticity` among them is the centrepiece - the one test here
-    whose failure mode is to silently prove nothing.
+    a tool call whose handler raised, which goes back the same way, and activity that may never
+    arrive at all. The three halves it inherits are named in this module's docstring, and
+    `_agent_hermeticity` among them is the centrepiece - the one test here whose failure mode is to
+    silently prove nothing.
 
     `pytestmark` is on the class rather than on each method because subclasses inherit it, and
     because `asyncio_mode = "strict"` makes the marker the difference between a test that runs and
@@ -268,6 +271,61 @@ class AgentContract(AgentPreflightContract, AgentQuestionContract, AgentHermetic
             f"a tool handler was handed {odd}, and a handler takes the mapping the port declares - "
             f"an adapter that passes on the raw text its backend produced makes every handler in "
             f"the framework parse a payload the port says is already parsed"
+        )
+        assert isinstance(outcome.text, str), "and the run itself ended normally"
+
+    async def test_a_tool_handler_that_raises_is_a_refusal_and_not_the_end_of_the_run(
+        self, runner: AgentRunner, model: ModelId, tmp_path: Path
+    ) -> None:
+        """The other half of §3.3's mechanism: a handler that *failed*, not one that refused.
+
+        A tool handler is the caller's own code and it can hit a bug - an unwritable file, a
+        service that is down, a `KeyError` in somebody's payload reading. The agent is told and
+        gets another go, exactly as it does for a payload the handler turned down: by the time a
+        call has failed there is a session in flight holding all the reasoning that produced it,
+        and the argument for not throwing that away is the same argument.
+
+        **This clause exists because its silence was doing damage.** The suite pinned the refusal
+        path and said nothing here, and two fakes of this port answered it differently for a whole
+        stage - one carrying the run on, one killing it - with every suite green. A clause can only
+        be written where every implementation agrees, so writing it is what closes that: an
+        implementation that lets a handler's exception out of `run` reports a failure in
+        `--dry-run` that the backend it stands in for would have carried through, and one that
+        swallowed it silently would leave the agent with nothing to correct.
+
+        What is asserted is the outcome and never the mechanism, exactly as above: the handler
+        invoked more than once inside **one** `run`, and that run returning normally. The words the
+        agent was told are not asserted, because every implementation has its own - one prefixes
+        the tool's name, another hands over the vendor's rendering of the exception - and a suite
+        that read them would be refusing a correct adapter for its phrasing.
+
+        A run that raised never reaches the assertion, which is the point of provoking it this way.
+        """
+        reported = await runner.capabilities(model)
+        if Capability.TOOL_CALLING not in reported:
+            pytest.skip(
+                "this backend reports no TOOL_CALLING, so no tool call of its can fail; preflight "
+                "refuses a role that declares tools against it, and the port has no opinion on a "
+                "task carrying tools that a backend cannot call"
+            )
+
+        notes = Notes(raise_first=1)
+        outcome = await outcome_of(
+            runner,
+            task(workspace(tmp_path), model, KEEP_CALLING_A_FAILING_NOTE, tools=(notes.tool,)),
+        )
+
+        assert len(notes.received) >= 2, (
+            f"the tool handler was called {len(notes.received)} time(s) in one run, and the first "
+            f"call raised. A handler that failed reaches the agent as a refusal it can read and "
+            f"act on, inside the same conversation - an adapter that ended the run on it, retried "
+            f"the whole task itself, or let the exception out of `run`, leaves exactly this trace"
+        )
+        odd = [payload for payload in notes.received if not isinstance(payload, Mapping)]
+        assert not odd, (
+            f"a tool handler was handed {odd} on a call after one that raised. A retry after a "
+            f"failure is an ordinary call and carries the mapping the port declares, not the raw "
+            f"text a backend produced"
         )
         assert isinstance(outcome.text, str), "and the run itself ended normally"
 

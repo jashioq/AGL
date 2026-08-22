@@ -29,9 +29,9 @@ these are the ones this adapter can close, in the order they matter:
     obvious wrong place to run it.
 
 Two more sit beside those, and neither is a gap in the suite - they are decisions this adapter made
-that nothing else would notice: that a person's own merge configuration cannot decide whether a
-landing lands or what it contains, and that a branch name spelled like a git option is a value and
-never an option.
+that nothing else would notice: that a person's own configuration cannot decide whether a landing
+lands, what it contains, what shape it takes in the target's history or what programs run inside
+it, and that a branch name spelled like a git option is a value and never an option.
 
 Named `test_git_integrator.py`, for the module it covers: `tests/` carries no `__init__.py` - see
 `tests/conftest.py` for why it must not - so pytest's module names are the bare filenames and two
@@ -39,6 +39,7 @@ files of one name under different directories would collide at import.
 """
 
 import json
+import shlex
 import signal
 import subprocess
 import sys
@@ -88,6 +89,36 @@ AGREED: Final = f"{WORK}/agreed.txt"
 # How many lines a file written here has, so that two versions differ on every line rather than in
 # one place: a merge that combined them would be a merge that guessed.
 _LINES: Final = 24
+
+# The hooks a person's own `core.hooksPath` would put inside a landing. These three are exactly what
+# `--no-verify` bypasses on the two commands this adapter runs: `pre-merge-commit` and `commit-msg`
+# on the merge, `pre-commit` and `commit-msg` on the commit that concludes a held one.
+# `prepare-commit-msg` is deliberately not among them - git runs that one whatever `--no-verify`
+# says, so planting it would fail these tests against an adapter doing exactly what it should.
+_BYPASSED: Final = ("pre-commit", "pre-merge-commit", "commit-msg")
+
+# Where the hooks are planted, the file they write when one runs, and the file whose commit proves
+# git found them. All three sit under the test's own `tmp_path`, which is what makes the configured
+# `core.hooksPath` absolute: git resolves a relative one against the working tree, and a landing
+# happens in a worktree rather than in the repository, so a relative path would name nothing there
+# and every assertion below would pass without a hook ever existing.
+_HOOKS: Final = "hooks"
+_MARKER: Final = "a-hook-ran"
+_PROOF: Final = "hook-proof.txt"
+
+# A `gpg.program` that is not a program. It is what makes "the landing was not signed" mean the
+# same thing on a machine with a key, a machine with none and a machine with no `gpg` at all - a
+# test whose verdict depends on the developer's keyring is a different test on every machine.
+_NO_SIGNER: Final = "no-such-gpg"
+
+# What a planted hook does: say that it ran, at a path fixed when the hook is written rather than
+# derived from wherever git chose to run it. Writing is the stronger sensor of the two available -
+# a marker that never appears proves the hook did not run at all, where a landing that merely
+# succeeded is also what a hook exiting 0 looks like.
+_HOOK: Final = """#!/bin/sh
+printf '%s\\n' {name} >> {marker}
+exit 0
+"""
 
 # What the subprocesses below are handed and what they hand back. One JSON argument rather than an
 # argv of positions, because these are three programs sharing one situation and a mislaid position
@@ -224,6 +255,48 @@ def _read(workspace: Workspace, name: str) -> str | None:
     """What is at `name`, or `None` if nothing is - which is what "it was removed" looks like."""
     path = workspace.path.joinpath(*name.split("/"))
     return path.read_text(encoding="utf-8") if path.is_file() else None
+
+
+def _hooked(repository: Path, where: Path, root: Path) -> Path:
+    """Give `repository` a hooks directory of its own, prove git runs what is in it, and hand back
+    the file those hooks write to.
+
+    An operator's own hook is target-repo configuration reaching a run through a door §3.5 does not
+    name, and the two ways an arrangement like this passes while testing nothing are both closed
+    here. `core.hooksPath` is set **absolute**, because git resolves a relative one against the
+    working tree and a landing happens in a worktree, so a relative path would name a directory
+    that is not there. And every hook is **made executable**, because git skips one that is not,
+    with a hint nobody reads.
+
+    Neither of those is asserted directly, because the one thing that covers both is asking git.
+    So the directory is proved before anything relies on it: a plain `git commit` in `where`, made
+    without `--no-verify`, has to leave the marker, and the marker is cleared again before the
+    caller goes on. A hook test that never shows the hook working is the same hole one layer down.
+
+    `--no-gpg-sign` is passed to that proving commit because a caller may already have pointed
+    `gpg.program` at nothing. What is being established here is that git found the hooks, and a
+    commit that could not be signed would answer a question nobody asked.
+    """
+    hooks = root / _HOOKS
+    hooks.mkdir()
+    marker = root / _MARKER
+    for name in _BYPASSED:
+        hook = hooks / name
+        hook.write_text(_HOOK.format(name=name, marker=shlex.quote(str(marker))), encoding="utf-8")
+        hook.chmod(0o755)
+    _git(repository, "config", "core.hooksPath", str(hooks))
+
+    (where / _PROOF).write_text(_body("a commit made without --no-verify"), encoding="utf-8")
+    _git(where, "add", "--", _PROOF)
+    _git(where, "commit", "-q", "--no-gpg-sign", "-m", "a commit that runs the person's own hooks")
+
+    assert marker.is_file(), (
+        f"a plain `git commit` in {where} ran none of {', '.join(_BYPASSED)} out of {hooks}, so "
+        f"nothing below could tell a landing that bypassed them from a hooks directory git never "
+        f"looked in. An unexecutable hook file or a path git resolves elsewhere both look like this"
+    )
+    marker.unlink()
+    return marker
 
 
 class _Renamed(Workspace):
@@ -454,7 +527,7 @@ async def test_a_hold_taken_by_a_process_that_dies_is_found_and_released_by_late
 
 
 async def test_a_retry_lands_once_the_collision_is_resolved_in_the_held_target(
-    integrator: Integrator, provider: WorkspaceProvider, base: str, repository: Path
+    integrator: Integrator, provider: WorkspaceProvider, base: str, repository: Path, tmp_path: Path
 ) -> None:
     """Gap 1: "the landed branch of `retry` is exercised by nothing here".
 
@@ -467,12 +540,22 @@ async def test_a_retry_lands_once_the_collision_is_resolved_in_the_held_target(
     the head moved, the resolution is what the target holds, the sibling's work is in the target's
     past, and nothing is pending afterwards. The last one matters most - a `retry` that answered
     with a head and left the hold standing would have the next `abort` undo a landing it reported.
+
+    **The commit that concludes a landing is inside the landing**, which is why the person's own
+    hooks and their signer are planted here too. `--no-verify` and `--no-gpg-sign` are spelled twice
+    in the adapter, once for the merge and once for this commit, and the settings test below reaches
+    only the first - a second copy nothing asserts is a flag the next reader deletes as duplication.
+    They go in *after* the collision, so what is pinned here is this commit and not the merges that
+    produced the hold; the argument for each of them is that test's, and not repeated.
     """
     target, sibling, settled = await _collide(integrator, provider, base)
     landed = _git(sibling.path, "rev-parse", "HEAD").strip()
     resolution = _body("what the person at the conflict screen decided")
     _write(target, COLLIDING, resolution)
     _git(target.path, "add", "--", COLLIDING)
+    marker = _hooked(repository, sibling.path, tmp_path)
+    _git(repository, "config", "commit.gpgsign", "true")
+    _git(repository, "config", "gpg.program", str(tmp_path / _NO_SIGNER))
 
     outcome = await integrator.retry(target)
 
@@ -480,6 +563,12 @@ async def test_a_retry_lands_once_the_collision_is_resolved_in_the_held_target(
         f"retrying a landing whose collision was resolved and staged in the held target answered "
         f"with a conflict again: {outcome.conflict}. This port has no opinion about what they did "
         f"and looks again, and what it looks at says the collision is resolved"
+    )
+    assert not marker.exists(), (
+        f"concluding the held landing ran {marker.read_text(encoding='utf-8').split()} out of the "
+        f"hooks directory this repository configured. The commit that ends a landing is as much "
+        f"inside it as the merge that began it, and a house format enforced on one is enforced on "
+        f"the other"
     )
     assert outcome.head == await target.head() != settled, (
         f"the retry answered with {outcome.head!r}, the target is at {await target.head()!r}, and "
@@ -692,6 +781,67 @@ async def test_a_resolution_recorded_on_this_machine_does_not_resolve_a_landing(
     )
     await integrator.abort(target)
     assert await target.head() == settled, "and the release puts it back where the landing did"
+
+
+async def test_a_landing_is_a_merge_commit_and_runs_no_program_a_person_configured(
+    integrator: Integrator, provider: WorkspaceProvider, base: str, repository: Path, tmp_path: Path
+) -> None:
+    """The other half of that line: not what a landing contains, but what it *is* and what runs in
+    it. Three more settings, none of them anything to do with AGL, and each pinning one flag.
+
+      * **`merge.ff = only`** ↔ `--no-ff`. The target here has touched nothing, so the child's
+        branch is a fast-forward and git will take it - the target's head would become a commit the
+        *child* made, `git log` on the target could no longer say which child arrived when, and the
+        head a run records for a landing would be a value that exists whether or not the landing
+        happened. So what is asserted is the shape of the record rather than its contents: two
+        parents, the first of them where the target stood before.
+      * **`commit.gpgsign = true`** ↔ `--no-gpg-sign`. `gpg.program` is pointed at a path that does
+        not exist, and that is the whole of what makes this test the same test everywhere: left to
+        the machine, the verdict would depend on whether the developer running the suite has a key,
+        or a `gpg` at all, and a test that means three things on three machines is not a gate.
+        Pointed at nothing, signing fails identically for everyone, so a landing that completes is
+        proof the flag was passed. It fails by being reported as a conflict rather than by raising:
+        git leaves `MERGE_HEAD` behind when it cannot write the commit, and a held target is what
+        `land` reads that as.
+      * **`core.hooksPath`** ↔ `--no-verify`. A hook of the operator's own, running inside a
+        landing, is the target repository deciding what AGL's own bookkeeping has to look like -
+        and a house commit format enforced against a branch AGL created minutes ago is a check that
+        can only fail. The hooks write instead of vetoing, so the absence of a marker proves they
+        never ran at all; `_hooked` proves beforehand that they are hooks git would have run.
+    """
+    _git(repository, "config", "merge.ff", "only")
+    _git(repository, "config", "commit.gpgsign", "true")
+    _git(repository, "config", "gpg.program", str(tmp_path / _NO_SIGNER))
+    target = await provider.open(LABEL, None, base)
+    child = await provider.open(LABEL, CHILD, base)
+    mine = _body("the child's own work")
+    _write(child, MINE, mine)
+    await child.commit_all("the child's own work")
+    marker = _hooked(repository, child.path, tmp_path)
+    settled = await target.head()
+    landed = await child.head()
+
+    outcome = await integrator.land(child, target)
+
+    assert outcome.conflicted is False, (
+        f"landing into a target that has touched nothing answered with a conflict: "
+        f"{outcome.conflict}. Nothing here collides, and `gpg.program` names a file that is not "
+        f"there - a merge that asks the person's own signer cannot write its commit and leaves the "
+        f"landing held, which is what this answer is"
+    )
+    assert not marker.exists(), (
+        f"the landing ran {marker.read_text(encoding='utf-8').split()} out of the hooks directory "
+        f"this repository configured. A hook inside a landing is a program AGL never heard of "
+        f"passing judgement on a commit nobody wrote by hand, and the one that rejects it stops "
+        f"every run against that repository"
+    )
+    assert tuple(_git(target.path, "log", "-1", "--format=%P").split()) == (settled, landed), (
+        f"the target's head has parents {_git(target.path, 'log', '-1', '--format=%P').split()}. A "
+        f"landing is a merge commit in the target's own history, with the head the target stood at "
+        f"- {settled!r} - as its first parent and the child's own as its second. One parent means "
+        f"git fast-forwarded, and the head the run recorded is a commit the child made"
+    )
+    assert _read(target, MINE) == mine, "and the child's work is in the target either way"
 
 
 async def test_a_branch_name_spelled_like_a_git_option_is_a_value_and_never_an_option(

@@ -677,14 +677,19 @@ async def test_a_task_carrying_every_restriction_runs_and_is_prevented_from_noth
 async def test_a_tool_handler_that_raises_comes_back_as_a_refusal_and_not_as_an_exception(
     tmp_path: Path,
 ) -> None:
-    """`_tools._Route._called`'s own line, which this fake matches and the other fake does not.
+    """`_tools._Route._called`'s own line, which this fake matches and the other fake now does too.
 
     That module catches a handler's exception and answers `f"{tool} failed: {raised}"` with
-    `rejected=True`, "so the model is told, and the run carries on". This is the sharpest piece of
-    parity in the module, because it is a divergence *from the other fake*, taken on purpose: there
-    the catching is the vendor SDK's and outside AGL's source, here it is one line of this
-    adapter's own, and a fake of this adapter that killed a run its runner would have carried
-    through is a `--dry-run` reporting a failure anger would not.
+    `rejected=True`, "so the model is told, and the run carries on". A fake of this adapter that
+    killed a run its runner would have carried through is a `--dry-run` reporting a failure anger
+    would not.
+
+    This used to be a divergence from `adapters/claude_code/fake.py`, argued from where the catch
+    is written - one line of this adapter's own here, the vendor SDK's over there. That fake now
+    catches too, for the reason both modules' docstrings give: a workflow author cannot see whose
+    `except` did it, only that both runners carry on. `tests/contracts/agent.py` pins the clause
+    for every implementation of the port; what stays here is the shape only a script can see, which
+    is the refusal itself and the sentence it carries.
 
     Both callers are driven, because they fail differently: a script gets a `ToolResult` it can
     read, and the default treats it as any other refusal - which is what makes a handler that
