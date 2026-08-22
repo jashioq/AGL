@@ -23,8 +23,10 @@ from agl.ports.home_layout import (
     RunScope,
     project_config,
     project_dir,
+    projects_dir,
     run_record,
     scope_dir,
+    settings_file,
     step_dir,
     step_entry,
 )
@@ -55,6 +57,33 @@ def test_the_layout_is_the_one_the_plan_draws() -> None:
     assert step_entry(_HOME, t01, StepName("review_quality"), _DIGEST) == Path(
         f"{_RUN}/worktrees/T-01/steps/review_quality/{_DIGEST}.json"
     )
+
+
+def test_the_two_paths_under_home_that_no_project_name_composes() -> None:
+    """The operator's own settings file at the top, and the directory the projects sit in.
+
+    Neither is addressed by a name, and neither is a path `Store` reads - `config/` reads both,
+    before anything is constructed. They are here because the rule is that one module computes
+    under AGL_HOME, which is wider than the set of paths a store happens to open.
+    """
+    assert settings_file(_HOME) == Path("/agl-home/config.toml")
+    assert projects_dir(_HOME) == Path("/agl-home/projects")
+    assert settings_file(_HOME).parent == _HOME.path, "at the top of AGL_HOME, not below it"
+    assert projects_dir(_HOME).parent == _HOME.path
+
+
+def test_the_projects_directory_is_the_one_the_named_paths_are_composed_beneath() -> None:
+    """The container and the paths under it are one answer, so a scan cannot look elsewhere.
+
+    `projects/` is handed back where `steps/` and `worktrees/` are not, because §3.6 looks a
+    project up by repository path and the names are not known in advance - so enumerating the
+    directory is the operation, not joining a segment onto it.
+    """
+    myapp = ProjectName("myapp")
+    assert project_config(_HOME, myapp).parent == projects_dir(_HOME)
+    assert project_dir(_HOME, myapp).parent == projects_dir(_HOME)
+    assert scope_dir(_HOME, _SCOPE).is_relative_to(projects_dir(_HOME))
+    assert not settings_file(_HOME).is_relative_to(projects_dir(_HOME))
 
 
 def test_runs_are_stored_per_project_so_one_label_in_two_repos_is_two_runs() -> None:
@@ -230,6 +259,11 @@ def test_a_trees_root_cannot_be_used_where_agl_home_belongs() -> None:
         project_config(trees, ProjectName("myapp"))  # type: ignore[arg-type]
     with pytest.raises(InternalError):
         step_entry(trees, _SCOPE, StepName("spec"), _DIGEST)  # type: ignore[arg-type]
+    # The two that take the root and nothing else route through `_root` like the rest.
+    with pytest.raises(InternalError, match="never conflated"):
+        settings_file(trees)  # type: ignore[arg-type]
+    with pytest.raises(InternalError, match="TreesRoot"):
+        projects_dir(trees)  # type: ignore[arg-type]
 
 
 def test_the_layout_is_pure_computation_and_imports_nothing_that_could_make_it_otherwise() -> None:

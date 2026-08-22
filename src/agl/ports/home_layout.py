@@ -1,16 +1,26 @@
-"""Paths under AGL_HOME - what Store addresses.
+"""Paths under AGL_HOME - the one module that composes them.
 
 `AGL_HOME` is where AGL keeps its own state: which runs exist, what each one has already done,
-and the per-project settings file at the top. It is not where code is checked out. That is the
-trees root, `tree_layout.py` is the only module that computes under it, and the plan's rule is
-that the two are never conflated - so this module speaks `AglHome`, that one speaks `TreesRoot`,
-and neither imports the other. Nothing here can be handed the other root: `mypy --strict`
-refuses the call, and `_root` below refuses it again at runtime, because the two wrappers are
-structurally identical and nothing but the class itself tells them apart.
+the per-project settings files, and the operator's own settings file at the top. It is not where
+code is checked out. That is the trees root, `tree_layout.py` is the only module that computes
+under it, and the plan's rule is that the two are never conflated - so this module speaks
+`AglHome`, that one speaks `TreesRoot`, and neither imports the other. Nothing here can be handed
+the other root: `mypy --strict` refuses the call, and `_root` below refuses it again at runtime,
+because the two wrappers are structurally identical and nothing but the class itself tells them
+apart.
 
-The layout, from the plan:
+**The rule is that one module composes under `AGL_HOME`** - not that everything here is a path
+`Store` addresses. Most of it is, and `Store` is why the module was written, but `project_config`
+has been here since stage 2 and no store has ever read it, and `settings_file` is read by
+`config/` before anything at all has been constructed. What puts a path here is the root it is
+joined onto, not who opens the result: a second module that spells `projects/` or `config.toml`
+is a second module to find and change the day the layout moves, and that drift is exactly §1.10's
+charge against the previous implementation.
+
+The layout, from the plan - §3.6's diagram, with §1.10's global file above it:
 
     AGL_HOME/
+      config.toml                            <- the operator's own settings (§1.10)
       projects/myapp.toml
       projects/myapp/runs/auth/
         run.json
@@ -36,6 +46,15 @@ inside `T-01/worktrees/sub-b/` sits at the end of a *sequence* of namespaces, no
 nor `worktrees/` is addressable on its own: a caller has nothing to join a namespace onto, so
 the nesting rule is written down once and a second copy cannot drift from this one.
 
+**`projects/` is addressable and those two are not**, and the difference is one of kind rather
+than a softening of the rule above. `steps/` and `worktrees/` are segments on the way to
+something the caller already names - a step, a namespace - so handing back the container hands
+back the join, and the nesting rule gains a second author. `projects/` is a directory whose
+*contents are the answer*: §3.6 resolves a project by walking up to a git root and looking it up
+**by repository path**, a path is not a name, so the names are not known in advance and
+enumerating them is the operation. Nothing is left for a caller to compose: a name becomes a file
+only through `project_config`, and only if `_checked_project` says it fits.
+
 Every function is a pure function of its arguments. Nothing here creates a directory, asks
 whether one exists, reads the environment, or consults the current working directory - `Store`
 does the first, and deciding where `AGL_HOME` actually is belongs to `config/`. These functions
@@ -59,14 +78,17 @@ __all__ = [
     "RunScope",
     "project_config",
     "project_dir",
+    "projects_dir",
     "run_record",
     "scope_dir",
+    "settings_file",
     "step_dir",
     "step_entry",
 ]
 
 
 # The layout's own words. Every one of them appears exactly once below.
+_SETTINGS_FILE: Final = "config.toml"
 _PROJECTS: Final = "projects"
 _RUNS: Final = "runs"
 _STEPS: Final = "steps"
@@ -135,14 +157,36 @@ class RunScope:
         return RunScope(self.project, self.label)
 
 
+def settings_file(home: AglHome) -> Path:
+    """`AGL_HOME/config.toml` - the operator's own settings, and the only file at the top.
+
+    The connector sections `[agent.claude]` and `[agent.openai]`, and whatever else later
+    acquires a setting that is not per-project. `config/` owns the file's *format* and reads it
+    before anything at all is constructed; this module owns only where it is, for the reason the
+    module docstring gives: one place computes under `AGL_HOME`, whoever opens the result.
+    """
+    return _root(home) / _SETTINGS_FILE
+
+
+def projects_dir(home: AglHome) -> Path:
+    """`AGL_HOME/projects/` - the registered projects, one settings file and one subtree each.
+
+    The two functions below compose beneath it. Exposed, where `steps/` and `worktrees/`
+    deliberately are not, because this is the container whose contents are themselves an answer:
+    resolving a project means listing it, since §3.6 looks a project up by repository path and
+    the names are not known in advance. The module docstring has the full distinction.
+    """
+    return _root(home) / _PROJECTS
+
+
 def project_config(home: AglHome, project: ProjectName) -> Path:
     """`AGL_HOME/projects/<project>.toml` - one project's settings."""
-    return _root(home) / _PROJECTS / f"{_checked_project(project)}{_PROJECT_SUFFIX}"
+    return projects_dir(home) / f"{_checked_project(project)}{_PROJECT_SUFFIX}"
 
 
 def project_dir(home: AglHome, project: ProjectName) -> Path:
     """`AGL_HOME/projects/<project>/` - everything AGL has recorded about one project."""
-    return _root(home) / _PROJECTS / _checked_project(project)
+    return projects_dir(home) / _checked_project(project)
 
 
 def scope_dir(home: AglHome, scope: RunScope) -> Path:
