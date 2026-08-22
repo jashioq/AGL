@@ -799,7 +799,9 @@ changes what a merge means, found by experiment at stage 5: `pull.twohead = ours
 refuses every landing; `rerere.enabled` replays a resolution recorded on another machine and lands a
 combination nobody in the run ever saw; and **`core.hooksPath`** runs an operator's own hook inside
 a landing, which is target-repo configuration reaching the run by another door. `merge.ff` and
-`commit.gpgsign` belong in the same set. Every invocation therefore pins the settings it depends on
+`commit.gpgsign` belong in the same set. Note that `--no-verify` skips `pre-commit` and `commit-msg`
+but **not** `prepare-commit-msg`, so the flag alone leaves a hook running inside a landing; pinning
+`core.hooksPath` at an empty directory is what actually closes it. Every invocation therefore pins the settings it depends on
 rather than inheriting them.
 
 **Refs are arguments, and arguments are an injection surface.** `--end-of-options` is load-bearing

@@ -68,6 +68,11 @@ an Authorization-header teardown (a redirected base URL with no API key makes th
 operator's real OAuth token to whatever is listening), and a `scripts/check` gate asserting no module
 can reach a paid endpoint. A test that spends a token looks exactly like one that does not.
 
+**Mutation testing needs `PYTHONDONTWRITEBYTECODE=1` and a `__pycache__` purge.** Stage 8.5 found a
+same-length mutation surviving `git checkout --`: the source was restored, the stale `.pyc` was not,
+and the "restored" tree ran mutated bytecode. `inspect.getsource` reads the file and cannot see it;
+`dis` can. Every mutate-restore cycle in this build before stage 8.5 was exposed to this.
+
 Three standing rules: a run that cannot happen is a **skip with a reason**, never a green; no test
 may pass because something failed; and no test spends tokens.
 
@@ -460,7 +465,7 @@ means an abstraction was missing and should be reported, not patched around.
 | 19.1 | Three concurrent runs on one repo — two `split`, one `fix`, different base refs. **Fake agents, real git**: the claim is about worktree and ref concurrency, not model behaviour, so this spends nothing |
 | 19.2 | Assemble `docs/manual-qa.md` into a single ordered checklist — every harness assumption accumulated since stage 7, each with what was assumed, the command to check it, and what to do if it is wrong. **Not an automated suite**: this is the one pass a human runs against real models, at the end, once |
 | 19.3 | Verify all twelve measurable targets from plan Part 5, one assertion each |
-| 19.4 | Enforcement audit — every contract in place and firing; delete `workflows/noop/`. Three stage-5 items: import-linter's `exhaustive = True` would close contract 1's hole natively (needs a `containers` rewrite); `src/agl/ports/__init__.py` is guarded by nothing; and module size is drifting badly — 14 over 300 at stage 3, 47 by stage 7 — so this is an audit of a backlog, not a check. Two debts carried from stage 0: flip `unmatched_ignore_imports_alerting` back to the default on the vendor-containment and composition-root contracts, now that the permitted vendor imports actually exist (it was set to `none` because the expressions matched nothing in an empty tree, which means a stale ignore is currently never reported); and confirm the adapter-independence list covers every package, including `adapters/_process.py` if stage 8 sanctioned it |
+| 19.4 | Enforcement audit — plus four stage-8.5 leftovers: `ports/store.py` says a suite is written against a port's docstring "and against nothing else," but `StoreContract` now carries three clauses sourced from §3.6 — the port needs the sentence; the OpenAI runner's `cwd=` AST sibling asserts presence only; `settings=None` sits outside the hermeticity set; and `Conversation.report` propagates a raising activity reporter on both fakes with the port silent. Every contract in place and firing; delete `workflows/noop/`. Three stage-5 items: import-linter's `exhaustive = True` would close contract 1's hole natively (needs a `containers` rewrite); `src/agl/ports/__init__.py` is guarded by nothing; and module size is drifting badly — 14 over 300 at stage 3, 47 by stage 7 — so this is an audit of a backlog, not a check. Two debts carried from stage 0: flip `unmatched_ignore_imports_alerting` back to the default on the vendor-containment and composition-root contracts, now that the permitted vendor imports actually exist (it was set to `none` because the expressions matched nothing in an empty tree, which means a stale ignore is currently never reported); and confirm the adapter-independence list covers every package, including `adapters/_process.py` if stage 8 sanctioned it |
 
 **Accept:** all twelve targets pass in CI.
 
