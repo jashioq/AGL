@@ -14,10 +14,10 @@ What replaces it is one line in the package that owns the workflow:
     [project.entry-points."agl.workflows"]
     tickets = "agl.workflows.tickets:tickets"
 
-`pyproject.toml` declares the group already and it is deliberately empty; `workflows/noop/` at stage
-10 is the first entry in it. Adding a workflow is that line and a package, and there is no central
-table here or anywhere else to edit - measurable target #1, and §3.3's "no `importlib`, no
-`getattr`, no central dispatch to edit" in all three of its parts.
+`pyproject.toml` declares the group and one line in it today: `noop`, the wiring probe stage 10
+registered and stage 19.4 deletes, package and line together. Adding a workflow is that line and a
+package, and there is no central table here or anywhere else to edit - measurable target #1, and
+§3.3's "no `importlib`, no `getattr`, no central dispatch to edit" in all three of its parts.
 
 ## The prohibition, read correctly - because this module imports `importlib.metadata`
 

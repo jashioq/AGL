@@ -11,8 +11,8 @@ package or a `.dist-info` directory: an entry point is a name, a `module:attr` s
 and resolving it is the interpreter's job rather than this file's.
 
 The one impure function gets one test, and it asserts the honest thing. The `agl.workflows` group is
-declared in `pyproject.toml` and is deliberately empty until stage 10, so what can be asserted today
-is that reading it returns - a skip would assert nothing, and this catches a group name that has
+declared in `pyproject.toml`, and since stage 10 it holds `noop`, so what is asserted is that
+reading it returns that name - a skip would assert nothing, and this catches a group name that has
 drifted out of agreement with `pyproject.toml` into something unreadable.
 
 Refusals are asserted on their class *and* on the name, the entry-point value or the list of
@@ -163,11 +163,23 @@ def test_an_entry_point_that_loads_the_wrong_kind_of_object_is_refused() -> None
 # --- the one impure line ------------------------------------------------------------------------
 
 
-def test_the_real_entry_point_group_is_readable_and_empty_today() -> None:
-    """`pyproject.toml` declares `agl.workflows` and deliberately registers nothing in it yet.
+def test_the_real_entry_point_group_is_readable_and_holds_noop() -> None:
+    """`pyproject.toml` declares `agl.workflows`, and deliverable 10.5 registered `noop` in it.
 
-    Asserting that reading it returns is the honest version of this test rather than a skip: it is
+    This test used to assert the group was empty and its name said *today*; today has ended.
+    Asserting the real installed state is still the honest version of it rather than a skip: it is
     the only case that touches the installed-distribution state of this environment, and it fails
-    if `GROUP` and `pyproject.toml` ever stop naming the same group in a readable way.
+    if `GROUP` and `pyproject.toml` ever stop naming the same group in a readable way - or if the
+    built `entry_points.txt` has gone stale against a `pyproject.toml` that has moved.
+
+    Membership rather than equality, because stages 17 and 18 register `fix` and `split` beside it.
+    **19.4 deletes `workflows/noop/` and the entry-point line with it**, so this test changes there
+    too, to whatever the group holds once the scaffolding is gone.
     """
-    assert names(installed()) == ()
+    registered = names(installed())
+
+    assert "noop" in registered, (
+        f"the {GROUP} group holds {registered} and not `noop`. `pyproject.toml` registers it, and "
+        f"the installed distribution's entry_points.txt is a build artifact that does not see an "
+        f"edit to it - refresh the editable install with `uv pip install -e . --no-deps`"
+    )

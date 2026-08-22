@@ -20,8 +20,11 @@ all = ["agl[claude,terminal]"]
 [project.scripts]
 agl = "agl.cli.main:main"
 
-# Workflows register themselves here in later stages. Intentionally empty for now.
+# Workflows register themselves here: one line per workflow, and no central table to edit.
+# `noop` is stage 10's wiring probe and stage 19.4 deletes it, this line with it; `fix` and
+# `split` register themselves here when stages 17 and 18 make them runnable.
 [project.entry-points."agl.workflows"]
+noop = "agl.workflows.noop:noop"
 
 [dependency-groups]
 dev = [

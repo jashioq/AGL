@@ -14,6 +14,20 @@ is actually made of, and the one file that a new backend, a new store and a new 
 touch. That concentration *is* the design: a composition root nobody ever edits is one whose
 decisions have leaked somewhere else.
 
+## `Services` moved at stage 10.2; the construction of it did not
+
+The type is now `sdk/_engine/services.py` and is imported here, re-exported in `__all__`, and built
+below exactly as it was. The move was decided when the class was written: `Run.services` has to be
+annotated with it, `Run` lives in `sdk/workflow.py`, and contract 1 puts `sdk` below `config` - so
+a `Services` defined here and named there is the layer stack inverted. Its own module docstring
+argues why not `ports/` and why not eight loose parameters.
+
+Nothing about `real()` or `fakes()` changed, and the split is along the one line that matters: the
+type is eight ABCs, which anything may name, and the construction is eight class names, which only
+this module may. `FakeServices` stays here for that reason - its fields *are* concrete adapters, so
+it could not move without carrying `MemoryStore`, `HeadlessTerminal` and `FakeRepository` into a
+package that contract 5 forbids them to reach.
+
 ## R2 made physical: the connector table
 
 §3.2's requirement is one workflow, one run, several vendors, and `adapters/routing.py` is the
@@ -180,58 +194,12 @@ from agl.adapters.shell.verifier import ShellVerifier
 from agl.adapters.system_clock import ManualClock, SystemClock
 from agl.config.schema import AgentSettings, Project, Settings
 from agl.ports.agent import AgentRunner, Provider
-from agl.ports.clock import Clock
 from agl.ports.errors import UpstreamUnavailable
-from agl.ports.history import History
-from agl.ports.integration import Integrator
-from agl.ports.store import Store
 from agl.ports.terminal import Terminal
 from agl.ports.tree_layout import TreesRoot
-from agl.ports.verifier import Verifier
-from agl.ports.workspace import WorkspaceProvider
+from agl.sdk._engine.services import Services
 
 __all__ = ["FakeServices", "Services", "fakes", "real"]
-
-
-@dataclass(frozen=True, slots=True)
-class Services:
-    """Every port AGL needs, filled in. The bundle everything above the edge is handed.
-
-    **Every field is typed as a port ABC and not one of them as an adapter**, which is the whole
-    point of the type rather than a convention it happens to follow: a consumer of this object
-    cannot tell `GitHistory` from `FakeHistory`, cannot narrow to one, and cannot grow a branch on
-    which implementation it got. That is what makes `fakes()` a deployment instead of a mock, and
-    what makes contract 5 enforceable - a field typed `FilesystemStore` would put an adapter's name
-    in every module that reads the bundle.
-
-    Frozen, because a bundle is what this invocation was assembled with and reassigning a field
-    halfway through a run would leave two halves of a workflow talking to different stores.
-    """
-
-    store: Store
-    """Run records and step entries (§3.6). Under `AGL_HOME`, never in the target repository."""
-
-    workspaces: WorkspaceProvider
-    """Isolated places to work, and taking them back."""
-
-    history: History
-    """What changed and what contains what, over the target repository. Not a run log."""
-
-    integrator: Integrator
-    """Landing a workspace into a target, or saying why it would not go."""
-
-    verifier: Verifier
-    """The merge gate's build. One call site, inside integration."""
-
-    terminal: Terminal
-    """The surface a workflow shows screens on. There is no second display and no selection."""
-
-    clock: Clock
-    """The only source of the current time, so that a run's record is reproducible."""
-
-    agents: AgentRunner
-    """One runner over every configured provider. A `RoutingAgentRunner` in both bundles, which
-    nothing above can see or should: a workflow names a model and never learns what served it."""
 
 
 @dataclass(frozen=True, slots=True)
