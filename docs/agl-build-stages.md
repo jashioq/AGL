@@ -252,11 +252,15 @@ hoisting look obviously right — it is §1.1's charge verbatim, and the self-ho
 has no approval concept at all is the third implementation that would pay for it. Measure the local
 decision safe, as stage 7 did, rather than assuming it.
 
-**Shared subprocess helper — decide, don't assume.** Stage 5 built `adapters/git/_runner.py`. This
-stage is the second consumer of process execution, which by the plan's own rule (Part 2, rule 6) is
-when the general case may be built. If extraction is warranted, add `adapters/_process.py` and
-refactor git onto it in the same stage, and record it as the **one sanctioned exception** to
-adapter independence in `.importlinter`. If the two needs differ enough that sharing would distort
+**Shared subprocess helper — decide, don't assume.** Stage 5 built `adapters/git/_runner.py` and
+stage 6 built `adapters/shell/verifier.py`, so this stage is the **third** consumer of process
+execution, not the second — rule 6's premise (the general case becomes visible at consumer two) has
+already been tested and stage 6 answered in writing. If extraction is warranted anyway, add
+`adapters/_process.py` and refactor both onto it in the same stage. Note that `.importlinter`
+contract 4 is `type = independence` and therefore **symmetric**: listing `_process` there would
+*forbid* git from importing it, the opposite of sanctioning. The real decision point is
+`ADAPTER_EXEMPT` in `tests/test_contract_listings.py`, and an exempt module is unpoliced in both
+directions — a worse trade than it sounds. If the two needs differ enough that sharing would distort
 either, say so and keep them separate. Either answer is acceptable; an unexamined default is not.
 
 **Accept:** contract suite 3.2 passes for **both fakes** in full, and for the real adapters as far as

@@ -356,7 +356,7 @@ class Claude(ModelId):
     OPUS = "claude:opus"; SONNET = "claude:sonnet"; HAIKU = "claude:haiku"
 
 class OpenAI(ModelId):
-    GPT5 = "openai:gpt-5"
+    SOL = "openai:sol"; TERRA = "openai:terra"; LUNA = "openai:luna"
 ```
 
 One `AgentRunner` port. `adapters/routing.py` holds one adapter per provider and dispatches on
@@ -1542,7 +1542,7 @@ Two rules that matter more than the stage list:
    claude_agent_sdk" src/` hits only `adapters/claude_code/`; the Codex binary name appears in no
    `.py` file under `src/` outside `adapters/openai/`. Scope matters: docs *must* name the binary to
    document the rule, so the gate covers source only. These are *import and invocation* tests, not
-   name tests — `Claude.OPUS` and `OpenAI.GPT5` in a workflow are correct and expected, and are the
+   name tests — `Claude.OPUS` and `OpenAI.SOL` in a workflow are correct and expected, and are the
    sanctioned way for a workflow to express provider choice without naming a harness.
 6. **Deleting a connector** means deleting its adapter package, its port, its config section, and
    its container entry — nothing else breaks.
