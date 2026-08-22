@@ -387,6 +387,11 @@ class AgentTask:
 `GIT_WRITES = ("Bash(git commit:*)", …)` leaves the workflow and becomes
 `Restriction.NO_VCS_WRITES`. Claude Code renders deny patterns; Codex CLI a sandbox policy.
 
+**Note the spelling, verified against the shipped matcher at stage 7:** `Bash(git commit:*)` is a
+*legacy prefix rule matched literally*, so `git  commit` with two spaces bypasses it. `Bash(git
+commit *)` is a wildcard rule matched with whitespace collapsed, and is the correct form. The old
+code's spelling is quoted in §1.1 as history; it must not be built.
+
 **Three preflight checks, before the run starts:**
 
 1. **Provider availability.** Collect the providers named by the workflow's roles; for each, verify
@@ -433,6 +438,14 @@ Three consequences:
 - **Billing follows the harness.** Both CLIs authenticate against a subscription by default, and
   against per-token API billing when a key is present in the environment. v1.1 inherits the parent
   environment and does not manage this; the operator keeps `ANTHROPIC_API_KEY` unset (§3.11).
+
+**An approval mode is the leak to watch, and stage 7 confirmed the pressure is real.** A framework
+run has nobody to approve a tool call, so the Claude adapter sets `permission_mode` to bypass and
+Codex CLI faces the identical decision through `--sandbox` / `--ask-for-approval`. Two harnesses
+agreeing is the strongest possible argument for hoisting it to the port — and hoisting it is exactly
+§1.1's charge, *"an approval mode, as an unvalidated string."* It stays in each adapter. Stage 7
+measured the local decision safe rather than assuming it: bare-name deny rules remove tools from a
+session identically under all five modes, so the mode governs only calls that were never denied.
 
 **Capability differences become real rather than hypothetical.** Whether Codex CLI can ask the user
 a question mid-run in non-interactive mode determines whether it satisfies `MID_RUN_QUESTIONS`. That
@@ -759,6 +772,14 @@ contributes source code and nothing else.**
 
 Put it in the agent port's **contract suite**: a fixture repo carrying a poisoned config for *every*
 harness, asserting each adapter ignored its own.
+
+**What `setting_sources=[]` does and does not cover**, measured at stage 7: it suppresses the
+*target repository's* configuration — a marker planted in `CLAUDE.md` reaches the composed request
+under `None` and under `["user","project","local"]`, and is absent under `[]`. It does **not**
+suppress the operator's own installed skills and subagent listings, which still reach the model.
+That is the second channel, deferred by §3.11 and therefore consistent — but the boundary is
+narrower than "the target repo contributes nothing else" sounds. `skills=[]` would close half of it
+and was deliberately not adopted in v1.1.
 
 Environment isolation is a *second* channel and is deliberately out of scope for v1.1 (§3.11).
 
@@ -1527,7 +1548,10 @@ Two rules that matter more than the stage list:
    its container entry — nothing else breaks.
 7. **Every port has a contract suite** its real adapter and its fake both pass — *every* port,
    including ones that promise little. `Clock`'s suite is two assertions; the value is the parity,
-   not the coverage.
+   not the coverage. **One honest exception:** six of the agent suite's eight clauses read a model's
+   conduct, so under the no-paid-tests rule they run against fakes only and the real adapters are
+   checked once in the manual QA pass. Everything a free instrument can reach — hermeticity, tool
+   registration, deny-rule enforcement, the composed request — is covered for real adapters too.
 8. **Every command runs end-to-end on fakes alone** — no network, no git.
 9. **Three runs, one repo, concurrently** — two `split` and one `fix`, different base refs —
    complete without contention and leave three independent local branches.
