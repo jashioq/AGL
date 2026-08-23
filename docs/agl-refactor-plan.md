@@ -642,8 +642,8 @@ async def ticket_pass(parent: Run, backlog: Backlog, ticket: Ticket,
     await w.step("implement", implementer,             # prompt instructs TDD; the agent runs
                  commit=f"implement {ticket.id}")      # its own tests, repeatedly, unbounded
     findings = await gather(                           # reviewers take no commit= — their
-        w.step("review_quality", review_quality),      # worktree is restored on the way out
-        w.step("review_spec",    review_spec),
+        w.step("review_quality", review_quality),      # worktree is restored on the way out.
+        w.step("review_spec",    review_spec),         # same namespace, so these serialize (§3.6)
     )
     if highs := high(findings):
         backlog.add(await w.step("triage", triage, findings=highs))
@@ -878,7 +878,7 @@ Every step file holds the same four fields:
 {
   "fingerprint": "9f2c4e…a71b",
   "value": { "tickets": [ { "id": "T-01", "title": "…", "blocked_by": [] } ] },
-  "head": "4a91c07f2b3e8d15c6a0",
+  "head": "4a91c07f2b3e8d15c6a0f31d8e2b47c9a6013f5e",
   "at": "2026-08-18T09:16:41Z"
 }
 ```
@@ -910,8 +910,8 @@ digest  = sha256(base + ":" + str(n))        ← the filename
 
 Match on path **and** fingerprint, else re-run.
 
-**Canonicalisation is load-bearing and none of it fails loudly.** Three rules, all measured at the
-post-stage-8 review:
+**Canonicalisation is load-bearing and none of it fails loudly.** Five rules — three measured at the
+post-stage-8 review, two more at stage 11, each found by mutation rather than by reading:
 
 - **Sets must be sorted.** `frozenset[Restriction]` has no stable iteration order across processes —
   `Restriction` is a `StrEnum`, `Enum.__hash__` hashes the member name, and `PYTHONHASHSEED`
@@ -922,8 +922,15 @@ post-stage-8 review:
   passes `findings=highs` — a list of the workflow's own dataclasses — and the deadline shortcut is
   `repr()`, whose default embeds an object id and is therefore silently unstable.
 - **`Tool.payload_schema` is a `MappingProxyType`** and `JsonValue` deliberately excludes `Mapping`,
-  so hashing tool schemas raises `TypeError` on the first call. One `dict()` at the top level. This
-  one at least fails loudly.
+  so a naive walker raises `TypeError` on it. Handle `Mapping` recursively, at any depth.
+- **`ensure_ascii=True`, and refuse surrogates.** Found at stage 11 the same way the three above
+  were — the flip was green until someone mutated it. `json.dumps` renders an astral character and
+  its surrogate pair byte-identically, so the escaping is not injective over every `str`, and a
+  collision is a **false cache hit**: replay returns another step's result. Refusing surrogates
+  closes it.
+- **A dataclass contributes its qualified type name.** `asdict` erases the type, so
+  `Finding("T-01", 3)` and `Ticket("T-01", 3)` fingerprint identically and changing an input's type
+  while keeping its shape replays the old result.
 
 Each of these presents as *replay simply never hits* rather than as an error, which is why the rule
 is written here rather than left to stage 11.
@@ -965,6 +972,19 @@ digest that is not there and **both re-run, forever, silently**. Scoping the cou
 `(namespace, step name)` makes it deterministic under concurrency, because siblings occupy different
 namespaces. A per-invocation counter is correct for sequential workflows and for no concurrent
 one. Where inputs genuinely vary, each call is `n=0` and the counter is invisible.
+
+**A namespace's workspace is single-threaded.** The counter buys determinism at the *address* level
+only; two concurrent steps in one namespace share one `Workspace`, and §3.3's own example gathers two
+reviewers on one worktree. Under the pseudocode as written, A's pre-run restore wipes files B's
+worker just wrote, B's `commit_all` records A's changes under B's message, and A's `head()` after its
+own commit can read B's. So **the framework serializes steps within a namespace**: a `gather` over
+same-namespace steps is legal and simply does not overlap. It costs latency and nothing else, and an
+author who wants real concurrency uses `worktree()`, which is what the trees root is flat for.
+
+**The counter advances when an entry is written, not when a step is called.** A step that crashes and
+is retried within one run must not consume a slot — the crash is not journalled, so a retry landing at
+`n = 1` is a slot a later resume asks for at `n = 0`, misses, and pays an agent for again. Advancing
+on the write keeps the two walks aligned.
 
 **What it costs:** a genuinely stuck loop no longer fails loudly — it writes `n=0,1,2,…` until
 something else stops it. Loop termination is therefore the workflow's job, which tickets' `drive`
