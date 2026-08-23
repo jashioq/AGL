@@ -663,7 +663,7 @@ async def ticket_pass(parent: Run, backlog: Backlog, ticket: Ticket,
         backlog.add(await w.step("triage", triage, findings=highs))
         return
     outcome = await w.integrate()
-    if outcome.conflicted:
+    while outcome.conflicted:                          # while, not if — §3.4 explains why
         ...                                            # workflow shows its own conflict view
 ```
 
@@ -773,6 +773,28 @@ the one v1.1 accepts.
 **On conflict the framework does not ask.** It returns a `Conflict` outcome and holds the lease;
 the workflow shows its own screen and decides. The lease is scoped to this run's integration
 target, so a human deliberating in one run never blocks another.
+
+```python
+outcome = await run.integrate()
+while outcome.conflicted:                        # while, not if
+    if await run.terminal.show(views.conflict,   # the view takes what it renders:
+                               conflict=outcome.conflict,   # the port's type
+                               build=outcome.verified,      # None unless the gate went red
+                               priority=10):
+        outcome = await outcome.retry()
+    else:
+        await outcome.abort()
+        break
+```
+
+**Two things the obvious spelling gets wrong**, both found at stage 15 by running this for the first
+time. `if` rather than `while` **leaks the lease**: a person who retries without having fixed
+anything gets a conflicted outcome back, the branch falls through, and the run holds the lease *and*
+the target's step lock until it exits. And passing `outcome` itself forces the view's parameter to be
+annotated with the engine's own private type — so the view takes what it *renders*, which is the
+port's `Conflict` plus the verifier's output when the gate is what went red.
+
+`retry()` with nothing pending is `InternalError`.
 
 **Lifetime: released when the outcome settles — `retry()` and `abort()` are what release it.** Run
 exit is the sweeper, not the lifetime; read literally, "released when the run exits" would serialise
@@ -1159,7 +1181,7 @@ between levels.
 
 ```python
 await term.show(views.agent_question, question=q,          priority=5)
-await term.show(views.conflict,       outcome=out,         priority=10)
+await term.show(views.conflict,       conflict=out.conflict, priority=10)
 ```
 
 Queues are FIFO within a priority, so simultaneous questions from several agents stack and wait.
@@ -1179,6 +1201,12 @@ user may walk away from a fully blocked run. The workflow renders it however it 
 
 No second passive layer is needed for banners: the workflow knows it is halted, so
 `board(halted=True)` renders it.
+
+**One place the design's unbounded wait meets a vendor clock.** There are no question timeouts by
+design, so an unanswered question blocks its step indefinitely — but a harness may impose its own on
+the tool carrying the question. Codex's `tool_timeout_sec` is the live case, and it is the backend
+with no second asking mechanism, so a timeout there ends the question with nothing to fall back to.
+Preflight is where this would be caught if it can be caught at all.
 
 **Known and accepted:** preemption loses text a user was part-way through typing unless the
 renderer preserves per-screen input state. And there are no timeouts — an unanswered question
