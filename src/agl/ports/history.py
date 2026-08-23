@@ -177,10 +177,16 @@ class History(ABC):
     async def contains(self, ancestor: str, descendant: str) -> bool:
         """Is `ancestor` already part of what `descendant` records? Is X already in Y.
 
-        The one ancestry question AGL asks, and it is asked in one place: `clear` deletes a run's
-        own line of work only if it is already contained in the base ref, and otherwise keeps it
-        and says so (§3.10). The costs are asymmetric - a retained name is a stale ref, a deleted
-        one is the entire run - so the answer decides between "tidy up" and "leave it alone".
+        The one ancestry question AGL asks, and two places ask it. `clear` deletes a run's own line
+        of work only if it is already contained in the base ref, and otherwise keeps it and says so
+        (§3.10). The costs there are asymmetric - a retained name is a stale ref, a deleted one is
+        the entire run - so the answer decides between "tidy up" and "leave it alone". `integrate()`
+        asks the same question of every landing before it keeps one: is the source's own head in the
+        head the integrator reported, so that the state about to become the parent's `last_good` is
+        one the child's work is actually in. A landing concluded by `Integrator.retry` may be
+        somebody else's - `retry` takes only the target, and a resumed run can find a hold it did
+        not take (§3.4) - and that is the only thing standing between such an answer and a workflow
+        being told work landed that is not there.
 
         Nothing more than that. No common-ancestor lookup, no divergence count, no "how far ahead":
         those are the vocabulary §1.3 caught this boundary speaking, each of them a method that

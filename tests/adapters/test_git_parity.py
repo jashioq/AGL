@@ -81,7 +81,7 @@ so pytest's module names are the bare filenames and every one of them has to be 
 
 import subprocess
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Final
 
@@ -125,6 +125,11 @@ LABEL: Final = RunLabel("parity")
 CHILD: Final = Namespace("T-01")
 SIBLING: Final = Namespace("T-02")
 TRUNK: Final = "main"
+
+# A third child, and one test's: the work offered to a target that is already holding a landing.
+# A child of its own rather than one of the two above, because what that test has to see is work
+# the target does not already hold staying out of it while the hold stands.
+LATECOMER: Final = Namespace("T-03")
 
 # One directory of this file's own, so that a file appearing under it appeared because a test put
 # it there rather than because a repository already held it.
@@ -692,6 +697,150 @@ async def test_default_ref_and_the_shape_of_a_resolved_id_agree(
         assert resolved == bundle.base, f"{name} resolved its default to something else"
 
 
+@dataclass(frozen=True, slots=True)
+class _Offered:
+    """Everything one bundle answered when work was offered to a target already holding a landing.
+
+    A record rather than a tuple, because there are twelve of these and a comparison of two
+    twelve-tuples reports a difference by position: a reader would be counting commas to find out
+    which claim the two implementations parted company over. Every field is a value both can
+    produce - no head is compared, per this module's rule - so the whole record goes through
+    `_alike` in one piece.
+    """
+
+    first_landing_conflicted: bool
+    """A precondition, compared rather than asserted: the child's work went in cleanly."""
+
+    second_landing_conflicted: bool
+    """The other precondition, and the thing that makes the hold: the sibling's work did not."""
+
+    conflicted: bool
+    """The answer under test - a conflicted outcome, where this used to be an `InternalError`."""
+
+    head: str | None
+    """`None`, because the two-case outcome has exactly one of these and this is the other case."""
+
+    paths: tuple[str, ...] | None
+    """What the conflict enumerates, which must be the *pending* landing's unresolved file.
+
+    `None` when no conflict came back at all, so that an implementation which answered with a head
+    is told apart from one that answered `()` - the port protects the empty tuple, and both of
+    these can enumerate, so `()` here would be a real divergence rather than an honest silence.
+    """
+
+    summary_names_the_target: bool
+    summary_names_the_source: bool
+    """The two lines of work, in the sentence a person reads. The summary itself is not compared:
+    it carries the checkout's path, and the two bundles have two trees roots."""
+
+    target_stayed_put: bool
+    """Nothing moved. This path does not merge, does not abort and does not touch a ref."""
+
+    offered_work_stayed_out: bytes | None
+    """`None`: the file the offered child wrote is not in the target, so nothing half-landed."""
+
+    hold_still_pending: bool
+    """The hold survived being landed over, observed as `retry` not raising and conflicting again -
+    which is the whole vocabulary `tests/contracts/integration.py` says this port has for a hold."""
+
+    released_to: bool | None
+    """Whether `abort` afterwards put the target back where the first landing left it."""
+
+    holds_after_the_release: bytes | None
+    """And what the contested file holds then - the first child's work, nobody else's."""
+
+
+async def test_landing_over_a_hold_nobody_released_is_the_same_conflict_from_both(
+    pair: Mapping[str, _Bundle],
+) -> None:
+    """A hold nobody released is the conflicted answer from both, and neither touches the target.
+
+    **This test used to pin `InternalError` from both**, on the rule that the framework calls
+    `land` only with the target free: every path out of a conflicted landing owes the target a
+    `retry` or an `abort`, so reaching this one meant AGL had lost track of a hold it took. Stage
+    14 changed the answer in both implementations and this changed with them, so the reason is
+    written here rather than left in a commit message.
+
+    What broke the old rule is the hold outliving the process that took it. §3.4: *a resumed run
+    must be able to find a hold it did not take* - `integrate()` is not a step, so nothing journals
+    it, and a run resuming after a process died mid-conflict reaches the same call with the target
+    still held. `InternalError` there is exit 70 for a state a person can still put right, which
+    the plan refuses in as many words; the exit it names first is the one taken here, because the
+    state *is* a conflict and the workflow already knows how to route one. The rule did not go
+    away - §3.4's lease, which `sdk/_engine/integration.py` holds per integration target, is what
+    keeps a single process from reaching this over a hold of its own.
+
+    The parity claim is the same strength it was, and covers more of the answer than one error
+    class could: both implementations conflict rather than raise, both enumerate the *pending*
+    landing's unresolved file rather than reporting `()`, both name the two lines of work in the
+    sentence a person reads, both leave the hold standing - observed as `retry` not raising, which
+    is the whole vocabulary this port has for it - and both leave the target where the first
+    landing left it, with the offered work still outside. Then `abort` still puts it back, which is
+    what says nothing on this path quietly consumed the hold.
+
+    A test of its own rather than one of three scenarios in one, because it deliberately leaves a
+    target held partway through and a second scenario over the same bundle would inherit it.
+    """
+
+    async def over_a_hold(bundle: _Bundle) -> _Offered:
+        target, child, sibling = await _three(bundle)
+        latecomer = await bundle.provider.open(LABEL, LATECOMER, bundle.base)
+        _put(child, CONTESTED, _body("the child's own work"))
+        await child.commit_all("the child's own work")
+        _put(sibling, CONTESTED, _body("the sibling's own work, sharing not one line"))
+        await sibling.commit_all("the sibling's own work")
+        _put(latecomer, ALPHA, _body("work offered while the target was holding a landing"))
+        await latecomer.commit_all("the latecomer's own work")
+        landed = (await bundle.integrator.land(child, target)).conflicted
+        settled = await target.head()
+        holding = (await bundle.integrator.land(sibling, target)).conflicted
+
+        offered = await bundle.integrator.land(latecomer, target)
+
+        conflict = offered.conflict
+        answered = _Offered(
+            first_landing_conflicted=landed,
+            second_landing_conflicted=holding,
+            conflicted=offered.conflicted,
+            head=offered.head,
+            paths=conflict.paths if conflict is not None else None,
+            summary_names_the_target=conflict is not None and target.branch in conflict.summary,
+            summary_names_the_source=conflict is not None and latecomer.branch in conflict.summary,
+            target_stayed_put=await target.head() == settled,
+            offered_work_stayed_out=_get(target, ALPHA),
+            hold_still_pending=(await bundle.integrator.retry(target)).conflicted,
+            released_to=None,
+            holds_after_the_release=None,
+        )
+        await bundle.integrator.abort(target)
+        return replace(
+            answered,
+            released_to=await target.head() == settled,
+            holds_after_the_release=_get(target, CONTESTED),
+        )
+
+    for answer in (await _alike(pair, over_a_hold)).values():
+        assert answer == _Offered(
+            first_landing_conflicted=False,
+            second_landing_conflicted=True,
+            conflicted=True,
+            head=None,
+            paths=(CONTESTED,),
+            summary_names_the_target=True,
+            summary_names_the_source=True,
+            target_stayed_put=True,
+            offered_work_stayed_out=None,
+            hold_still_pending=True,
+            released_to=True,
+            holds_after_the_release=_body("the child's own work"),
+        ), (
+            "landing into a target that is already holding a landing did not answer the way §3.4's "
+            "first exit says it must: a conflicted outcome naming the pending landing's unresolved "
+            "file and both lines of work, with the hold still standing, the target where the first "
+            "landing left it, the offered work outside it, and `abort` still able to release it"
+        )
+
+
 # --- What both refuse, and with which class -------------------------------------------------------
 
 
@@ -758,31 +907,6 @@ async def test_the_same_bad_provisioning_is_refused_with_the_same_class_by_both(
     assert await _refused(pair, cut_from_nothing) is ConflictError
     assert await _refused(pair, over_a_crash) is ConflictError
     assert await _refused(pair, while_open) is ConflictError
-
-
-async def test_landing_over_a_hold_nobody_released_is_the_same_error_from_both(
-    pair: Mapping[str, _Bundle],
-) -> None:
-    """`InternalError`, because the framework calls `land` only with the target free.
-
-    Every path out of a conflicted landing owes the target a `retry` or an `abort`, so reaching
-    this one means AGL lost track of a hold it took - and merging over the hold would report the
-    old collision as this landing's. A test of its own rather than one of three scenarios in one,
-    because it deliberately leaves the target held and a second scenario over the same bundle
-    would inherit it.
-    """
-
-    async def over_a_hold(bundle: _Bundle) -> object:
-        target, child, sibling = await _three(bundle)
-        _put(child, CONTESTED, _body("the child's own work"))
-        await child.commit_all("the child's own work")
-        _put(sibling, CONTESTED, _body("the sibling's own work, sharing not one line"))
-        await sibling.commit_all("the sibling's own work")
-        await bundle.integrator.land(child, target)
-        await bundle.integrator.land(sibling, target)
-        return await bundle.integrator.land(child, target)
-
-    assert await _refused(pair, over_a_hold) is InternalError
 
 
 async def test_retrying_with_nothing_pending_is_the_same_error_from_both(

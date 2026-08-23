@@ -2,11 +2,14 @@
 
 Four properties, and each is a thing that would be expensive to discover later.
 
-**Every field of `Services` is declared as a port ABC.** Asserted against `get_type_hints`, not
-against the runtime types, because the runtime types are right by accident on any bundle that
-happens to have been built correctly - what matters is the *declaration*, since that is what every
-consumer above sees and what would let a module branch on which implementation it got. One
-comparison covers all eight fields and a ninth field added without a port breaks it.
+**Every field of `Services` that is a port is declared as a port ABC.** Asserted against
+`get_type_hints`, not against the runtime types, because the runtime types are right by accident on
+any bundle that happens to have been built correctly - what matters is the *declaration*, since that
+is what every consumer above sees and what would let a module branch on which implementation it got.
+One comparison covers all nine fields, and a tenth added without being written down breaks it. The
+ninth is `build`, which is not a port and is kept in a list of its own for that reason: a `str` on
+this class has to be a deliberate act, and 14.0's argument for the one there is that
+`Verifier.verify` takes the build command as a parameter and its only caller is above the edge.
 
 **Construction is eager but inert.** The real bundle below is built with a home, a repository and a
 trees root that do not exist, and every one of the paths handed in is a directory nothing has
@@ -64,7 +67,7 @@ from agl.ports.workspace import WorkspaceProvider
 # most of this file is synchronous - construction is - and marking those would be a warning per
 # test saying so.
 
-# The bundle's eight fields and the port each one is declared as. Written out here rather than read
+# The bundle's eight ports and the ABC each one is declared as. Written out here rather than read
 # off the class, so that a field quietly retyped to an adapter fails against a list somebody wrote
 # on purpose instead of agreeing with itself.
 _PORTS: Final = {
@@ -77,6 +80,13 @@ _PORTS: Final = {
     "clock": Clock,
     "agents": AgentRunner,
 }
+
+# The ninth field, which is not a port and is the only one that is not. `Verifier.verify` takes the
+# build command as a parameter and its one call site is the merge gate inside `integrate()`, above
+# the edge - so the bundle is what carries it (`sdk/_engine/services.py` argues the alternatives).
+# A second list rather than a row in the first: the two say different things, and a tenth field
+# arriving as a `str` should have to be added here by somebody who meant it.
+_CONFIGURED: Final = {"build": str}
 
 # The two adapter modules that import a vendor package at module level, and so the two that must
 # not be reachable from a path that has not been told to construct them.
@@ -110,10 +120,16 @@ def _project(tmp_path: Path) -> Project:
 
 
 def _ports_are_filled(services: container.Services) -> None:
-    """Every declared field holds an instance of the port it is declared as."""
-    assert {field.name for field in fields(services)} == set(_PORTS)
+    """Every port field holds an instance of the port it is declared as, and the ninth is there.
+
+    `build` has no ABC to be an instance of, so what is asserted about it here is only that the
+    bundle's fields are exactly the two lists above - a field on neither breaks this - and that a
+    built bundle carries something in it. What it carries is two tests further down.
+    """
+    assert {field.name for field in fields(services)} == set(_PORTS) | set(_CONFIGURED)
     for name, port in _PORTS.items():
         assert isinstance(getattr(services, name), port), name
+    assert services.build
 
 
 def test_every_field_of_the_bundle_is_declared_as_a_port_and_never_as_an_adapter() -> None:
@@ -122,8 +138,12 @@ def test_every_field_of_the_bundle_is_declared_as_a_port_and_never_as_an_adapter
     A field declared `FilesystemStore` would type-check everywhere and put an adapter's name into
     every module that reads a bundle - which is contract 5's rule broken by a type annotation
     rather than by an import, and import-linter would not see it.
+
+    `build` is compared just as exactly, in a list of its own. It is project configuration rather
+    than a capability, so there is no adapter it could name - and folding it into the same
+    comparison is what keeps "a field arrived without anybody writing it down" a failure here.
     """
-    assert get_type_hints(container.Services) == _PORTS
+    assert get_type_hints(container.Services) == _PORTS | _CONFIGURED
 
 
 def test_the_real_bundle_builds_and_fills_every_port(tmp_path: Path) -> None:
@@ -156,6 +176,47 @@ def test_the_fakes_bundle_needs_no_extra_installed(
     monkeypatch.setitem(sys.modules, _RICH_TERMINAL, None)
     harness = container.fakes(TreesRoot(tmp_path / "trees"))
     _ports_are_filled(harness.services)
+
+
+def test_the_real_bundle_carries_the_projects_configured_build_command(tmp_path: Path) -> None:
+    """The route §3.11 leaves open, closed at the one place both ends are in scope.
+
+    `Verifier.verify` takes the command, its only caller is the merge gate inside `integrate()`, and
+    `Project.build` is where the command is written down - so something has to carry it across, and
+    the container is the only thing holding a `Project` *and* building the bundle a `Run` gets.
+    Asserted as the project's own string rather than as "not empty", because the failure this
+    catches is a plausible one: a bundle that carried a placeholder would gate every merge on a
+    build nobody configured.
+    """
+    assert container.real(_settings(tmp_path), _project(tmp_path)).build == "make check"
+
+
+@pytest.mark.asyncio
+async def test_the_fakes_bundle_carries_a_build_command_the_gate_answers_to(
+    tmp_path: Path,
+) -> None:
+    """The two halves that have to be one string, driven rather than compared.
+
+    `FakeVerifier` scripts its verdicts **by command** - "scripting by the thing a test can name in
+    advance and hold still" - so a test that wants a red gate has to name the command the bundle is
+    carrying. A literal here and a literal in the container would agree until one of them changed,
+    and the failure is silent in the worst direction: an unscripted command *passes*, so the script
+    stops matching and every landing sails through the gate the test thought it had closed.
+    """
+    harness = container.fakes(TreesRoot(tmp_path / "trees"))
+    assert harness.services.build == container.FAKE_BUILD
+
+    harness.verifier.answers(container.FAKE_BUILD, passed=False, status=2, output="2 failing")
+    outcome = await harness.services.verifier.verify(harness.services.build, tmp_path)
+
+    assert (outcome.passed, outcome.status, outcome.output) == (False, 2, "2 failing")
+
+
+def test_the_fakes_bundle_takes_a_build_command_of_its_own(tmp_path: Path) -> None:
+    """A test about a *particular* command reaching the gate has to choose it, so `fakes()` takes
+    one - keyword-only, beside the scripts, for the reason those are keyword-only."""
+    harness = container.fakes(TreesRoot(tmp_path / "trees"), build="./gradlew check")
+    assert harness.services.build == "./gradlew check"
 
 
 def test_the_concrete_fakes_are_the_same_objects_as_the_ports_in_the_bundle(

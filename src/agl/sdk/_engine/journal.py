@@ -180,17 +180,24 @@ it was would recompute `spec` against H5, miss, and re-run - every step, every r
 with the run still finishing and still right. The only symptoms are the bill and the wait, which is
 the failure mode every rule in this module shares.
 
-**Where stage 14's write lands, and what it costs to leave out.** A child landing moves the
+**Where the integration write lands, and what it costs to leave out.** A child landing moves the
 parent's physical head, and `integrate()` is not a step, so nothing journals it - the parent's
 `last_good` still names a commit from before the landing. §3.6: "`IntegrationOutcome.head` carries
 the value; the engine must write it into the parent's chain", and this is "the one path in the
-design that destroys work rather than costing a re-run". The write lands on `Journal._last_good`,
-from `sdk/_engine/integration.py` at deliverable 14.1, through an `advance(head)` that is
-deliberately **not** built here: there is no `integrate()` to call it, and a mutator with no caller
-is an untested one. What 11.3 owes 14.1 is that the mechanism stays reachable - `last_good` is
-instance state on this object, not a local in a loop - and that the cost of forgetting it is
-written down where the field is. Forgetting it does not cost a re-run: the parent's next
-fingerprint miss restores to a commit before every landed child and deletes all of it.
+design that destroys work rather than costing a re-run". The write lands on `Journal._last_good`
+and `advance` below is the door it comes through. 14.0 opened it ahead of its caller and 14.1 is
+that caller: `sdk/_engine/integration.py` makes the call after the landing has been checked for
+containing the child's work and before the target's lease goes back. Forgetting it does not cost a
+re-run - the parent's next fingerprint miss restores to a commit before every landed child and
+deletes all of it.
+
+**`exclude_steps` is the second door that same caller comes through**, added at 14.1 and used
+nowhere else. A landing writes the target namespace's whole checkout, moves its branch and reads its
+head - every one of the things the lock below exists to keep two steps from doing at once - so an
+integration into this namespace has to shut this namespace's own step walk, by the same mechanism
+and for §3.6's reason. The plan says that nowhere: §3.6 is about steps, §3.4 is about integrations,
+and neither is about both. The alternative was for the engine to reach through this class's
+underscore at `_running`, which would turn an invariant this module keeps into one everybody keeps.
 
 ## Why `InputError`, where `ports/run.py` says `InternalError`
 
@@ -690,10 +697,10 @@ class Journal:
                 "a journal was opened at an empty base, and a namespace's starting head names the "
                 "commit it was opened from - there is no state in which a walk has no head yet"
             )
-        # The chain, and the only mutable thing on this object. Written in exactly two places, both
-        # in `step`: from `entry.head` on a hit, and from the worktree's head after a write.
-        # Deliverable 14.1 adds a third - `integrate()` writing `IntegrationOutcome.head` here -
-        # and the module docstring says what it costs to leave it out.
+        # The chain, and the only mutable thing on this object. Written in exactly three places:
+        # twice inside `step` - from `entry.head` on a hit, and from the worktree's head after a
+        # write - and once in `advance`, which is `integrate()` putting `IntegrationOutcome.head`
+        # here. The module docstring says what leaving that third write out costs.
         self._last_good = base
         # §3.6's "a namespace's workspace is single-threaded", and this is where it is spent.
         # Constructed here rather than lazily inside `step`: a lock built on first use would be
@@ -706,10 +713,11 @@ class Journal:
     def last_good(self) -> str:
         """The commit this namespace is known to be at - `base` until an entry, `entry.head` after.
 
-        Read-only, and the read is the whole of what is exposed: `_last_good` is written in exactly
-        two places, both inside `step`, and deliverable 14.1 adds the third. A setter here would be
-        a fourth writer with no caller, and the field's own comment says why that is not the seam
-        `integrate()` needs - what it needs is that the value stays instance state on this object.
+        Read-only, and the read is the whole of what is exposed: `_last_good` is written twice
+        inside `step` and once in `advance`, and those three are all of them. A setter here would
+        be a fourth writer with nothing of its own to say - `advance` is the seam `integrate()`
+        needs, and its docstring argues why a named mutator carrying the occasion beats an
+        assignment anything holding a `Journal` may make.
 
         **Synchronous, and that is what `Run.worktree` needs of it.** A child's base is its parent's
         logical head (§3.6: "the starting head is chained logically, not read from disk"), and
@@ -720,6 +728,95 @@ class Journal:
         advanced it, and neither is where this chain is.
         """
         return self._last_good
+
+    def advance(self, head: str) -> None:
+        """Move this namespace's chain to a commit no step of its own produced - `integrate()`'s
+        write, and the third writer of `_last_good`.
+
+        §3.6, in those words: "**`integrate()` advances the parent's `last_good`**.
+        `IntegrationOutcome.head` carries the value; the engine must write it into the parent's
+        chain." `sdk/_engine/integration.py` is the caller and the only one there is.
+
+        **What leaving it out costs is the whole reason it exists.** A child landing moves the
+        parent's *physical* head, but this chain is built from step entries and `integrate()` is not
+        a step, so nothing journals it: the parent goes on believing it is at the commit its last
+        step ended at, which is a commit from before every landing. The next step in the parent to
+        miss its fingerprint then restores to that commit - `reset --hard` *and* `clean -fd` - and
+        every child that has landed since is gone. **This and a mispaired `commit=` are the only two
+        paths in AGL that destroy work rather than costing a re-run.** Every other rule this module
+        spends a paragraph on fails by re-running a step and paying an agent twice; these two fail
+        by deleting what was already paid for, and neither of them raises on the way.
+
+        **Synchronous, because it assigns and nothing goes and looks.** The value is the outcome's,
+        produced by the integrator that has already landed the work, and `last_good` is chained
+        logically rather than read from the worktree (§3.6) - so there is no `head()` behind this
+        and nothing for a caller to await. `Run.worktree` needs the same of `last_good` for the same
+        reason, one field over.
+
+        **Not a setter on the property, deliberately.** A setter would be a fourth writer of one
+        field, reachable from anything holding a `Journal`, saying nothing about when writing it is
+        legitimate - which is exactly once per landing, from the one caller with an
+        `IntegrationOutcome` in its hand. A named mutator is that same assignment with the occasion
+        attached, and it keeps the field's writers countable: three, and all three nameable in one
+        sentence.
+
+        **And it writes no entry, which is the design rather than an omission here.** Nothing
+        journals an integration: no fingerprint over a landing, no file under `steps/` for one, and
+        so nothing on disk a resume could read to learn that a child went in. That is why §3.4's
+        "a resumed run must be able to find a hold it did not take" is a problem at all. This write
+        lives exactly as long as the process; a resume rebuilds the chain by walking the entries
+        again, from the base the namespace was opened at.
+
+        **It takes no lock, and could not - and 14.1 is what makes that safe rather than stated.**
+        `_running` is an `asyncio.Lock` and this is a plain call, so an advance arriving while a
+        step in this namespace is mid-walk would land between that walk's suspensions, and the
+        step, having taken its base before its first one, would record an entry chaining from a
+        head this call has already moved past. What keeps the two apart is `exclude_steps` below:
+        the caller - `sdk/_engine/integration.py`, the only one there is - holds this namespace's
+        step lock from before the landing until after this line, so no step in this namespace can
+        be mid-walk when this runs. Acquiring `_running` here would not be a second safety net but
+        a deadlock against that same caller, an `asyncio.Lock` being neither reentrant nor
+        acquirable from synchronous code. The exclusion belongs one layer up because landing into a
+        namespace whose own step is running is two writers of one checkout long before it is
+        anything to do with this field.
+
+        An empty `head` is refused for the constructor's reason and in its register: an empty string
+        names nothing, and it would be handed to `restore` and hashed into every fingerprint after
+        it. `IntegrationOutcome` spells "it did not land" as a conflict and never as an empty head,
+        so nothing that got this far honestly has one.
+        """
+        if not head:
+            raise InternalError(
+                "an integration tried to advance a namespace's chain to an empty head, and an "
+                "empty string names no commit - a landing that went in reports where the target is "
+                "now, and one that did not carries a conflict instead of a head"
+            )
+        self._last_good = head
+
+    async def exclude_steps(self) -> Callable[[], None]:
+        """Shut this namespace's step walk, and hand back the one thing that opens it again.
+
+        **Deliverable 14.1's seam, and its caller is `sdk/_engine/integration.py` - `Leases.claim`,
+        and nothing else.** §3.6 makes a namespace's workspace single-threaded and the lock below
+        is that rule; a landing into this namespace is a *second writer of the same checkout*,
+        which the plan never says because §3.6 is about steps and §3.4 is about integrations. So an
+        integration holds this shut for as long as it holds §3.4's per-target lease - across a
+        conflict included, because a target mid-landing is a tree no step may run in.
+
+        **One call rather than a pair, and the release is the return value.** An acquire and a
+        release as two named members would be two things a caller has to keep in step across a
+        `return` - and this one is held across one, since a conflicted outcome goes back to the
+        workflow with the lock still taken, so `async with` is not available to keep them together.
+        Handing back the release makes the pair one expression at the call site and leaves the lock
+        itself unreachable: nothing outside this class can wait on it, ask it anything, or acquire
+        it a second time.
+
+        Named for what it does to *steps* rather than for the lock it takes, for `Steps.landing`'s
+        reason: `_running`'s invariants are this module's to keep, and a member that handed out the
+        object would make them everybody's.
+        """
+        await self._running.acquire()
+        return self._running.release
 
     async def step(
         self,

@@ -98,7 +98,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-from agl.adapters.git._conflicts import collided, unresolved
+from agl.adapters.git._conflicts import already_holding, collided, unresolved
 from agl.adapters.git._merging import combined, contested
 from agl.adapters.git._patches import differences, patch
 from agl.adapters.git._snapshots import FakeRepository, Hold, Tree
@@ -437,20 +437,51 @@ class FakeIntegrator(Integrator):
         nothing. That is the ordinary shape of a replayed run (§3.6) and not a failure, not a
         conflict, and not a third case.
 
-        The pre-check is a rule rather than a probe: a landing already pending means the run owes
-        this target a `retry` or an `abort` it never made, and merging over one would report the
-        old hold's collision as this landing's.
+        **A target already holding a landing is answered with a `Conflict`, and nothing is
+        touched.** The pre-check is a rule rather than a probe and it stays first, for two reasons
+        that were both true before the answer changed: combining over a hold would report the old
+        hold's collision as this landing's, and the refusal below would fire first anyway - a held
+        checkout is full of collisions this package wrote and nobody recorded, so a landing over
+        one would be refused for *unrecorded work* and tell a person to go and look at a file their
+        two lines of work have never disagreed about.
+
+        What changed at stage 14 is the answer, from `InternalError` to the port's ordinary second
+        one, and §3.4 is why: *a resumed run must be able to find a hold it did not take.*
+        `integrate()` is not a step, so nothing journals it, and the run that resumes reaches the
+        same call with the target still held - a recoverable state, and the plan refuses to let it
+        be exit 70. The state *is* a conflict and the workflow already knows how to route one. The
+        other exit it offers is a `held(target)` predicate on the port, which would put §1.3's
+        `merge_in_progress` back and contradict what `tests/contracts/integration.py` writes down
+        about a hold having no predicate to ask; the shortcut it forbids outright, `abort()` before
+        every land, would throw away a partial resolution `retry` exists to preserve.
+        `GitIntegrator.land` argues the whole of it, and this agrees with it because §1.9 says a
+        fake that answers differently is a `--dry-run` that sends a run down a path anger does not
+        take - and here the two paths are a workflow's conflict screen and exit 70.
+
+        The clause the plan's durability requirement puts on a fake is unreachable rather than
+        unmet, and the module docstring says why: a `FakeRepository` dies with its process, so the
+        hold a resumed run would find was never there to find. What is honoured is the structural
+        half - the hold is the repository's and not this object's, so a `FakeIntegrator` built
+        after the one that took it lands into a target it can see is held.
+
+        The `Conflict` is not a claim that these two lines of work disagree; nothing here has
+        compared them. `paths` are the *pending* landing's, read exactly as `retry` reads them so
+        that the two moments cannot disagree, and the summary says whose they are.
 
         The refusal below is the real adapter's, and git states it in as many words - a merge that
         would overwrite a file the checkout has changed and not recorded is refused before
         anything is touched. Without it a `--dry-run` would quietly destroy an agent's uncommitted
         work where a real run would have stopped and said so.
         """
-        if self._repository.held(target.path) is not None:
-            raise InternalError(
-                f"a landing into {target.branch!r} is already pending, and this run is asking to "
-                f"land {source.branch!r} on top of it. Every path out of a conflicted landing owes "
-                f"the target a retry or an abort, so AGL has lost track of a hold it took"
+        pending = self._repository.held(target.path)
+        if pending is not None:
+            return IntegrationOutcome(
+                conflict=already_holding(
+                    _still_unresolved(pending, snapshot(target.path)),
+                    source.branch,
+                    target.branch,
+                    target.path,
+                )
             )
         landing = self._repository.tip(source.branch)
         if landing is None:
@@ -526,7 +557,7 @@ class FakeIntegrator(Integrator):
                 f"landing by hand, which `abort` is the tolerant answer to"
             )
         held = snapshot(target.path)
-        still = tuple(path for path in pending.collisions if contested(held.get(path)))
+        still = _still_unresolved(pending, held)
         if still:
             return IntegrationOutcome(conflict=unresolved(still, target.branch, target.path))
         settled = dict(pending.combined)
@@ -579,6 +610,25 @@ class FakeIntegrator(Integrator):
                 f"recorded, and landing {target.branch!r} would write over them. Record them or "
                 f"take them away first; nothing here has been changed"
             )
+
+
+def _still_unresolved(pending: Hold, held: Tree) -> tuple[str, ...]:
+    """Which of a held landing's collisions nobody has resolved yet, out of one reading of the
+    checkout.
+
+    The fake's counterpart of asking git's index which paths are unmerged, and it is asked of the
+    file because the file is where this package wrote the question - divergence 3 in
+    `test_git_parity.py`, which is where an edited-but-unstaged resolution parts the two
+    implementations company.
+
+    One function for both moments that need the answer, and that is the point of it rather than an
+    economy: `retry` asks in order to decide whether the landing can be concluded, and `land` asks
+    in order to say what the hold standing in its way is made of. Two readings could come to
+    differ, and the pair that diverged would be reporting one set of files to the person at the
+    conflict screen and acting on another. It takes the tree rather than reading one, so a caller
+    makes exactly one pass over the checkout and decides on what that pass saw.
+    """
+    return tuple(path for path in pending.collisions if contested(held.get(path)))
 
 
 def _merged(source: str, target: str) -> str:

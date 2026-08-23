@@ -20,7 +20,10 @@ file needs an answer both implementations can give.
   * **One repository is one repository, however many adapters are built over it.** The real three
     reach one shared object through the filesystem, so two `GitIntegrator`s over one path are the
     same integrator; the fake has to make that true by holding nothing itself, and the hold §3.4
-    argues about is the case where it matters most.
+    argues about is the case where it matters most. Twice over: an integrator built after the hold
+    was taken can end it, and one asked to *land* into it is told what is in the way rather than
+    combining over a collision nobody resolved - which is the resumed run of §3.4, in the strongest
+    form a repository that dies with its process admits.
   * **The lock that is deliberately not taken.** §3.9's `flock` guards git's worktree registry
     across processes. This registry is a dict in one process, so a second process would contend
     over nothing - and a lock file appearing in the trees root would say otherwise.
@@ -75,6 +78,12 @@ BODY: Final = b"the state a run is cut from\n"
 CONTESTED: Final = "agl-acceptance/contested.txt"
 MINE: Final = b"what the child wrote\n"
 YOURS: Final = b"what the sibling wrote instead\n"
+
+# A third child, and the file only it writes: the work offered to a target that is already holding
+# a landing. A file nobody else touches, so that "it did not go in" is a thing to look at.
+LATECOMER: Final = Namespace("T-03")
+ELSEWHERE: Final = "agl-acceptance/elsewhere.txt"
+LATER: Final = b"what the latecomer wrote, while the target was held\n"
 
 # §3.9's lock file, named here so that this file asserts *where* one would be rather than reading
 # a constant back out of the implementation that would then agree with itself.
@@ -231,6 +240,78 @@ async def test_one_repository_is_one_integrator_however_many_are_built_over_it(
     assert await target.head() == settled
     with pytest.raises(InternalError):
         await took.retry(target)
+
+
+async def test_an_integrator_landing_into_a_hold_another_one_took_is_told_so_and_touches_nothing(
+    repository: FakeRepository, trees: TreesRoot, base: str
+) -> None:
+    """§3.4's resumed hold, in the strongest form a fake admits - and its answer to it.
+
+    *A resumed run must be able to find a hold it did not take*, and the answer stage 14 gives is
+    the first exit the plan names: `land` into a held target reports a `Conflict` rather than
+    raising, because the state is recoverable and exit 70 on resume is what §3.4 refuses. A
+    `FakeRepository` dies with its process, so the resumed *run* is out of reach here - what stands
+    in for it is the same thing the test above uses for the hold itself, an integrator built after
+    the one that took it, and the claim is that the second one is told what is in the way rather
+    than landing over it or answering out of an attribute it does not have.
+
+    The parity file pins that this answer is git's answer too, in detail. What is here is the part
+    that needs two integrators: an implementation holding the pending landing in the object that
+    took it would let this second one merge straight over a collision nobody has resolved, and
+    `--dry-run` would report a clean merge train where a real run stops at a screen.
+    """
+    provider = FakeWorkspaceProvider(repository, trees)
+    target = await provider.open(LABEL, None, base)
+    child = await provider.open(LABEL, CHILD, base)
+    sibling = await provider.open(LABEL, SIBLING, base)
+    latecomer = await provider.open(LABEL, LATECOMER, base)
+    for workspace, name, content in (
+        (child, CONTESTED, MINE),
+        (sibling, CONTESTED, YOURS),
+        (latecomer, ELSEWHERE, LATER),
+    ):
+        _put(workspace.path, name, content)
+        await workspace.commit_all("a child's own work")
+
+    took = FakeIntegrator(repository)
+    assert (await took.land(child, target)).conflicted is False
+    settled = await target.head()
+    assert (await took.land(sibling, target)).conflicted is True
+
+    offered = await FakeIntegrator(repository).land(latecomer, target)
+
+    assert offered.conflicted is True and offered.head is None, (
+        f"an integrator built after the hold was taken answered {offered.head!r} for a landing "
+        f"into a target that is still holding one, so it either could not see the hold or landed "
+        f"over a collision nobody resolved"
+    )
+    assert offered.conflict is not None
+    assert offered.conflict.paths == (CONTESTED,), (
+        f"the conflict names {offered.conflict.paths}, and what is unresolved is the pending "
+        f"landing's collision over {CONTESTED} - the landing the person is being asked about"
+    )
+    for branch in (target.branch, latecomer.branch):
+        assert branch in offered.conflict.summary, (
+            f"the line a person reads is {offered.conflict.summary!r} and does not name "
+            f"{branch!r}: the screen has to say which landing is in the way and which was turned "
+            f"back"
+        )
+    assert await target.head() == settled, "nothing on this path moves the target"
+    assert not (target.path / "agl-acceptance" / "elsewhere.txt").is_file(), (
+        "the work offered while the target was held is in the target's checkout, so something was "
+        "combined on a path that is supposed to look and report and do nothing else"
+    )
+    assert (await took.retry(target)).conflicted is True, (
+        "the hold was gone after being landed over, which is the partial resolution `retry` exists "
+        "to preserve being thrown away by the shortcut §3.4 forbids"
+    )
+
+    await took.abort(target)
+
+    assert await target.head() == settled
+    assert (target.path / "agl-acceptance" / "contested.txt").read_bytes() == MINE, (
+        "the first child's work is not what the target holds after the release"
+    )
 
 
 async def test_the_registry_lock_is_deliberately_not_taken(

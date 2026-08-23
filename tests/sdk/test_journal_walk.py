@@ -44,6 +44,13 @@ that notices:
     test does its retry against the same `Fingerprints` and asserts the entry landed at `n = 0`,
     which is where the resume below it then looks.
 
+**A sixth is here for the opposite reason: its failure is the loudest thing in this design.**
+`advance` is §3.6's "`integrate()` advances the parent's `last_good`", and a chain that did not
+follow a landing means the parent's next fingerprint miss restores past every child that has landed
+and cleans the tree of it. That is not a re-run and not an exception - it is work gone, and one of
+only two places in AGL where a mistake costs that. So the test asserts on the *call*: what the walk
+after an advance asked its workspace to restore to.
+
 Named `test_journal_walk.py`: `tests/` carries no `__init__.py` - see `tests/conftest.py` for why
 it must not - so pytest's module names are the bare filenames and every one has to be unique.
 """
@@ -59,6 +66,7 @@ import pytest
 
 from agl.config import container
 from agl.ports.agent import Claude, Restriction, Tool, ToolResult
+from agl.ports.errors import InternalError
 from agl.ports.home_layout import RunScope
 from agl.ports.ids import Namespace, ProjectName, RunLabel, StepName
 from agl.ports.run import JsonValue
@@ -363,6 +371,106 @@ async def test_a_base_that_advanced_between_runs_does_not_invalidate_earlier_ste
     assert await _step(resumed, SPEC, spec) == {"spec": "oauth"}
     assert await _step(resumed, TICKETS, tickets) == {"tickets": ["T-01", "T-02", "T-03"]}
     assert (spec.runs, tickets.runs) == (0, 0)
+
+
+# --- `advance`: the third writer of the chain ----------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_advance_moves_the_chain_to_a_landed_head_and_the_next_restore_keeps_it(
+    tmp_path: Path,
+) -> None:
+    """§3.6's "`integrate()` advances the parent's `last_good`", and what forgetting it destroys.
+
+    The same arrangement as the two tests above and the opposite claim, which is the pair worth
+    reading together. There a landing arrives behind the journal's back and the chain must *not*
+    follow it, because nothing told the journal it happened. Here the engine says so, and everything
+    after has to be against the landed commit.
+
+    Two assertions and the second is the one with money in it. The next step being fingerprinted
+    from `landed` is what a reader expects; the next step's **pre-run restore** targeting `landed`
+    is what keeps the landed work in the tree, because that restore is `reset --hard` and
+    `clean -fd` and it runs unconditionally on every miss. Aimed one commit back, it takes every
+    child that has landed with it.
+    """
+    harness, raw, base = await _opened(tmp_path)
+    calls: list[tuple[str, str]] = []
+    workspace = _Recorded(raw, calls)
+    journal = _journal(harness, workspace, base)
+
+    def _edits() -> None:
+        _write(raw, "src/a.txt", b"two\n")
+
+    await _step(journal, SPEC, _Worker(does=_edits), commit="spec")
+    after_spec = await raw.head()
+
+    # What `integrate()` does: a child's work lands in this checkout, and the engine hands the chain
+    # the head the integrator reported. `IntegrationOutcome.head` is exactly this value.
+    _write(raw, "src/landed.txt", b"from T-01\n")
+    landed = await raw.commit_all("land T-01")
+    assert landed != after_spec
+
+    journal.advance(landed)
+    assert journal.last_good == landed
+
+    calls.clear()
+    await _step(journal, TICKETS, _Worker({"tickets": []}))
+
+    chained = await _entry_at(harness, TICKETS, _digest(landed))
+    assert chained is not None, "the step after a landing was fingerprinted against the old chain"
+    assert chained.head == landed
+    assert calls[0] == ("restore", landed), (
+        f"the pre-run restore targeted {calls[0][1]!r}, a commit from before the landing: that is "
+        f"`reset --hard` and `clean -fd` over every child that had landed, which §3.6 calls one of "
+        f"the two paths in this design that destroy work rather than costing a re-run"
+    )
+    assert (raw.path / "src" / "landed.txt").read_bytes() == b"from T-01\n"
+
+
+@pytest.mark.asyncio
+async def test_advance_writes_no_entry_and_a_second_walk_starts_from_the_ledger(
+    tmp_path: Path,
+) -> None:
+    """Nothing journals an integration, and a resume is where that shows.
+
+    There is no fingerprint over a landing and no file under `steps/` for one - §3.4's "a resumed
+    run must be able to find a hold it did not take" is the same gap named from the other side. So
+    the chain this call moves lives exactly as long as the process: a second walk opens at the base
+    it was given and replays forward out of the entries, and the entry written *before* the landing
+    still hits, because a landing changed nothing any digest was taken over.
+    """
+    harness, workspace, base = await _opened(tmp_path)
+    journal = _journal(harness, workspace, base)
+
+    await _step(journal, SPEC, _Worker({"spec": "oauth"}))
+
+    _write(workspace, "src/landed.txt", b"from T-01\n")
+    landed = await workspace.commit_all("land T-01")
+    journal.advance(landed)
+
+    resumed = _journal(harness, workspace, base)
+    assert resumed.last_good == base, "a landing left something on the ledger for a resume to read"
+
+    spec = _Worker()
+    assert await _step(resumed, SPEC, spec) == {"spec": "oauth"}
+    assert spec.runs == 0, "the entry recorded before the landing stopped replaying after it"
+
+
+@pytest.mark.asyncio
+async def test_advance_refuses_an_empty_head_and_leaves_the_chain_where_it_was(
+    tmp_path: Path,
+) -> None:
+    """The constructor's refusal one moment later and in its register: an empty string names no
+    commit, and this one would be handed to `restore` and hashed into every fingerprint after it.
+    `IntegrationOutcome` spells "it did not land" as a conflict and never as an empty head, so
+    nothing honest gets here with one."""
+    harness, workspace, base = await _opened(tmp_path)
+    journal = _journal(harness, workspace, base)
+
+    with pytest.raises(InternalError, match="empty head"):
+        journal.advance("")
+
+    assert journal.last_good == base
 
 
 # --- the pre-run restore -------------------------------------------------------------------------

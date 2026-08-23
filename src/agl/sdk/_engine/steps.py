@@ -267,10 +267,13 @@ _INPUTS_HEADING: Final = "## Inputs"
 class Steps:
     """One namespace's step engine: its checkout, its journal, and the run's shared counter.
 
-    Built by `Run.__post_init__` and reached only through `Run.step`, whose body is one line over
-    this. One of these per `Run`, which is one per namespace - the run's own at stage 12, and one
-    more per child at 13.1 - and the state it holds is the state a namespace has: the checkout, the
-    walk over it, and the lock that makes opening those two a single event.
+    Built by `Run.__post_init__`. One of these per `Run`, which is one per namespace - the run's own
+    at stage 12, and one more per child at 13.1 - and the state it holds is the state a namespace
+    has: the checkout, the walk over it, and the lock that makes opening those two a single event.
+
+    Three things read it and each is one line over one member. `Run.step` is `step`; `Run.worktree`
+    is `last_good`, read synchronously because a child's base is its parent's logical head; and
+    stage 14's integration engine is `landing`, which is the namespace a child's work goes into.
     """
 
     def __init__(
@@ -334,6 +337,40 @@ class Steps:
         cost `_namespace` documents for the single case and not a new one.
         """
         return self._base if self._opened is None else self._opened[0].last_good
+
+    async def landing(self) -> tuple[Journal, Workspace]:
+        """This namespace as an integration target: what work lands into, and what records that it
+        did.
+
+        **Deliverable 14's seam, and its caller is `sdk/_engine/integration.py`.** `integrate()`
+        lands a child's workspace into its *parent's* and then puts `IntegrationOutcome.head` into
+        the parent's chain (§3.6), so it needs both halves of one namespace and it needs them as
+        objects rather than as names: `Integrator.land(source, target)` takes a `Workspace`, and
+        `Journal.advance` writes a field only the live journal has. Both are here, together, because
+        a landing that moved one without the other is the destructive failure §3.6 spends a
+        paragraph on - the checkout ahead of the chain, and the parent's next fingerprint miss
+        resetting past every child that has landed.
+
+        **Named for what the caller wants, which is why it is not `_namespace` under a second
+        name.** `_namespace` is this class's one-time open and its double-checked lock, and what
+        makes it private is that its invariants are this module's to keep; another module reaching
+        through that underscore would make them everybody's. One named member says who asks and what
+        for, in the class that already owns both halves and opens them exactly once.
+
+        **On `Steps` and deliberately not on `Run`.** §3.3's `Run` is six members and this is not
+        among them: it hands out a checkout and a mutable chain, which is the plumbing every
+        argument for `_engine/` is about, and a workflow author holding it could move their own
+        parent's `last_good` without the framework hearing of it. The engine reaches it as
+        `run._parent._steps.landing()` - two private names of two classes in one package, which is
+        exactly what `workflow._starts_at` already does one field over.
+
+        The open is the same one-time open every step in this namespace goes through, so landing
+        into a namespace that has taken no step provisions it exactly as its first step would have.
+        `WorkspaceProvider.open` is idempotent by contract - "an existing workspace is returned
+        exactly as it stands" - so the run's own `_base`, already opened by `api.run` before the
+        workflow was awaited, comes back with whatever is in it.
+        """
+        return await self._namespace()
 
     def _reported(self, line: str) -> None:
         """What the serving adapter calls to say what is happening. It is held, and nothing else.

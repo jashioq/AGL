@@ -60,9 +60,10 @@ nothing: it reads packaging metadata and sorts strings.
 
 Load the workflow, refuse a label that is already taken, pin the base ref to a full object name,
 write `run.json`, provision the run's own `_base` worktree from that pin, then await the workflow's
-function. The order is load-and-parse first because those two refuse with no I/O at all - §3.3's
-"before anything runs" read as strictly as it can be - then the conflict check, which decides
-whether this run may exist, then the three that are addressed to the repository.
+function and give back every integration lease it was still holding. The order is load-and-parse
+first because those two refuse with no I/O at all - §3.3's "before anything runs" read as strictly
+as it can be - then the conflict check, which decides whether this run may exist, then the three
+that are addressed to the repository.
 
 **The record is written before the workflow is invoked**, so a crash mid-run leaves something behind
 to resume or to clear. It is the one value in AGL with no other copy anywhere (`ports/store.py`), so
@@ -111,10 +112,17 @@ In this module the hazard is *wrapping* rather than reporting - any `except AglE
 translated, annotated or re-raised would turn a workflow's `ReviewNotConverging(Stop)` into
 something else on the way out, and the exit code would be right by accident or wrong by one edit.
 
-So there is no `try` in this file. A workflow's exception leaves `api.run` as the object it raised,
-with its own traceback under it, and `cli/exit_codes.exit_status` answers 7 for it without
-either module having learned what `ReviewNotConverging` is. That is stronger than catching `Stop`
-first, and it is pinned by identity in the suite rather than by class.
+So there is no `except` in this file, and there never may be. A workflow's exception leaves
+`api.run` as the object it raised, with its own traceback under it, and `cli/exit_codes.exit_status`
+answers 7 for it without either module having learned what `ReviewNotConverging` is. That is
+stronger than catching `Stop` first, and it is pinned by identity in the suite rather than by class.
+
+**14.1 put a `try` here and the rule is unchanged, because the rule was about catching.** §3.4 gives
+the framework a lease per integration target and has it "released when the run exits", so the last
+two lines of `run` are a `finally` around the workflow's function. A `finally` sees no exception,
+names no class and cannot decide anything: control leaves it carrying whatever arrived, `Stop`
+subclass and all. What would break the criterion is an `except` of any width, which is why the
+sentence above is written about that word rather than about `try`.
 
 ## The registry, and the one seam it left open
 
@@ -166,6 +174,7 @@ from agl.ports.ids import ProjectName, RunLabel
 from agl.ports.run import RunSpec
 from agl.ports.tree_layout import run_branch
 from agl.sdk import params
+from agl.sdk._engine.integration import Leases
 from agl.sdk._engine.services import Services
 from agl.sdk.workflow import Run, Workflow
 
@@ -239,10 +248,39 @@ async def run(
     # earlier, so that a workflow which takes no steps at all still leaves `agl/<label>` a real ref.
     await services.workspaces.open(label, None, spec.base_sha)
 
+    # §3.4's lease per integration target, constructed here and not left to `Run`'s own default,
+    # because "the lease is released when the run exits" needs something above the workflow to be
+    # holding the handle - and a defaulted field is built where nothing can reach it. This is the
+    # one of `Run`'s three shared tables the composition root passes.
+    leases = Leases()
     # The `Run` is built from what this function already computed and nothing else: `scope` is the
     # address the record above went to, and `base` is the same resolved commit the record pins and
     # the checkout was cut from.
-    await wf.fn(Run(params=given, services=services, scope=scope, base=spec.base_sha))
+    #
+    # **The `try` is a `finally` and never an `except`**, which is what keeps the module docstring's
+    # `Stop` argument true: nothing here catches, translates, annotates or re-raises a workflow's
+    # exception, so it still leaves this function as the object it raised. What the `finally` adds
+    # is that an unresolved conflict does not outlive the run holding a lease and a namespace's step
+    # lock - a workflow that returned without deciding, raised, or was stopped mid-decision leaves a
+    # live integration, and the object it is reachable from is going away with the workflow.
+    #
+    # **It releases the lease and deliberately does not abort the adapter's hold.** The hold is
+    # durable by design (§3.4) so that a later invocation can find one it did not take, and 14.0
+    # made a pre-existing hold answer as a `Conflict` rather than exit 70 - so aborting on the way
+    # out would silently discard a partial resolution somebody may be in the middle of making, which
+    # is the shortcut §3.4 forbids by name. `sdk/_engine/integration.py` argues the whole of it.
+    try:
+        await wf.fn(
+            Run(
+                params=given,
+                services=services,
+                scope=scope,
+                base=spec.base_sha,
+                leases=leases,
+            )
+        )
+    finally:
+        leases.release_all()
 
 
 async def resume(services: Services, project: ProjectName, label: RunLabel) -> None:

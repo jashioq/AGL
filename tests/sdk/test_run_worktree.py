@@ -461,6 +461,108 @@ def test_asking_twice_for_one_name_hands_back_the_same_child_and_the_runs_own_ta
     assert first.scope == RunScope(PROJECT, LABEL, (TICKET,))
 
 
+# --- who cut whom: the link `integrate()` walks --------------------------------------------------
+
+
+def test_the_root_has_no_parent_and_every_child_holds_the_run_that_cut_it(
+    repository: Path, tmp_path: Path, base: str
+) -> None:
+    """14.0's seam. `integrate()` writes into the **parent's** chain and lands into the **parent's**
+    checkout (§3.4, §3.6), so what it needs is the parent `Run`, and this is where it comes from.
+
+    **Asserted by identity, and that is the claim rather than a shortcut.** What the engine wants
+    off the parent is its live journal - the in-memory `last_good` a landing advances - so an
+    equal-but-second `Run` over the parent's scope would satisfy `==` and carry a second `Steps`, a
+    second checkout and a second chain, and advancing that one would move a value nothing reads.
+    That is why the link is a reference and not an address to look one up by.
+
+    **`None` is how a root says it is a root**, which is the case `integrate()` has to refuse: a run
+    with nowhere to land is a workflow error, and this says so directly where a lookup that came
+    back empty would say "the root, or a bug, and I cannot tell which".
+
+    The grandchild is here because parentage and the namespace table agree at depth one and part
+    company at depth two: `sub-b` was cut by `T-01`, while both of them are ordinary entries in the
+    one run-wide table, which knows who *holds* a name and not who spent it.
+    """
+    run = _run(repository, tmp_path, base)
+
+    child = run.worktree("T-01")
+    grandchild = child.worktree("sub-b")
+
+    assert run._parent is None
+    assert child._parent is run
+    assert grandchild._parent is child
+
+
+def test_a_reopened_namespace_still_holds_the_parent_that_first_cut_it(
+    repository: Path, tmp_path: Path, base: str
+) -> None:
+    """`_child` is the only thing that builds a child, so it is the only thing that sets the link.
+
+    A reopen never reaches it - `Worktrees.open` calls `build` exactly once per namespace - so the
+    second call hands back the object the first one made, parent and all. That is what keeps the
+    link true across a replay: a second walk makes the same `worktree()` calls and has to land on
+    the same parent every time, because the chain a landing will advance is the one already in
+    memory and there is only ever one of it per namespace.
+    """
+    run = _run(repository, tmp_path, base)
+    child = run.worktree("T-01")
+
+    first = child.worktree("sub-b")
+    again = child.worktree("sub-b")
+
+    assert again is first
+    assert again._parent is child
+
+
+@pytest.mark.asyncio
+async def test_the_landing_seam_hands_out_the_namespaces_own_journal_and_checkout(
+    repository: Path, tmp_path: Path, base: str
+) -> None:
+    """14.0's third seam, and the two claims that make it a seam rather than an accessor.
+
+    `integrate()` lands a child's workspace into its parent's and then advances the parent's chain,
+    so it asks the parent's `Steps` for both at once. **The checkout has to be the one the parent's
+    own steps work in** - landing into a second checkout over one branch is work done in a directory
+    nothing else looks at - and **the journal has to be the live one**, because a chain advanced on
+    a copy is a value nothing reads.
+
+    The second claim is asserted the only way it can be shown from outside: advance through the seam
+    and then cut a child, whose base is that chain (§3.6, "the starting head is chained logically,
+    not read from disk"). A `landing()` that built its own `Journal` would pass every assertion
+    above this one and leave every later child cut from the commit before the landing - which is the
+    destructive failure `advance` exists to prevent, arriving through the door that was opened to
+    prevent it.
+    """
+    record = _Agent()
+    written = {FEATURE: b"the callback route\n"}
+    run = _run(repository, tmp_path, base, _agent(record, writes=written))
+    await run.step("spec", _role("write the spec"), commit="spec")
+
+    journal, workspace = await run._steps.landing()
+    again_journal, again_workspace = await run._steps.landing()
+
+    assert (again_journal, again_workspace) == (journal, workspace)
+    assert (workspace.path / FEATURE).is_file(), (
+        "the seam opened a checkout of its own: what a landing goes into has to be the tree the "
+        "parent's own steps have been committing to"
+    )
+    assert journal.last_good == _head(tmp_path, "spec")
+
+    # What an integrator does to the target, and then what the engine does to the chain.
+    sidequest = workspace.path / SIDEQUEST
+    sidequest.parent.mkdir(parents=True, exist_ok=True)
+    sidequest.write_bytes(b"landed from T-01\n")
+    landed = await workspace.commit_all("land T-01")
+
+    journal.advance(landed)
+
+    assert run.worktree("T-02").base == landed, (
+        "the chain the seam handed out is not the chain `worktree()` reads, so the landing moved "
+        "one journal and every child after it was still cut from the commit before the landing"
+    )
+
+
 @pytest.mark.asyncio
 async def test_a_reopened_namespace_replays_its_step_and_is_not_cut_again(
     repository: Path, tmp_path: Path, base: str

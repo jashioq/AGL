@@ -450,7 +450,7 @@ def _over(
     """The fakes bundle with its two git ports made real - the smallest arrangement that puts
     `api.run` over an actual repository.
 
-    Two of eight fields replaced, and both are needed: `workspaces` because the claims here are
+    Two of nine fields replaced, and both are needed: `workspaces` because the claims here are
     about a git worktree and a git ref, and `history` because `api.run` resolves the pin through it
     and a `FakeHistory` answers about a `FakeRepository` that has never heard of these commits. The
     store stays the in-memory one - `run.json`'s content is asserted on fakes above, and nothing

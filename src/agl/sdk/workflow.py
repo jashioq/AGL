@@ -16,18 +16,25 @@ params class, and it would be back to asking a module what it contains.
 ## What this stage builds, and what it deliberately leaves empty
 
 §3.3 gives `Run` six members - `params`, `step`, `worktree`, `integrate`, `activity`, `terminal` -
-plus `Stop`. **Four of the six are here.** `integrate` is 14 and `terminal` is 15. They are not
-stubbed, not declared raising `NotImplementedError`, and not present as attributes that refuse. A
-member that exists and refuses is a member every caller has to ask about, and `hasattr` on it is
-exactly the duck typing this layer was built to replace.
+plus `Stop`. **Five of the six are here.** `terminal` is 15. It is not stubbed, not declared raising
+`NotImplementedError`, and not present as an attribute that refuses. A member that exists and
+refuses is a member every caller has to ask about, and `hasattr` on it is exactly the duck typing
+this layer was built to replace.
 
-**`step` and `worktree` are both delegates**, to `sdk/_engine/steps.py` and
-`sdk/_engine/worktrees.py`. ARCHITECTURE.md §6 carries a row for each; the argument is that this
-module is the surface - a decorator, a frozen `Run`, `Stop` - and a lock, a lazily opened checkout,
-a capture cell, a replay walk and a run-wide table of taken namespaces are plumbing, which `sdk/`
-keeps under `_engine/` (`services.py` makes that case at length for the bundle). The fields those
-two need are here, because a constructor's shape is what every call site is written against; what
-they *do* with them is not.
+**`step`, `worktree` and `integrate` are all delegates**, to `sdk/_engine/steps.py`,
+`sdk/_engine/worktrees.py` and `sdk/_engine/integration.py`. ARCHITECTURE.md §6 carries a row for
+each; the argument is that this module is the surface - a decorator, a frozen `Run`, `Stop` - and a
+lock, a lazily opened checkout, a capture cell, a replay walk, a run-wide table of taken namespaces
+and a lease held across a person's decision are plumbing, which `sdk/` keeps under `_engine/`
+(`services.py` makes that case at length for the bundle). The fields those three need are here,
+because a constructor's shape is what every call site is written against; what they *do* with them
+is not.
+
+**`integrate` is the one delegate whose return type is an `_engine` class**, and it has to be:
+`ports.IntegrationOutcome` carries no `retry` and no `abort`, because those two release a lease
+`ports/integration.py` argues at length is not the port's to model. `Integration` is that outcome
+with the two verbs on it, and `Run.fingerprints` being a `Fingerprints` out of `_engine/journal.py`
+is the precedent one field over.
 
 **`activity` is a delegate for a second reason as well**, which is that a `Run` is frozen and
 slotted and the current activity string is by definition mutable - §3.7's "the current agent
@@ -79,7 +86,8 @@ accepted at any `P`, `Run` being covariant in it.
 
 ## The bundle, the address, the base, and the counter
 
-`Run.services` is `sdk/_engine/services.py`'s eight ports. It was carried unread from 10.3, on the
+`Run.services` is `sdk/_engine/services.py`'s eight ports, plus the build command 14.0 put beside
+them because `Verifier.verify` takes one. It was carried unread from 10.3, on the
 argument that a constructor's shape is what every call site is written against - each of
 `cli/commands/`, `sdk/testing.py` at 16.5, and every test that drives a workflow - and `run.step` is
 the member that now reads it: the ledger through `services.store`, the checkout through
@@ -93,20 +101,44 @@ between run and resume" cannot change "the first step's starting head"). Derivin
 `step` would mean this module reading `run.json` back through the store to learn something the
 caller had in a local variable.
 
-`fingerprints` and `worktrees` are the run's two shared tables, and both are constructor arguments
-with a default **because `worktree()` hands its own to every child it cuts**. §3.6 scopes `n` per
+`fingerprints`, `worktrees` and `leases` are the run's three shared tables, and all three are
+constructor arguments with a default **because `worktree()` hands its own to every child it cuts**.
+`leases` joined the other two at 14.1 with nothing new to argue: §3.4 gives the framework one lease
+per integration target, a table built per `Run` would be a table per namespace, and two siblings
+landing into one parent would each take their own lock over their own dict and both be inside the
+parent's checkout at once - the failure the lease exists to prevent, with the lease still nominally
+taken. §3.6 scopes `n` per
 `(namespace, step name)` and `Journal.__init__` argues that one counter per run is what makes that
 key mean anything; §3.9 makes a namespace unique run-wide rather than sibling-wide, and
 `_engine/worktrees.py` argues that a table built privately per `Run` is a table per *namespace*,
 which cannot see a name taken anywhere else in the tree. Either built privately in here would look
 identical at stage 12, where a run has exactly one namespace, and would be that stage's fix silently
-removed the moment `run.worktree()` cut the second. So both are fields with a default: the root
+removed the moment `run.worktree()` cut the second. So all three are fields with a default: the root
 takes the default, and `_child` below passes on the objects this `Run` holds.
 
+**`leases` is the one of the three the composition root does pass**, and that is not an
+inconsistency in the defaulting. `api.run` releases it in a `finally` around the workflow's function
+- §3.4's "the lease is released when the run exits" - so something above the workflow has to be
+holding the handle, and the only way to hold what a defaulted field built is to have built it. The
+default stays because `_child` and `sdk/testing.py` and every test that constructs a `Run` directly
+still want one, and a required argument would make each of them say `Leases()` to get the thing they
+would have got anyway.
+
 They are public for one reason and it is not that a workflow author needs them - none does. Every
-field on this class is what the run was assembled with, and hiding two of the six behind underscores
-would make the two the composition root does not pass look like a different kind of thing from the
-four it does.
+field on this class is what the run was assembled with, and hiding some of the seven behind
+underscores would make the ones the composition root does not pass look like a different kind of
+thing from the ones it does.
+
+## A child holds the `Run` that cut it, and the root holds `None`
+
+`integrate()` at stage 14 lands a child's workspace into the **parent's** and writes
+`IntegrationOutcome.head` into the **parent's** chain (§3.6), so it needs the parent `Run` - the
+object, with its live journal in it. 13.1 built neither a parent field nor an index by scope, on
+purpose; 14.0 settles it as `_parent`, private, defaulted `None`, and set by `_child` and by nothing
+else. The field's own docstring argues that against the two alternatives, against §3.6's "the key,
+not the object", and against the covariance the `worktrees` field one line above it had to give way
+to. It is private because §3.3's surface is six members: a public `parent` would hand every workflow
+author a tree to walk, and the first thing walked up a tree is somebody else's namespace.
 
 ## `Stop` is re-exported, never redefined
 
@@ -196,6 +228,8 @@ from typing import cast
 
 from agl.ports.errors import InputError, Stop
 from agl.ports.home_layout import RunScope
+from agl.sdk._engine.integration import Integration, Leases
+from agl.sdk._engine.integration import integrate as _integrate
 from agl.sdk._engine.journal import Fingerprints
 from agl.sdk._engine.services import Services
 from agl.sdk._engine.steps import Steps
@@ -214,8 +248,8 @@ class Run[P = object]:
     which parameters they were given. Slotted, so the surface is the fields below and an attribute
     nobody declared cannot be attached to it.
 
-    Three of §3.3's six members belong to stages 13 to 15 and are absent rather than stubbed - see
-    the module docstring, which also argues each field below.
+    One of §3.3's six members belongs to stage 15 and is absent rather than stubbed - see the module
+    docstring, which also argues each field below.
     """
 
     params: P
@@ -268,6 +302,76 @@ class Run[P = object]:
     `test_workflow.py` pins. Every `Run` in one table really does share one `P` - the root's is the
     only table there is and `_child` is the only thing that adds to it - but nothing in the type
     system ties the two together, so `worktree()` narrows once, visibly, where it can say why."""
+
+    leases: Leases = field(default_factory=Leases)
+    """§3.4's lease per integration target, run-wide and shared down the tree.
+
+    `fingerprints`' shape and `fingerprints`' argument, two fields over: defaulted for the root,
+    passed on by `_child`, and never built inside a child. A `Leases` built per `Run` would be a
+    lease table per *namespace*, and a lease table per namespace serialises nothing at all - two
+    siblings landing into one parent would each take their own lock over their own dict and both be
+    inside the parent's checkout at once, which is what the lease exists to prevent, with the lease
+    still nominally taken. `sdk/_engine/integration.py` holds it and argues the rest, including why
+    this is not §3.9's cross-process `flock` on the worktree registry and why the two must not be
+    read as one mechanism at two sizes.
+
+    **Not generic, so it costs no erasure where `worktrees` cost one.** A lease is keyed by the
+    target's `RunScope` and holds a lock rather than a `Run`, so there is nothing in it for this
+    class to be invariant in.
+
+    Defaulted like the other two and passed by exactly one caller: `api.run` constructs it so that
+    it can call `release_all` in a `finally` around the workflow's function, which is §3.4's "the
+    lease
+    is released when the run exits"."""
+
+    _parent: Run[P] | None = field(default=None, repr=False, compare=False)
+    """The `Run` that cut this one, or `None` because nothing did. `integrate()`'s one seam.
+
+    A landing has two ends and both of them are the parent's: §3.4 lands a child's `Workspace` into
+    the target's, and §3.6 has the engine write `IntegrationOutcome.head` into the parent's chain.
+    So `integrate()` needs the parent, and what it needs of the parent is the **object** - the live
+    `Journal` behind `_steps`, whose `_last_good` the write lands on. `scope.namespaces[:-1]` is not
+    that; it is the address the object would be at.
+
+    **Why not the namespace table.** `worktrees` answers "who has taken this name", which is a
+    question about names, and it is shared down the tree precisely so that one answer covers the
+    whole run. Making it also answer "who cut me" gives one table two jobs and one of them
+    ill-fitting: the root never appears in it - nothing takes the run's own namespace - so it would
+    have to be inserted under a name §3.3 reserves in order to be findable at all, and the entry
+    would exist to be looked up rather than to record a name being spent.
+
+    **Why not an index by scope.** That is a *derived key*: it composes an address and hopes an
+    object is there. The lookup can miss, and the one case where it misses is a `Run` with no
+    parent, which is exactly the case `integrate()` has to refuse - so the mechanism's only failure
+    is indistinguishable from its only interesting answer. `None` here says "this is the root"
+    directly; a lookup that found nothing says "the root, or a bug, and I cannot tell which".
+    Holding the reference makes the thing the engine wants structural rather than reconstructed.
+
+    **Note the contrast with §3.6's "the key, not the object".** That paragraph is about the
+    fingerprint counter, where the *key* does the work - counts are keyed `(scope, step name, base)`
+    and a child's scope is unique run-wide, so sharing one `Fingerprints` is belt-and-braces rather
+    than the mechanism. Here it is the other way round, and a reader who has just read that
+    paragraph should not have to guess: a scope identifies an address, and an address is not a
+    journal. Two `Run`s over one scope would be two chains, and advancing the wrong one moves a
+    value nothing reads.
+
+    **Covariant, and this one costs nothing where `worktrees` cost an erasure.** `Run` must stay
+    covariant in `P` - that is what lets §3.3's own `async def fix(run: Run) -> None` be decorated
+    with `@workflow(params=FixParams)`, which `tests/sdk/test_workflow.py` pins. `Worktrees` is a
+    mutable container and therefore invariant in what it holds, which is why that field is typed
+    `Run[object]` and `worktree()` casts. A frozen dataclass field is read-only, so `Run[P] | None`
+    is a covariant position and the type may be the honest one: a child's parent really is a `Run`
+    at this run's own `P`, `_child` copying `params` across unchanged.
+
+    Out of `repr` and out of `__eq__`. A recursive repr is the thing to weigh - a child printing its
+    parent prints *its* parent, so one `repr` on a nested run walks the whole chain to the root -
+    and equality gains nothing either, `scope` already naming the entire ancestry, so comparing
+    parents would compare one fact twice and recursively.
+
+    **Set by `_child` and by nothing else**, which is what makes the link true across a replay:
+    `_child` is the only thing that builds a child, a reopen hands back the object it built rather
+    than calling it again, and so a namespace's parent is decided once, when the name is first
+    spent."""
 
     _steps: Steps = field(init=False, repr=False, compare=False)
     """The engine `step` delegates to - `sdk/_engine/steps.py`, holding this namespace's checkout
@@ -432,6 +536,67 @@ class Run[P = object]:
             ),
         )
 
+    async def integrate(self) -> Integration:
+        """Land this Run's work into its **parent's** worktree. §3.3's `run.integrate`.
+
+            outcome = await run.integrate()
+            if outcome.conflicted:
+                if await run.terminal.show(views.conflict, outcome=outcome, priority=10):
+                    await outcome.retry()
+                else:
+                    await outcome.abort()
+
+        **No argument, and there is nothing to point it elsewhere with** (§3.3). A landing has two
+        ends and both of them are decided: the source is this Run's line of work and the target is
+        the one that cut it. A `run.integrate(into=...)` would be a workflow choosing a target,
+        which is a scheduling decision the framework has no vocabulary for and a way to land a
+        child into a namespace whose chain nobody advances.
+
+        **Serialized per target** (§3.4). Landings into one parent are taken one at a time, so a
+        `gather` over two children's `integrate()` is legal and simply does not overlap - and the
+        same lease also shuts the *parent's* own step walk while a landing is in flight, because a
+        landing writes the parent's checkout and §3.6 makes a namespace's workspace single-threaded.
+        Both are held until the outcome is settled, a conflict included: a target mid-landing is a
+        tree no step may run in.
+
+        **On conflict the framework does not ask** (§3.4). What comes back is an outcome whose
+        `conflicted` is true, carrying a `Conflict` written for your own screen, with the target
+        left held mid-landing and the lease still taken. Show whatever you like and then call one
+        of the two verbs: `retry()` looks again at wherever the landing now stands - a collision
+        somebody resolved by hand concludes and goes on down the same path a clean landing takes -
+        and `abort()` gives up, releases the hold and puts the target back. **One of the two, on
+        every path out**, including the paths where something raised: an unsettled outcome holds a
+        lease that stops every later landing into that parent until the run exits.
+
+        **`retry()` on an outcome that has settled is `InternalError`** and `abort()` on one says
+        nothing, which is `ports/integration.py`'s asymmetry inherited rather than reinvented: a
+        retry with nothing pending means AGL lost track of a hold it took, while an abort meets that
+        state on every ordinary path.
+
+        **The root has no parent, so calling this there raises `InputError`.** §3.3 and §3.9: AGL
+        never checks out or writes to any ref outside `agl/*`, so `main` and every branch of yours
+        is **unaddressable rather than policy-protected** - there is no rule here to relax and no
+        argument that would name one.
+
+        **The parent's `last_good` advances to the landing's head** (§3.6), which is what keeps the
+        parent's next fingerprint miss from restoring to a commit before every child that has
+        landed and deleting all of it. Nothing journals an integration, so that advance lives as
+        long as the process and a resume rebuilds the chain by walking the entries again.
+        """
+        if self._parent is None:
+            raise InputError(_unaddressable(self.scope))
+        # Two private names of two classes in one package, which is what `_starts_at` below already
+        # does one member over: what a `Run` lands into is this module's business, and a public
+        # `parent` would be a seventh member of §3.3's six handing every workflow author a tree to
+        # walk. `Steps.landing` is the seam on the other side and argues its own half.
+        return await _integrate(
+            source=self._steps,
+            target=self._parent._steps,
+            address=self._parent.scope,
+            services=self.services,
+            leases=self.leases,
+        )
+
     def _child(self, scope: RunScope, base: str) -> Run[P]:
         """One child `Run`, at an address and a starting head the table has already decided.
 
@@ -440,6 +605,12 @@ class Run[P = object]:
         The four fields it does not vary are the four a child must not vary: the params and the
         ports are the run's, and the counter and the table are *this object's* rather than new ones,
         for the reasons the module docstring gives about each.
+
+        **And this is the one line that sets `_parent`**, which follows from that same sentence
+        rather than being a second rule to keep: a child is built here exactly once per namespace,
+        so the link is written exactly once, and a reopen - which does not reach this method at all
+        - hands back the same object and therefore the same parent. There is no other way to make a
+        child, and so no way for one to acquire a parent that did not cut it.
         """
         return Run(
             params=self.params,
@@ -448,6 +619,8 @@ class Run[P = object]:
             base=base,
             fingerprints=self.fingerprints,
             worktrees=self.worktrees,
+            leases=self.leases,
+            _parent=self,
         )
 
 
@@ -474,6 +647,41 @@ def _starts_at(run: Run[object], base: Run[object] | str | None) -> str:
     if isinstance(base, str):
         return base
     return base._steps.last_good
+
+
+def _unaddressable(scope: RunScope) -> str:
+    """Why the root cannot integrate, said as §3.3 and §3.9 say it rather than as a rule.
+
+    **The distinction the message exists to make is that this is not a permission.** A refusal
+    phrased as "AGL will not write to your branches" invites the next question, which is how to let
+    it - a flag, a setting, a `--force`. There is nothing to let: §3.9 puts every ref AGL touches
+    under `agl/*` and every checkout under the trees root, so a `Run` has exactly one thing it could
+    land into and the root has none of them. `main` is not defended, it is unnameable.
+
+    `InputError` for `Namespace`'s reason and `params.parse`'s: what the caller supplied cannot be
+    used and nothing was attempted, so exit 2 sends a workflow author to the call they wrote rather
+    than to a bug in the framework.
+    """
+    return (
+        f"there is no parent to integrate into: {_where(scope)} called `run.integrate()`, and a "
+        f"landing goes into the worktree of the `Run` that cut this one (§3.3). Only a child "
+        f"opened with `run.worktree(name)` has one. There is no argument to point it elsewhere, "
+        f"and that is not a policy: AGL never checks out or writes to any ref outside `agl/*` "
+        f"(§3.9), so `main` and every branch of yours is unaddressable rather than protected - "
+        f"there is no rule here that could be relaxed and no spelling that would name one"
+    )
+
+
+def _where(scope: RunScope) -> str:
+    """Which `Run` in the tree asked, for a message and for nothing else.
+
+    `_engine/worktrees.py` writes the same sentence for its own refusal, and this is deliberately a
+    second copy rather than an import: that one is private to the module that owns the namespace
+    table, and a message shared between two refusals is a message neither of them can reword.
+    """
+    if not scope.namespaces:
+        return "the run itself"
+    return "the worktree " + " -> ".join(str(name) for name in scope.namespaces)
 
 
 # The one shape a workflow's function has. Private, because it is a spelling convenience rather

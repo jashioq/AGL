@@ -46,9 +46,13 @@ a program AGL is deliberately not asking anybody to drive. §1.3's charge was on
 crossing a boundary, and a summary quoting `CONFLICT (add/add)` would carry a porcelain code
 through it in prose.
 
-So the two lead-ins below say what happened in the port's words, and they differ because the two
-moments do: `land` knows which line of work would not go in, and `retry` is looking again at a
-landing whose source it deliberately does not re-supply.
+So the three lead-ins below say what happened in the port's words, and they differ because the
+three moments do. `land` knows which line of work would not go in. `retry` is looking again at a
+landing whose source it deliberately does not re-supply. And `already_holding` is the one where
+nothing was compared at all: the target was holding a landing before this one was offered, so what
+that sentence has to say is what is standing in the way, whose collision the paths belong to, and
+that this landing was not attempted - a person reading it as "your two branches disagree" would go
+looking for a disagreement nobody has had yet.
 
 Three paths are named and the rest are counted. A screen row is finite, the tuple beside it carries
 every path in full, and a summary that named forty files would push the one thing it is guaranteed
@@ -67,7 +71,7 @@ from typing import Final
 from agl.adapters.git._runner import unreadable
 from agl.ports.integration import Conflict
 
-__all__ = ["collided", "unmerged", "unresolved"]
+__all__ = ["already_holding", "collided", "unmerged", "unresolved"]
 
 # What ends every record of the `-z` form, and the byte a path cannot contain. The path is the tail
 # of a record, after the one tab that the mode, the object and the stage in front of it cannot hold
@@ -127,6 +131,39 @@ def unresolved(paths: tuple[str, ...], target: str, where: Path) -> Conflict:
     return _conflict(paths, f"the landing {target} is holding still will not combine", where)
 
 
+def already_holding(paths: tuple[str, ...], source: str, target: str, where: Path) -> Conflict:
+    """What `land` reports when the target was already holding a landing before this one arrived.
+
+    **Not a claim that `source` and `target` disagree about anything.** Nothing was compared,
+    nothing was combined and nothing was written; the claim is about the target alone - it cannot
+    take this landing while it is still holding one, and the landing it is holding has to be
+    concluded or given up before this one can be attempted. Both `land`s argue why that state is a
+    conflict rather than an error, and §3.4 is where the decision is written down.
+
+    `paths` are the **pending** landing's, which is why the sentence says so in as many words. They
+    are the useful thing to put on the screen - a person deciding between `retry` and `abort` is
+    deciding about that landing, and an empty tuple beside a sentence about a hold would send them
+    to look at nothing - but read as this landing's they would name a collision between two lines
+    of work that have never been compared. One clause is cheaper than that misreading.
+
+    Both names are `Workspace.branch` values, which this module neither parses nor composes.
+    """
+    lead = (
+        f"a landing into {target} was already pending when {source} was offered, and that one has "
+        f"to be concluded or given up before this one can be attempted"
+    )
+    still = (
+        f"Still unresolved in the landing already held: {_named(paths)}."
+        if paths
+        else "Nothing is left unresolved in the landing already held to name."
+    )
+    return Conflict(
+        paths,
+        f"{lead}. {still} Nothing was combined here and nothing was changed - the landing already "
+        f"held is held in {where}",
+    )
+
+
 def _conflict(paths: tuple[str, ...], lead: str, where: Path) -> Conflict:
     """One lead-in, the files, and where to go and look. The whole of the prose.
 
@@ -139,6 +176,15 @@ def _conflict(paths: tuple[str, ...], lead: str, where: Path) -> Conflict:
             paths,
             f"{lead}, and git left no unresolved file to name. The landing is held in {where}",
         )
+    return Conflict(paths, f"{lead}: {_named(paths)}. The landing is held in {where}")
+
+
+def _named(paths: tuple[str, ...]) -> str:
+    """Three paths, and the rest as a count. The module docstring argues the ceiling.
+
+    Shared by all three lead-ins rather than written out beside each, so that a summary cannot
+    come to name three files in one moment and forty in another - the screen row is the same row
+    whichever of the three sentences is standing in it.
+    """
     rest = len(paths) - _NAMED
-    named = ", ".join(paths[:_NAMED]) + (f" and {rest} more" if rest > 0 else "")
-    return Conflict(paths, f"{lead}: {named}. The landing is held in {where}")
+    return ", ".join(paths[:_NAMED]) + (f" and {rest} more" if rest > 0 else "")

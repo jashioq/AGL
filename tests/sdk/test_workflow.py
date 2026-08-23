@@ -227,13 +227,24 @@ def test_a_run_can_be_handed_the_counter_a_parent_is_already_using(tmp_path: Pat
 
 
 def test_a_run_holds_nothing_it_did_not_declare(tmp_path: Path) -> None:
-    """Slotted, so the surface is the fields below. Two of §3.3's six members belong to stages 14
-    and 15 and are absent rather than stubbed, and an attribute a caller attached to a `Run` would
-    be one more that nobody declared and that replay would never see.
+    """Slotted, so the surface is the fields below. One of §3.3's six members belongs to stage 15
+    and is absent rather than stubbed, and an attribute a caller attached to a `Run` would be one
+    more that nobody declared and that replay would never see.
 
     `worktrees` joined the list at 13.1, beside `fingerprints` and for its reason: it is the run's
     table of taken namespaces (§3.9), defaulted for the root and handed on to every child, so it is
     a constructor keyword rather than something `__post_init__` builds.
+
+    `leases` joined at 14.1 and is the third of exactly the same shape: §3.4's lease per integration
+    target, run-wide, defaulted for the root and handed on by `_child`. It is a constructor keyword
+    for one reason the other two do not have - `api.run` releases it in a `finally` around the
+    workflow's function, so the composition root has to be holding the object the run was built
+    with.
+
+    `_parent` joined at 14.0 and is the link `integrate()` walks to reach the namespace a child's
+    work lands into. A keyword like the three above, defaulted `None` - which is how a root says it
+    is a root - and set by `_child` alone. Private, because §3.3's surface is six members and a
+    public one would hand a workflow author a tree to walk.
 
     `_steps` is the engine `step` delegates to, derived in `__post_init__` from the four public
     fields - `Entry` sets its own derived field the same way - and it is deliberately not a
@@ -247,6 +258,8 @@ def test_a_run_holds_nothing_it_did_not_declare(tmp_path: Path) -> None:
         "base",
         "fingerprints",
         "worktrees",
+        "leases",
+        "_parent",
         "_steps",
     )
     with pytest.raises(TypeError, match="_steps"):

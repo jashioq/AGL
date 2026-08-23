@@ -15,6 +15,11 @@ these are the ones this adapter can close, in the order they matter:
     holding a target can only be released by a later invocation, so the hold has to be readable
     from the repository*. That is asserted here across three real processes, one of which is killed
     outright while holding.
+  * **What a resumed run is told when it lands into that inherited hold** (the same two gaps, from
+    the other side). §3.4 requires the answer to be a `Conflict` and forbids exit 70 on resume, and
+    the situation only exists across a process boundary - a lease keeps one process from reaching
+    it - so the second test below kills a process holding and then offers the same child again from
+    a fresh one.
   * **That a `retry` ever lands** (gap 1). "Only the conflicted case is exercised here... an
     implementation whose `retry` can only ever conflict passes." Resolving a collision needs the
     held target put into a state the contract suite is forbidden to know the shape of. From out
@@ -163,6 +168,48 @@ async def main() -> None:
         flush=True,
     )
     os.kill(os.getpid(), signal.SIGKILL)
+
+
+asyncio.run(main())
+"""
+
+_OFFERING: Final = """
+import asyncio
+import json
+import sys
+from pathlib import Path
+
+from agl.adapters.git.integrator import GitIntegrator
+from agl.adapters.git.workspace import GitWorkspaceProvider
+from agl.ports.ids import Namespace, RunLabel
+from agl.ports.tree_layout import TreesRoot
+
+
+async def main() -> None:
+    where = json.loads(sys.argv[1])
+    repository = Path(where["repository"])
+    provider = GitWorkspaceProvider(repository, TreesRoot(Path(where["trees"])))
+    integrator = GitIntegrator(repository)
+    label = RunLabel(where["label"])
+    target = await provider.open(label, None, where["base"])
+    sibling = await provider.open(label, Namespace(where["sibling"]), where["base"])
+    outcome = await integrator.land(sibling, target)
+    print(
+        json.dumps(
+            {
+                "conflicted": outcome.conflicted,
+                "head": outcome.head,
+                "paths": list(outcome.conflict.paths) if outcome.conflict else [],
+                "summary": outcome.conflict.summary if outcome.conflict else "",
+                "target_branch": target.branch,
+                "source_branch": sibling.branch,
+                "source_head": await sibling.head(),
+                "at": await target.head(),
+                "pending": (await integrator.retry(target)).conflicted,
+            }
+        ),
+        flush=True,
+    )
 
 
 asyncio.run(main())
@@ -523,6 +570,110 @@ async def test_a_hold_taken_by_a_process_that_dies_is_found_and_released_by_late
         await integrator.retry(target)
 
 
+async def test_a_resumed_run_landing_into_an_inherited_hold_is_told_so_rather_than_exit_70(
+    repository: Path, trees: TreesRoot, base: str, provider: WorkspaceProvider
+) -> None:
+    """§3.4's resumed hold, in the one shape that actually produces it: two real processes.
+
+    *A resumed run must be able to find a hold it did not take. The durable hold is what makes a
+    crash-during-conflict recoverable - but `integrate()` is not a step, so nothing journals it,
+    and a resumed run calls `land()` into a target still holding the previous process's merge.*
+    The plan ends that paragraph with **not exit 70 on resume**, and this is the test of it: an
+    `InternalError` here is exit 70 out of a run that has done nothing wrong, about a repository
+    the person can still put right with `retry` or `abort`.
+
+    Nothing smaller reaches it. The contract suite is forbidden to look at a held target and cannot
+    kill a process; the parity file proves both implementations answer alike but drives one process
+    each; and a second `GitIntegrator` in *this* interpreter would be satisfied by a hold kept in a
+    module-level dict. So the first process below is killed outright while holding - `SIGKILL`, no
+    finaliser, no `abort` on the way out - and the second is a fresh interpreter that offers the
+    same child again, which is exactly what a resume does when it walks the same workflow back to
+    the same `integrate()` call.
+
+    What is asserted about that second process is that it was *told*, and that being told cost the
+    target nothing: the outcome is conflicted, it names the pending landing's unresolved file and
+    both lines of work, the head has not moved, the sibling's own commit is still not in the
+    target's past, and the hold is still there afterwards - `retry` conflicting again, which is the
+    only question this port answers about a hold. Then this process releases it and the target is
+    back where the landing that *succeeded* left it, which is the whole of the recovery §3.4 says
+    the durable hold exists for.
+    """
+    situation = {
+        "repository": str(repository),
+        "trees": str(trees.path),
+        "base": base,
+        "label": str(LABEL),
+        "child": str(CHILD),
+        "sibling": str(SIBLING),
+        "file": "landed.txt",
+        "mine": _body("the child's own work"),
+        "theirs": _body("the sibling's own work, sharing not one line"),
+    }
+
+    took = _apart(repository, _HOLDING, situation)
+
+    assert took.returncode == -signal.SIGKILL, (
+        f"the process that was to die holding the target exited {took.returncode} instead of being "
+        f"killed, so whatever it did on the way out is part of this test: {took.stderr}"
+    )
+    held = json.loads(took.stdout)
+    assert held["conflicted"] is True, "the process that died was to die holding a conflict"
+
+    resumed = _apart(repository, _OFFERING, situation)
+
+    assert resumed.returncode == 0, (
+        f"a fresh process offered work to the target it inherited and could not be told what was "
+        f"in the way: {resumed.stderr}. §3.4 calls a hold nobody released a conflict and forbids "
+        f"exit 70 on resume - the run that meets one has done nothing wrong, and the state is one "
+        f"a person can still put right"
+    )
+    offered = json.loads(resumed.stdout)
+    assert offered["conflicted"] is True and offered["head"] is None, (
+        f"landing into a target holding a landing answered {offered['head']!r}. The two cases are "
+        f"one each, and this is the one with something to put on a screen rather than a head "
+        f"claiming work went into a target that is still mid-landing"
+    )
+    assert offered["paths"] == ["landed.txt"], (
+        f"the conflict names {offered['paths']} as unresolved. The file the two children each "
+        f"created is landed.txt, and it is the pending landing's collision - the person deciding "
+        f"between retry and abort is deciding about that landing, so those are the files to name"
+    )
+    for which in ("target_branch", "source_branch"):
+        assert offered[which] in offered["summary"], (
+            f"the line a person reads is {offered['summary']!r} and does not name "
+            f"{offered[which]!r}. The screen has to say which landing is in the way and which one "
+            f"was turned back, or the paths beside it read as a collision between these two"
+        )
+    assert offered["at"] == held["settled"], (
+        f"the target is at {offered['at']!r} rather than at {held['settled']!r}, where the landing "
+        f"that succeeded left it. Nothing on this path merges, aborts or moves a ref"
+    )
+    assert not _git_answers(
+        repository, "merge-base", "--is-ancestor", offered["source_head"], offered["at"]
+    ), (
+        "the offered child's own commit is in the target's past after a landing that reported a "
+        "conflict, so something went in while the target was holding somebody else's landing"
+    )
+    assert offered["pending"] is True, (
+        "the hold was gone by the time the resumed process asked, so landing over it consumed the "
+        "collision somebody may be in the middle of resolving - which is the shortcut §3.4 forbids"
+    )
+
+    target = await provider.open(LABEL, None, base)
+    integrator = GitIntegrator(repository)
+    await integrator.abort(target)
+
+    assert await target.head() == held["settled"], (
+        f"releasing the inherited hold after a resumed run was turned back left the target at "
+        f"{await target.head()!r} rather than at {held['settled']!r}"
+    )
+    assert _read(target, "landed.txt") == situation["mine"], (
+        "the work of the child that did land is not what the target holds after the release"
+    )
+    with pytest.raises(InternalError):
+        await integrator.retry(target)
+
+
 # --- The half of `retry` the contract suite cannot reach ----------------------------------------
 
 
@@ -862,10 +1013,20 @@ async def test_a_branch_name_spelled_like_a_git_option_is_a_value_and_never_an_o
     invisible rather than harmless. `branch.autoSetupMerge = always` is the ordinary way a branch
     acquires an upstream, and nothing stops a person setting one by hand on a branch AGL made.
 
-    The second half is the other shape of the same hazard and pins the other guard: `git merge` also
-    takes `--abort`, so a branch named that would be a release. The port has no spelling for landing
-    over a hold and the answer is `InternalError` either way - what is asserted is that the hold is
-    still there afterwards, which is what a value read as that option would have taken away.
+    The second half is the other shape of the same hazard: `git merge` also takes `--abort`, so a
+    branch named that would be a release. What is asserted is what was always asserted here - the
+    hold is still there afterwards, which is what a value read as that option would have taken away
+    - and only the answer to the call itself has changed, from `InternalError` to the conflicted
+    outcome stage 14 made a pre-existing hold (§3.4).
+
+    **That change moved what makes this half pass**, and saying so is worth more than leaving a
+    reader to assume: `land` now answers a held target before it composes any argv at all, so the
+    branch named `--abort` never reaches git and the hold survives because nothing ran, not because
+    `--end-of-options` stopped it. The guard is pinned by the first half, which is the only path in
+    this port where a branch name reaches a command - `retry` runs a `commit` that takes no ref and
+    `abort` a `merge --abort` that takes none either. What this half still pins is the other clause
+    the same change introduced: a landing offered to a held target touches nothing, including when
+    the name it was offered under is one git would have acted on.
     """
     target = await provider.open(LABEL, None, base)
     child = await provider.open(LABEL, CHILD, base)
@@ -890,8 +1051,12 @@ async def test_a_branch_name_spelled_like_a_git_option_is_a_value_and_never_an_o
 
     target, _, held = await _collide(integrator, provider, base)
 
-    with pytest.raises(InternalError):
-        await integrator.land(_Renamed(child, "--abort"), target)
+    over_the_hold = await integrator.land(_Renamed(child, "--abort"), target)
+    assert over_the_hold.conflicted is True, (
+        f"landing into a target that is already holding a landing answered with head "
+        f"{over_the_hold.head!r}. §3.4 makes that state a conflict rather than exit 70, and a head "
+        f"here would claim work went into a target that is still mid-landing"
+    )
 
     still = await integrator.retry(target)
     assert still.conflicted is True, (

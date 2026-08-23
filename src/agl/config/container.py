@@ -23,10 +23,20 @@ a `Services` defined here and named there is the layer stack inverted. Its own m
 argues why not `ports/` and why not eight loose parameters.
 
 Nothing about `real()` or `fakes()` changed, and the split is along the one line that matters: the
-type is eight ABCs, which anything may name, and the construction is eight class names, which only
-this module may. `FakeServices` stays here for that reason - its fields *are* concrete adapters, so
-it could not move without carrying `MemoryStore`, `HeadlessTerminal` and `FakeRepository` into a
-package that contract 5 forbids them to reach.
+type is eight ABCs and a `str`, which anything may name, and the construction is eight class names,
+which only this module may. `FakeServices` stays here for that reason - its fields *are* concrete
+adapters, so it could not move without carrying `MemoryStore`, `HeadlessTerminal` and
+`FakeRepository` into a package that contract 5 forbids them to reach.
+
+## The ninth field, and why the composition root is the thing that fills it
+
+`Services.build` arrived at 14.0 and is not a port. `Verifier.verify` takes the build command as a
+parameter, its one call site is the merge gate inside `integrate()`, and until then nothing above
+the edge could reach `Project.build` at all - §3.11 refuses `run.project`, and `api.run` takes the
+project's name rather than its record. That module's own docstring says the rest of a `Project` "has
+already been spent by the container"; `real()` below is where the last field of it is spent, one
+line under the `build_timeout` §3.11 routes the other way. `sdk/_engine/services.py` argues the
+alternatives at length, and none of them is a second thing this file constructs.
 
 ## R2 made physical: the connector table
 
@@ -172,6 +182,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
+from typing import Final
 
 from agl.adapters.claude_code import fake as claude_fake
 from agl.adapters.filesystem.memory_store import MemoryStore
@@ -199,7 +210,16 @@ from agl.ports.terminal import Terminal
 from agl.ports.tree_layout import TreesRoot
 from agl.sdk._engine.services import Services
 
-__all__ = ["FakeServices", "Services", "fakes", "real"]
+__all__ = ["FAKE_BUILD", "FakeServices", "Services", "fakes", "real"]
+
+# The build command a fakes bundle carries unless a caller names another, and the string a test
+# scripts the gate's verdict against. A constant rather than a literal in two files, because
+# `FakeVerifier` keys its script **by command** - "scripting by the thing a test can name in advance
+# and hold still", as `adapters/shell/fake.py` puts it - so the bundle's value and the test's have
+# to be one string or the script silently never matches and every landing passes. Deliberately not a
+# runnable program: this bundle starts no process, and a value that happened to be a real command
+# would be one a mistakenly-real verifier could go and run.
+FAKE_BUILD: Final = "agl-fake-build"
 
 
 @dataclass(frozen=True, slots=True)
@@ -264,6 +284,12 @@ def real(settings: Settings, project: Project) -> Services:
         terminal=_terminal(),
         clock=SystemClock(),
         agents=_agents(settings.agents),
+        # And the command that same port takes on the call instead, travelling the other way for
+        # the same reason: `verify` has no timeout parameter and does have a command one, so the
+        # deadline is configured into the adapter and the command has to be carried to the caller.
+        # This is the last field of a `Project` to be spent, which is what `api.py` already claims
+        # of the whole record when it takes the project's name and nothing else.
+        build=project.build,
     )
 
 
@@ -271,6 +297,7 @@ def fakes(
     trees: TreesRoot,
     *,
     files: Mapping[str, bytes] | None = None,
+    build: str = FAKE_BUILD,
     claude: claude_fake.Script | None = None,
     openai: openai_fake.Script | None = None,
 ) -> FakeServices:
@@ -283,6 +310,13 @@ def fakes(
     a caller does to `repository` afterwards because `FakeRepository`'s mutators are that package's
     private vocabulary: seeding at construction is the only way in that does not reach across an
     adapter boundary.
+
+    `build` is what `services.build` carries: the merge gate's command, which `integrate()` hands to
+    `Verifier.verify`. It defaults to `FAKE_BUILD` so that a test wanting a red gate can script
+    `harness.verifier.answers(container.FAKE_BUILD, passed=False)` against a string both halves
+    already agree on, and it is a parameter so that a test about a particular command *reaching* the
+    gate can choose its own. There is no `build_timeout` beside it: `FakeVerifier` takes none, "a
+    build that is a dict lookup cannot run past one".
 
     `claude` and `openai` are one script per provider - an agent's conduct, in the only vocabulary
     the port has - and `None` on either means that provider's `unscripted` default, which is what
@@ -316,6 +350,7 @@ def fakes(
                     Provider.OPENAI: openai_fake.FakeAgentRunner(openai),
                 }
             ),
+            build=build,
         ),
         repository=repository,
         store=store,

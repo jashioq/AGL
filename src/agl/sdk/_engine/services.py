@@ -1,4 +1,4 @@
-"""`Services` - every port AGL needs, filled in, in the one object a `Run` carries.
+"""`Services` - every port AGL needs, filled in, in the one object a `Run` carries - and one string.
 
 Stage 9 built this class inside `config/container.py`, and built it as a plain frozen dataclass
 over port ABCs precisely so that arriving here would be a **move rather than a rewrite**: nothing
@@ -15,9 +15,10 @@ it and re-exports the name.
 `lint-imports` says so rather than a reviewer. Moving the type costs the composition root one
 import line and keeps the arrow pointing the one direction it may point.
 
-The construction stays where it was, and that is not a compromise. The type is eight ABCs; the
-construction is eight class names, which is the one thing only the composition root may write.
-Splitting them along exactly that line is what makes the move a move.
+The construction stays where it was, and that is not a compromise. The type is eight ABCs and a
+`str`; the construction is eight class names and one field off the project's record, which is the
+one thing only the composition root may write. Splitting them along exactly that line is what makes
+the move a move.
 
 ## Why not `ports/`
 
@@ -36,11 +37,34 @@ cannot place is a module in the wrong ring.
 ## Why not eight loose parameters
 
 The alternative to a bundle is `Run(params, store, workspaces, history, integrator, verifier,
-terminal, clock, agents)`, and the cost of it is measured in what a ninth port does. With a bundle,
-adding one is a field here and a line in `container.real` and `container.fakes`. Without one, it is
-every construction site: `api.py`, each of `cli/commands/`, `sdk/testing.py`, and every test that
-drives a workflow - none of which mention that port or want to. The bundle is what keeps "add a
-port" proportional to the port rather than to the number of places a `Run` is built.
+terminal, clock, agents)`, and the cost of it is measured in what one more field does. With a
+bundle, adding one is a field here and a line in `container.real` and `container.fakes`. Without
+one, it is every construction site: `api.py`, each of `cli/commands/`, `sdk/testing.py`, and every
+test that drives a workflow - none of which mention that port or want to. The bundle is what keeps
+"add a port" proportional to the port rather than to the number of places a `Run` is built. 14.0
+spent that exactly once, on `build`, and it cost the two lines the paragraph promises.
+
+## The ninth field is not a port, and it is here because the plan leaves it nowhere else
+
+`Verifier.verify(command, workdir)` takes the build command **as a parameter**, and its docstring
+makes it "exactly as the user wrote it in the project's settings". §3.4 gives that method one call
+site: the merge gate inside `integrate()`, which is `sdk/_engine/`. So something above the edge has
+to be holding the command - and until 14.0 nothing could. This bundle carried only ports, §3.11
+refuses `run.project` as an accessor, and `api.run` takes the project's *name* rather than its
+record, on the argument that "the rest of a `Project` ... has already been spent by the container".
+For `build` that sentence was not yet true; this field is what makes it true.
+
+§3.11 settles the sibling case in the other direction and the asymmetry is the whole of the
+argument: `build_timeout` reaches `ShellVerifier` at construction, "where implementations are
+configured", **because** `verify` has no timeout parameter and "a hosted verifier with its own
+deadline would carry an argument it could only ignore". The command is the same configuration
+travelling the opposite way - the port requires the caller to hold it - and the plan is silent about
+where it travels. The alternatives are each refused somewhere else already, and the field's own
+docstring names them.
+
+The claim this file used to make is narrowed rather than dropped. "Every field is typed as a port
+ABC and not one of them as an adapter" was always about not naming an adapter, and a `str` the user
+typed names none; what stops being true is only that the class is ports and nothing else.
 
 It buys a second thing, which is that substituting every implementation at once is one argument.
 That is measurable target #8 - every command runs end-to-end on fakes alone - and it is why
@@ -80,14 +104,21 @@ __all__ = ["Services"]
 
 @dataclass(frozen=True, slots=True)
 class Services:
-    """Every port AGL needs, filled in. The bundle everything above the edge is handed.
+    """Every port AGL needs, filled in, and the one project setting a port makes its caller hold.
 
-    **Every field is typed as a port ABC and not one of them as an adapter**, which is the whole
-    point of the type rather than a convention it happens to follow: a consumer of this object
-    cannot tell `GitHistory` from `FakeHistory`, cannot narrow to one, and cannot grow a branch on
-    which implementation it got. That is what makes `container.fakes()` a deployment instead of a
-    mock, and what makes contract 5 enforceable - a field typed `FilesystemStore` would put an
-    adapter's name in every module that reads the bundle.
+    Eight ABCs and a string. The eight are the bundle proper; the ninth is `build`, which is here
+    because `Verifier.verify` takes the build command as a parameter and the only thing that calls
+    it lives above the edge - see the field, and the module docstring for what the alternatives
+    cost.
+
+    **Every field that is a port is typed as a port ABC and not one of them as an adapter**, which
+    is the whole point of the type rather than a convention it happens to follow: a consumer of this
+    object cannot tell `GitHistory` from `FakeHistory`, cannot narrow to one, and cannot grow a
+    branch on which implementation it got. That is what makes `container.fakes()` a deployment
+    instead of a mock, and what makes contract 5 enforceable - a field typed `FilesystemStore` would
+    put an adapter's name in every module that reads the bundle. `build` is not an exception being
+    made to that rule: it is configuration rather than a capability, so there is no implementation
+    of it for a consumer to narrow to and nothing about it a workflow could branch on.
 
     Frozen, because a bundle is what this invocation was assembled with and reassigning a field
     halfway through a run would leave two halves of a workflow talking to different stores.
@@ -117,3 +148,29 @@ class Services:
     agents: AgentRunner
     """One runner over every configured provider. A `RoutingAgentRunner` in both bundles, which
     nothing above can see or should: a workflow names a model and never learns what served it."""
+
+    build: str
+    """The merge gate's build command - `Project.build`, exactly as the user wrote it.
+
+    **The one field here that is not a port**, and the only piece of project configuration with a
+    call site above the edge. `verifier` is the capability and this is the argument that capability
+    cannot be exercised without: `Verifier.verify(command, workdir)` puts the command on the call,
+    §3.4 gives it one caller, and that caller is `integrate()` inside `sdk/`. Nothing else in a
+    `Project` is in that position - `repo` and `trees` are spent building the git adapters,
+    `build_timeout` is spent constructing the verifier, and `name` is the run's address - so this is
+    the only string that has to travel and the bundle is the only thing that travels.
+
+    The alternatives were each refused somewhere else first. A field on `Run` would be a seventh
+    member of §3.3's six, handing every workflow author the project's build command to interpolate
+    into a prompt - which §3.2.1 says is a *different* command, "written literally into prompts,
+    hand-tuned per project", and two commands under one name is the confusion `Project`'s own
+    docstring exists to head off. A field on `RunSpec` would put it in `run.json`, where it becomes
+    a stored format compared on resume, for a value that is configuration and may honestly differ
+    between two invocations of one run. A second bundle beside this one - "the project, minus the
+    parts §3.11 refuses" - is `run.project` under another name, and §3.11 refuses that by name.
+
+    Not validated here. `Project.__post_init__` already refuses a blank one, on the argument that a
+    blank command "would make every run's gate pass without building anything", and a second copy of
+    that check would be a second copy to drift. Nothing below the edge parses it, splits it or asks
+    whether the program in it exists; the adapter that owns that decision is the one that runs it.
+    """

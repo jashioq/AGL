@@ -47,9 +47,11 @@ So the refusal is caught and the world is asked afterwards - `workspace.py::disc
 `_runner.py`'s durable lesson about probing after a failure rather than before every call. A target
 that is now held means this merge conflicted; a target that is not means git refused something else
 and the error goes on up carrying git's own words. `land` asks the same question *before* it starts,
-too, and that one is not a probe but a rule: a landing pending in the target means the framework
-skipped a `retry` or an `abort` it owed, and a merge attempted over one would report the old hold's
-conflict as this landing's.
+too, and that one is not a probe but a rule: a landing pending in the target is a landing that has
+to be concluded or given up first, and a merge attempted over one would report the old hold's
+collision as this landing's - if git ran it at all, which over a `MERGE_HEAD` it will not. What
+that rule *answers with* is a `Conflict` and not an error, because §3.4 requires a resumed run to
+be able to find a hold it did not take; `land` below argues the whole of it.
 
 **A conflict is never an exception.** It is the ordinary second answer to this port's question, and
 the exception above is caught inside this module and turned into a return value before anything
@@ -125,7 +127,7 @@ which is what two `agl` invocations are - need no arrangement between them.
 from pathlib import Path
 from typing import Final
 
-from agl.adapters.git._conflicts import collided, unmerged, unresolved
+from agl.adapters.git._conflicts import already_holding, collided, unmerged, unresolved
 from agl.adapters.git._runner import GitRunner
 from agl.ports.errors import InternalError, UpstreamUnexpected
 from agl.ports.integration import IntegrationOutcome, Integrator
@@ -198,28 +200,67 @@ class GitIntegrator(Integrator):
     async def land(self, source: Workspace, target: Workspace) -> IntegrationOutcome:
         """Merge `source`'s branch in `target`'s own checkout, and say what came of it.
 
-        Three answers, of which the port has two. It went in, and the head is the target's own -
-        read back through `Workspace.head` rather than out of git a second time, so the state the
-        outcome names and the state the gate will run in are one reading. It would not combine, and
-        the target is left held with a `Conflict` for the workflow's screen. Or git refused for a
-        reason that is not a collision, and that is an error carrying git's own words.
+        Four situations, and the port has two answers for them. It went in, and the head is the
+        target's own - read back through `Workspace.head` rather than out of git a second time, so
+        the state the outcome names and the state the gate will run in are one reading. It would
+        not combine, and the target is left held with a `Conflict` for the workflow's screen. The
+        target was *already* holding a landing before this one was offered, which is a `Conflict`
+        too and is argued below. Or git refused for a reason that is none of those, and that is an
+        error carrying git's own words.
 
         **Work the target already holds still lands.** git answers "Already up to date", exits 0,
         and the head does not move - which is the port's own clause and the ordinary shape of a
         replayed run (§3.6), not a failure and not a conflict.
 
-        The pre-check is a rule rather than a probe: a landing already pending means the run owes
-        this target a `retry` or an `abort` it never made, and merging over one is how the previous
-        hold's conflict would be reported as this landing's. It binds a resume, too, and says so
-        loudly on purpose - a hold outlives the process that took it, so an invocation that finds
-        one it did not take is the invocation that owes it a verb, and landing over it silently
-        would throw away a collision somebody may be in the middle of resolving by hand.
+        **A target already holding a landing is the conflicted answer, and nothing is touched.**
+        The pre-check is a rule rather than a probe and it stays first, for the reason it was
+        always first: a merge attempted over a hold would report the old hold's collision as this
+        landing's, and git refuses to start one over a `MERGE_HEAD` anyway - so a check made
+        afterwards would be reading a refusal that says nothing about these two lines of work. What
+        changed at stage 14 is the answer, from `InternalError` to the port's ordinary second one.
+
+        §3.4 is why: *a resumed run must be able to find a hold it did not take.* `integrate()` is
+        not a step, so nothing journals it; a process killed mid-conflict leaves a hold that
+        outlives it, and the run that resumes walks the same workflow to the same call and offers
+        the same child into a target that is still held. That state is recoverable, and the plan
+        forbids the answer that made it exit 70 on resume. It names two exits, and this is the
+        first of them: the state *is* a conflict, and the workflow already knows how to route one -
+        it shows its screen, and the person chooses `retry` or `abort` for the landing that is
+        standing there.
+
+        **The rule did not weaken; what enforces it moved up a layer**, where §3.4 says the lease
+        belongs. `sdk/_engine/integration.py` holds one per integration target from the start of an
+        integration until a conflicted outcome is settled, so within one process this can no longer
+        be reached over a hold that process took - the lease is still held and a second integration
+        into that target is still waiting on it. What stays reachable is the cross-process case,
+        which is precisely the recoverable one, and `InternalError` was never the right thing to
+        tell somebody about a repository they can still put right.
+
+        The other exit §3.4 offers is a `held(target)` predicate on the port, and it was not taken.
+        `ports/integration.py` has not moved since stage 2; `tests/contracts/integration.py`
+        records that a held target has no in-progress predicate and is observed "only as `retry`
+        not raising ... which is the whole vocabulary the framework has for it too"; and a
+        predicate here is the first member of §1.3's charge sheet - `merge_in_progress` - walking
+        back in. The shortcut the plan forbids outright, `abort()` before every land, would throw
+        away a collision somebody may be in the middle of resolving by hand, which is the whole of
+        what `retry` exists to preserve.
+
+        What comes back is honest rather than invented, and `_conflicts.py` composes it: not "these
+        two would not combine", which nothing here has looked at, but "the target cannot take this
+        landing because it is already holding one". `paths` are the *pending* landing's still
+        unresolved files, read from the index the same way `retry` reads them, because this
+        implementation can enumerate and a person sent to a conflict screen with an empty tuple is
+        a person sent nowhere - and the summary says whose they are, so they cannot be read as this
+        landing's.
+
+        **Nothing on this path merges, aborts, moves a ref or writes a file.** It looks, and it
+        reports.
         """
         if await self._held(target):
-            raise InternalError(
-                f"a landing into {target.branch!r} is already pending, and this run is asking to "
-                f"land {source.branch!r} on top of it. Every path out of a conflicted landing owes "
-                f"the target a retry or an abort, so AGL has lost track of a hold it took"
+            return IntegrationOutcome(
+                conflict=already_holding(
+                    await self._unresolved(target), source.branch, target.branch, target.path
+                )
             )
         try:
             await self._git.run(
