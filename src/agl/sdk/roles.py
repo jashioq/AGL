@@ -17,8 +17,9 @@ is still immutable and still holds nothing belonging to a single invocation of i
 
 ## `instructions` is the prompt text, and not a path to it
 
-§3.7's example writes `instructions="prompts/decompose.md"`. **This module reads that as shorthand
-and takes the prompt itself, already resolved.** Three things say so, and the third is decisive:
+§3.7's example keeps its prompts in files - `instructions=prompt_file("prompts/decompose.md")` -
+and what that hands over is **the prompt itself, already resolved.** This field never holds a path.
+Three things say so, and the third is decisive:
 
 * `ports/agent.py::AgentTask.instructions` is documented as "What to do, in full, as the workflow
   author wrote it. The prompt, already resolved." A role holding a filename would leave `Run.step`
@@ -33,10 +34,20 @@ and takes the prompt itself, already resolved.** Three things say so, and the th
   error. Nothing about the string a Role carries is checked, so there is no version of this that
   fails loudly instead.
 
-A `prompt_file("prompts/decompose.md")` helper that reads the file **at declaration time** and hands
-back its text is additive, correct, and deliberately not built here: it fingerprints the text, so it
-has none of the problem above, and it needs a decision about what the path is relative to - the
-workflow package, presumably - which is a decision about packaging and not about roles.
+So §3.7's `prompt_file("prompts/decompose.md")` is the sanctioned spelling and it is below. It reads
+the file **at declaration time** and hands back its text, which has none of the problem above: the
+`Role` holds the prompt, the fingerprint hashes the prompt, and editing the prompt moves the digest
+and re-runs the step. It is a function and not a `Role` field, and that is the same decision read
+twice - `Role.instructions` stays a `str`, `Role` does no I/O, and there is no second spelling of
+`instructions` for a reader to wonder about.
+
+**What the path is relative to was the open question, and the answer is the directory of the module
+that called it.** §3.7 writes `prompt_file("prompts/decompose.md")` in `workflows/tickets/roles.py`
+and means `workflows/tickets/prompts/decompose.md`, wherever pip put that package. The two
+alternatives are both wrong in ways that only show up after installation: the current directory is
+whatever the person's shell was in, which is the ambient read stage 11.0 spent a deliverable
+removing, and the package root would need this module to guess which of a caller's parent packages
+was meant.
 
 ## `on_question` implies `MID_RUN_QUESTIONS`, and the author does not restate it
 
@@ -127,8 +138,10 @@ Not refused here, and deliberately: **that a step taking no `commit=` uses a rol
 `Restriction.NO_VCS_WRITES`**. §3.3 calls that pairing "the author's job, by convention and not
 enforcement", and the two halves are not in the same place anyway - the restriction is on the role
 and the `commit=` is on the call, so a role cannot see how it is being used. Nothing here reaches a
-port either: no provider is asked what it can do, no capability is compared against anything, and no
-prompt file is read. Preflight is stage 16, and it needs a runner.
+port either: no provider is asked what it can do and no capability is compared against anything.
+Preflight is stage 16, and it needs a runner. (`prompt_file` is the one piece of I/O in this module
+and it is not an exception to that sentence: it reads the author's own source tree, at import, and
+`ports/` has no ABC for "open a file the author committed beside their workflow" - see below.)
 
 ## `RoleIncompleteError` has no caller here, and that is deliberate
 
@@ -138,15 +151,17 @@ name says Role and because 12.1 should import it rather than invent it - the one
 module whose caller arrives in the next deliverable. Its argument is on the class.
 """
 
-from collections.abc import Sequence
+import sys
+from collections.abc import Mapping, Sequence
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
+from pathlib import Path
 
 from agl.ports.agent import Capability, ModelId, QuestionHandler, Restriction, Tool
 from agl.ports.errors import InputError, UpstreamUnexpected
 from agl.sdk.tools import ReportingTool
 
-__all__ = ["Role", "RoleIncompleteError"]
+__all__ = ["Role", "RoleIncompleteError", "prompt_file"]
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -270,6 +285,100 @@ class Role[P = None]:
         object.__setattr__(self, "requires", requires)
 
 
+def prompt_file(path: str | Path) -> str:
+    """The text of a prompt file, read **now**, at the line that declares the role.
+
+    §3.7's sanctioned spelling, and it takes one argument because that is how §3.7 writes it:
+
+        decompose = Role(
+            instructions=prompt_file("prompts/decompose.md"),   # read at declaration
+            model=Claude.OPUS,
+            tools=[report_tickets],
+            on_question=approve,
+        )
+
+    **Reading at declaration time is the whole mechanism.** What the `Role` then holds is prompt
+    *text*, so §3.6 fingerprints the prompt: edit `prompts/decompose.md`, resume, and the digest has
+    moved and the step re-runs against the new wording. A role holding the *filename* would
+    fingerprint the filename, the edit would move nothing, and the resume would replay what the old
+    wording produced - a cache hit, at the moment you are iterating and least want stale output,
+    with nothing anywhere to notice. The module docstring makes that argument at length; this
+    function is what makes the honest spelling the short one.
+
+    **A relative path resolves against the directory of the module that called this**, so §3.7's
+    `prompt_file("prompts/decompose.md")` in `workflows/tickets/roles.py` finds
+    `workflows/tickets/prompts/decompose.md` when that package is installed anywhere. An absolute
+    path is used exactly as given. The caller's file comes off the calling frame's `__file__`
+    (`sys._getframe`, which is one attribute lookup, where `inspect.stack()` builds a `FrameInfo`
+    for every frame on the stack and reads source context for each - this runs at import, on a
+    module that may declare a dozen roles).
+
+    **A caller with no `__file__` - a REPL, an `exec`, a frozen import - is an `InputError` telling
+    the author to pass an absolute path, and never a fall back to `Path.cwd()`.** The current
+    directory is where the person's shell happened to be, which for an installed workflow is the one
+    place its prompts are certainly not; and a fall back would find *a* file often enough to be
+    trusted and then read someone else's on the day it did not. Stage 11.0 spent a whole deliverable
+    taking that ambient read out of AGL and this is not the place to put one back.
+
+    **Every refusal is an `InputError`, at declaration time**, which is this module's register and
+    `arg()`'s and `@workflow`'s and `reporting_tool()`'s before it: a package that cannot be invoked
+    correctly should fail when it is imported, in front of the author, rather than forty minutes
+    into a run that has already paid for three agents. A missing file, a directory, a file that will
+    not open, one that is not UTF-8, and one that is empty or nothing but whitespace are the five,
+    and the last is `Role.__post_init__`'s own check made one line earlier and for its reason: an
+    empty prompt is the whole of what an agent was going to be asked.
+
+    **The text is returned exactly as it was read**, trailing newline and all. Trimming it would be
+    this module editing the author's prompt, and - since the text is hashed - a rule about
+    whitespace that two people could remember differently is a re-run waiting to happen. The one
+    normalisation is Python's own universal newlines, which `read_text` does: a checkout with
+    `core.autocrlf` on would otherwise fingerprint every prompt differently from the same commit on
+    another machine.
+
+    **UTF-8, and a decode error is a refusal rather than a repair.** No `errors=` argument, so a
+    prompt in some other encoding is refused by name instead of being read with replacement
+    characters in it - which would be a prompt the author never wrote, hashed into a digest, and
+    handed to a model that would do its best with it.
+    """
+    asked = Path(path)
+    # `sys._getframe(1)` is the caller of *this* function, so the lookup has to happen here and not
+    # inside the helper below - a frame index is a fact about where the line is written.
+    where = asked if asked.is_absolute() else _beside_the_caller(sys._getframe(1).f_globals, asked)
+    try:
+        text = where.read_text(encoding="utf-8")
+    except FileNotFoundError as missing:
+        raise InputError(
+            f"there is no prompt file at {where}, so the role declared with it would have nothing "
+            f"to ask its agent. A relative path is resolved against the directory of the module "
+            f"that called `prompt_file` - never against the current directory - so this is the "
+            f"path {asked!r} names from where it was written"
+        ) from missing
+    except IsADirectoryError as directory:
+        raise InputError(
+            f"{where} is a directory, and a role's instructions are one prompt. Name the file "
+            f"inside it that this role is asking its agent to read"
+        ) from directory
+    except UnicodeDecodeError as undecodable:
+        raise InputError(
+            f"{where} is not UTF-8 text: {undecodable}. A prompt is read as UTF-8 and nothing "
+            f"here repairs one - a prompt read with replacement characters in it is a prompt "
+            f"nobody wrote, fingerprinted as though somebody had, and handed to a model that "
+            f"would answer it anyway"
+        ) from undecodable
+    except OSError as unreadable:
+        raise InputError(
+            f"{where} could not be read: {unreadable}. The prompt is read where the role is "
+            f"declared, so this is the import failing rather than the run"
+        ) from unreadable
+    if not text.strip():
+        raise InputError(
+            f"the prompt file {where} is empty, and a role's instructions are the whole of what "
+            f"its agent is asked to do. `Role` refuses an empty prompt too, one line later, and "
+            f"`AgentTask` refuses it again at the dispatch"
+        )
+    return text
+
+
 class RoleIncompleteError(UpstreamUnexpected):
     """A reporting step's agent finished without ever calling its reporting tool.
 
@@ -295,3 +404,28 @@ class RoleIncompleteError(UpstreamUnexpected):
     and `None` means the backend did not say and the message can offer neither. `AgentOutcome.text`
     is what the agent said instead of reporting, and quoting it is what makes the failure legible.
     """
+
+
+def _beside_the_caller(caller: Mapping[str, object], asked: Path) -> Path:
+    """`asked`, resolved against the directory of the module whose globals these are.
+
+    `caller` is a frame's `f_globals` and is taken as a `Mapping[str, object]` rather than as the
+    `dict[str, Any]` typeshed gives it, so that `__file__` is narrowed by an `isinstance` here
+    instead of being trusted by a `cast` there. A module's `__file__` is a `str` when it is on
+    disk and absent when there is no file - those are the two cases, and both are answered below.
+
+    Resolved before the parent is taken: `__file__` is absolute for an imported module, but a
+    `python some/script.py` in older shapes and a `__main__` under some launchers is not, and
+    `Path("roles.py").parent` is `.` - which would silently become exactly the current-directory
+    read `prompt_file` refuses to make.
+    """
+    declared = caller.get("__file__")
+    if not isinstance(declared, str):
+        raise InputError(
+            f"`prompt_file({str(asked)!r})` was called from something with no `__file__` - a REPL, "
+            f"an `exec`, or a frozen import - so there is no module directory for a relative path "
+            f"to be relative to. Pass an absolute path. AGL will not fall back to the current "
+            f"directory: a workflow is read from wherever it was installed, and the directory this "
+            f"process happens to have started in is the one place its prompts are certainly not"
+        )
+    return Path(declared).resolve().parent / asked

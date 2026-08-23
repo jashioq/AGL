@@ -56,24 +56,52 @@ not be called from inside one - which is precisely what 16.5's harness, and ever
 .asyncio` test below, do. `list_workflows` is the one operation that is not async, because it awaits
 nothing: it reads packaging metadata and sorts strings.
 
-## What `run` does, in order, and the four things it deliberately does not
+## What `run` does, in order, and the two things it deliberately does not
 
 Load the workflow, refuse a label that is already taken, pin the base ref to a full object name,
-write `run.json`, then await the workflow's function. That is the whole of stage 10, and the order
-is load-and-parse first because those two refuse with no I/O at all - §3.3's "before anything runs"
-read as strictly as it can be - then the conflict check, which decides whether this run may exist,
-then the two questions for the repository.
+write `run.json`, provision the run's own `_base` worktree from that pin, then await the workflow's
+function. The order is load-and-parse first because those two refuse with no I/O at all - §3.3's
+"before anything runs" read as strictly as it can be - then the conflict check, which decides
+whether this run may exist, then the three that are addressed to the repository.
 
 **The record is written before the workflow is invoked**, so a crash mid-run leaves something behind
 to resume or to clear. It is the one value in AGL with no other copy anywhere (`ports/store.py`), so
 the cost of writing it early is a stale record after a crash - which `clear` takes away - and the
 cost of writing it late is a run that happened and cannot be named.
 
-**No worktree, no branch, no lock, and no persistence beyond `run.json`.** Steps persist their own
-entries, from inside the workflow, through the `Run` built on the last line; the base worktree is
-13.4's to provision eagerly, and until then `run.step` opens it on first use; integration is 14.
-`RunSpec.branch` is written here and no branch is created to match it - the record says where the
-run's work will go, and the thing that puts it there arrives later.
+**And it is written before the workspace is provisioned**, which is the same argument at the sharper
+end and the reason those two lines are in the order they are. `WorkspaceProvider` offers no
+enumeration on purpose (`ports/workspace.py`), so `run.json` is the only thing that names a run at
+all: a crash after `open()` must still leave a record naming the label, or `agl/<label>` and
+`.trees/<label>/_base/` are a branch and a directory nothing can ever reach again. Writing first
+costs a record for a run whose checkout was never cut, which is one `agl clear` away; writing second
+costs a leak that no command in AGL has a way to address.
+
+**The exposure this changed, stated rather than left to be found.** §3.9's known leak is a crash
+between `open()` and the first entry write, and 13.4 makes that window start earlier - at this
+function rather than at the first step - so it now covers the whole of a workflow, including one
+that never steps at all. What it does **not** widen is the half of that leak nothing can address:
+`_base` is addressed by `namespace=None`, which is derivable from the label alone, so a record on
+disk is the whole of what `clear` needs in order to reach it, and the two lines above are in the
+order that guarantees one. The unreachable half belongs to *children* and is untouched here - a
+child's checkout is opened by `sdk/_engine/steps.py` on its first step, `Store.namespaces` lists
+only namespaces that have recorded something, so a crash in between leaves a directory `clear`
+cannot see and afterwards cannot `rmdir` past. Closing that is not this deliverable's, and widening
+this window did not make it worse.
+
+**A worktree and a branch now, and no lock and no persistence beyond `run.json`.** 13.4 is what put
+the first two here, and §3.9 is why they belong to this function rather than to the first step: AGL
+never writes into the target repository except through a `Workspace` - its own integration branch
+included, which lives in `_base` and not in the user's checkout - and "`agl/<label>` is a real ref
+from run start and advances with each `integrate()`, so progress is inspectable live - `git log
+agl/auth`, `git diff main..agl/auth`". That sentence was false for a run whose workflow had not yet
+taken a step, because the checkout was opened lazily by `run.step` and a workflow that ran no steps
+opened nothing. `RunSpec.branch` is still written here and still not composed for the provider:
+`WorkspaceProvider.open` derives `run_branch(label)` itself, so the record and the ref agree by both
+reading `tree_layout` rather than by one of them being handed the other's answer. Steps persist
+their own entries, from inside the workflow, through the `Run` built on the last line; integration
+is 14. The one lock §3.9 asks for is on git's worktree registry and is taken inside the adapter,
+around the two commands that mutate it and nothing else.
 
 ## `run` catches nothing at all, which is how the `Stop` ordering hazard is met
 
@@ -193,10 +221,27 @@ async def run(
     )
     await services.store.write_record(scope, spec.to_json())
 
+    # §3.9's `_base`, cut eagerly and **after** the record, which is the whole of what these two
+    # lines' order buys: `run.json` is the only enumeration `clear` has, so a crash after this call
+    # must still leave a record naming the run - see the module docstring, and `ports/workspace.py`
+    # for why no provider will ever be able to list what it holds.
+    #
+    # `spec.base_sha` and never `ref`, never `base_ref`: `open` takes a ref expression or a commit
+    # id, `Journal` takes only the second, and the run's own base is pinned precisely so that a
+    # commit landing on `main` between this line and the first step cannot move where the checkout
+    # was cut from (§3.6). The record and the checkout therefore agree by construction, being the
+    # one value spent twice.
+    #
+    # The `Workspace` is deliberately dropped rather than carried into `Run`. `open` is idempotent
+    # by contract - "an existing workspace is returned exactly as it stands" - so `run.step`'s lazy
+    # open in `sdk/_engine/steps.py` hands back this very checkout on first use and cuts nothing.
+    # Nothing else moves: this call is not a new path into the engine, it is the same call made
+    # earlier, so that a workflow which takes no steps at all still leaves `agl/<label>` a real ref.
+    await services.workspaces.open(label, None, spec.base_sha)
+
     # The `Run` is built from what this function already computed and nothing else: `scope` is the
-    # address the record above went to, and `base` is the same resolved commit the record pins. No
-    # worktree is provisioned here - `run.step` opens this namespace's checkout on first use, and
-    # 13.4 is what provisions the run's own worktree eagerly and per §3.9.
+    # address the record above went to, and `base` is the same resolved commit the record pins and
+    # the checkout was cut from.
     await wf.fn(Run(params=given, services=services, scope=scope, base=spec.base_sha))
 
 

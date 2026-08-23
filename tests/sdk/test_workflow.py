@@ -214,29 +214,41 @@ def test_the_run_carries_the_address_and_the_base_api_py_already_computed(tmp_pa
 
 
 def test_a_run_can_be_handed_the_counter_a_parent_is_already_using(tmp_path: Path) -> None:
-    """13.1's seam, pinned while it is cheap to.
+    """13.1's seam, still pinned here where it is cheapest to.
 
     §3.6 scopes `n` per `(namespace, step name)`, which only means anything if every namespace in a
-    run counts against one object. `run.worktree()` is what will pass it; what this asserts is that
-    there is a way in at all, because a counter built privately in `__post_init__` would look
-    identical today - a run has one namespace at stage 12 - and would be rule 1's fix silently
-    removed the moment a child was cut.
+    run counts against one object. `run.worktree()` is what passes it - `test_run_worktree.py`
+    asserts that it passes *this* object - and what this asserts is that there is a way in at all,
+    because a counter built privately in `__post_init__` would look identical at stage 12, where a
+    run has one namespace, and would be rule 1's fix silently removed the moment a child was cut.
     """
     counter = Fingerprints()
     assert _run(NoParams(), tmp_path, fingerprints=counter).fingerprints is counter
 
 
 def test_a_run_holds_nothing_it_did_not_declare(tmp_path: Path) -> None:
-    """Slotted, so the surface is the fields below. Four of §3.3's six members belong to stages
-    12.4 to 15 and are absent rather than stubbed, and an attribute a caller attached to a `Run`
-    would be one more that nobody declared and that replay would never see.
+    """Slotted, so the surface is the fields below. Two of §3.3's six members belong to stages 14
+    and 15 and are absent rather than stubbed, and an attribute a caller attached to a `Run` would
+    be one more that nobody declared and that replay would never see.
+
+    `worktrees` joined the list at 13.1, beside `fingerprints` and for its reason: it is the run's
+    table of taken namespaces (§3.9), defaulted for the root and handed on to every child, so it is
+    a constructor keyword rather than something `__post_init__` builds.
 
     `_steps` is the engine `step` delegates to, derived in `__post_init__` from the four public
     fields - `Entry` sets its own derived field the same way - and it is deliberately not a
     constructor argument: a caller free to supply one could hand a `Run` an engine addressing
     another namespace's checkout.
     """
-    assert Run.__slots__ == ("params", "services", "scope", "base", "fingerprints", "_steps")
+    assert Run.__slots__ == (
+        "params",
+        "services",
+        "scope",
+        "base",
+        "fingerprints",
+        "worktrees",
+        "_steps",
+    )
     with pytest.raises(TypeError, match="_steps"):
         Run(
             params=NoParams(),

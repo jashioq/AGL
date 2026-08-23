@@ -20,6 +20,12 @@ rather than checked would be worse than no fallback at all.
 that reader is a workflow author looking for the line they wrote. `tests/sdk/test_tools.py` and
 `tests/sdk/test_params.py` pin the same module's neighbours the same way.
 
+**`prompt_file` is measured against the file it read, never against itself.** Its section pins what
+a declaration holds afterwards - the text, not the path - what a relative path is resolved against,
+and each of the five refusals. What it cannot pin from here is the claim §3.7 actually makes, that
+the *agent* is asked what the file says; `tests/sdk/test_run_step.py` drives a real step for that,
+and for the edit that must re-run one.
+
 **`RoleIncompleteError` is asserted through `exit_code_for` and through its absence from
 `EXIT_CODES`**, together. Either alone would pass against the wrong design: the code alone would
 survive somebody adding a table entry for it, and the absence alone would survive it resolving to
@@ -27,7 +33,9 @@ survive somebody adding a table entry for it, and the absence alone would surviv
 in.
 """
 
+import importlib
 import json
+import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import FrozenInstanceError, dataclass, replace
 from pathlib import Path
@@ -48,13 +56,17 @@ from agl.ports.errors import EXIT_CODES, AglError, InputError, UpstreamError, ex
 from agl.ports.questions import Answer, Question
 from agl.ports.run import JsonValue
 from agl.sdk._engine.journal import base_of
-from agl.sdk.roles import Role, RoleIncompleteError
+from agl.sdk.roles import Role, RoleIncompleteError, prompt_file
 from agl.sdk.tools import ReportingTool, reporting_tool
 
 _HEAD: Final = "4a91c07f2b3e8d15c6a0b7f31d92e8054c6a0f13"
 
 _REVIEW: Final = "Review the worktree against the spec and report what you found."
 _IMPLEMENT: Final = "Implement the ticket. Run the tests until they pass."
+
+# What a prompt file holds, for the `prompt_file` section below: §3.7's own `prompts/decompose.md`,
+# written out so that "the text arrived" and "a path arrived" cannot be confused for each other.
+_DECOMPOSE: Final = "Propose tickets, ask for approval, revise until approved, then report.\n"
 
 
 @dataclass(frozen=True)
@@ -281,6 +293,161 @@ def test_blank_instructions_are_refused_where_they_are_written(blank: str) -> No
     with pytest.raises(InputError) as refusal:
         Role(instructions=blank, model=Claude.OPUS)
     assert "instructions" in str(refusal.value)
+
+
+# --- `prompt_file`, which is how the text gets there ---------------------------------------------
+#
+# §3.7: "`prompt_file()` reads at declaration time and is the sanctioned spelling". The tests below
+# are the declaration half - what it reads, what it resolves against, and what it refuses.
+# `tests/sdk/test_run_step.py` holds the half that cannot be measured here: that the text reaches
+# the agent, and that editing the file re-runs the step rather than replaying the old wording.
+
+
+def _declared(where: Path) -> Role[None]:
+    """A role whose prompt is a file - §3.7's own shape, with the path already absolute."""
+    return Role(instructions=prompt_file(where), model=Claude.OPUS)
+
+
+def test_a_role_declared_with_prompt_file_holds_the_text_and_not_the_path(tmp_path: Path) -> None:
+    """The point of the whole function: `Role.instructions` is still a `str` of prompt, so §3.6
+    fingerprints the prompt. A `prompt_file` that answered with the path it was given would satisfy
+    the type and nothing else, and the failure would be a silent replay a run later."""
+    where = tmp_path / "review.md"
+    where.write_text(_REVIEW, encoding="utf-8")
+
+    role = _declared(where)
+
+    assert role.instructions == _REVIEW
+    assert str(where) not in role.instructions
+
+
+def test_the_text_is_handed_back_exactly_as_it_was_written(tmp_path: Path) -> None:
+    """Verbatim, trailing newline and all. Trimming would be this function editing the author's
+    prompt, and a whitespace rule two people could remember differently is a moved digest."""
+    where = tmp_path / "review.md"
+    where.write_text(f"  {_REVIEW}\n\n", encoding="utf-8")
+    assert prompt_file(where) == f"  {_REVIEW}\n\n"
+
+
+def test_editing_the_prompt_file_moves_the_steps_fingerprint(tmp_path: Path) -> None:
+    """§3.7's named failure, closed: "a role holding a filename would fingerprint the filename, so
+    editing the prompt would move nothing and a resume would replay what the old wording produced".
+    The path here is identical across the two declarations; only the file's contents differ."""
+    where = tmp_path / "review.md"
+    where.write_text(_REVIEW, encoding="utf-8")
+    before = replace(REVIEWER, instructions=prompt_file(where))
+
+    where.write_text(f"{_REVIEW} Check the tests too.", encoding="utf-8")
+    after = replace(REVIEWER, instructions=prompt_file(where))
+
+    assert _base(before) != _base(after)
+
+
+def test_a_relative_prompt_path_is_read_from_beside_the_module_that_declared_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """§3.7 writes `prompt_file("prompts/decompose.md")` and means the file beside that module.
+
+    A real module on disk, imported, because that is the only honest form of this: the resolution is
+    made from the *calling frame's* `__file__`, so a helper in this file calling `prompt_file` on
+    this file's behalf would measure this file's directory and prove nothing about a workflow
+    package installed somewhere else.
+
+    The working directory is moved to `tmp_path` first, where `prompts/decompose.md` does not exist.
+    That is the assertion's other half: an implementation resolving against `Path.cwd()` - the
+    ambient read stage 11.0 removed - fails here rather than passing by coincidence of where pytest
+    was started.
+    """
+    package = tmp_path / "tickets"
+    (package / "prompts").mkdir(parents=True)
+    (package / "prompts" / "decompose.md").write_text(_DECOMPOSE, encoding="utf-8")
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "roles.py").write_text(
+        "from agl.sdk.roles import prompt_file\n\n"
+        'DECOMPOSE = prompt_file("prompts/decompose.md")\n',
+        encoding="utf-8",
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    assert not (tmp_path / "prompts").exists(), "the cwd must not be able to answer this"
+    importlib.invalidate_caches()
+
+    try:
+        declared = importlib.import_module("tickets.roles")
+        assert declared.DECOMPOSE == _DECOMPOSE
+    finally:
+        # This test is the only thing that puts these two in `sys.modules`, and a second test
+        # importing the same name would otherwise be handed this one's module.
+        for name in ("tickets.roles", "tickets"):
+            sys.modules.pop(name, None)
+
+
+def test_a_missing_prompt_file_is_refused_at_the_declaration_naming_the_path(
+    tmp_path: Path,
+) -> None:
+    """`arg()`'s stance and `reporting_tool()`'s: a package that cannot be invoked correctly should
+    fail when it is imported. The alternative is a run that pays for two agents and then discovers
+    that the third role has no prompt."""
+    where = tmp_path / "prompts" / "decompose.md"
+    with pytest.raises(InputError) as refusal:
+        prompt_file(where)
+    assert str(where) in str(refusal.value)
+
+
+def test_a_directory_where_a_prompt_belongs_is_refused(tmp_path: Path) -> None:
+    """`read_text` on one raises `IsADirectoryError` on this platform and `PermissionError` on
+    another, so it is caught by name and answered in this module's words either way."""
+    with pytest.raises(InputError) as refusal:
+        prompt_file(tmp_path)
+    assert str(tmp_path) in str(refusal.value)
+
+
+@pytest.mark.parametrize("blank", ["", "   ", "\n\t\n"])
+def test_an_empty_prompt_file_is_refused_where_the_role_is_declared(
+    tmp_path: Path, blank: str
+) -> None:
+    """`Role.__post_init__`'s check, made one line earlier and for its reason: the instructions are
+    the whole of what an agent is asked to do, and an empty file is the way to have none by
+    accident - `touch prompts/review.md` and then forget to write it."""
+    where = tmp_path / "review.md"
+    where.write_text(blank, encoding="utf-8")
+    with pytest.raises(InputError) as refusal:
+        prompt_file(where)
+    assert str(where) in str(refusal.value)
+
+
+def test_a_prompt_that_is_not_utf_8_is_refused_rather_than_read_with_holes_in_it(
+    tmp_path: Path,
+) -> None:
+    """No `errors=` argument, deliberately: a prompt read with replacement characters in it is a
+    prompt nobody wrote, fingerprinted as though somebody had, and answered by a model anyway."""
+    where = tmp_path / "review.md"
+    where.write_bytes(b"review the caf\xe9 module\n")
+    with pytest.raises(InputError) as refusal:
+        prompt_file(where)
+    assert "UTF-8" in str(refusal.value)
+
+
+def test_a_caller_with_no_file_is_told_to_pass_an_absolute_path(tmp_path: Path) -> None:
+    """A REPL, an `exec`, a frozen import: there is no module directory, so there is nothing for a
+    relative path to be relative to.
+
+    Refused rather than resolved against `Path.cwd()`, which would find *a* file often enough to be
+    trusted and then read somebody else's on the day it did not. The second half is asserted too:
+    an absolute path from the same caller is read, because the refusal is about resolution and not
+    about who is asking.
+    """
+    namespace: dict[str, object] = {"prompt_file": prompt_file}
+    assert "__file__" not in namespace
+
+    with pytest.raises(InputError, match="absolute"):
+        exec('prompt_file("prompts/decompose.md")', namespace)
+
+    where = tmp_path / "decompose.md"
+    where.write_text(_DECOMPOSE, encoding="utf-8")
+    namespace["where"] = str(where)
+    exec("read = prompt_file(where)", namespace)
+    assert namespace["read"] == _DECOMPOSE
 
 
 # --- rule one: at most one reporting tool --------------------------------------------------------

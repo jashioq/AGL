@@ -115,15 +115,22 @@ def _base(tool: Tool) -> str:
 
 def test_the_derived_schema_is_the_object_a_vendor_is_handed() -> None:
     """The stored format, in full. Nested objects, an optional as `anyOf`, arrays with their item
-    schema, `required` holding exactly the fields with no default, and `additionalProperties`."""
+    schema, `required` holding exactly the fields with no default, `additionalProperties`, and the
+    `title` §3.6 rule 6 puts on every payload type at every depth.
+
+    `__name__` rather than the literal `"test_tools"`, for `test_run_step.py`'s reason: that string
+    is pytest's import mode talking and not this file's claim. What *is* this file's claim is the
+    shape - module, a dot, and the qualified name - and dropping either half of it fails here."""
     assert dict(REPORT.payload_schema) == {
         "type": "object",
+        "title": f"{__name__}.Findings",
         "properties": {
             "summary": {"type": "string"},
             "findings": {
                 "type": "array",
                 "items": {
                     "type": "object",
+                    "title": f"{__name__}.Finding",
                     "properties": {
                         "file": {"type": "string"},
                         "severity": {"type": "string"},
@@ -168,20 +175,24 @@ def test_a_field_with_a_default_is_not_required_and_one_without_it_is() -> None:
 
 def test_reordering_two_fields_costs_no_agent_run() -> None:
     """`required` is sorted, so a cosmetic edit does not move the fingerprint. `properties` needs no
-    sorting of its own: it is a JSON object and canonical JSON sorts an object's keys."""
+    sorting of its own: it is a JSON object and canonical JSON sorts an object's keys.
 
-    @dataclass(frozen=True)
-    class OneWay:
-        alpha: str
-        beta: str
+    **The two payloads are built through `make_dataclass` under one name**, and that is the whole
+    arrangement rather than an affectation: since 13.0 a payload type contributes its qualified name
+    to the schema, so two `class` statements spelled `OneWay` and `TheOther` would differ in their
+    `title` before a single field was reordered, and this test would pass while measuring nothing.
+    `make_dataclass("Payload", ...)` names both the same and leaves the field order as the only
+    difference there is - which is what the claim is actually about, an author moving one line
+    inside one dataclass."""
+    one_way = make_dataclass("Payload", [("alpha", str), ("beta", str)], frozen=True)
+    the_other = make_dataclass("Payload", [("beta", str), ("alpha", str)], frozen=True)
+    assert one_way.__qualname__ == the_other.__qualname__, "the arrangement this test rests on"
 
-    @dataclass(frozen=True)
-    class TheOther:
-        beta: str
-        alpha: str
-
-    one = reporting_tool("report", "report it", OneWay)
-    other = reporting_tool("report", "report it", TheOther)
+    # Annotated because `make_dataclass` answers a bare `type`, so there is nothing for `P` to be
+    # solved from - which is the price of building the two payloads under one name, and is paid
+    # here rather than by giving them two names and measuring nothing.
+    one: ReportingTool[Any] = reporting_tool("report", "report it", one_way)
+    other: ReportingTool[Any] = reporting_tool("report", "report it", the_other)
     assert dict(one.payload_schema) == dict(other.payload_schema)
     assert _base(_tool(one)) == _base(_tool(other))
 
@@ -531,12 +542,20 @@ def test_editing_the_payload_dataclass_changes_the_steps_base() -> None:
     assert _base(_tool(REPORT)) != _base(_tool(widened))
 
 
-def test_the_schema_is_derived_from_the_fields_and_not_from_the_payloads_name() -> None:
-    """Which is the recorded limit of §3.6's "a stale entry is discarded rather than failing to
-    parse - that falls out free". It is free for every *structural* change; swapping a payload for a
-    structurally identical one leaves the base untouched, and `journal.py`'s rule 6 - the qualified
-    type name a dataclass input contributes - has no counterpart here. Pinned as the behaviour it
-    is, and reported as a finding rather than presented as a promise."""
+def test_two_payload_types_of_one_shape_are_two_schemas_and_two_fingerprints() -> None:
+    """§3.6 rule 6's second half, and the leak 12.3 reported and 13.0 closed.
+
+    Structurally identical payload types used to derive a byte-identical schema, so swapping
+    `Findings` for a `Review` of the same shape left the fingerprint where it was and the old entry
+    replayed **into the new type**: the expensive direction, a false cache hit rather than a re-run,
+    with nothing failing to parse and the run carrying on with the wrong thing. §3.6's "a stale
+    entry is discarded rather than failing to parse" is only true once the qualified name is in the
+    terms, and the `title` is where it is.
+
+    Both halves are asserted. The schema, because it is the stored format and the only place a
+    reporting tool can carry identity at all - `base_of` hashes a tool's name, its description and
+    its schema, and `Tool` is a port type that must not learn what a payload class is. And the base,
+    because that is the sentence anybody actually cares about: these are two steps."""
 
     @dataclass(frozen=True)
     class SameShape:
@@ -547,7 +566,60 @@ def test_the_schema_is_derived_from_the_fields_and_not_from_the_payloads_name() 
         tags: tuple[str, ...] = ()
 
     twin = reporting_tool(REPORT.name, REPORT.description, SameShape)
-    assert _base(_tool(REPORT)) == _base(_tool(twin))
+    assert dict(twin.payload_schema)["properties"] == dict(REPORT.payload_schema)["properties"], (
+        "the two payloads no longer have one shape, so this measures something else entirely"
+    )
+    assert dict(twin.payload_schema)["title"] != dict(REPORT.payload_schema)["title"]
+    assert _base(_tool(REPORT)) != _base(_tool(twin))
+
+
+def test_a_nested_payload_types_name_is_a_term_too_and_not_only_the_outermost() -> None:
+    """The depth, which is the whole of the implementation - `journal._canonical`'s rule 6 word for
+    word, one walker over an input and one over a payload.
+
+    A name written once at the top of `payload_schema` would leave `Outer(inner=Inner)` and
+    `Outer(inner=Other)` one fingerprint, which is the same false cache hit one level down. The two
+    outer types are therefore built under **one** name through `make_dataclass`, so that the only
+    difference between the two schemas is the type of a nested field: an implementation that tags
+    the outermost payload and nothing else passes every version of this test that lets the outer
+    names differ."""
+    inner = make_dataclass("Inner", [("tokens", int)], frozen=True)
+    other = make_dataclass("Other", [("tokens", int)], frozen=True)
+    one = make_dataclass("Outer", [("nested", inner)], frozen=True)
+    twin = make_dataclass("Outer", [("nested", other)], frozen=True)
+    assert one.__qualname__ == twin.__qualname__, "the arrangement this test rests on"
+
+    declared: ReportingTool[Any] = reporting_tool("report", "report it", one)
+    swapped: ReportingTool[Any] = reporting_tool("report", "report it", twin)
+    assert dict(declared.payload_schema)["title"] == dict(swapped.payload_schema)["title"]
+    assert _base(_tool(declared)) != _base(_tool(swapped))
+
+
+def test_the_name_in_a_title_is_the_qualified_one_and_not_the_bare_class_name() -> None:
+    """Two payload classes spelled `Payload` in two scopes are two types, and a workflow that
+    swapped one for the other changed what it asks for - `journal.py` says the same of two
+    identically-named dataclasses in two modules. `__name__` would call these one type."""
+
+    def one() -> type[object]:
+        @dataclass(frozen=True)
+        class Payload:
+            summary: str
+
+        return Payload
+
+    def other() -> type[object]:
+        @dataclass(frozen=True)
+        class Payload:
+            summary: str
+
+        return Payload
+
+    first, second = one(), other()
+    assert first.__name__ == second.__name__, "the arrangement this test rests on"
+    declared = reporting_tool("report", "report it", first)
+    swapped = reporting_tool("report", "report it", second)
+    assert dict(declared.payload_schema)["title"] != dict(swapped.payload_schema)["title"]
+    assert _base(_tool(declared)) != _base(_tool(swapped))
 
 
 # --- the type chain §3.3 promises -----------------------------------------------------------------

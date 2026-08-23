@@ -702,6 +702,25 @@ class Journal:
         # 3.10, so a `Journal` is still constructible from synchronous code.
         self._running = asyncio.Lock()
 
+    @property
+    def last_good(self) -> str:
+        """The commit this namespace is known to be at - `base` until an entry, `entry.head` after.
+
+        Read-only, and the read is the whole of what is exposed: `_last_good` is written in exactly
+        two places, both inside `step`, and deliverable 14.1 adds the third. A setter here would be
+        a fourth writer with no caller, and the field's own comment says why that is not the seam
+        `integrate()` needs - what it needs is that the value stays instance state on this object.
+
+        **Synchronous, and that is what `Run.worktree` needs of it.** A child's base is its parent's
+        logical head (§3.6: "the starting head is chained logically, not read from disk"), and
+        `worktree()` is a plain call, so the value has to be readable without awaiting. That is not
+        a constraint this property strains against: `Workspace.head()` is async precisely because it
+        goes and looks, and looking is the thing forbidden here. On a resume a persisted namespace's
+        physical head is wherever its last step left it and the run's own is wherever integrations
+        advanced it, and neither is where this chain is.
+        """
+        return self._last_good
+
     async def step(
         self,
         name: StepName,

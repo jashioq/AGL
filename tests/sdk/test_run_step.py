@@ -14,7 +14,7 @@ machine it runs on. The ledger is a real `FilesystemStore` for the same reason i
 "nothing under `steps/<name>/`" is a directory listing here, not a digest recomputed by the test
 from the arithmetic it is checking.
 
-Five of these are worth naming, because each is written against a failure that is silent:
+Six of these are worth naming, because each is written against a failure that is silent:
 
   * **The entry's `head` is recorded after the commit.** §3.3: "a `run.commit()` after the step
     would run *after* the entry was written, so the recorded `head` would predate the commit - and
@@ -34,6 +34,11 @@ Five of these are worth naming, because each is written against a failure that i
   * **An agent that never reports leaves no entry.** The step re-runs, which is only true if
     nothing was written; a `RoleIncompleteError` that had recorded something would be a step that
     read as done and had no result.
+  * **What the agent is asked is the role's own text plus this step's inputs.** §3.3 appends one
+    block of canonical JSON under a fixed heading rather than interpolating, and both halves of that
+    fail in silence: inputs that never arrive leave a `triage` agent triaging findings it was never
+    shown, while a template engine quietly rewrites a prompt that carries a JSON Schema. The section
+    near the bottom asserts the whole dispatched string and not a substring of it.
 
 `run.activity` is here too, at the end, because this file already holds the only thing that
 dispatches to an adapter. There is little to it by design (§3.7: the framework holds the last
@@ -55,6 +60,7 @@ import pytest
 
 from agl.adapters.claude_code.fake import Conversation, Script
 from agl.adapters.filesystem.store import FilesystemStore
+from agl.adapters.git.history import GitHistory
 from agl.adapters.git.workspace import GitWorkspaceProvider
 from agl.config import container
 from agl.ports.agent import AgentOutcome, Claude, Restriction, StopReason, ToolResult
@@ -65,7 +71,7 @@ from agl.ports.questions import Answer, Question
 from agl.ports.run import JsonValue
 from agl.ports.tree_layout import TreesRoot
 from agl.ports.workspace import Workspace
-from agl.sdk.roles import Role, RoleIncompleteError
+from agl.sdk.roles import Role, RoleIncompleteError, prompt_file
 from agl.sdk.tools import reporting_tool
 from agl.sdk.workflow import Run
 
@@ -99,6 +105,22 @@ class Summary:
 
 
 REPORT: Final = reporting_tool("report", "report what you did", Summary)
+
+
+@dataclass(frozen=True)
+class Restatement:
+    """`Summary`'s shape under another name, for the payload-identity section near the bottom.
+
+    Field for field the same, so the schema derived from it is the same schema but for the one term
+    13.0 added: the qualified type name. A reporting tool declared over it carries `REPORT`'s own
+    name and description too, which leaves the payload *type* as the only difference between two
+    otherwise identical roles - and so as the only thing that can move the fingerprint.
+    """
+
+    text: str
+
+
+RESTATE: Final = reporting_tool(REPORT.name, "report what you did", Restatement)
 
 
 class _Crash(Exception):
@@ -155,11 +177,16 @@ def base(repository: Path) -> str:
 def _run(repository: Path, tmp_path: Path, base: str, script: Script | None = None) -> Run[None]:
     """A `Run` over one real repository, one real ledger and one scripted agent.
 
-    The bundle comes from the composition root's fakes and has two of its eight fields replaced,
+    The bundle comes from the composition root's fakes and has three of its eight fields replaced,
     which is the smallest arrangement that puts real git and a real store under a `Run` without a
-    test constructing eight ports by hand. The five that stay fake - history, integrator, verifier,
-    terminal, clock - are not reached by a step, and the sixth, the routing runner, is where the
-    script goes.
+    test constructing eight ports by hand. The four that stay fake - integrator, verifier, terminal,
+    clock - are not reached by a step, and the fifth, the routing runner, is where the script goes.
+
+    **`history` is real because a step now reaches it.** 13.2 made `Steps._namespace` resolve its
+    base through `History.resolve` and hand the one resolved value to both the checkout and the
+    `Journal`, so that the cut and the chain cannot disagree about where a namespace began; a
+    `FakeHistory` here answers about a `FakeRepository` that has never heard of this repository's
+    commits, and would refuse the run's own pinned base. Real git is asked about real git.
 
     Called twice with the same arguments it is a resume: the same ledger on disk, the same worktree
     reopened, and a fresh counter, which is what §3.6 means by "`n` is never persisted".
@@ -170,6 +197,7 @@ def _run(repository: Path, tmp_path: Path, base: str, script: Script | None = No
         harness.services,
         store=FilesystemStore(AglHome(tmp_path / "home")),
         workspaces=GitWorkspaceProvider(repository, trees),
+        history=GitHistory(repository),
     )
     return Run(params=None, services=services, scope=SCOPE, base=base)
 
@@ -815,6 +843,322 @@ async def test_a_roles_question_handler_reaches_the_runner_and_its_answer_return
     assert await run.step("decide", role) == Summary("decide #0")
     assert [question.prompt for question in record.asked] == ["Land it, or keep going?"]
     assert record.results[0].text == "land it", "the answer did not reach the agent that asked"
+
+
+# --- what the agent is actually asked -------------------------------------------------------------
+#
+# §3.3 settles the mechanism and it is not templating: "the framework appends one structured block
+# of canonical JSON under a fixed heading, and the author writes the prompt knowing inputs arrive at
+# the end". The five tests below are written against the five ways that goes wrong, and only the
+# first of them is the obvious one:
+#
+#   * *The block never arrives.* Stage 12's actual behaviour and the whole of 13.0(i): §3.3's own
+#     `w.step("triage", triage, findings=highs)` fingerprints the findings correctly, pays for an
+#     agent, and hands it a prompt with no findings in it. Nothing raises, the step records a
+#     result, and what the run produced is a triage of nothing.
+#   * *Something interpolates.* `_TEMPLATED` is a prompt carrying `{`, `}`, `{name}`, a JSON Schema
+#     and a `%s`, which is what these prompts really look like, and it is asserted to survive
+#     **byte-identical** in front of the block. `str.format` raises `KeyError` on it and `%` raises
+#     `TypeError` on it, so either of those two implementations is a red test rather than a subtly
+#     different prompt. The quiet third one - a `str.replace` or a regex over `{name}` - is what the
+#     byte-identity is really for, because nothing about it would raise.
+#   * *A step with no inputs is given a block anyway*: a heading over an empty object, or merely a
+#     trailing newline nobody would ever see. Asserted as equality against the role's instructions.
+#   * *The block is not canonical.* Two calls writing the same inputs in a different keyword order
+#     must compose the same text, which is `sort_keys` seen from outside the journal - and must
+#     replay, which is what the same inputs have to mean to a resume.
+#   * *A dataclass arrives as something other than its fields.* §3.3 passes `findings=highs`, so
+#     this is the shape the plan's own example needs and not an exotic one.
+#
+# **The expected text is spelled out here rather than imported.** A suite that called
+# `canonical_json` to check what `canonical_json` produced would agree with it whatever either of
+# them said, and the same goes twice over for the heading: it is fixed by §3.3, an author writes
+# the closing paragraph of a prompt against it, and no fingerprint contains it - so respelling it is
+# a change to every prompt in AGL that nothing else in this repository can see.
+
+
+# The heading §3.3 fixes, with the blank lines that separate it from the prompt above and the block
+# below - the whole of what the framework inserts between an author's text and their step's inputs.
+_HEADING: Final = "\n\n## Inputs\n\n"
+
+# A prompt written the way these prompts really are: a payload schema, a placeholder that is not
+# one, and two percent signs. `_TEMPLATED.format(**inputs)` raises `KeyError: '"type"'` and
+# `_TEMPLATED % inputs` raises `TypeError` at `100% of` - measured, not assumed - so neither
+# templating implementation passes this quietly, and neither survives the byte-identical prefix.
+_TEMPLATED: Final = (
+    'Report through the tool below. Its payload schema is {"type": "object", "properties": '
+    '{"text": {"type": "string"}}}, and `{name}` is what a finding calls the ticket it belongs '
+    "to. Keep 100% of the diff and write %s wherever you skipped something."
+)
+
+
+@dataclass(frozen=True)
+class Finding:
+    """§3.3's `findings=highs`: a list of the workflow's own dataclasses, passed as one input."""
+
+    ticket: str
+    severity: int
+
+
+@pytest.mark.asyncio
+async def test_the_inputs_a_step_passes_are_appended_to_what_the_agent_is_asked(
+    repository: Path, tmp_path: Path, base: str
+) -> None:
+    """13.0(i): `**inputs` are fingerprint terms **and** they reach the agent (§3.3).
+
+    Asserted as the whole dispatched string rather than as `"T-01" in asked`, because everything
+    §3.3 fixes about the block is in the parts a containment check cannot see: that the role's own
+    text comes first, that one fixed heading separates the two, that the keys are sorted, and that
+    the separators are the compact ones the fingerprint was taken with.
+    """
+    record = _Agent()
+    run = _run(repository, tmp_path, base, _agent(record))
+
+    await run.step("triage", _role("triage the findings", read_only=True), ticket="T-01", high=3)
+
+    assert record.runs == ["triage the findings" + _HEADING + '{"high":3,"ticket":"T-01"}'], (
+        "the step's inputs were fingerprinted and never shown to the agent, which is §3.3's own "
+        "tickets example paying for a triage of findings it was never handed"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_prompt_carrying_braces_and_percent_signs_reaches_the_agent_byte_identical(
+    repository: Path, tmp_path: Path, base: str
+) -> None:
+    """§3.3's reason for rejecting templating, written as the assertion that catches it.
+
+    Two assertions where one would do, because they fail differently and both are worth reading. The
+    prefix says the author's text was not touched - which is the claim - and the equality says what
+    was added is the block and only the block. A role that carries a JSON Schema is not a contrived
+    case: `roles.py` puts the prompt text in `instructions`, and a reporting role's prompt is
+    usually explaining a schema.
+    """
+    record = _Agent()
+    run = _run(repository, tmp_path, base, _agent(record))
+
+    await run.step("triage", _role(_TEMPLATED, read_only=True), ticket="T-01")
+
+    (asked,) = record.runs
+    assert asked.startswith(_TEMPLATED), (
+        "the role's own instructions were rewritten on the way to the agent. Nothing may "
+        "interpolate here: these prompts carry JSON Schemas, and a `{name}` in one is literal text"
+    )
+    assert asked == _TEMPLATED + _HEADING + '{"ticket":"T-01"}'
+
+
+@pytest.mark.asyncio
+async def test_a_step_with_no_inputs_is_dispatched_the_roles_instructions_and_nothing_else(
+    repository: Path, tmp_path: Path, base: str
+) -> None:
+    """§3.3's block is appended when there is one, and "nothing at all" when there is not.
+
+    Equality and not `startswith`, because every wrong version of this passes `startswith`: a
+    heading over an empty object, a blank line, one trailing newline. This is the shape most
+    dispatches in AGL have - every reviewer reviews the worktree and takes no inputs at all - so a
+    stray character here is in almost every prompt, changes no fingerprint, and re-runs nothing.
+    """
+    record = _Agent()
+    run = _run(repository, tmp_path, base, _agent(record))
+
+    await run.step("review", _role("review the diff", read_only=True))
+
+    assert record.runs == ["review the diff"]
+
+
+@pytest.mark.asyncio
+async def test_the_same_inputs_in_a_different_keyword_order_compose_and_replay_the_same(
+    repository: Path, tmp_path: Path, base: str
+) -> None:
+    """Canonical JSON sorts keys, so the block is a function of the inputs and not of the call.
+
+    The replay is the half that costs money when it is wrong, and it is also this file's answer to
+    "did the fingerprint move": the entry is written by the first walk and found by the second,
+    which is only true if `journal.step` is still being handed `role.instructions` and `inputs` as
+    the two separate terms §3.6 records. A composed prompt hashed in place of them would re-run
+    every step ever recorded, and this is the cheapest place that shows.
+    """
+    record = _Agent()
+    role = _role("triage the findings", read_only=True)
+
+    first = _run(repository, tmp_path, base, _agent(record))
+    await first.step("triage", role, ticket="T-01", high=3)
+
+    second = _run(repository, tmp_path, base, _agent(record))
+    await second.step("triage", role, high=3, ticket="T-01")
+
+    assert len(record.runs) == 1, "reordering two keyword arguments re-ran the agent"
+    assert record.runs[0].endswith('{"high":3,"ticket":"T-01"}'), (
+        "the block is written in the order the call wrote its keywords, so two calls carrying the "
+        "same inputs hand two different prompts to two agents - and the digest they share, which "
+        "is taken over sorted keys, says the two are one step and replays the first one's result"
+    )
+    assert len(_entries(tmp_path, "triage")) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_dataclass_input_reaches_the_agent_as_its_fields_and_its_type(
+    repository: Path, tmp_path: Path, base: str
+) -> None:
+    """§3.3's own `findings=highs`, which is a list of the workflow's own dataclasses.
+
+    The `__agl_type__` tag is asserted rather than tolerated. §3.6 rule 6 puts a dataclass's
+    qualified name in the fingerprint at every depth, and this block is the same canonical text the
+    digest was taken over - so the tag is in front of the agent by construction, and the only way it
+    would not be is a second serialiser, free to disagree with the first about what these inputs
+    were. It reads as information rather than noise: it is the type the workflow named.
+
+    `Finding.__module__` rather than the literal `"test_run_step"`, because that string is pytest's
+    import mode talking and not this file's claim.
+    """
+    record = _Agent()
+    run = _run(repository, tmp_path, base, _agent(record))
+    typed = '{"__agl_type__":"' + Finding.__module__ + '.Finding",'
+
+    await run.step(
+        "triage",
+        _role("triage the findings", read_only=True),
+        findings=[Finding("T-01", 3), Finding("T-07", 5)],
+    )
+
+    block = (
+        '{"findings":['
+        + typed
+        + '"severity":3,"ticket":"T-01"},'
+        + typed
+        + '"severity":5,"ticket":"T-07"}]}'
+    )
+    assert record.runs == ["triage the findings" + _HEADING + block], (
+        "the findings §3.3 hands to `triage` did not reach the agent asked to triage them, or they "
+        "reached it as something other than the canonical text their fingerprint was taken over"
+    )
+
+
+# --- a prompt that came out of a file ------------------------------------------------------------
+#
+# §3.7: "**`instructions` is prompt text, never a path.** A role holding a filename would
+# fingerprint the filename, so editing the prompt would move nothing and a resume would replay what
+# the old wording produced - as a cache hit, with nothing to notice. `prompt_file()` reads at
+# declaration time and is the sanctioned spelling."
+#
+# `tests/sdk/test_roles.py` pins what `prompt_file` returns and what it refuses. These two are the
+# claim that sentence is really about, and neither can be made there: a `prompt_file` that answered
+# with the path it was handed would satisfy every type in the codebase, and the only place it shows
+# is in front of an agent - or, worse, in a digest that did not move.
+
+
+@pytest.mark.asyncio
+async def test_a_role_declared_with_prompt_file_asks_the_agent_what_the_file_says(
+    repository: Path, tmp_path: Path, base: str
+) -> None:
+    """The whole of §3.7's promise, measured at the far end: what the agent was asked **is** the
+    file's text.
+
+    Equality against the file's own contents rather than a containment check, because the two
+    implementations worth catching both pass a containment check on something: a role holding the
+    path would hand the agent a path, and a role holding a stripped or reflowed copy would hand it
+    a prompt the author did not write and a digest nobody could reproduce by reading the file.
+    """
+    record = _Agent()
+    prompt = tmp_path / "prompts" / "review.md"
+    prompt.parent.mkdir(parents=True)
+    prompt.write_text("Review the worktree against the spec.\n\nReport what you found.\n")
+    run = _run(repository, tmp_path, base, _agent(record))
+
+    await run.step("review", _role(prompt_file(prompt), read_only=True))
+
+    assert record.runs == [prompt.read_text(encoding="utf-8")], (
+        "the agent was not asked what the prompt file says. A role that carried the filename would "
+        "look exactly like this from every other angle - it would type-check, it would "
+        "fingerprint, and the run would finish"
+    )
+
+
+@pytest.mark.asyncio
+async def test_editing_the_prompt_file_re_runs_the_step_and_the_agent_reads_the_new_wording(
+    repository: Path, tmp_path: Path, base: str
+) -> None:
+    """§3.7's named failure, shown closed - and the control beside it, because "it re-ran" is only
+    a claim if the unedited case replays.
+
+    Three walks over one ledger. The first records an entry; the second re-declares the role from
+    the *unchanged* file and replays it, paying for no agent; the third re-declares it after an edit
+    and pays for one, which is what a role holding the filename could not do - the filename would be
+    identical across all three, the digest would still match, and the resume would hand back what
+    the old wording produced with nothing anywhere to notice.
+
+    The last assertion is the half that says the re-run was for the right reason: the agent was
+    asked the *new* text, not merely asked again.
+    """
+    record = _Agent()
+    prompt = tmp_path / "prompts" / "review.md"
+    prompt.parent.mkdir(parents=True)
+    first_wording = "Review the worktree against the spec.\n"
+    prompt.write_text(first_wording, encoding="utf-8")
+
+    first = _run(repository, tmp_path, base, _agent(record))
+    await first.step("review", _role(prompt_file(prompt), read_only=True))
+
+    unedited = _run(repository, tmp_path, base, _agent(record))
+    await unedited.step("review", _role(prompt_file(prompt), read_only=True))
+    assert len(record.runs) == 1, "the control: re-reading an unchanged prompt file must replay"
+
+    edited_wording = "Review the worktree against the spec, and check the tests too.\n"
+    prompt.write_text(edited_wording, encoding="utf-8")
+    edited = _run(repository, tmp_path, base, _agent(record))
+    await edited.step("review", _role(prompt_file(prompt), read_only=True))
+
+    assert record.runs == [first_wording, edited_wording], (
+        "editing the prompt file moved nothing, so the resume replayed what the old wording "
+        "produced - §3.6's own reason for putting the role in the digest, arriving as a cache hit"
+    )
+    assert len(_entries(tmp_path, "review")) == 2
+
+
+# --- a reporting tool's payload type is a term too ------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_step_reporting_through_another_payload_type_does_not_replay_the_first(
+    repository: Path, tmp_path: Path, base: str
+) -> None:
+    """§3.6 rule 6's second half, at the surface where it costs something.
+
+    Two roles identical in every term a fingerprint takes but one: the reporting tool's payload
+    *type*. Same instructions, same model, same restrictions, same tool name and description, and a
+    payload dataclass of exactly the same shape under a different name. Before 13.0 the two derived
+    a byte-identical schema, so the second walk found the first's entry and replayed it **into the
+    new type** - nothing raised, nothing failed to parse, and the workflow read a `Restatement` that
+    was recorded as a `Summary`.
+
+    The control comes first for the reason it always does: a run where everything re-runs would pass
+    the second half of this and mean nothing by it.
+    """
+    record = _Agent()
+    review = _role("review", read_only=True)
+    restated = Role(
+        instructions="review",
+        model=Claude.SONNET,
+        restrictions={Restriction.NO_VCS_WRITES},
+        tools=(RESTATE,),
+    )
+
+    first = _run(repository, tmp_path, base, _agent(record))
+    assert await first.step("review", review) == Summary("review #0")
+
+    unchanged = _run(repository, tmp_path, base, _agent(record))
+    assert await unchanged.step("review", review) == Summary("review #0")
+    assert len(record.runs) == 1, "the control: the same role twice is one agent run"
+
+    swapped = _run(repository, tmp_path, base, _agent(record))
+    assert await swapped.step("review", restated) == Restatement("review #0")
+
+    assert len(record.runs) == 2, (
+        "the step replayed an entry recorded for another payload type. The workflow asked for a "
+        "`Restatement` and was handed what an agent reported as a `Summary`, off the ledger, "
+        "without an agent being asked and without anything failing to parse"
+    )
+    assert len(_entries(tmp_path, "review")) == 2
 
 
 # --- `run.activity` ------------------------------------------------------------------------------

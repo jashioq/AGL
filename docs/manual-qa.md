@@ -29,7 +29,8 @@ Entries are numbered in the order they were raised, starting at 1, and are never
 model behind it: `tests/instruments/loopback.py` binds `127.0.0.1` and answers a real `claude`
 process out of canned data, and a scripted `claude_agent_sdk` `Transport` drives the adapter with
 no CLI at all. Every command below **spends real tokens unless the entry says otherwise** — that
-is what makes it a manual entry. Entries 6, 7 and 11 are the exceptions and are free.
+is what makes it a manual entry. Entries 6, 7 and 11 are the exceptions and are free; entry 15 is
+free on one backend and paid on the other, and says so at the top.
 
 **Environment these entries were measured in**, so a later reader can tell a drift from a
 disagreement:
@@ -1069,3 +1070,273 @@ one, not in this adapter, and `tests/conftest.py`'s docstring should stop saying
 established-but-unused. Two guards must stay whatever happens: the emptied `CODEX_HOME`, which is
 what makes a misconfigured redirect an authentication failure rather than a bill, and
 `scripts/check`'s paid-endpoint gate.
+
+---
+
+## 14. Whether a live agent reads the inputs block appended to its prompt
+
+**Raised by:** stage 13 — 13.0(i): `_composed` and `_INPUTS_HEADING` in
+`src/agl/sdk/_engine/steps.py`.
+
+**Assumed.** That a real agent **attends to** the block `run.step(name, role, **inputs)` appends.
+§3.3 settles how a value reaches an agent and it is not templating — `str.format` breaks on a brace
+and these prompts carry JSON Schemas, `%` breaks on a percent sign — so the framework appends one
+structured block under a fixed heading and "the author writes the prompt knowing inputs arrive at
+the end". Four properties of that block are the assumption, and each is a separate way a model could
+miss it:
+
+- it is at the **end**, after however many hundred lines of role instructions;
+- it is under a **markdown heading**, `## Inputs`, and nothing else marks it;
+- it is **compact canonical JSON** — `journal.canonical_json`, so the separators carry no spaces
+  and the keys are sorted, which is not how a human would lay an input out for a reader;
+- `ensure_ascii=True`, so a non-ASCII input arrives as the escape `\u00ef` and not as the character
+  it stands for, and every dataclass at every depth carries an `__agl_type__` tag naming its
+  qualified type.
+
+None of that is negotiable at the margin, which is why the question is "does a model read this"
+rather than "should it be prettier": the block **is** the canonical text the fingerprint was taken
+over, byte for byte, and a pretty-printer here would be a second answer to "what were these inputs",
+free to drift from the digest in either direction.
+
+**Already covered, free — the framework's whole half, and it is more than it looks.**
+`tests/sdk/test_run_step.py` drives the real engine against a scripted fake and asserts the **whole
+dispatched string** rather than a containment, because everything §3.3 fixes about the block is in
+the parts a containment check cannot see:
+
+- the block is composed, its keys sorted and its separators the compact ones the fingerprint was
+  taken with (`test_the_inputs_a_step_passes_are_appended_to_what_the_agent_is_asked`);
+- the author's own text survives **byte-identical** in front of a prompt carrying `{`, `}`,
+  `{name}`, a JSON Schema and a literal `%s` — and both templating implementations were *measured*
+  raising on that prompt rather than assumed to
+  (`test_a_prompt_carrying_braces_and_percent_signs_reaches_the_agent_byte_identical`);
+- a step with no inputs is dispatched the role's instructions and **nothing else** — no heading over
+  an empty object, no trailing newline
+  (`test_a_step_with_no_inputs_is_dispatched_the_roles_instructions_and_nothing_else`);
+- two calls whose keywords are written in different orders compose one string and replay as one
+  step (`test_the_same_inputs_in_a_different_keyword_order_compose_and_replay_the_same`);
+- §3.3's own `findings=highs` reaches the dispatch as its fields **and** its `__agl_type__` tag
+  (`test_a_dataclass_input_reaches_the_agent_as_its_fields_and_its_type`).
+
+All five read the composed string off `AgentTask.instructions`, since the fake records the
+instructions of every task it is handed. **What no free test can show is a model attending to it.**
+A scripted fake cannot fail to read its prompt, and neither can a loopback: the block leaves this
+machine correctly and what happens to it afterwards is the one thing on the far side.
+
+**Command.** On an authenticated machine, in a scratch directory. The prompt is built by
+`steps._composed` itself rather than by hand — the composition is already proven and a hand-built
+copy would be measuring this file's typing, not the framework's output. The input is chosen so that
+each of the four properties above fails visibly and separately: a dataclass for the `__agl_type__`
+tag, a non-ASCII character for the `ensure_ascii` escaping, and a second key so that key order and
+the end of the block are both readable in the answer.
+
+```bash
+.venv/bin/python -c "
+import asyncio
+from dataclasses import dataclass
+from pathlib import Path
+from agl.adapters.claude_code.runner import ClaudeCodeRunner
+from agl.ports.agent import AgentTask, Claude
+from agl.sdk._engine.steps import _composed
+
+@dataclass(frozen=True)
+class Finding:
+    ticket: str
+    severity: int
+    note: str
+
+instructions = (
+    'You are triaging review findings. The findings you must triage are given to you in this '
+    'prompt and nowhere else - do not read any file and do not run any command. Answer with '
+    'exactly three lines and nothing else: (1) the ticket id of the single finding, (2) its '
+    'note, copied character for character, (3) the deadline.'
+)
+inputs = {
+    'findings': [Finding('T-01', 5, 'the naïve path is not naïve')],
+    'deadline': 'Friday',
+}
+asked = _composed(instructions, inputs)
+print('--- PROMPT AS DISPATCHED ---'); print(asked); print('--- END ---')
+
+task = AgentTask(
+    instructions=asked,
+    workspace=Path.cwd(),
+    model=Claude.SONNET,
+    restrictions=frozenset(),
+    tools=(),
+)
+print('OUTCOME:', asyncio.run(ClaudeCodeRunner().run(task)))
+"
+```
+
+The diaeresis in that note is the whole of the third field's job, and it has to survive being copied
+out of this file: the Python source carries the character, `canonical_json` renders it back as
+`\u00ef`, and the escape is what the model is shown. Three things pass, and they fail independently,
+which is why the reply is asked for in three lines: the **ticket id** says the block was found and
+parsed at all; the **note copied character for character** says the escape was decoded rather than
+echoed back as `\u00ef`; and the **deadline** says the model read past the first key rather than
+stopping at the object it recognised. Run the same command against `OpenAI.LUNA` through
+`OpenAiRunner` — it is one import and one enum away — because §3.3's block is composed once, above
+the port, and is handed to whichever backend the role routes to.
+
+**A single failure is not a verdict, and the boundary is entry 2's.** Whether a *particular* prompt
+gets a model to use its inputs is prompt engineering and belongs to the workflow. Run the cheap tier
+after the strong one rather than instead of it: `Claude.HAIKU` failing where `Claude.SONNET`
+succeeds is a fact about routing a role to a cheap model, not about the block. Record a failure when
+the block is demonstrably in the prompt and the answer is demonstrably not taken from it — and
+record a **partial** one, because that is the likely shape: the tag ignored, or the escape echoed,
+or the last key never reached.
+
+**If it is wrong.** §3.3's own `w.step("triage", triage, findings=highs)` fingerprints the findings
+correctly, pays for an agent, and triages nothing. That is precisely the failure 13.0(i) closed one
+layer down — before it, the inputs were a fingerprint term and were never sent at all — and the
+remaining version of it is quieter, because the findings are now *in the prompt* and merely unread.
+Nothing raises. The step records a result, the digest matches on resume, and the workflow carries on
+with a triage of nothing.
+
+**Two candidate repairs, and the property they share is the reason this entry exists.** A different
+heading or a different position — inputs before the instructions rather than after, or a heading
+that says more than two words — is one; a paragraph per input, each key named in prose with its
+value under it, is the other, and it is the larger change because it stops being canonical JSON and
+therefore stops being the text the digest was taken over. **Either one moves no digest.** The
+heading and the composition are deliberately outside the fingerprint — `journal.step` is still
+handed `instructions=role.instructions` and `inputs=inputs` as two separate terms, which is §3.6's
+shape and a stored format — so a repair costs no re-runs, which is the good half, and is invisible
+to every test and every resume in this repository, which is the other. A resume after such a repair
+replays results the old heading produced, and nothing anywhere says so. Whoever makes that change
+should write it down here.
+
+---
+
+## 15. Whether both harnesses accept a payload schema carrying `title`
+
+**Raised by:** stage 13 — 13.0(iii): `_object_schema` in `src/agl/sdk/tools.py`. The crossing is
+`ports.agent.Tool.payload_schema`, and the two places it lands are
+`src/agl/adapters/claude_code/_tools.py::_schema` and
+`src/agl/adapters/openai/_tools.py::_advertised`.
+
+**This entry is free on Claude Code**, and not free on Codex — so read the two halves separately,
+and do the free one first.
+
+**Assumed.** That both vendors accept a derived payload schema carrying a JSON Schema `title`.
+13.0(iii) writes `f"{module}.{qualname}"` into every payload schema **at every depth**, so that two
+structurally identical payload types stop fingerprinting identically: `base_of` hashes a tool's
+name, its description and its schema and nothing else, and `Tool` is a **port** type that must not
+learn what a reporting tool's payload class is, so the schema is the one term the identity can
+travel in. That schema is then handed straight across the port to both adapters and on to the
+vendor. `title` was chosen over `$id` and `description` precisely because it is a standard
+*annotation* keyword with no validating behaviour in any draft — no validator can reject a payload
+over it and no backend has to be told about it — so the expectation is that both accept it without
+comment. **Neither has been asked.**
+
+**Already covered, free — and the gap in it is exact, which is what makes this cheap.**
+
+- **The framework's half is settled three ways.** Two payload types of one shape derive two schemas
+  and two fingerprints
+  (`test_two_payload_types_of_one_shape_are_two_schemas_and_two_fingerprints`); a *nested* type's
+  name is a term too, built under one outer name so that tagging only the outermost fails the test
+  (`test_a_nested_payload_types_name_is_a_term_too_and_not_only_the_outermost`); and the name is the
+  qualified one, so two classes both spelled `Payload` in two scopes are two types
+  (`test_the_name_in_a_title_is_the_qualified_one_and_not_the_bare_class_name`). All in
+  `tests/sdk/test_tools.py`.
+- **Neither adapter rewrites it.** Both crossings only `setdefault` `type` and `properties` onto a
+  copy — nothing is stripped, renamed or validated — and on the Codex side that is asserted rather
+  than merely read off the source: the `inputSchema` a client reads off `tools/list` **is**
+  `dict(tool.payload_schema)`,
+  "nothing here is entitled to rewrite it"
+  (`tests/adapters/test_openai_runner.py::test_a_tools_schema_reaches_the_model_as_the_workflow_declared_it`).
+- **The instrument that would catch a rejection already runs on every `scripts/check`, and is
+  pointed at a schema without the annotation in it.** The only tool the contract suite and both
+  adapter suites ever declare is `Notes`, whose `_NOTE_SCHEMA` in `tests/contracts/_agent_tasks.py`
+  is **hand-written** and carries no `title` — reasonably, since it was written before 13.0(iii)
+  existed and a suite about a port has no business deriving one. So every free measurement of a tool
+  reaching a real harness has been taken on a schema that does not exercise this. That is the whole
+  of the gap: not a missing instrument, a missing line in a fixture.
+
+**Command, Claude Code — free, no model, no tokens.** The init message a session emits when it opens
+lists registered tools by name **before any model call**, so a harness that rejected the schema
+would fail at registration and be visible with no paid turn. Preparation: one line into
+`_NOTE_SCHEMA` in `tests/contracts/_agent_tasks.py`, spelled the way `_object_schema` spells it —
+
+```python
+"title": "tests.contracts._agent_tasks.Note",
+```
+
+— and then, on a machine with the CLI installed, against the session-scoped loopback:
+
+```bash
+AGL_LIVE_AGENT=1 .venv/bin/pytest "tests/adapters/test_claude_code_runner.py::test_the_tools_a_task_carries_are_registered_and_the_denied_ones_are_gone"
+```
+
+Still passing means the SDK's in-process MCP server and the CLI both accepted the annotation and the
+tool is registered. Revert the line afterwards.
+
+**Read the annotation in the bytes that left, in the same free run, because registration is the
+weaker of the two claims.** With the same preparation in place, `harness.composed()` gives the
+request the CLI actually sent, and `test_the_composed_request_carries_the_asking_tool_with_a_usable_schema`
+is the shape to copy: spawn with `tools=(notes.tool,)`, build the same `offered` mapping off
+`composed.get("tools", [])`, and print `offered["mcp__agl__record_note"]["input_schema"]`. A `title`
+in that dict is the annotation surviving start-up, MCP enumeration, and the fold into the API's own
+`input_schema` spelling — three places it could have been dropped without registration noticing.
+
+**Command, Codex — there is no free instrument, and the findings say why.** State this rather than
+reaching for the obvious wrong thing:
+
+- **`codex debug prompt-input` cannot answer it.** It renders the model-visible prompt input list —
+  developer and user messages — and **not the tool list** (`docs/codex-cli-findings.md` §0, restated
+  in §3 and §6). It is the instrument most of that document rests on and it is silent here.
+- **`codex mcp list` and `codex mcp get` report configuration, not a connection.** The installed
+  binary's own `--help` calls `--json` "Output the configured servers as JSON" and "Output the
+  server configuration as JSON" respectively; a server declared as `command="/bin/echo"` comes back
+  configured (§0), so nothing there has spoken MCP to anything.
+- **The nearest free evidence is entry 12's, and it is about the dialect rather than about this
+  client.** `claude mcp add --transport http --scope local … && claude mcp list` against a live
+  `_tools.Supply` performs a real `tools/list` and reported `✔ Connected`. Declaring that supply's
+  tool through `reporting_tool` rather than by hand would put a `title`-carrying schema through a
+  production MCP client for free — which is worth doing, and is a different vendor's client.
+
+So the acceptance point for Codex is a real `codex exec` start-up, and it costs what entry 12 costs.
+**Do not spend a second turn on it: run it as entry 12.** In entry 12's command, replace the
+hand-built `Tool(...)` with the derived declaration, leaving everything else as it stands:
+
+```python
+from dataclasses import dataclass
+from agl.sdk.tools import reporting_tool
+
+@dataclass(frozen=True)
+class Note:
+    note: str
+
+declared = reporting_tool('record_note', 'Write down one note about what you found. Call it once.', Note)
+tool = Tool(name=declared.name, description=declared.description,
+            payload_schema=declared.payload_schema, handler=note)
+```
+
+Entry 12 already reads the two outcomes this needs: a run that fails at **start-up** — the harness
+reporting it could not initialise the server — is a rejected schema, and a run that completes
+without calling the tool is entry 9's question and not this one.
+
+**If it is wrong.** A reporting tool that fails to register is **a step whose agent can never
+report**. §3.3 is explicit about what that costs: "If the agent returns without firing it, there is
+no result and the step re-runs" — which the framework now raises automatically as
+`RoleIncompleteError` — so every reporting step in every workflow pays for an agent, gets nothing,
+records nothing, and re-runs on the next resume, forever. It is not a degradation: reporting steps
+are how every value in this design gets into the ledger.
+
+**The repair is genuinely awkward, and that is the reason this is worth the two minutes it costs.**
+The identity has to stay in the fingerprint and stop reaching the vendor, and those are the same
+term: `base_of` hashes exactly `name`, `description` and `payload_schema`, and giving `Tool` a
+fourth field naming a payload class is `ports/agent.py` learning what a reporting tool is, which
+§3.3 spends a paragraph forbidding and `_object_schema`'s docstring refuses by name. What is left is
+to **strip `title` in each adapter on the way out** — two lines, no port change, the fingerprint
+untouched — and it should be recorded as a trade rather than as a fix, because it makes the schema
+the model is shown differ from the schema that was hashed. That is the same class of drift
+`steps.py` refuses for the inputs block, arrived at from the other direction, and a later reader
+should find the two arguments together.
+
+**One softer question rides along on the same run and costs nothing extra.** `title` reaching the
+model is deliberate — `_object_schema` calls it "acceptable and arguably useful", on the grounds
+that the model is told the name of the thing it is filling in. Whether a model handed
+`workflows.tickets.models.Findings` in its payload schema does anything odd with it — narrates it,
+treats it as a field, refuses it as unfamiliar — is not something anybody has watched. Note anything
+strange; a rewrite to a friendlier value is a **stored format** change and re-runs the ledger, so it
+is worth knowing before somebody proposes one.

@@ -17,10 +17,21 @@ would still be 7 and the traceback would name this module instead of the step th
 **The record is asserted field by field against §3.6**, key set included, because `run.json` is the
 one value in AGL with no other copy anywhere. The `base_sha` assertions are the ones with teeth:
 full length, and not the ref name - `refs/heads/main` would satisfy every "is a string" check.
+
+**13.4 brought a real repository into this file, and only where a fake cannot answer.** The bundle's
+`FakeWorkspaceProvider` is a full implementation of the port - it makes real directories under the
+trees root and keeps a real registry of which line of work each one holds - so "a workflow that
+takes no step at all still leaves `_base` provisioned" is asserted on fakes, where it costs a
+millisecond and no git. What fakes cannot answer is what §3.9 actually promises: that `agl/<label>`
+is a *ref in a git repository* a person can `git log`, that the checkout sits at the pinned commit
+rather than at wherever the ref has got to since, and that a step reopening it registers no second
+worktree. Those two tests build a repository, put `GitWorkspaceProvider` and `GitHistory` under
+`api.run`, and ask git itself.
 """
 
+import subprocess
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Final
@@ -28,13 +39,19 @@ from typing import Final
 import pytest
 
 from agl import api
+from agl.adapters.claude_code.fake import Conversation, Script
+from agl.adapters.git.history import GitHistory
+from agl.adapters.git.workspace import GitWorkspaceProvider
 from agl.config import container, registry, sources
+from agl.ports.agent import AgentOutcome, Claude, StopReason
 from agl.ports.errors import ConflictError, InputError, InternalError, NotFoundError, exit_code_for
 from agl.ports.home_layout import RunScope
-from agl.ports.ids import ProjectName, RunLabel
+from agl.ports.ids import Namespace, ProjectName, RunLabel
 from agl.ports.run import JsonValue, RunSpec
-from agl.ports.tree_layout import TreesRoot, run_branch
+from agl.ports.tree_layout import TreesRoot, base_worktree, run_branch
+from agl.ports.workspace import Workspace, WorkspaceProvider
 from agl.sdk.params import arg
+from agl.sdk.roles import Role
 from agl.sdk.workflow import Run, Stop, workflow
 
 # `asyncio_mode = "strict"`, so every async test below carries its own marker.
@@ -68,6 +85,17 @@ class ReviewNotConverging(Stop):
     """§3.1's own example of a workflow's reason to stop, spelled against the SDK's `Stop`."""
 
 
+# The file the real repository below is seeded with, matching what `_fakes` seeds its own with, and
+# the one a commit landing mid-`api.run` adds.
+SEEDED: Final = "src/a.txt"
+LANDED: Final = "src/landed.txt"
+
+# An effect role: no reporting tool, so a step over it results in `null` and its whole purpose is
+# that a step happened at all. `Claude.SONNET` because a role has to name a model and the fakes
+# bundle serves both providers; nothing below depends on which.
+LOOKING: Final = Role(instructions="look at what is already here", model=Claude.SONNET)
+
+
 # What each workflow was handed and what one of them raised, at module level because the workflows
 # have to be: `EntryPoint.load` imports a module and reads an attribute in it, and sees no local.
 handed: Final[list[Run[ProbeParams]]] = []
@@ -88,12 +116,28 @@ async def halting(run: Run[NoParams]) -> None:
     raise stop
 
 
+@workflow(name="stepping", version="0.1", params=NoParams)
+async def stepping(run: Run[NoParams]) -> None:
+    """Takes one step, so that the checkout `api.run` provisioned is asked for a second time.
+
+    No `commit=` and a role with no reporting tool, because neither is what this is for: the step
+    exists to reach `Steps._namespace`, which is the lazy open 13.4 stopped being the first caller
+    of. The walk restores the checkout on the way out and records `null`.
+    """
+    await run.step("look", LOOKING)
+
+
 def _point(name: str, attribute: str) -> EntryPoint:
     """§3.3's `probe = "agl.workflows.probe:probe"`, pointed at this module instead."""
     return EntryPoint(name=name, value=f"{__name__}:{attribute}", group=registry.GROUP)
 
 
 POINTS: Final = (_point("probe", "probe"), _point("halting", "halting"))
+
+# Deliberately not in `POINTS`. `test_list_workflows_is_the_registrys_sorted_names` asserts the
+# whole listing, so a third workflow added to that tuple would be a stage-13 test editing a
+# stage-10 assertion about something else entirely; the two tests that need it pass both.
+STEPPING: Final = (_point("stepping", "stepping"),)
 
 
 def _fakes(tmp_path: Path) -> container.FakeServices:
@@ -111,9 +155,10 @@ async def _record(harness: container.FakeServices) -> dict[str, JsonValue]:
 async def _run(
     harness: container.FakeServices, name: str = "probe",
     argv: Sequence[str] = ("-r", "add oauth"), *, base_ref: str | None = None,
+    points: Sequence[EntryPoint] = POINTS,
 ) -> None:
     """One invocation, with this module's entry points supplied instead of what is installed."""
-    await api.run(harness.services, PROJECT, name, LABEL, argv, base_ref=base_ref, points=POINTS)
+    await api.run(harness.services, PROJECT, name, LABEL, argv, base_ref=base_ref, points=points)
 
 
 # --- a run that completes ------------------------------------------------------------------------
@@ -182,15 +227,69 @@ async def test_from_names_the_base_ref_and_the_default_is_the_repositorys(tmp_pa
 
 
 @pytest.mark.asyncio
-async def test_a_completed_run_leaves_nothing_but_run_json(tmp_path: Path) -> None:
-    """"No steps, no worktrees, no persistence beyond `run.json`" - stage 10, in as many words. The
-    branch the record names is not created and no checkout is cut: `agl/<label>` arrives with the
-    base worktree at 13.4, and a `run` that provisioned one here would be stage 13 leaking in."""
+async def test_a_workflow_that_takes_no_step_still_leaves_base_provisioned(tmp_path: Path) -> None:
+    """13.4, and the whole of what it is observable as. `probe` takes no steps at all, so the lazy
+    open in `sdk/_engine/steps.py` is never reached - which makes this precisely the run for which
+    §3.9's "`agl/<label>` is a real ref from run start, so progress is inspectable live" used to be
+    false. Until 13.4 this file asserted the opposite in as many words, that a completed run left
+    nothing but `run.json`; what changed is not how strong the claim is but which of the two callers
+    of `WorkspaceProvider.open` gets there first.
+
+    Both halves, because a provisioning that made the directory and no line of work - or the line of
+    work and no directory - is one that neither `git log agl/auth` nor a person going to look at
+    what the agents did could use. The branch is asserted to be *at the pin*, not merely to exist:
+    a `_base` cut from somewhere else is a run whose first step chains its fingerprint off one
+    commit and whose checkout starts at another."""
     harness = _fakes(tmp_path)
+
     await _run(harness)
 
-    assert harness.repository.tip(run_branch(LABEL)) is None
-    assert not (tmp_path / "trees").exists()
+    assert base_worktree(TreesRoot(tmp_path / "trees"), LABEL).is_dir()
+    assert harness.repository.tip(run_branch(LABEL)) == (await _record(harness))["base_sha"]
+
+
+class _Refusing(WorkspaceProvider):
+    """A provider that provisions nothing, which is the one failure `container.fakes()` cannot
+    arrange.
+
+    A stub rather than a broken bundle: what the test below needs is `open` raising, and the two
+    teardown verbs exist only because the port has three members - reaching either of them would
+    mean `run` had started taking workspaces back, which it does not. `ConflictError` is `open`'s
+    own refusal class (`ports/workspace.py`), so nothing about the shape of the failure is invented
+    for the occasion.
+    """
+
+    async def open(self, label: RunLabel, namespace: Namespace | None, base: str) -> Workspace:
+        raise ConflictError("this provider refused to provision anything, deliberately")
+
+    async def remove(self, label: RunLabel, namespace: Namespace | None) -> None:
+        raise AssertionError("nothing in `api.run` takes a workspace back")
+
+    async def discard(self, label: RunLabel, namespace: Namespace | None) -> None:
+        raise AssertionError("nothing in `api.run` deletes a line of work")
+
+
+@pytest.mark.asyncio
+async def test_a_provisioning_that_fails_leaves_the_record_where_clear_can_find_it(
+    tmp_path: Path,
+) -> None:
+    """The order of the last two lines of `run`, pinned from the one side it is visible from.
+
+    `run.json` is written before the workspace is provisioned because it is the only enumeration
+    `clear` has: `WorkspaceProvider` offers none by design, so a crash after `open()` with no record
+    on disk leaves `agl/<label>` and `.trees/<label>/_base/` behind with nothing in AGL able to name
+    either again. This is that ordering asserted through the failure that isolates it - a provider
+    that cannot provision at all - and the second assertion is the other half of it: provisioning
+    failed, so the workflow must not have been entered."""
+    handed.clear()
+    harness = _fakes(tmp_path)
+    services = replace(harness.services, workspaces=_Refusing())
+
+    with pytest.raises(ConflictError, match="refused to provision"):
+        await api.run(services, PROJECT, "probe", LABEL, ("-r", "add oauth"), points=POINTS)
+
+    assert (await _record(harness))["branch"] == run_branch(LABEL)
+    assert handed == [], "the workflow ran although its workspace was never provisioned"
 
 
 # --- params, and the two refusals the stage names ------------------------------------------------
@@ -274,6 +373,179 @@ async def test_a_stop_subclass_leaves_api_run_unwrapped_and_exits_seven(tmp_path
     assert caught.value is raised[0]
     assert exit_code_for(caught.value) == 7
     assert (await _record(harness))["workflow"] == "halting"
+
+
+# --- 13.4 against a real repository ---------------------------------------------------------------
+
+
+def _git(where: Path, *argv: str) -> str:
+    """One git command, for arranging and observing. Never for the thing under test.
+
+    `tests/sdk/test_run_step.py`'s helper and its argument: a test that built its repository through
+    the adapter would be resting its arrangement on the behaviour it is about to check.
+    """
+    done = subprocess.run(["git", *argv], cwd=where, capture_output=True, text=True, check=True)
+    return done.stdout
+
+
+@pytest.fixture
+def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A real repository with one commit on `main`, and no configuration from this machine.
+
+    The `GIT_CONFIG_*` variables are what make these two tests the same tests everywhere - a
+    developer with `commit.gpgsign` on, a `core.hooksPath` of their own or a template directory
+    would otherwise be running different ones - and they go through `monkeypatch` so the adapters,
+    which inherit the environment, see them too. It sits beside `tmp_path/trees` rather than under
+    it: §3.9's trees root is not the repository, and a worktree cut into the user's own checkout is
+    the arrangement this whole stage exists to end.
+    """
+    for name in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"):
+        monkeypatch.setenv(name, str(tmp_path / "nonexistent-git-config"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    for role in ("AUTHOR", "COMMITTER"):
+        monkeypatch.setenv(f"GIT_{role}_NAME", "AGL api")
+        monkeypatch.setenv(f"GIT_{role}_EMAIL", "agl@example.invalid")
+    work = tmp_path / "repo"
+    work.mkdir()
+    _git(work, "init", "-q", "-b", "main")
+    seeded = work / SEEDED
+    seeded.parent.mkdir(parents=True)
+    seeded.write_bytes(b"one\n")
+    _git(work, "add", SEEDED)
+    _git(work, "commit", "-q", "-m", "the state a run is cut from")
+    return work
+
+
+class _MovingHistory(GitHistory):
+    """`GitHistory`, except that a commit lands on the ref the instant it has been resolved.
+
+    §3.6 pins `base_sha` against "a commit landing on `main` between run and resume". Inside
+    `api.run` that same hazard has a much smaller window - between the `resolve` that computes the
+    pin and the `open` that cuts the checkout - and nothing a test can do from outside fits into it,
+    the two being consecutive lines. So it is arranged from inside, and that is not decoration: it
+    is the only arrangement under which handing `open` the `--from` string and handing it
+    `spec.base_sha` name different commits. Without the move the two are the same commit and the
+    assertion would pass against either.
+
+    Subclassed rather than written out, because the difference from the real adapter is exactly one
+    method and a hand-rolled `History` here would be four members of boilerplate agreeing with it.
+    """
+
+    def __init__(self, repository: Path) -> None:
+        super().__init__(repository)
+        self._at = repository
+
+    async def resolve(self, ref: str) -> str:
+        """What `GitHistory` answers, and then a commit on `ref` that its answer predates."""
+        pinned = await super().resolve(ref)
+        (self._at / LANDED).write_bytes(b"landed while the run was starting\n")
+        _git(self._at, "add", LANDED)
+        _git(self._at, "commit", "-q", "-m", "a commit landing between the resolve and the open")
+        return pinned
+
+
+def _over(
+    repository: Path, tmp_path: Path, *, moving: bool = False, claude: Script | None = None
+) -> container.FakeServices:
+    """The fakes bundle with its two git ports made real - the smallest arrangement that puts
+    `api.run` over an actual repository.
+
+    Two of eight fields replaced, and both are needed: `workspaces` because the claims here are
+    about a git worktree and a git ref, and `history` because `api.run` resolves the pin through it
+    and a `FakeHistory` answers about a `FakeRepository` that has never heard of these commits. The
+    store stays the in-memory one - `run.json`'s content is asserted on fakes above, and nothing
+    here is a claim about a file under `AGL_HOME`.
+    """
+    trees = TreesRoot(tmp_path / "trees")
+    harness = container.fakes(trees, claude=claude)
+    return replace(
+        harness,
+        services=replace(
+            harness.services,
+            workspaces=GitWorkspaceProvider(repository, trees),
+            history=_MovingHistory(repository) if moving else GitHistory(repository),
+        ),
+    )
+
+
+def _worktrees(repository: Path) -> tuple[Path, ...]:
+    """Every checkout git has registered against this repository, resolved, in git's own order.
+
+    Resolved on both sides wherever this is compared, because git records a worktree's real path
+    and `/tmp` is a symlink on macOS - the same trap `GitWorkspaceProvider._branch_at` documents.
+    """
+    listing = _git(repository, "worktree", "list", "--porcelain")
+    at = "worktree "
+    return tuple(
+        Path(line[len(at) :]).resolve() for line in listing.splitlines() if line.startswith(at)
+    )
+
+
+def _looking(seen: list[Path]) -> Script:
+    """An agent that writes nothing, reports nothing, and records where it was pointed.
+
+    `AgentTask.workspace` is the only place the checkout a step actually ran in is observable from
+    above the engine, which makes it the honest way to ask whether the second `open` handed back
+    the place the first one provisioned.
+    """
+
+    async def _script(conversation: Conversation) -> AgentOutcome:
+        seen.append(conversation.task.workspace)
+        return AgentOutcome(stop_reason=StopReason.COMPLETED, text="")
+
+    return _script
+
+
+@pytest.mark.asyncio
+async def test_the_checkout_is_cut_from_the_pin_and_not_from_the_ref(
+    repository: Path, tmp_path: Path
+) -> None:
+    """§3.6's pin, carried all the way into the working checkout. `--from main` is resolved once,
+    the ref moves under it, and `agl/auth` still starts where the record says the run started.
+
+    This is what "pass `spec.base_sha`, never `base_ref`" costs to get wrong: `open` accepts a ref
+    expression too, so handing it the string would work every day except the one where somebody
+    pushes while a run is starting - and then the checkout begins at a commit the `Journal` never
+    hashed, and every first fingerprint in the run is taken over a head the worktree is not at."""
+    pinned = _git(repository, "rev-parse", "--verify", "main").strip()
+    harness = _over(repository, tmp_path, moving=True)
+
+    await _run(harness, base_ref="main")
+
+    assert _git(repository, "rev-parse", "--verify", "main").strip() != pinned, (
+        "the arrangement never moved the ref, so this test distinguishes nothing"
+    )
+    assert (await _record(harness))["base_sha"] == pinned
+    assert _git(repository, "rev-parse", "--verify", f"refs/heads/{run_branch(LABEL)}").strip() == (
+        pinned
+    )
+    place = base_worktree(TreesRoot(tmp_path / "trees"), LABEL)
+    assert _git(place, "rev-parse", "HEAD").strip() == pinned
+    assert not (place / LANDED).exists(), "the checkout carries a commit made after the pin"
+
+
+@pytest.mark.asyncio
+async def test_a_step_reopens_that_checkout_rather_than_cutting_a_second(
+    repository: Path, tmp_path: Path
+) -> None:
+    """Idempotence end to end: `api.run` provisions, `run.step` asks again, and git registers one
+    worktree.
+
+    `WorkspaceProvider.open` promises this and `tests/contracts/workspace.py` holds both adapters
+    to it, but neither says anything about the two callers now being different modules - and that
+    is the whole of 13.4's risk. The worktree count is the assertion with teeth: a second `add` at
+    this path is not merely waste, it is the refusal `open` makes instead of provisioning over a
+    place something already holds, so an engine that had stopped reopening would not quietly cut a
+    second checkout - it would fail the run."""
+    seen: list[Path] = []
+    harness = _over(repository, tmp_path, claude=_looking(seen))
+
+    await _run(harness, name="stepping", argv=(), points=(*POINTS, *STEPPING))
+
+    place = base_worktree(TreesRoot(tmp_path / "trees"), LABEL)
+    assert seen == [place], "the step ran somewhere other than the place `api.run` provisioned"
+    assert _worktrees(repository) == (repository.resolve(), place.resolve())
+    assert _git(place, "rev-parse", "--abbrev-ref", "HEAD").strip() == run_branch(LABEL)
 
 
 # --- the rest of the surface ---------------------------------------------------------------------

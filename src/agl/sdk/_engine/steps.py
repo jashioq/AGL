@@ -60,23 +60,39 @@ journal's lock in that same order. The counter is still taken with nothing suspe
 and the dispatch, because it is taken inside `Journal.step`, which this module reaches only after
 the checkout is open.
 
-**And provisioning the run's own worktree properly is 13.4's**, from the pinned `RunSpec.base_sha`
-and per §3.9. `WorkspaceProvider.open` is idempotent by contract - "an existing workspace is
-returned exactly as it stands" - so what this does today is provision it on first use and what 13.4
-does is provision it before a workflow is entered. The call below does not change; what changes is
-that it stops being the first one.
+**And the run's own worktree is no longer provisioned here first.** 13.4 gave that to `api.run`,
+which opens `_base` from the pinned `RunSpec.base_sha` before the workflow function is awaited, so
+that §3.9's "`agl/<label>` is a real ref from run start" holds for a run whose workflow has not yet
+taken a step - and so that AGL's own integration branch lives in a `Workspace` rather than in the
+user's checkout. Not one line below moved, which is the point of it having been written this way:
+`WorkspaceProvider.open` is idempotent by contract - "an existing workspace is returned exactly as
+it stands" - so the call in `_namespace` hands back that same checkout with whatever is in it,
+rather than cutting a second one. What changed is which caller is first, and only for the run's own
+namespace: every child a `worktree()` cuts is still provisioned here, on its first step, and the
+paragraphs above are why that is safe.
 
-## `Fingerprints` is the run's, and this is the seam 13.1 fills
+## `Fingerprints` is the run's, and this is the seam `worktree()` fills
 
 One counter per run, shared by every namespace's `Journal` - `Journal.__init__` argues why, and the
 short version is that its key already carries the scope, so a counter built per journal would be
-rule 1's fix removed. At stage 12 a run has exactly one namespace, so a counter built per `Run`
-happens to be indistinguishable from the right thing, which is precisely why it is a constructor
+rule 1's fix removed. At stage 12 a run had exactly one namespace, so a counter built per `Run`
+happened to be indistinguishable from the right thing, which is precisely why it is a constructor
 argument on `Run` and a constructor argument here rather than something either of them builds.
-13.1's `run.worktree()` cuts a child `Run` and must hand it *this* object; a counter buried in a
-constructor with no way in would leave it building a second one, and two counters over one run is
-the failure §3.6 spells out - siblings each looking in their own ledger of counts for a digest that
-is not there, both re-running, forever, silently.
+`run.worktree()` cuts a child `Run` and hands it *this* object; a counter buried in a constructor
+with no way in would leave it building a second one, and two counters over one run is the failure
+§3.6 spells out - siblings each looking in their own ledger of counts for a digest that is not
+there, both re-running, forever, silently.
+
+## The starting head: read from here, resolved here, and never read from disk
+
+Two members added at 13.2 and they are the same sentence from two ends. `last_good` hands out where
+this namespace's chain has got to, synchronously, because `Run.worktree` is a plain call and a
+child's base is that value; `_namespace` turns whatever this `Steps` was built with into a resolved
+commit id, once, and gives the one value to the checkout and to the `Journal` alike. Each member's
+own docstring carries the argument, and the shared half is §3.6's: the chain is logical, so neither
+of them may reach for `Workspace.head()` or a branch tip - both of which run ahead of the chain the
+moment something moves the branch without journalling it, which a step that raised after `commit=`
+already does today and `integrate()` will do deliberately at stage 14.
 
 ## The reporting tool: converted here, captured here, and never named across the port
 
@@ -163,23 +179,50 @@ namespace, so at most one step in this namespace is ever in flight and "the most
 only one". A gathered pair waits its turn rather than overlapping, and the cell is written by
 whichever of them holds the journal's lock.
 
-## `**inputs` are fingerprint terms, and this module does not touch the prompt
+## `**inputs` are fingerprinted by the journal and appended to the prompt here
 
-§3.3 calls them "ordinary Python values interpolated into the prompt", and *that they are part of
-the fingerprint* is the half of that sentence AGL implements: they go to `base_of` and nowhere else,
-and `AgentTask.instructions` is `role.instructions` verbatim. Interpolation is deliberately not
-performed here, because the plan specifies no syntax for it and every syntax that could be invented
-is worse than none. `str.format` breaks any prompt containing a brace, and prompts contain JSON
-Schemas, code and examples; `%` breaks any prompt containing a percent sign; and a rendered block
-appended to the prompt would be a format nothing in the plan describes, imposed on every role that
-never asked for one. A workflow that wants a value in front of its agent builds the role where the
-value is in scope and puts the text in `instructions`, which §3.6 already fingerprints - `roles.py`
-notes that a role carrying `on_question` is built that way for a related reason.
+§3.3 settles how a value reaches the agent, and it is not templating: "the framework appends one
+structured block of canonical JSON under a fixed heading, and the author writes the prompt knowing
+inputs arrive at the end". Templating was considered and rejected in the plan itself - `str.format`
+breaks on any prompt containing a brace and these prompts carry JSON Schemas; `%` breaks on a
+percent sign - so nothing in this module formats, substitutes or rewrites one character of what an
+author wrote. `_composed` is a concatenation and is meant to read as one: `role.instructions` comes
+out of it byte-identical, at the front, which the suite pins with a role whose text carries `{`,
+`}`, `{name}`, a JSON Schema and a `%s`. Without the append, §3.3's own `w.step("triage", triage,
+findings=highs)` fingerprints the findings correctly and the triage agent never sees them, which is
+the whole of what 13.0(i) is.
 
-**This is reported as an ambiguity in §3.3 rather than resolved silently**: under this reading the
-plan's own `w.step("triage", triage, findings=highs)` fingerprints the findings correctly and does
-not put them in front of the agent, which is a gap in the plan and not a decision this deliverable
-is entitled to close by inventing a template language.
+**The block is `journal.canonical_json` and not a second serialiser**, and the reuse is the property
+worth having rather than a saving: what the agent is shown is byte-for-byte what was fingerprinted,
+so the prompt and the cache key cannot disagree about what the inputs were. A pretty-printer here
+would be a second answer to "what do these inputs say", free to drift from the one the digest was
+taken over, and what drift means in this direction is an input change the agent can see that replay
+cannot - or the reverse, a re-run whose prompt is identical to the one before it. The costs come
+with the reuse and are real: the separators are compact rather than spaced, `ensure_ascii=True`
+renders every non-ASCII character as an escape, and §3.6 rule 6 tags every dataclass at every depth
+with its qualified type name. The tag is information rather than noise - `models.Finding` tells a
+model what it is looking at - and it is a fingerprint term, so a prompt that hid it would be hiding
+the one thing that decides whether this step re-runs.
+
+**Empty `inputs` appends nothing at all**: no heading, no separator, not a newline. A step that
+passes none dispatches text that is not merely equal to `role.instructions` but *is* it, so every
+role that takes its work from the worktree - every reviewer, most implementers - is untouched by any
+of this.
+
+**Nothing about the fingerprint moves, and the composed text is not one of its terms.**
+`journal.step` still receives `instructions=role.instructions` and `inputs=inputs` as two separate
+arguments, which is §3.6's shape and a **stored format**: every digest ever written was taken over
+those two terms separately, so hashing the composition instead would re-run every step recorded by
+every run in existence - and buy nothing, the composition being a pure function of two terms already
+in there. The composed string exists for the dispatch and for nothing else. Its corollary is the
+cost and belongs in the same breath: respelling `_INPUTS_HEADING` changes every prompt in AGL
+without changing a single digest, so a resume would replay results the old heading produced. That is
+the trade §3.6 makes for the commit message, made here knowingly, and it is why the heading is a
+constant nobody is expected to touch rather than a knob.
+
+**A replayed step composes nothing**, which falls out of where the composition is rather than being
+a rule anything has to remember: it happens inside `_worker`, and a hit returns the stored value
+without ever building the task.
 
 ## `context` and `plan_only` take their defaults, and one of them is unreachable
 
@@ -194,19 +237,31 @@ something to fix by deriving it from `restrictions`, a derivation `ports/agent.p
 
 import asyncio
 from collections.abc import Mapping
-from typing import cast
+from typing import Final, cast
 
 from agl.ports.agent import AgentOutcome, AgentTask, StopReason, Tool, ToolResult
 from agl.ports.home_layout import RunScope
 from agl.ports.ids import Namespace, StepName
 from agl.ports.run import JsonValue
 from agl.ports.workspace import Workspace
-from agl.sdk._engine.journal import Fingerprints, Journal
+from agl.sdk._engine.journal import Fingerprints, Journal, canonical_json
 from agl.sdk._engine.services import Services
 from agl.sdk.roles import Role, RoleIncompleteError
 from agl.sdk.tools import ReportingTool
 
 __all__ = ["Steps"]
+
+# §3.3's fixed heading: the one line between a role's own instructions and the canonical JSON of
+# that step's `**inputs`. **Fixed** is the whole of the specification - one spelling, never derived
+# from a step name, a role, an input key or anything else - because "the author writes the prompt
+# knowing inputs arrive at the end", and a heading assembled per call is one no prompt could be
+# written against. Markdown because these prompts are markdown, and `##` rather than `#` because a
+# prompt's own title is usually `#`: what this heads is a section of the instructions and not a
+# second document stapled to them. Deliberately no adjective - not "Canonical JSON inputs", not "AGL
+# inputs" - because the two words are what an author writes their closing paragraph against, and
+# every extra one is a word that has to stay true. See the module docstring for the cost of ever
+# respelling it: no digest changes, so nothing re-runs, and every prompt in AGL is different.
+_INPUTS_HEADING: Final = "## Inputs"
 
 
 class Steps:
@@ -221,14 +276,18 @@ class Steps:
     def __init__(
         self, services: Services, scope: RunScope, base: str, fingerprints: Fingerprints
     ) -> None:
-        """The ports, the address, the commit this namespace starts at, and the run's counter.
+        """The ports, the address, where this namespace starts, and the run's counter.
 
-        `base` is a resolved commit id and never a ref expression, for the reason `Journal`'s class
-        docstring gives at length: it is hashed into every first fingerprint in this namespace and
-        handed to `restore`, and `RunSpec.base_sha` is pinned precisely so that a commit landing on
-        the ref between run and resume cannot move either. Nothing here checks it - `Journal`
-        refuses an empty one, and git judges the rest at `restore`, where the judging happens
-        anyway.
+        `base` is **usually** a resolved commit id and is allowed to be a ref expression, which is
+        the one thing about this signature that changed at 13.2 and the reason `_namespace` resolves
+        below. `Journal` still takes only the resolved form, for the reason its class docstring
+        gives at length: the base is hashed into every first fingerprint in the namespace and handed
+        to `restore`, and `RunSpec.base_sha` is pinned precisely so that a commit landing on a ref
+        between run and resume cannot move either. What arrives here unresolved is exactly one case
+        - a child cut by `worktree(name, base="main")`, where the call is synchronous and
+        `History.resolve` is not - and it is resolved once, in `_namespace`, before either the
+        checkout or the walk sees it. Nothing here checks it: `Journal` refuses an empty one, and
+        git judges the rest at `restore`, where the judging happens anyway.
         """
         self._services = services
         self._scope = scope
@@ -252,6 +311,29 @@ class Steps:
         which is also why no component and no view parameter exists for it.
         """
         return self._activity
+
+    @property
+    def last_good(self) -> str:
+        """Where this namespace's chain has got to - what a child cut from here starts at.
+
+        §3.6's `last_good`, read from the one place it is kept: this namespace's `base` until the
+        journal exists, and the journal's own after. There is no third answer and no moment with
+        none, because `Journal._last_good` is initialised to exactly this `base`.
+
+        **Synchronous, which is the reason it is a property here at all.** `Run.worktree` is a plain
+        call (§3.3), so a child's base has to be readable without awaiting - and the two values that
+        *are* async are precisely the two §3.6 forbids: `Workspace.head()` and the branch tip are
+        the physical worktree, which can be ahead of this chain with nothing journalled (a step that
+        raised after `commit=`; stage 14's `integrate()`), and reading either would hand a child
+        work this run has no record of.
+
+        Before the journal exists this answers the raw `base`, ref expression and all - the
+        grandchild case in one line: a child cut from `base="main"` whose own child is cut before
+        the first has opened passes `"main"` on, and each of them resolves it at its own open. Two
+        resolutions of one ref can differ if something lands on it in between, which is the same
+        cost `_namespace` documents for the single case and not a new one.
+        """
+        return self._base if self._opened is None else self._opened[0].last_good
 
     def _reported(self, line: str) -> None:
         """What the serving adapter calls to say what is happening. It is held, and nothing else.
@@ -299,7 +381,13 @@ class Steps:
             try:
                 outcome = await self._services.agents.run(
                     AgentTask(
-                        instructions=role.instructions,
+                        # §3.3's append, and the only line in AGL that decides what an agent is
+                        # asked: the role's own text, then this step's inputs under a fixed
+                        # heading. Composed here rather than above the lookup, so a replay hit
+                        # composes nothing - the same reason the whole task is built in here - and
+                        # `journal.step` below still fingerprints the two terms separately, which
+                        # the module docstring argues at length is not an oversight.
+                        instructions=_composed(role.instructions, inputs),
                         workspace=workspace.path,
                         model=role.model,
                         restrictions=frozenset(role.restrictions),
@@ -361,13 +449,35 @@ class Steps:
         acquisition can be. The re-check inside is the half that matters: two gathered steps in a
         fresh namespace both see `None`, and without it the second would open a second checkout and
         build a second `Journal`, which is two locks over one namespace and so no lock at all.
+
+        **The base is resolved here, once, and the resolved value goes to both.**
+        `WorkspaceProvider.open` accepts a ref expression or a commit id, deliberately, and
+        `Journal` accepts only the second - so this is the one place the two forms meet, and it
+        spends a single value on both so the cut and the chain cannot disagree about where this
+        namespace began. `History.resolve` on a full object name is the identity (a commit id is a
+        valid ref expression), so this is a no-op for the root and for every `Run`-derived child,
+        and does real work only for `worktree(name, base="main")`.
+
+        **What that leaves standing, stated rather than discovered.** A ref-string base is *not*
+        pinned across a resume the way `RunSpec.base_sha` is: §3.6 pins the run's own base precisely
+        so that "a commit landing on `main` between run and resume" cannot move the first step's
+        head, and a child cut from a ref re-resolves at every open. If that ref has moved, the
+        child's first fingerprint moves with it and its steps re-run. That is loud in the bill and
+        never a false cache hit - the digest differs, so nothing wrong is ever replayed - and the
+        workflow that wants a pin passes a `Run` or a commit id, both of which are already one.
+
+        The grandchild case follows from `last_good` and is worth naming here too: a child cut from
+        a ref string whose own child is cut *before* the first has opened passes the unresolved
+        string on, and the grandchild resolves it at its own open. Two resolutions, possibly two
+        commits, both of them honest readings of what that ref said when each namespace began.
         """
         if self._opened is not None:
             return self._opened
         async with self._opening:
             if self._opened is None:
+                base = await self._services.history.resolve(self._base)
                 workspace = await self._services.workspaces.open(
-                    self._scope.label, _namespace_of(self._scope), self._base
+                    self._scope.label, _namespace_of(self._scope), base
                 )
                 self._opened = (
                     Journal(
@@ -376,7 +486,7 @@ class Steps:
                         workspace,
                         self._services.clock,
                         self._fingerprints,
-                        self._base,
+                        base,
                     ),
                     workspace,
                 )
@@ -451,6 +561,38 @@ class _Capture[P]:
         raises `InternalError` for one that will not fit: AGL wrote it and AGL is reading it.
         """
         return self._declaration.read(value)
+
+
+def _composed(instructions: str, inputs: Mapping[str, object]) -> str:
+    """§3.3's dispatch text: the role's instructions, the fixed heading, and the inputs as JSON.
+
+    **Concatenation, and nothing else.** No `str.format`, no `%`, no f-string over the author's own
+    text, no substitution of any kind - which is what lets a prompt carrying a JSON Schema, a
+    literal `{name}` or a stray `%s` through unchanged, and those are the exact characters §3.3
+    rejects templating over. `instructions` is either returned as it stands or emitted as the first
+    element of the join, so it survives byte-identical either way.
+
+    **Empty inputs return the argument itself**, so a step that passes none is dispatched with the
+    role's instructions and not with a copy of them that happens to compare equal. That is what
+    "appends nothing at all" has to mean to be worth asserting: no heading over an empty object, no
+    trailing blank line, nothing for a diff of two prompts to show.
+
+    The three parts are joined by a blank line because that is what separates sections of a markdown
+    prompt, and there is no trailing newline: this value is the whole of one message and nothing
+    appends to it.
+
+    `canonical_json` can raise `InputError` and here it cannot, which is worth one clause rather
+    than a guard: `journal.step` has already put these same inputs through `base_of`, and `base_of`
+    canonicalises them by the same rules. A step whose inputs cannot be hashed never reaches a
+    dispatch, so the refusal a workflow author sees still names `inputs.findings[0].deadline` and
+    not some path this function invented.
+
+    A module-level function and not a member: it reads nothing off a `Steps`, and the only thing it
+    needs to be near is `_INPUTS_HEADING`.
+    """
+    if not inputs:
+        return instructions
+    return "\n\n".join((instructions, _INPUTS_HEADING, canonical_json(inputs)))
 
 
 def _namespace_of(scope: RunScope) -> Namespace | None:

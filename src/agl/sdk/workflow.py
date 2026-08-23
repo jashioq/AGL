@@ -16,17 +16,18 @@ params class, and it would be back to asking a module what it contains.
 ## What this stage builds, and what it deliberately leaves empty
 
 §3.3 gives `Run` six members - `params`, `step`, `worktree`, `integrate`, `activity`, `terminal` -
-plus `Stop`. **Three of the six are here.** `worktree` is 13, `integrate` is 14 and `terminal` is
-15. They are not stubbed, not declared raising `NotImplementedError`, and not present as attributes
-that refuse. A member that exists and refuses is a member every caller has to ask about, and
-`hasattr` on it is exactly the duck typing this layer was built to replace.
+plus `Stop`. **Four of the six are here.** `integrate` is 14 and `terminal` is 15. They are not
+stubbed, not declared raising `NotImplementedError`, and not present as attributes that refuse. A
+member that exists and refuses is a member every caller has to ask about, and `hasattr` on it is
+exactly the duck typing this layer was built to replace.
 
-**`step` is a delegate and the engine is `sdk/_engine/steps.py`.** ARCHITECTURE.md §6 carries the
-row; the argument is that this module is the surface - a decorator, a frozen `Run`, `Stop` - and a
-lock, a lazily opened checkout, a capture cell and a replay walk are plumbing, which `sdk/` keeps
-under `_engine/` (`services.py` makes that case at length for the bundle). The four fields `step`
-needs are here, because a constructor's shape is what every call site is written against; what it
-*does* with them is not.
+**`step` and `worktree` are both delegates**, to `sdk/_engine/steps.py` and
+`sdk/_engine/worktrees.py`. ARCHITECTURE.md §6 carries a row for each; the argument is that this
+module is the surface - a decorator, a frozen `Run`, `Stop` - and a lock, a lazily opened checkout,
+a capture cell, a replay walk and a run-wide table of taken namespaces are plumbing, which `sdk/`
+keeps under `_engine/` (`services.py` makes that case at length for the bundle). The fields those
+two need are here, because a constructor's shape is what every call site is written against; what
+they *do* with them is not.
 
 **`activity` is a delegate for a second reason as well**, which is that a `Run` is frozen and
 slotted and the current activity string is by definition mutable - §3.7's "the current agent
@@ -92,12 +93,20 @@ between run and resume" cannot change "the first step's starting head"). Derivin
 `step` would mean this module reading `run.json` back through the store to learn something the
 caller had in a local variable.
 
-`fingerprints` is the run's shared counter, and it is a constructor argument **because 13.1 has to
-be able to hand it to a child**. §3.6 scopes `n` per `(namespace, step name)` and `Journal.__init__`
-argues that one counter per run is what makes that key mean anything; a counter built privately in
-here would look identical at stage 12, where a run has exactly one namespace, and would be rule 1's
-fix silently removed the moment `run.worktree()` cut the second. So the seam is a field with a
-default, filled by nothing today and by `worktree()` tomorrow.
+`fingerprints` and `worktrees` are the run's two shared tables, and both are constructor arguments
+with a default **because `worktree()` hands its own to every child it cuts**. §3.6 scopes `n` per
+`(namespace, step name)` and `Journal.__init__` argues that one counter per run is what makes that
+key mean anything; §3.9 makes a namespace unique run-wide rather than sibling-wide, and
+`_engine/worktrees.py` argues that a table built privately per `Run` is a table per *namespace*,
+which cannot see a name taken anywhere else in the tree. Either built privately in here would look
+identical at stage 12, where a run has exactly one namespace, and would be that stage's fix silently
+removed the moment `run.worktree()` cut the second. So both are fields with a default: the root
+takes the default, and `_child` below passes on the objects this `Run` holds.
+
+They are public for one reason and it is not that a workflow author needs them - none does. Every
+field on this class is what the run was assembled with, and hiding two of the six behind underscores
+would make the two the composition root does not pass look like a different kind of thing from the
+four it does.
 
 ## `Stop` is re-exported, never redefined
 
@@ -173,19 +182,24 @@ No registry of decorated workflows, no `__init_subclass__`, no import-time side 
 module-level list here would be a second one, holding only the workflows that happened to be
 imported.
 
-No `Run` factory and no `Run.child`. Constructing the root `Run` is the composition root's business
-at 10.3, and cutting a child is `run.worktree` at stage 13; a helper here would prejudge both.
+No `Run` factory, and `_child` is private. Constructing the root `Run` is the composition root's
+business - `api.py` builds it out of the record it just wrote - and cutting a child is `worktree()`,
+which is the one caller `_child` has. A public factory would be a second way to make a `Run` in a
+tree, free to hand one a table or a counter that is not the run's, which is the failure both fields
+above exist to prevent.
 """
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, is_dataclass
 from inspect import iscoroutinefunction
+from typing import cast
 
 from agl.ports.errors import InputError, Stop
 from agl.ports.home_layout import RunScope
 from agl.sdk._engine.journal import Fingerprints
 from agl.sdk._engine.services import Services
 from agl.sdk._engine.steps import Steps
+from agl.sdk._engine.worktrees import Worktrees
 from agl.sdk.roles import Role
 
 __all__ = ["Run", "Stop", "Workflow", "workflow"]
@@ -220,20 +234,40 @@ class Run[P = object]:
     counter is keyed by (§3.6, rule 1)."""
 
     base: str
-    """The commit this namespace's chain starts at - `RunSpec.base_sha`, resolved.
+    """Where this namespace's chain starts - for the root, `RunSpec.base_sha`, already resolved.
 
-    **A 40- or 64-character object name and never a ref expression.** `Journal`'s class docstring
-    argues it at length: this is hashed into every first fingerprint in the namespace and handed to
-    `restore`, and a ref name in either place is a run that re-fingerprints itself the day something
-    lands on that ref. Not re-checked here - `Journal` refuses an empty one and git judges the rest
+    **A ref expression is legal here and is one case only**: a child cut by `worktree(name,
+    base="main")`, whose base cannot be resolved at the call because `worktree()` is synchronous.
+    Every other `Run` in a tree - the root, and every child cut from `None` or from another `Run` -
+    holds a resolved commit id, because that is what a logical head is. `Steps._namespace` resolves
+    this exactly once, through `services.history`, and hands the resolved value to both the
+    checkout and the `Journal`, which is why `Journal`'s own docstring can go on insisting it never
+    sees a ref name. Not re-checked here - `Journal` refuses an empty one and git judges the rest
     at `restore`, where the judging happens anyway."""
 
     fingerprints: Fingerprints = field(default_factory=Fingerprints)
     """§3.6's counter `n`, one per run and shared by every namespace's journal.
 
     Defaulted, because a root `Run` is the run and has nobody to inherit one from; a keyword all the
-    same, because 13.1's `run.worktree()` must hand *this* object to the child it cuts. The module
-    docstring says what a second counter over one run would cost."""
+    same, because `worktree()` hands *this* object to the child it cuts. The module docstring says
+    what a second counter over one run would cost."""
+
+    worktrees: Worktrees[Run[object]] = field(default_factory=Worktrees)
+    """§3.9's table of the namespaces this run has taken, run-wide and shared down the tree.
+
+    `fingerprints`' shape and `fingerprints`' argument, one field over: defaulted for the root,
+    passed on by `_child`, and never built inside a child - a table per `Run` is a table per
+    namespace, which is sibling-wide uniqueness with the run-wide check written and unreachable.
+    `sdk/_engine/worktrees.py` holds it and says what two names flattening onto one checkout costs.
+
+    **`Run[object]` and not `Run[P]`, and the erasure is forced rather than chosen.** A table is a
+    mutable container, so `Worktrees` is invariant in what it holds; a field of type
+    `Worktrees[Run[P]]` therefore makes `Run` invariant in `P` too, and `Run` **must stay
+    covariant** - that is what lets §3.3's own `async def fix(run: Run) -> None` be decorated with
+    `@workflow(params=FixParams)`, which the module docstring names as a promise of the surface and
+    `test_workflow.py` pins. Every `Run` in one table really does share one `P` - the root's is the
+    only table there is and `_child` is the only thing that adds to it - but nothing in the type
+    system ties the two together, so `worktree()` narrows once, visibly, where it can say why."""
 
     _steps: Steps = field(init=False, repr=False, compare=False)
     """The engine `step` delegates to - `sdk/_engine/steps.py`, holding this namespace's checkout
@@ -308,11 +342,14 @@ class Run[P = object]:
         replaying must not re-run an agent. The trade is that a replayed step keeps the commit it
         already made, message and all.
 
-        **`**inputs` are fingerprinted and nothing else.** They must be JSON-serialisable or built
-        from dataclasses - `InputError` otherwise, naming the path to the offending value - and any
-        change to one re-runs the step and everything downstream of it, which is what gives replay
-        its build-system cascade. They are not interpolated into the prompt: `sdk/_engine/steps.py`
-        argues why, and what to write instead when a value has to reach the agent.
+        **`**inputs` are fingerprinted, and appended to the prompt.** They must be JSON-serialisable
+        or built from dataclasses - `InputError` otherwise, naming the path to the offending value -
+        and any change to one re-runs the step and everything downstream of it, which is what gives
+        replay its build-system cascade. They also reach the agent, as §3.3 says they must: the
+        framework appends one block of canonical JSON under a fixed `## Inputs` heading at the end
+        of the role's instructions, and interpolates nothing into the text the author wrote. **So
+        write the prompt knowing the inputs arrive at the end** - `sdk/_engine/steps.py` carries
+        that argument and the costs that come with it.
 
         **The result is the role's reporting-tool payload**, read back as the dataclass the role
         declared, on a fresh run and on a replay alike. A role declaring no reporting tool is an
@@ -325,6 +362,118 @@ class Run[P = object]:
         class's.
         """
         return await self._steps.step(name, role, commit=commit, inputs=inputs)
+
+    def worktree(self, name: str, base: Run[object] | str | None = None) -> Run[P]:
+        """A child `Run` with its own worktree and its own namespace. §3.3's `run.worktree`.
+
+            w = parent.worktree(ticket.id, base=blocker)
+            await w.step("implement", implementer, commit=f"implement {ticket.id}")
+
+        **A plain synchronous call.** Not awaited, and deliberately not a context manager: "a
+        context manager would tear the worktree down on exit, destroying exactly what you want to
+        inspect after a failure. Worktrees persist until `clear`" (§3.3). Nothing is provisioned
+        here either - no directory, no branch, no process - because a child's checkout is opened
+        lazily by its first step, exactly as the run's own is. What this call costs is a dictionary
+        lookup and an object.
+
+        **The child shares this run's params, ports, counter and namespace table**, and has its own
+        scope, its own base, its own checkout and its own `activity`. `worktree()` is the only real
+        concurrency AGL has: §3.6 serializes steps within a namespace, so a `gather` over two steps
+        on one `Run` is legal and simply does not overlap, and an author who wants two agents
+        actually running at once opens two worktrees - which is what the trees root is flat for.
+
+        **Its branch is `agl/_work/<label>/<name>`, and this method composes no part of it.**
+        `tree_layout.worktree_branch` derives it and `WorkspaceProvider.open` creates it, from the
+        namespace this call registers. The infix is not decoration: `agl/<label>/<name>` **cannot
+        exist in git** beside `agl/<label>` in either creation order, because refs are files under
+        `refs/heads/` and `agl/<label>` would have to be a file and a directory at once - and
+        `git check-ref-format` passes each name individually, which is why "must be a legal ref"
+        never caught it (§3.9). Routing children under `agl/_work/` keeps the deliverable branch
+        cleanly named, which matters because that is the one the user pushes.
+
+        **Idempotent: an existing name reopens rather than recreates** (§3.3), and reopening hands
+        back *this same object* - so a replay walking the same calls lands in the same namespaces
+        with the same chain, and two `Journal`s over one namespace, which would be two locks over
+        one checkout, cannot arise. A `base` passed to a reopen is ignored, for the reason
+        `WorkspaceProvider.open` ignores its own on reopen. **One name means one spelling**: this
+        `Run` asking for `t-01` after `T-01` is refused rather than reopened, because the two are
+        two of everything but the directory.
+
+        **Names are unique within the run, not merely among siblings** (§3.9). The trees root is
+        flat, so `T-01`'s child `sub-b` and a top-level `sub-b` are two scopes under `AGL_HOME` and
+        one directory under `.trees/<label>/`; a name taken anywhere in this run is `ConflictError`
+        naming both scopes, and the comparison casefolds because `T-01` and `t-01` are two refs to
+        git and one directory on macOS. A malformed name is `InputError`, out of `Namespace` itself,
+        before anything is registered. The name is otherwise opaque - rename `T-01` to `banana` and
+        the framework behaves identically (§3.3).
+
+        **`base` is another `Run`, a ref string, or omitted**, and a workflow with a dependency
+        graph resolves its own blockers and passes the resulting `Run`: the framework never reads a
+        `blocked_by` field and never learns that a graph exists (§3.3). Omitted means this Run's
+        current logical head; a `Run` means that Run's; a string is taken as written and resolved
+        once, later, when the child opens.
+
+        **"Logical head" is the chain and never the physical worktree** (§3.6: "the starting head is
+        chained logically, not read from disk"). It is this namespace's `base` before any entry and
+        its last recorded entry's `head` after - not `Workspace.head()` and not the branch tip, both
+        of which can be ahead of the chain with nothing journalled: a step that raised after
+        `commit=` moved the branch and wrote no entry, and stage 14's `integrate()` will move it
+        again. Cutting a child from either would hand it work this run has not recorded, which is
+        the mirror of the failure §3.6 spends a paragraph on and is why this reads `_steps`.
+        """
+        # The one `cast` in this module, and the field docstring argues it: the table is invariant
+        # in what it holds, so holding `Run[P]` would cost `Run` the covariance §3.3's bare-`Run`
+        # workflow signature rests on. What makes the narrowing true is that `_child` below is the
+        # only thing that ever puts a `Run` in this table, and it copies `params` across unchanged.
+        return cast(
+            "Run[P]",
+            self.worktrees.open(
+                name, scope=self.scope, base=_starts_at(self, base), build=self._child
+            ),
+        )
+
+    def _child(self, scope: RunScope, base: str) -> Run[P]:
+        """One child `Run`, at an address and a starting head the table has already decided.
+
+        Private, and called once per namespace by `Worktrees.open` - never by `worktree()` directly,
+        which is what makes a reopen structurally unable to build a second `Run` over one namespace.
+        The four fields it does not vary are the four a child must not vary: the params and the
+        ports are the run's, and the counter and the table are *this object's* rather than new ones,
+        for the reasons the module docstring gives about each.
+        """
+        return Run(
+            params=self.params,
+            services=self.services,
+            scope=scope,
+            base=base,
+            fingerprints=self.fingerprints,
+            worktrees=self.worktrees,
+        )
+
+
+def _starts_at(run: Run[object], base: Run[object] | str | None) -> str:
+    """§3.3's three spellings of a child's base, reduced to the one string a namespace starts at.
+
+    A module-level function rather than a member, because it is a fact about the *argument* and not
+    about the `Run` it was passed to: the `str` branch never looks at `run` at all, and the `Run`
+    branch reads the other one's chain. Written as one function so the three cases sit together and
+    a fourth cannot be added to only two of them.
+
+    Reading `base._steps` is a private field of another instance of this same class, which is
+    ordinary Python and is deliberate: what a `Run` starts a child at is this module's business, and
+    a public `last_good` on `Run` would be a seventh member of §3.3's six offering a workflow author
+    a head to branch on - which is exactly the "branch only on step results" rule read backwards.
+
+    The two chain reads are `Steps.last_good` and never `Workspace.head()`: §3.6's "the starting
+    head is chained logically, not read from disk", argued at the call site above and at
+    `Steps.last_good` itself. A ref string is passed through untouched and unresolved, because this
+    is a synchronous call and `History.resolve` is not one; `Steps._namespace` is where it is spent.
+    """
+    if base is None:
+        return run._steps.last_good
+    if isinstance(base, str):
+        return base
+    return base._steps.last_good
 
 
 # The one shape a workflow's function has. Private, because it is a spelling convenience rather

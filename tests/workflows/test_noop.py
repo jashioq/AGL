@@ -28,7 +28,7 @@ from agl.config import container, registry
 from agl.ports.home_layout import RunScope
 from agl.ports.ids import ProjectName, RunLabel
 from agl.ports.run import JsonValue, RunSpec
-from agl.ports.tree_layout import TreesRoot, run_branch
+from agl.ports.tree_layout import TreesRoot, base_worktree, run_branch, run_trees_dir
 from agl.sdk.workflow import Stop, Workflow
 from agl.workflows.noop import AskedToStop, NoopParams, noop
 
@@ -139,19 +139,27 @@ def test_the_same_label_a_second_time_exits_four(
     )
 
 
-def test_a_completed_run_leaves_nothing_but_run_json(tmp_path: Path) -> None:
+def test_a_completed_run_leaves_its_own_base_and_nothing_more(tmp_path: Path) -> None:
     """`noop` builds nothing, which is the whole of what it is for.
 
-    "No steps, no worktrees, no persistence beyond `run.json`" is stage 10 in as many words, and
-    this workflow adds nothing to it: no branch is cut for the one the record names, and the trees
-    root is never created. A probe that provisioned a worktree would be stage 13 leaking in here.
+    "No steps, no persistence beyond `run.json`" is stage 10 in as many words and this workflow adds
+    nothing to it. What *is* under the trees root belongs to `api.run` and not to the workflow: 13.4
+    provisions the run's own `_base` from the pinned `base_sha` before any workflow function is
+    entered, so §3.9's "`agl/<label>` is a real ref from run start" holds even for the run that does
+    the least work of any run AGL can perform. Until 13.4 this test asserted the opposite and named
+    stage 13 as what would change it.
+
+    The claim about *this workflow* is therefore the last assertion, and it is the one that would
+    catch `noop` growing a step or a child: one checkout under `.trees/x/`, the run's own.
     """
     harness = _fakes(tmp_path)
 
     assert _main(harness) == 0
 
-    assert harness.repository.tip(run_branch(LABEL)) is None
-    assert not (tmp_path / "trees").exists()
+    trees = TreesRoot(tmp_path / "trees")
+    assert harness.repository.tip(run_branch(LABEL)) == _record(harness)["base_sha"]
+    assert base_worktree(trees, LABEL).is_dir()
+    assert sorted(place.name for place in run_trees_dir(trees, LABEL).iterdir()) == ["_base"]
 
 
 # --- the flag, and the `Stop` it can raise -------------------------------------------------------

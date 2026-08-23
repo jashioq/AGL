@@ -86,11 +86,13 @@ Everything else is refused where it is declared, naming the field and its type, 
 
 It goes into `base_of`'s `role.tools[].payload_schema`, so **changing how a schema is derived
 re-runs every step ever recorded** - the same warning `ports/agent.py` puts on its enum values and
-`journal.py` puts on `_TYPE_KEY`. Two consequences are built in rather than left to be found:
+`journal.py` puts on `_TYPE_KEY`. Three consequences are built in rather than left to be found:
 `required` is **sorted**, so that reordering two fields - which changes nothing anyone can observe -
-does not cost an agent run; and `properties` is left in declaration order, because it is a JSON
-object and canonical JSON sorts an object's keys anyway, so the order is free to be the one the
-model reads best.
+does not cost an agent run; `properties` is left in declaration order, because it is a JSON object
+and canonical JSON sorts an object's keys anyway, so the order is free to be the one the model reads
+best; and `title` holds the payload type's **qualified name**, at every depth, which is §3.6 rule 6
+reaching the one place a reporting tool can carry it. `_object_schema` argues that one where it is
+written.
 
 `additionalProperties: false` is included because the alternative is a schema that permits what the
 handler refuses. An unknown key is a rejection below whatever the schema says, so saying `false` is
@@ -126,26 +128,30 @@ AGL's code, which is `journal.py`'s own test for who a fault belongs to, so `rea
 `InternalError` and `rejection` is the only path that produces prose for a model.
 
 **§3.6 says a stale entry is discarded rather than failing to parse, and that this "falls out
-free": changing the dataclass changes the schema, which changes the fingerprint. It is not
-airtight.** Two leaks, neither closed here, both reported at 12.3:
+free": changing the dataclass changes the schema, which changes the fingerprint. It was not
+airtight.** 12.3 reported two leaks. 13.0 closed one and left the other, and both are worth reading
+together, because the one that is left is the one nothing can close from here:
 
-1. **The schema carries the payload's shape and not its identity.** Swapping `Findings` for a
-   structurally identical `Review` derives byte-identical schemas, so the fingerprint is unchanged
-   and the old entry replays into the new type. That is `journal.py`'s rule 6 - `Finding("T-01", 3)`
-   and `Ticket("T-01", 3)` - with the qualified type name missing, and it is the expensive
-   direction: a false cache hit rather than a re-run. Nothing fails to parse; the wrong type is
-   handed back and the run carries on. Closing it means putting the payload type's qualified name
-   into the schema or beside it, which changes §3.6's fingerprint terms, and that is not this
-   deliverable's to decide.
-2. **The schema describes shape, and a dataclass validates in `__post_init__`.** That is how every
-   dataclass in this repository states its rules, and adding or tightening one changes what converts
-   while changing nothing in the derived schema - so a recorded value really can stop converting
-   with its fingerprint still matching. That is the case §3.6 says cannot happen. `read` turns it
-   into an `InternalError` naming the payload type, which is the honest report, not a fix.
+1. **Closed at 13.0: the schema carried the payload's shape and not its identity.** Swapping
+   `Findings` for a structurally identical `Review` derived byte-identical schemas, so the
+   fingerprint did not move and the old entry replayed into the new type - `journal.py`'s rule 6
+   (`Finding("T-01", 3)` against `Ticket("T-01", 3)`) with the qualified type name missing, and the
+   expensive direction of it: a false cache hit rather than a re-run, with nothing failing to parse
+   and the wrong type handed back to a run that carries on. `_object_schema` now writes that
+   qualified name into the derived schema as `title`, at every depth, which puts it in
+   `base_of`'s terms without `Tool` growing a field the port has no use for.
+2. **Open, and unclosable from here: the schema describes shape, and a dataclass validates in
+   `__post_init__`.** That is how every dataclass in this repository states its rules, and adding or
+   tightening one changes what converts while changing nothing in the derived schema - so a recorded
+   value really can stop converting with its fingerprint still matching. That is the case §3.6 says
+   cannot happen. `read` turns it into an `InternalError` naming the payload type, which is the
+   honest report, not a fix. §3.6 rule 6 names this exception itself: a `__post_init__` "is
+   invisible to a derived schema".
 
-What *does* fall out free is every structural change: a field added, removed, renamed, or retyped
-moves `properties` or `required`, so the fingerprint moves and the entry is never read. The
-argument holds for the shape of a payload and not for what a payload means.
+What *does* fall out free is now every structural change and every change of identity: a field
+added, removed, renamed or retyped moves `properties` or `required`, and renaming or moving the
+payload class moves `title`, so the fingerprint moves and the entry is never read. The argument
+holds for the shape of a payload and for which type it is, and not for what a payload means.
 """
 
 from collections.abc import Callable, Mapping
@@ -310,6 +316,43 @@ def _object_schema(
     `required` is sorted and `properties` is not - the module docstring argues both, and the reason
     for the asymmetry is that canonical JSON sorts an object's keys and leaves an array's order
     alone, so only one of the two costs an agent run when an author moves a line.
+
+    **`title` is the payload type's qualified name, and it is here to be fingerprinted.** §3.6 rule
+    6 puts a dataclass's qualified name in the digest at every depth, and its second half says the
+    same of "a reporting tool's payload type": two structurally identical payload types derive a
+    byte-identical schema, so the old entry replays into the new one, and §3.6's claim that a stale
+    entry "is discarded rather than failing to parse" holds only once the name is in the terms. It
+    is the expensive direction of this module's failures - a false cache **hit**, one type handed
+    back another's recorded result, nothing raised - which is why it is closed by refusing to be
+    ambiguous rather than by checking anything.
+
+    **It goes in the schema because there is nowhere else to put it.** `base_of` hashes a tool's
+    `name`, its `description` and its `payload_schema` and nothing else, and `Tool` is a **port**
+    type: a field carrying an SDK declaration's payload class would be `ports/agent.py` learning
+    what a reporting tool is, which §3.3 spends a paragraph forbidding. So the identity travels
+    inside the one term that already crosses.
+
+    **And it is written here, not once at the top, which is the whole of the depth.** `_schema_for`
+    reaches this function again for every nested dataclass, so a name written here names every type
+    in the payload rather than only the outermost - `Outer(inner=Inner)` and `Outer(inner=Other)`
+    must not be one fingerprint either. That is exactly `journal._canonical`'s shape and it is the
+    same argument: `dataclasses.asdict` erases the type, so tagging what it returns names the outer
+    one and erases every one below it. The two walkers close the same rule at the same depth, one
+    over an input and one over a payload.
+
+    **`title` and not `$id` or `description`.** `title` is a JSON Schema *annotation*: it has no
+    validating behaviour in any draft, so no vendor's validator can reject a payload over it and no
+    backend has to be told about it. `$id` would be read as a base URI and change how `$ref` is
+    resolved in a schema that grew one; `description` is the author's own prose about the payload
+    and would put a second voice in it.
+
+    **What it costs, stated rather than discovered.** The value reaches the model, which is
+    acceptable and arguably useful - the model is told the name of the thing it is filling in, and
+    a qualified name is what the workflow itself calls it. And renaming or moving a payload class
+    re-runs every step that reports through it, which is correct rather than a price: the workflow
+    will read that result back as a different type, so the recorded one is not this step's result.
+    Like everything else this function returns, the string is a **stored format** - its shape is
+    hashed into every digest ever written - so respelling the key or the name re-runs the ledger.
     """
     if kind in inside:
         raise InputError(
@@ -327,6 +370,13 @@ def _object_schema(
             required.append(spec.name)
     return {
         "type": "object",
+        # Spelled out rather than taken from `_describe`, although that function says the same
+        # words: `_describe` exists to word refusals and is free to be reworded for one, and this
+        # string is hashed into every digest ever written. It is `journal.py`'s `_WIRE_TIME`
+        # argument - two copies of one format, on purpose, where sharing would tie a stored format
+        # to a name whose owner may change it - and it is the identical expression `_canonical`
+        # writes for rule 6, so the two rules read as the one rule they are.
+        "title": f"{kind.__module__}.{kind.__qualname__}",
         "properties": properties,
         "required": sorted(required, key=str),
         "additionalProperties": False,
