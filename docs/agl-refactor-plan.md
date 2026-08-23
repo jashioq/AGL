@@ -475,7 +475,7 @@ build commands are therefore independent by design: the prompt's drive the agent
 | | What it is |
 |---|---|
 | **Params** | a dataclass of `arg()` fields — all named flags, no positionals |
-| **Roles** | instructions + model + restrictions + tools + required capabilities |
+| **Roles** | instructions + model + restrictions + tools + required capabilities + `plan_only` |
 | **Tools** | the payload schemas agents report through |
 | **Views** | pure functions of state, in `views/`. Nothing renders without them (§3.7) |
 | **Shape** | one async function |
@@ -568,8 +568,17 @@ an `int`. Validation failure is `InputError` → exit 2, before anything runs.
 `(label, namespace, name)` plus a fingerprint (§3.6). On a hit it returns the stored value without
 running. On a miss it resets the worktree to the last good head, builds an `AgentTask` from the
 Role, dispatches to that model's provider, commits or wipes per `commit=`, and stores the result.
-`**inputs` are ordinary Python values interpolated into the prompt, and they *are* part of the
-fingerprint; `commit` is a real keyword on the signature, not an input, and is not.
+`**inputs` are ordinary Python values and they *are* part of the fingerprint; `commit` is a real
+keyword on the signature, not an input, and is not.
+
+**How inputs reach the agent: the framework appends them, it does not interpolate.** Templating was
+considered and rejected — `str.format` breaks on any prompt containing a brace, and these prompts
+carry JSON Schemas; `%` breaks on a percent sign. The framework appends one structured block of
+canonical JSON under a fixed heading, and the author writes the prompt knowing inputs arrive at the
+end. One predictable thing, no template syntax imposed on every role, and roles stay reusable
+module-level declarations rather than being rebuilt per call. **`**inputs` may not be named `name`,
+`role`, or `commit`** — those are the signature's own keywords, and a collision is a loud
+`TypeError`.
 
 **`run.worktree(name, base=None)`** — a child `Run` on branch `agl/_work/<label>/<name>`, cut from `base`
 (another `Run`, or a ref string) or, when `base` is omitted, from this Run's branch. A workflow with
@@ -928,9 +937,14 @@ post-stage-8 review, two more at stage 11, each found by mutation rather than by
   its surrogate pair byte-identically, so the escaping is not injective over every `str`, and a
   collision is a **false cache hit**: replay returns another step's result. Refusing surrogates
   closes it.
-- **A dataclass contributes its qualified type name.** `asdict` erases the type, so
+- **A dataclass contributes its qualified type name**, at every depth. `asdict` erases the type, so
   `Finding("T-01", 3)` and `Ticket("T-01", 3)` fingerprint identically and changing an input's type
-  while keeping its shape replays the old result.
+  while keeping its shape replays the old result. The same applies to a **reporting tool's payload
+  type**: two structurally identical payload types derive a byte-identical schema, so the old entry
+  replays into the new type. §3.6's claim that a stale entry "is discarded rather than failing to
+  parse" holds only once the qualified name is in the terms. Note it still does not cover a
+  `__post_init__`, which is invisible to a derived schema — tightening a payload's own validation
+  changes what converts while the fingerprint stays put.
 
 Each of these presents as *replay simply never hits* rather than as an error, which is why the rule
 is written here rather than left to stage 11.
@@ -1199,12 +1213,17 @@ async def approve(q: Question) -> Answer:
     return await run.terminal.show(views.approve_backlog, question=q, priority=5)
 
 decompose = Role(
-    instructions="prompts/decompose.md",
+    instructions=prompt_file("prompts/decompose.md"),   # read at declaration; see below
     model=Claude.OPUS,
     tools=[report_tickets],
     on_question=approve,                 # async (Question) -> Answer
 )
 ```
+
+**`instructions` is prompt text, never a path.** A role holding a filename would fingerprint the
+filename, so editing the prompt would move nothing and a resume would replay what the old wording
+produced — as a cache hit, with nothing to notice. That is precisely the failure §3.6 says the role
+term exists to prevent. `prompt_file()` reads at declaration time and is the sanctioned spelling.
 
 `Question` and `Answer` are lowest-common-denominator across vendors — prompt text, options,
 whether free text is allowed. Anything richer and only one backend could produce it. The callback
