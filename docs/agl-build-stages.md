@@ -384,7 +384,7 @@ and a new file. Changing only a commit message does not invalidate the entry.
 
 **Accept:** two concurrent children write entries with no lock and no interference. Replay of a
 nested run reproduces every namespace. A namespace reused anywhere in the run — not merely among
-siblings — is refused, compared case- and normalisation-insensitively (§3.9). `agl/<label>` and
+siblings — is refused, compared case-insensitively (§3.9 marks the NFC half vestigial: §3.3's ASCII allowlist admits no character with two spellings, so it can never fire). `agl/<label>` and
 `agl/_work/<label>/<ns>` coexist in a real repo.
 
 ---

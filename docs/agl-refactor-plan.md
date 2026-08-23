@@ -580,6 +580,10 @@ module-level declarations rather than being rebuilt per call. **`**inputs` may n
 `role`, or `commit`** — those are the signature's own keywords, and a collision is a loud
 `TypeError`.
 
+**The heading and the composition sit outside every fingerprint**, so respelling them changes every
+prompt in AGL and moves no digest. That is the same trade §3.6 makes knowingly for the commit
+message; it is stated here because nothing else would.
+
 **`run.worktree(name, base=None)`** — a child `Run` on branch `agl/_work/<label>/<name>`, cut from `base`
 (another `Run`, or a ref string) or, when `base` is omitted, from this Run's branch. A workflow with
 a dependency graph resolves its own blockers and passes the resulting `Run`; the framework never
@@ -685,8 +689,8 @@ ref and a POSIX filename. Restrict to `[A-Za-z0-9._-]`, non-empty, no leading or
 allowing one is a class of problem rather than a bug.
 
 **Reserved names.** `_base` is refused as a namespace (it is the run's own worktree directory), and
-`_work` is refused as a label (it is the child-branch prefix). Both compared case- and
-normalisation-insensitively, per §3.9.
+`_work` is refused as a label (it is the child-branch prefix). Both compared case-insensitively,
+per §3.9.
 
 #### Registration
 
@@ -982,7 +986,13 @@ never persisted; replay walks the same calls in the same order and reproduces th
 identical `base` values — `T-01` and `T-02` both call `step("implement", implementer)` with the same
 role, no inputs, and the same parent head. A per-invocation counter lets the interleaving decide who
 gets `n = 0`, and the interleaving differs on resume, so each child looks in its own scope for a
-digest that is not there and **both re-run, forever, silently**. Scoping the counter to
+digest that is not there and **both re-run, forever, silently**.
+
+Note what does the work: **the key, not the object.** Counts are keyed `(scope, step name, base)`
+and a child's scope is unique run-wide, so a privately-built counter per `Run` yields byte-identical
+digests. Sharing one counter object across a run is defensible belt-and-braces — it would matter only
+if two `Run`s ever shared a scope, which idempotent reopen prevents — but it is not what makes rule 1
+hold, and stage 13 measured that. Scoping the counter to
 `(namespace, step name)` makes it deterministic under concurrency, because siblings occupy different
 namespaces. A per-invocation counter is correct for sequential workflows and for no concurrent
 one. Where inputs genuinely vary, each call is `n=0` and the counter is invisible.
@@ -1389,7 +1399,7 @@ repo/                     ← user's working dir. AGL never touches it.
 .trees/
   auth/
     _base/                ← worktree, branch agl/auth, cut from base_sha
-    T-01/  T-02/          ← child worktrees, cut from agl/auth
+    T-01/  T-02/          ← child worktrees, cut from the parent's last_good
   billing/
     _base/                ← worktree, branch agl/billing
     T-01/
@@ -1520,8 +1530,11 @@ that content is tickets-specific and belongs to the workflow.
 directory. Stage 5 closed the directory half of this within the port: `remove` takes the run's own directory
 away once the last checkout in it is gone, so `clear` is a namespace loop over `remove` and
 `discard` with no new verb. **The ref half is still open** — no port can enumerate `agl/_work/<label>/*`,
-by design, and a crash between `open()` and the first entry write leaks both a branch and a
-directory, with the leaked directory then blocking the rmdir. Do not add a ref-listing verb to
+by design. The leak is **child-only**: `_base` is `namespace=None` and derivable from the label
+alone, so `clear` reaches it with no enumeration at all, which is what writing `run.json` before
+provisioning buys. But a crash between a *child's* `open()` and its first entry write leaves a
+directory `Store.namespaces` cannot see, and that directory then blocks the rmdir of
+`.trees/<label>/`. Do not add a ref-listing verb to
 `History` to close it. It
 deletes `agl/<label>` **only if merged into the base ref**; otherwise it warns and keeps it. `-f`
 deletes regardless — exactly `git branch -d` versus `-D`. The rationale is asymmetric cost: a
