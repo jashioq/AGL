@@ -40,14 +40,29 @@ file spends processes at all:
     journal sorted or iterated. The programmes below declare `frozenset(Restriction)` - all four
     members - and the two processes run under **different `PYTHONHASHSEED` values**, which is what
     makes "the worker ran exactly once in total" able to fail.
-  * *Rule 3, `asdict` and never `repr`.* Same argument: an object's id does not move while it is
-    alive. The first step of every programme takes a list of the workflow's own dataclasses with a
-    `frozenset[str]` field inside, whose `repr` renders in hash order - so the shortcut renders
-    differently in the second process and the digest with it.
+  * *Rule 3, walk the fields and never `repr`.* Same argument: an object's id does not move while
+    it is alive. The first step of every programme takes a list of the workflow's own dataclasses
+    with a `frozenset[str]` field inside, whose `repr` renders in hash order - so the shortcut
+    renders differently in the second process and the digest with it.
   * *`n` is never persisted.* A same-process resume is free to reuse the `Fingerprints` object it
     already had; a second process has to rebuild the counter from nothing by walking the same calls
     in the same order, which is the whole of what §3.6 means by the phrase.
   * *A commit made before the kill is still there after it.* Only a real repository can be asked.
+
+**And two that are falsifiable in one process but are stated here in the form they are actually
+paid in.** `test_journal_walk.py` and `test_journal.py` pin both as arithmetic; what the two
+two-process tests at the bottom add is that the value being handed back came off a real ledger
+written by a process that no longer exists, which is what a replay *is*.
+
+  * *A step that raised claims no slot* (§3.6, "the counter advances when an entry is written, not
+    when a step is called"). The `crash` programme raises inside a step and retries it within one
+    run; the second process walks the same calls and must hit the retry's entry without running
+    anything. Advance on the call instead and the retry sits one slot past where the resume looks.
+  * *Rule 6, a dataclass contributes its qualified type name.* The `retyped` and `renested`
+    variants pass the same field names and the same values under a different type - the outer one
+    and, separately, one nested inside it. The second process must **re-run**. This is the one
+    correction whose failure is a false cache hit: an entry found, a recorded value handed back,
+    and inputs that were never those.
 
 `test_journal_walk.py` already pins several of these claims **in-process** - the retry loop's
 `n = 0, 1, 2`, the commit message staying out of the fingerprint, a `_base` that advanced. Nothing
@@ -55,13 +70,16 @@ here duplicates the arithmetic those tests check; what is added is that the same
 kill and a process boundary, which a unit test in one interpreter cannot fail on.
 
 **Cost, and what is capped.** Real git plus a process per kill point per variant multiplies fast.
-The full sweep - every k in `0..N` - is run for all three programmes, which is 28 child processes
-(6 + 4 + 4 kill points, two processes each); the uninterrupted reference for each programme is
-computed **once** per session and compared against by every kill point, since it does not depend on
-k. The three variants that are not sweeps
-(a changed prompt, an advanced base, a reworded commit) are two processes each by their nature: they
-are "run to completion, change one thing, run again", and a kill adds nothing to what they assert.
-Nothing else is capped, and the measured wall clock is in the report for this deliverable.
+The full sweep - every k in `0..N` - is run for the three programmes that have kill points, which is
+28 child processes (6 + 4 + 4 kill points, two processes each); the uninterrupted reference for each
+programme is computed **once** per session and compared against by every kill point, since it does
+not depend on k. The six tests that are not sweeps (a changed prompt, an advanced base, a reworded
+commit, a swapped input type, a swapped *nested* input type, and a step that raised and was retried)
+are two processes each by their nature: they are "run to completion, change one thing, run again",
+and a kill adds nothing to what they assert. The `crash` programme has no sweep at all, and its own
+docstring in the instrument says why: a step that raised writes no entry, so the boundary after it
+is the same ledger state as the boundary before it. Nothing else is capped, and the measured wall
+clock is in the report for this deliverable.
 
 No test in this file is async, and that is not an oversight: everything asynchronous happens inside
 the child processes, and the parent only starts them, waits, and reads files.
@@ -636,7 +654,7 @@ def test_concurrent_siblings_replay_when_the_resume_completes_them_the_other_way
         )
 
 
-# --- the three variants that are a second run rather than a kill ---------------------------------
+# --- the six tests that are a second run rather than a kill --------------------------------------
 
 
 def test_a_changed_prompt_re_runs_that_step_and_everything_that_took_its_value(
@@ -762,6 +780,115 @@ def test_changing_only_the_commit_wording_replays_every_step_and_runs_no_worker(
             f"{branch} carries the reworded message {message!r}, so the second run did make a "
             f"commit - the replayed step is supposed to keep the one it already made"
         )
+
+
+def _swapped_types(world: _World, variant: str, what: str) -> None:
+    """Run `core` plain, then again with `spec`'s dataclass inputs under other types.
+
+    Only `spec` carries the constraints, and `spec`'s recorded value does not depend on them, so
+    nothing downstream sees a changed input and the cascade stops at one step. That is a sharper
+    claim than a cascade would be: a step that re-ran because something upstream moved proves
+    nothing about types, and here exactly one fingerprint is allowed to have moved.
+    """
+    _spawn(world, programme="core", tag="first", seed=KILLED_SEED)
+    before = _snapshot(world)
+
+    _spawn(world, programme="core", variant=variant, tag="second", seed=RESUMED_SEED)
+    after = _snapshot(world)
+    second = _workers(_records(world), "second")
+
+    assert second == ["spec"], (
+        f"the {variant!r} run's workers were {second}. `spec` takes a list of the workflow's own "
+        f"dataclasses and this run passed {what} - the same field names and the same values under "
+        f"a different type - so its fingerprint had to move and the step had to re-run. Replaying "
+        f"instead is the one failure in this family that returns a wrong answer rather than a "
+        f"bill: an entry found and handed back whose inputs were never these"
+    )
+    assert after.per_step["steps/spec"] == 2, (
+        "`spec` ran its worker and recorded no second entry, so the ledger and the log disagree"
+    )
+    for step in ("steps/decompose", "steps/plan", "worktrees/T-01/steps/implement", "steps/report"):
+        assert after.per_step[step] == 1, (
+            f"{step} acquired a second entry, so the swap reached past the one step that carries "
+            f"these inputs - and this test can no longer tell a type term from a cascade"
+        )
+    assert set(before.entries) < set(after.entries), "the second run recorded nothing at all"
+
+
+def test_an_input_dataclass_of_another_type_re_runs_the_step_rather_than_replaying_it(
+    world: _World,
+) -> None:
+    """§3.6's rule 6, the outer half: `Finding("T-01", 3)` and `Ticket("T-01", 3)`.
+
+    "`asdict` erases the type, so `Finding("T-01", 3)` and `Ticket("T-01", 3)` fingerprint
+    identically and changing an input's type while keeping its shape replays the old result." The
+    instrument's `Constraint` and `Requirement` are that pair, built from one list of values so
+    that "identical field names and identical values" is structural rather than a thing a reader
+    has to check character by character.
+    """
+    _swapped_types(world, "retyped", "a `Requirement` where the first run passed a `Constraint`")
+
+
+def test_a_nested_input_dataclass_of_another_type_re_runs_the_step_too(world: _World) -> None:
+    """Rule 6's nested half, which is where the obvious implementation of it fails.
+
+    `dataclasses.asdict` recurses: it turns a nested dataclass into a plain `dict` before any
+    walker sees it, so a type name attached to what `asdict` returned names the outer type and
+    erases every one below. Here the outer type is held identical on purpose - the `Constraint` is
+    a `Constraint` in both runs - and only its `budget` moves, from a `Budget` to a `Ceiling` of
+    the same one field and the same value. A walker that tagged only the top level passes the test
+    above and fails this one, which is why they are two tests and not one.
+    """
+    _swapped_types(world, "renested", "a `Ceiling` nested where the first run nested a `Budget`")
+
+
+def test_a_step_that_raised_and_was_retried_in_one_run_replays_where_a_resume_looks(
+    world: _World,
+) -> None:
+    """§3.6: "the counter advances when an entry is written, not when a step is called".
+
+    "A step that crashes and is retried within one run must not consume a slot - the crash is not
+    journalled, so a retry landing at `n = 1` is a slot a later resume asks for at `n = 0`, misses,
+    and pays an agent for again." The `crash` programme is that sentence: one `step` call whose
+    worker raises, and a retry of the same call - same name, same role, same inputs, same head, so
+    the same `base` - inside the `except`.
+
+    The second process is the whole assertion. It walks the same code, so its first `implement`
+    asks for `n = 0`; if the retry's entry is there it hits, returns, raises nothing, and never
+    enters the `except` at all - one call, one hit, no worker. Advance the counter on the call
+    instead and the entry sits at `n = 1`: the resume misses, pays for the failing attempt a second
+    time, and only then falls into the retry and hits. One worker line, silently, per resume.
+    """
+    _spawn(world, programme="crash", tag="first", seed=KILLED_SEED)
+    before = _snapshot(world)
+    first = _workers(_records(world), "first")
+
+    assert first == list(PROGRAMMES["crash"].labels), (
+        f"the first process ran {first} where a complete run of `crash` is "
+        f"{list(PROGRAMMES['crash'].labels)} in that order - the attempt that raises, and then "
+        f"the retry that the `except` around it makes"
+    )
+    assert before.per_step["steps/implement"] == 1, (
+        "two entries under one step name after one crash and one retry: a step that raised wrote "
+        "a file, and §3.6's whole ledger is `a step is done when its file is there`"
+    )
+
+    _spawn(world, programme="crash", tag="second", seed=RESUMED_SEED)
+    after = _snapshot(world)
+    second = _workers(_records(world), "second")
+
+    assert second == [], (
+        f"the resuming process ran {second}. It walks the same calls the first one did, so its "
+        f"first `implement` asks for n = 0 - and the retry's entry is only there if the attempt "
+        f"that raised claimed no slot. Recorded at n = 1 instead, this resume misses, pays the "
+        f"agent for the failing attempt all over again, and only then hits the retry"
+    )
+    assert after.entries == before.entries, "a resume that hit everything wrote something anyway"
+    assert after.branches == before.branches, (
+        "the retry's commit moved or was made again, so the replayed step did not keep the commit "
+        "it already made"
+    )
+    _assert_well_formed_at(after)
 
 
 # --- the kill, and the seeds, both asked directly -------------------------------------------------

@@ -12,7 +12,7 @@ existed. Where a test needs to know what the walk *asked* the workspace to do ra
 of it, `_Recorded` wraps the fake and writes the calls down; production code gained no
 observability for it.
 
-Three of these tests exist because their failure is silent, and each is written to be the thing
+Five of these tests exist because their failure is silent, and each is written to be the thing
 that notices:
 
   * **`last_good` read from the physical worktree** instead of chained from recorded entries.
@@ -28,12 +28,21 @@ that notices:
   * **The counter taken after a suspension.** Rule 1 makes `n` deterministic for siblings, which
     occupy different namespaces; it does nothing for two same-name steps in *one* scope, which
     share a `(scope, step, base)` key. Two tests again, and the reason there are two is worth
-    stating: the `asyncio.gather` test below is the one §3.6's failure is written in, but on its
-    own it **cannot fail**, because `asyncio` resumes waiters in FIFO order and FIFO order is
-    creation order - a suspension inserted before the counter is taken hands `n = 0` back to the
-    same coroutine anyway. So it is joined by `test_the_counter_is_taken_before_the_walk_can_
-    suspend`, which drives one `step` coroutine by hand, one send at a time, against dependencies
-    that really do suspend, and asks the question directly.
+    stating: the `asyncio.gather` test below is the one §3.6's failure is written in, and it now
+    catches the serialization too - two overlapping steps take one address and the second clobbers
+    the first - but on its own it cannot say *when* the address was taken. So it is joined by
+    `test_the_counter_is_taken_before_the_walk_can_suspend`, which drives one `step` coroutine by
+    hand, one send at a time, against dependencies that really do suspend, and asks directly.
+  * **Two steps in one namespace overlapping.** §3.6: "a namespace's workspace is single-threaded".
+    They share one `Workspace`, so overlapped, A's pre-run restore wipes what B's worker has just
+    written, B's `commit_all` records A's changes under B's message, and A's `head()` reads B's.
+    The test asserts on the *sequence of calls* the walk made, because every one of those outcomes
+    is a wrong answer rather than an exception and two of the three are invisible from the ledger.
+  * **A step that raised consuming a slot.** §3.6: "the counter advances when an entry is written,
+    not when a step is called". The retry that follows a crash **inside one run** is the only place
+    the two readings differ, because a resume rebuilds the counter from nothing either way - so the
+    test does its retry against the same `Fingerprints` and asserts the entry landed at `n = 0`,
+    which is where the resume below it then looks.
 
 Named `test_journal_walk.py`: `tests/` carries no `__init__.py` - see `tests/conftest.py` for why
 it must not - so pytest's module names are the bare filenames and every one has to be unique.
@@ -370,6 +379,13 @@ async def test_the_pre_run_restore_is_unconditional_and_not_guarded_on_head(
     assertion is therefore on the call and its position, not on the outcome - the second step is
     read-only and its own ending restore removes the leavings either way, so an outcome-only test
     would pass against the bug it was written for.
+
+    **The leavings are put back by hand, and that is not the test cheating.** 12.1 gave the walk a
+    failure path, so the crashed step's own ending wipe takes them on the way out - which is
+    asserted below, in passing. What reaches the next step is what a killed *process* leaves: a
+    kill runs no `finally`, so a checkout can start a step dirty with HEAD unmoved whatever this
+    walk does, and that is the state the pre-run restore exists for. Staging it explicitly is what
+    keeps this test about the guard rather than about which of two wipes happened to run first.
     """
     harness, raw, base = await _opened(tmp_path)
     calls: list[tuple[str, str]] = []
@@ -383,10 +399,11 @@ async def test_the_pre_run_restore_is_unconditional_and_not_guarded_on_head(
     with pytest.raises(_Crash):
         await _step(journal, REVIEW, _Worker(does=_leaves_a_mess_and_dies))
 
-    # Nothing cleaned up on the way out, and nothing was meant to: the walk has no failure path,
-    # 12.1 owns commit-or-wipe "on success and on failure alike", and 12.4 owns the shield a
-    # cancelling task needs. What makes the leavings harmless is the *next* step's restore.
-    assert (raw.path / "scratch" / "notes.md").is_file()
+    assert not (raw.path / "scratch" / "notes.md").exists(), (
+        "the step that raised left its scratch file behind: §3.3's wipe runs on success and on "
+        "failure alike, or a failed reviewer contaminates the checkout its own retry works in"
+    )
+    _write(raw, "scratch/notes.md", b"half a thought\n")
     assert await raw.head() == base, "the trap only springs when the crashed step left HEAD alone"
 
     def _marks() -> None:
@@ -516,6 +533,51 @@ async def test_a_crashed_step_leaves_no_entry_and_the_next_attempt_re_runs_it(
 
 
 @pytest.mark.asyncio
+async def test_a_step_that_raised_claims_no_slot_and_its_retry_lands_at_n_zero(
+    tmp_path: Path,
+) -> None:
+    """§3.6: "the counter advances when an entry is written, not when a step is called".
+
+    The retry here is inside **one** walk, against the `Fingerprints` the crashed attempt already
+    used, and that is the only arrangement in which the two readings differ: a resume rebuilds the
+    counter from nothing whatever the rule is, so a test that retried in a second walk could not
+    tell them apart. Advance on the call and the retry's entry lands at `n = 1`; the resume then
+    walks these same calls, asks for `n = 0`, finds nothing there, and pays for the step again -
+    silently, with the run still finishing and still right.
+
+    Both ends are asserted, because only the pair is the claim: the entry is at `n = 0`, nothing is
+    at `n = 1`, and a fresh walk of the same call hits it.
+    """
+    harness, workspace, base = await _opened(tmp_path)
+    journal = _journal(harness, workspace, base)
+
+    def _dies() -> None:
+        raise _Crash("the agent died mid-spec")
+
+    crashed = _Worker(does=_dies)
+    with pytest.raises(_Crash):
+        await _step(journal, SPEC, crashed)
+
+    retried = _Worker({"spec": "oauth"})
+    assert await _step(journal, SPEC, retried) == {"spec": "oauth"}
+    assert (crashed.runs, retried.runs) == (1, 1), "the retry did not reach its worker"
+
+    entry = await _entry_at(harness, SPEC, _digest(base))
+    assert entry is not None, (
+        "nothing is recorded at n = 0, so the attempt that raised consumed the slot - and the "
+        "resume below walks the same calls, asks for n = 0 and pays for the step a second time"
+    )
+    assert entry.value == {"spec": "oauth"}
+    assert await _entry_at(harness, SPEC, _digest(base, 1)) is None, (
+        "the retry was recorded at n = 1, one slot past where any resume will look for it"
+    )
+
+    resumed = _Worker({"spec": "must never be reached"})
+    assert await _step(_journal(harness, workspace, base), SPEC, resumed) == {"spec": "oauth"}
+    assert resumed.runs == 0, "a resume re-ran a step whose entry was on the ledger"
+
+
+@pytest.mark.asyncio
 async def test_a_retry_loop_with_nothing_varying_counts_up_and_replays_in_order(
     tmp_path: Path,
 ) -> None:
@@ -550,15 +612,20 @@ async def test_a_retry_loop_with_nothing_varying_counts_up_and_replays_in_order(
 
 
 class _Watching(Fingerprints):
-    """A `Fingerprints` that writes down when it was asked, so a test can ask *when*."""
+    """A `Fingerprints` that writes down when it was asked, so a test can ask *when*.
+
+    `digest` and not `claimed`: the question is when the walk takes its **address**, which is the
+    call that has to happen before anything can suspend. The claim comes a whole step later by
+    design, and a test that watched it would be asking about the other end of the method.
+    """
 
     def __init__(self, taken: list[str]) -> None:
         super().__init__()
         self._taken = taken
 
-    def next(self, scope: RunScope, step: StepName, base: str) -> str:
+    def digest(self, scope: RunScope, step: StepName, base: str) -> str:
         self._taken.append(str(step))
-        return super().next(scope, step, base)
+        return super().digest(scope, step, base)
 
 
 class _Suspending(Workspace):
@@ -632,14 +699,19 @@ class _SuspendingStore(Store):
 
 @pytest.mark.asyncio
 async def test_the_counter_is_taken_before_the_walk_can_suspend(tmp_path: Path) -> None:
-    """`Fingerprints.next` runs before `step`'s first suspension, asked directly.
+    """`Fingerprints.digest` runs before `step`'s first suspension, asked directly.
 
     The coroutine is driven by hand, one `send` at a time, against a store and a workspace that
-    really do yield. If anything at all is awaited before the counter is taken, the first `send`
+    really do yield. If anything at all is awaited before the address is taken, the first `send`
     returns with nothing recorded - and that is the precondition `Fingerprints`' own docstring
-    states and the reason the gather test below cannot be the only guard: `asyncio` resumes
-    waiters in the order they queued, which is creation order, so an inserted suspension hands
-    `n = 0` back to the same coroutine and the gather test stays green.
+    states. Note that the walk now acquires a lock first: an *uncontended* `asyncio.Lock.acquire`
+    returns without yielding, which is why this still answers in one `send`, and a lock that did
+    suspend on the empty case would be caught here.
+
+    The gather test below cannot be the only guard, because serialization already makes the order
+    of two same-name steps deterministic - but by way of `asyncio`'s FIFO wake order, which is a
+    property of the runtime rather than of this design. Taking the address before anything can
+    suspend is what makes the order the program's own without asking the runtime for anything.
     """
     harness, raw, base = await _opened(tmp_path)
     taken: list[str] = []
@@ -674,9 +746,17 @@ async def test_two_same_name_steps_in_one_scope_land_at_the_same_digests_either_
 
     Siblings are deterministic because they occupy different namespaces. Two `step("review", ...)`
     calls in *one* scope with one role and one set of inputs share a `(scope, step, base)` key, so
-    only the order the coroutines were created in can decide which gets `n = 0`. The walk is run
-    twice with the workers released in opposite orders, and the two entries must hold the same two
-    values at the same two addresses both times.
+    rule 1 separates nothing here at all. What separates them is that they do not overlap: §3.6
+    serializes steps within a namespace, so the second call takes its address only after the first
+    has claimed its entry, and the two addresses fall out in the order the coroutines were created
+    - which is the program's own order and is the same on every run.
+
+    The walk is run twice with the workers released in opposite orders, and the two entries must
+    hold the same two values at the same two addresses both times. Releasing the *second* worker
+    first is the case worth having: under serialization that gate is opened onto a step which has
+    not started, and the ledger is still the program's order rather than the release order. Without
+    the serialization the two take one address between them and the second entry clobbers the
+    first, which is what the `is not None` inside `_gathered` notices.
     """
     assert await _gathered(tmp_path / "a", "one") == {0: {"by": "one"}, 1: {"by": "two"}}
     assert await _gathered(tmp_path / "b", "two") == {0: {"by": "one"}, 1: {"by": "two"}}
@@ -718,6 +798,69 @@ async def _settled() -> None:
     the walk suspends once per awaited dependency and there are four of them per step."""
     for _ in range(10):
         await asyncio.sleep(0)
+
+
+# --- a namespace's workspace is single-threaded --------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_two_gathered_steps_in_one_namespace_do_not_overlap(tmp_path: Path) -> None:
+    """§3.6: "the framework serializes steps within a namespace", asked of the calls themselves.
+
+    Two steps under one `gather` over one `Journal` share one `Workspace`, and §3.3's own example
+    gathers two reviewers over one worktree. Overlapped, A's pre-run restore wipes the files B's
+    worker has just written, B's `commit_all` records A's changes under B's message, and A's
+    `head()` after its own commit reads B's - a wrong answer, a mislabelled commit and a corrupted
+    chain, none of which raises and two of which leave no trace on the ledger at all. So the
+    assertion is on the *sequence*: restore, worker, restore, and only then the second step's.
+
+    **The dependencies really suspend**, which is what makes this able to fail. `_FakeWorkspace`
+    and `MemoryStore` return without ever yielding, so two tasks over them run to completion one
+    after the other whatever `Journal` does, and a test against them would pass against no lock at
+    all. `_Suspending` and `_SuspendingStore` put a real suspension at every awaited dependency,
+    which is where an unserialized walk hands the loop to its sibling.
+
+    The two steps take **different inputs** on purpose: two addresses, one per step, so that this
+    test is about overlap and the counter is the business of the two tests above it.
+    """
+    harness, raw, base = await _opened(tmp_path)
+    calls: list[tuple[str, str]] = []
+    workspace = _Recorded(_Suspending(raw), calls)
+    journal = Journal(
+        _SuspendingStore(harness.services.store),
+        SCOPE,
+        workspace,
+        harness.services.clock,
+        Fingerprints(),
+        base,
+    )
+
+    def _working(which: str) -> Callable[[], Awaitable[JsonValue]]:
+        async def _worker() -> JsonValue:
+            await asyncio.sleep(0)
+            calls.append(("worker", which))
+            await asyncio.sleep(0)
+            return {"by": which}
+
+        return _worker
+
+    await asyncio.gather(
+        _step(journal, REVIEW, _working("one"), inputs={"which": "one"}),
+        _step(journal, REVIEW, _working("two"), inputs={"which": "two"}),
+    )
+
+    assert calls == [
+        ("restore", base),
+        ("worker", "one"),
+        ("restore", base),
+        ("restore", base),
+        ("worker", "two"),
+        ("restore", base),
+    ], (
+        "two steps in one namespace overlapped: one step's restore landed between the other's "
+        "restore and its worker, or between its worker and its ending wipe. They share a "
+        "`Workspace`, so that is one step emptying the checkout another is working in"
+    )
 
 
 # --- concurrent siblings -------------------------------------------------------------------------

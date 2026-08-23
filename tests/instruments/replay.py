@@ -21,7 +21,7 @@ across a process boundary, and every one of them fails silently:
   * a `frozenset[Restriction]` reaching the canonical text in iteration order rather than sorted
     (rule 2) has a *fixed* order for the life of one interpreter, so a same-process resume computes
     the digest it wrote and hits;
-  * a dataclass in `**inputs` canonicalised with `repr()` rather than `dataclasses.asdict`
+  * a dataclass in `**inputs` canonicalised with `repr()` rather than walked field by field
     (rule 3) carries an object id that does not move while the object is alive, likewise;
   * `Fingerprints` really being rebuilt from nothing on a resume - `n` is never persisted - is
     trivially true here and merely conventional in a same-process test, which is free to reuse the
@@ -32,6 +32,15 @@ The parent therefore runs the killed process and the resuming process under **di
 `restrictions` set holding *all four* `Restriction` members, and an input that is a list of the
 workflow's own dataclasses with a `frozenset[str]` field inside it. Without those two the seeds vary
 nothing and the second process proves only that the first one wrote some files.
+
+**Two more things a second process is what makes visible, and neither is about hash seeds.** A
+*replay* is a value read back off a real ledger written by a process that no longer exists, so the
+two claims deliverable 12.0 corrects are stated here in their end-to-end form. The `crash`
+programme raises inside a step and retries it within one run, and the second process must hit the
+retry's entry and run nothing at all - which only holds if the crashed attempt claimed no slot. And
+the `retyped` and `renested` variants hand the same field names and the same values under a
+*different type*, and the second process must **re-run** rather than replay - which is rule 6, and
+the one correction whose failure hands back a wrong answer instead of costing a re-run.
 
 **The workspace is real git, and that is the one place the fake is not good enough.** The git fakes
 keep their commits in memory and re-seed themselves per process, so a commit made before the kill
@@ -97,26 +106,74 @@ __all__ = ["Config", "PROGRAMMES", "Programme", "SIBLINGS", "driver_path", "main
 
 
 @dataclass(frozen=True)
+class Budget:
+    """A dataclass **nested** inside the one a workflow passes, and rule 6's sharpest term.
+
+    One integer field, because the value is not the point: the point is that this sits one level
+    down. `dataclasses.asdict` recurses, so a type name attached to what `asdict` returned names
+    the outer type and erases this one entirely - which is the half of rule 6 that a walker tagging
+    only the top level gets wrong while looking correct. `Ceiling` below is what makes that
+    measurable across a process boundary.
+    """
+
+    tokens: int
+
+
+@dataclass(frozen=True)
+class Ceiling:
+    """`Budget`'s twin: the same one field, the same value, a different type.
+
+    Swapped in behind variant `renested`, inside a `Constraint` that does **not** change - so the
+    only thing that moved between the two runs is a type name one level down. A journal that
+    fingerprinted the shape and not the type finds the first run's entry, replays it, and answers
+    a question nobody asked.
+    """
+
+    tokens: int
+
+
+@dataclass(frozen=True)
 class Constraint:
     """A workflow's own dataclass, passed in `**inputs` exactly as §3.3's tickets example does.
 
-    Two fields and both are deliberate. `area` is ordinary text. `tags` is a `frozenset[str]`, and
-    it is the term that makes rule 3 falsifiable across processes: `dataclasses.asdict` deep-copies
-    a frozen dataclass's set field back out **as a set**, so the canonical walker has to sort it at
-    that depth too - and the one-line shortcut, `repr()`, renders the set in iteration order, which
-    `PYTHONHASHSEED` randomises. So the `repr` of one of these is a different string in the next
-    process even when nothing about the value changed, which is rule 2's failure arriving through
-    rule 3's door, and it is measured rather than assumed: the parent asserts the two seeds it uses
-    really do render this differently before it believes anything else.
+    Three fields and each is deliberate. `area` is ordinary text. `tags` is a `frozenset[str]`, and
+    it is the term that makes rule 3 falsifiable across processes: the canonical walker hands a
+    frozen dataclass's set field on **as a set**, so it has to sort at that depth too - and the
+    one-line shortcut, `repr()`, renders the set in iteration order, which `PYTHONHASHSEED`
+    randomises. So the `repr` of one of these is a different string in the next process even when
+    nothing about the value changed, which is rule 2's failure arriving through rule 3's door, and
+    it is measured rather than assumed: the parent asserts the two seeds it uses really do render
+    this differently before it believes anything else. `budget` is rule 6's nested term.
 
     The default `repr` is kept, rather than `repr=False`'s heap address, because an address is only
     unstable if the allocator happens to move - a real effect, but a weaker lever than a set whose
     order is randomised by construction. `test_journal.py` takes the address route for rule 3 in
     isolation; this file wants the term that cannot quietly stop varying.
+
+    `budget` is annotated as either twin so that one declaration carries both variants. The
+    annotation is not enforced at runtime and the fingerprint never sees it; what it buys is that
+    `renested` swaps a *nested* type while the outer type is held identical, which is the only
+    arrangement in which the nested half of rule 6 can fail on its own.
     """
 
     area: str
     tags: frozenset[str]
+    budget: Budget | Ceiling
+
+
+@dataclass(frozen=True)
+class Requirement:
+    """`Constraint`'s twin - identical field names in identical order, and a different type.
+
+    Swapped in behind variant `retyped`, which is §3.6's own pair (`Finding` and `Ticket`) wearing
+    this file's names. Declared beside `Constraint` rather than derived from it, because two
+    dataclasses are what the rule is about and a factory would leave a reader wondering whether
+    the types really were distinct.
+    """
+
+    area: str
+    tags: frozenset[str]
+    budget: Budget | Ceiling
 
 
 async def _unused(payload: Mapping[str, JsonValue]) -> ToolResult:
@@ -137,14 +194,37 @@ TOOL: Final = Tool(
     handler=_unused,
 )
 
+# The values, once, so that the three tuples below cannot drift apart. "Identical field names and
+# identical values, under different types" is the whole of what makes a retyped run's re-run mean
+# what it is claimed to mean, and building all three from one source makes that structural rather
+# than something a reader has to check character by character. Four tags rather than two, and that
+# is not decoration: a two-element set has only two iteration orders, so no choice of hash seeds
+# could make three processes render it three different ways - and the parent's non-vacuity check
+# would be asking for something arithmetic forbids.
+_VALUES: Final = (
+    ("auth", frozenset({"oauth", "callback", "session", "refresh"}), 40_000),
+    ("api", frozenset({"routes", "handlers", "schemas", "errors"}), 25_000),
+)
+
 # The dataclass input, on the first step of every programme. A list of them, because §3.3 passes a
-# list and because a list is what makes the walker recurse before it reaches the set. Four tags
-# rather than two, and that is not decoration: a two-element set has only two iteration orders, so
-# no choice of hash seeds could make three processes render it three different ways - and the
-# parent's non-vacuity check would be asking for something arithmetic forbids.
-CONSTRAINTS: Final = (
-    Constraint(area="auth", tags=frozenset({"oauth", "callback", "session", "refresh"})),
-    Constraint(area="api", tags=frozenset({"routes", "handlers", "schemas", "errors"})),
+# list and because a list is what makes the walker recurse before it reaches the set.
+CONSTRAINTS: Final = tuple(
+    Constraint(area=area, tags=tags, budget=Budget(tokens=tokens)) for area, tags, tokens in _VALUES
+)
+
+# Variant `retyped`: the **outer** type swapped, which is §3.6's `Finding`/`Ticket` pair.
+RETYPED: Final = tuple(
+    Requirement(area=area, tags=tags, budget=Budget(tokens=tokens))
+    for area, tags, tokens in _VALUES
+)
+
+# Variant `renested`: the outer type held identical and only the **nested** one swapped, which is
+# the half `dataclasses.asdict` erases. Two variants and not one, because a single input carrying
+# both swaps would re-run under a walker that tagged only the top level - and that walker is
+# exactly the wrong one this pair exists to catch.
+RENESTED: Final = tuple(
+    Constraint(area=area, tags=tags, budget=Ceiling(tokens=tokens))
+    for area, tags, tokens in _VALUES
 )
 
 # The two child namespaces §3.6 names when it explains why the counter is scoped per namespace.
@@ -400,22 +480,38 @@ class _Programme:
 
 # --- the programmes ------------------------------------------------------------------------------
 
-# The one prompt edit variant 2 makes, and the step it lands on. `decompose` is deliberately a
-# *read-only* step: its head does not move, so a downstream step that re-runs after the edit re-ran
-# because its **inputs** changed and for no other reason. Editing an effect step's prompt would
-# change its commit as well, and "inputs or head" is not the claim §3.6 makes.
+# The one prompt edit the `edited` variant makes, and the step it lands on. `decompose` is
+# deliberately a *read-only* step: its head does not move, so a downstream step that re-runs after
+# the edit re-ran because its **inputs** changed and for no other reason. Editing an effect step's
+# prompt would change its commit as well, and "inputs or head" is not the claim §3.6 makes.
 EDITED_STEP: Final = "decompose"
 EDIT: Final = " Group them by area, smallest first."
 
-# Variant 3's wording change, appended to every `commit=` message and to nothing else.
+# The `reworded` variant's wording change, appended to every `commit=` message and to nothing else.
 REWORD: Final = ": add the oauth callback route"
 
 
 def _instructions(config: Config, step: str, text: str) -> str:
-    """A step's prompt, with variant 2's edit applied to exactly one step."""
+    """A step's prompt, with the `edited` variant's edit applied to exactly one step."""
     if config.variant == "edited" and step == EDITED_STEP:
         return text + EDIT
     return text
+
+
+def _constraints(config: Config) -> list[Constraint | Requirement]:
+    """The dataclass inputs, under the types this variant declares.
+
+    Three tuples built from one list of values, so the only difference a variant makes here is a
+    type name - which is the whole of rule 6. `retyped` swaps the outer type and `renested` swaps
+    the type one level down while holding the outer one still; the parent asserts that each of them
+    re-runs the step that carries these, because a step that *replayed* would be handing back a
+    result produced from inputs of another type entirely.
+    """
+    if config.variant == "retyped":
+        return list(RETYPED)
+    if config.variant == "renested":
+        return list(RENESTED)
+    return list(CONSTRAINTS)
 
 
 def _message(config: Config, text: str) -> str:
@@ -456,7 +552,7 @@ async def _core(run: _Programme) -> None:
         "spec",
         "spec",
         instructions=_instructions(config, "spec", "state what the request needs"),
-        inputs={"request": "add oauth", "constraints": list(CONSTRAINTS)},
+        inputs={"request": "add oauth", "constraints": _constraints(config)},
         value={"needs": ["a callback route", "a session store"]},
     )
     tickets = await run.step(
@@ -513,7 +609,7 @@ async def _retry(run: _Programme) -> None:
             f"review#{attempt}",
             "review",
             instructions="review the worktree",
-            inputs={"request": "add oauth", "constraints": list(CONSTRAINTS)},
+            inputs={"request": "add oauth", "constraints": _constraints(run.config)},
             value={"attempt": attempt},
         )
 
@@ -541,7 +637,7 @@ async def _siblings(run: _Programme) -> None:
         "spec",
         "spec",
         instructions="state what the request needs",
-        inputs={"request": "add oauth", "constraints": list(CONSTRAINTS)},
+        inputs={"request": "add oauth", "constraints": _constraints(run.config)},
         value={"needs": ["a callback route"]},
     )
     order = run.config.order
@@ -549,7 +645,7 @@ async def _siblings(run: _Programme) -> None:
     # `provider.open` inside a sibling is a suspension before `journal.step` is even called, so the
     # two coroutines would take their counters in whichever order real git finished in - a race,
     # and one that decides who gets `n = 0`. Opening them first leaves `journal.step` with no
-    # suspension before `Fingerprints.next`, which is the precondition that class's docstring
+    # suspension before the counter's `digest`, which is the precondition that class's docstring
     # states, and makes the counter order the order the coroutines were created in: the programme's
     # own order, and therefore `order`.
     for name in order:
@@ -576,6 +672,82 @@ async def _siblings(run: _Programme) -> None:
     await asyncio.gather(*(_sibling(position) for position in range(len(order))))
 
 
+class Refused(Exception):
+    """What a worker that fails looks like from the journal's side.
+
+    Any exception would do - §3.6's walk has no opinion about which and lets it out untouched - and
+    a named one is only so that `_crash` catches its own worker rather than any bug that happens to
+    pass through. What matters is what does **not** happen: the step wrote no entry, so nothing on
+    the ledger says it ever ran.
+    """
+
+
+def _refuses(_: JsonValue) -> None:
+    """The failing worker's body. Runs after the `worker` line is already on the log, deliberately:
+    the agent was called and the call was paid for, and only the recording did not happen."""
+    raise Refused("the agent refused the task")
+
+
+# The crash programme's two calls, which are two labels at **one** address. The step name, the
+# instructions and the inputs are shared between them by construction below, because the retry only
+# means anything if it is the same call: a different role or different inputs would be a different
+# `base` and a different address, and the counter would never have been asked the question.
+CRASHED: Final = "implement#raised"
+RETRIED: Final = "implement#retried"
+
+
+async def _crash(run: _Programme) -> None:
+    """A step that raises and is retried **inside one run** - §3.6's reason for advancing on write.
+
+    "A step that crashes and is retried within one run must not consume a slot - the crash is not
+    journalled, so a retry landing at `n = 1` is a slot a later resume asks for at `n = 0`, misses,
+    and pays an agent for again."
+
+    **The retry is in an `except` and that is the whole design of this programme.** The second
+    process walks the same code: it reaches the first call, and if the retry's entry is where a
+    resume looks - `n = 0` - that call *hits*, returns the recorded value, raises nothing, and the
+    `except` body is never entered. One call, one hit, no worker. Advance the counter on the call
+    instead and the entry sits at `n = 1`: the second process misses at `n = 0`, runs the worker
+    that raises, pays for it, falls into the `except` and only then hits. The observable difference
+    is one worker line in the resuming process's half of the log, which is exactly what the parent
+    counts.
+
+    Note where the kill boundary is not: `_Programme.step` counts a boundary after `journal.step`
+    *returns*, and a step that raised never gets there. That is the honest reading rather than an
+    oversight - `Config.kill_after`'s boundary is "after that step's entry is on disk and before
+    the next step begins", and a step that raised put nothing on disk, so killing "after" it would
+    be killing at a ledger state indistinguishable from killing before it. This programme is
+    therefore run to completion twice and swept over no kill points at all.
+    """
+    inputs: Mapping[str, object] = {
+        "request": "add oauth",
+        "constraints": _constraints(run.config),
+    }
+    instructions = "implement the ticket"
+    try:
+        await run.step(
+            CRASHED,
+            "implement",
+            instructions=instructions,
+            inputs=inputs,
+            does=_refuses,
+            value={"built": "T-01"},
+        )
+    except Refused:
+        # Same name, same role, same inputs, same head - so the same `base`, and the address is the
+        # counter's alone to decide. `commit=` differs and is allowed to: §3.6 keeps the message
+        # out of the fingerprint, so the retry writing a commit does not move it to another slot.
+        await run.step(
+            RETRIED,
+            "implement",
+            instructions=instructions,
+            inputs=inputs,
+            commit="implement T-01",
+            does=run.writes("src/oauth.py", "the callback route\n"),
+            value={"built": "T-01"},
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class Programme:
     """One runnable programme and the worker labels a complete run of it produces, in order.
@@ -583,6 +755,11 @@ class Programme:
     The labels live here rather than in the test so that the two cannot drift: "every step's worker
     ran exactly once in total, across both processes" is checked against this tuple, and a step
     added below without a label added beside it fails the very next run.
+
+    `crash` is the one programme whose labels are not one complete run's worth spread over two
+    processes: both of its workers run in the *first* process, because the second one hits and
+    never enters the retry at all. The tuple is still what the parent asserts against - it is just
+    asserted of one process rather than of the pair.
     """
 
     run: Callable[[_Programme], Awaitable[None]]
@@ -598,6 +775,7 @@ PROGRAMMES: Final[Mapping[str, Programme]] = MappingProxyType(
         "siblings": Programme(
             _siblings, ("spec", f"{SIBLINGS[0]}/implement", f"{SIBLINGS[1]}/implement")
         ),
+        "crash": Programme(_crash, (CRASHED, RETRIED)),
     }
 )
 

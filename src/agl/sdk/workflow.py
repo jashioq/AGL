@@ -16,12 +16,25 @@ params class, and it would be back to asking a module what it contains.
 ## What this stage builds, and what it deliberately leaves empty
 
 §3.3 gives `Run` six members - `params`, `step`, `worktree`, `integrate`, `activity`, `terminal` -
-plus `Stop`. **One of the six is here.** `step` and `activity` are stage 12, over the journal stage
-11 builds; `worktree` is 13, `integrate` is 14 and `terminal` is 15. They are not stubbed, not
-declared raising `NotImplementedError`, and not present as attributes that refuse. A member that
-exists and refuses is a member every caller has to ask about, and `hasattr` on it is exactly the
-duck typing this layer was built to replace. Stage 10 is the walking skeleton - `agl run noop -n x`
-exits 0 through the real wiring - and a `Run` carrying only `params` is what proves that.
+plus `Stop`. **Three of the six are here.** `worktree` is 13, `integrate` is 14 and `terminal` is
+15. They are not stubbed, not declared raising `NotImplementedError`, and not present as attributes
+that refuse. A member that exists and refuses is a member every caller has to ask about, and
+`hasattr` on it is exactly the duck typing this layer was built to replace.
+
+**`step` is a delegate and the engine is `sdk/_engine/steps.py`.** ARCHITECTURE.md §6 carries the
+row; the argument is that this module is the surface - a decorator, a frozen `Run`, `Stop` - and a
+lock, a lazily opened checkout, a capture cell and a replay walk are plumbing, which `sdk/` keeps
+under `_engine/` (`services.py` makes that case at length for the bundle). The four fields `step`
+needs are here, because a constructor's shape is what every call site is written against; what it
+*does* with them is not.
+
+**`activity` is a delegate for a second reason as well**, which is that a `Run` is frozen and
+slotted and the current activity string is by definition mutable - §3.7's "the current agent
+activity string for this Run ... or `None` when nothing is running". A frozen dataclass has nowhere
+to put it, and the answer is not a second mechanism: `_steps` already holds this namespace's
+mutable state, it is already the only thing that talks to an `AgentRunner`, and the string arrives
+through a callback on the very call it makes. So the cell lives there and this is a property over
+it. `sdk/_engine/steps.py` argues the rest, including why a replayed step has no activity at all.
 
 ## The class `registry.load` narrows to
 
@@ -63,17 +76,28 @@ argument and then requires a function taking a `Run[TicketsParams]`, so declarin
 and annotating another is an error at the decoration site. A function annotated with a bare `Run` is
 accepted at any `P`, `Run` being covariant in it.
 
-## The bundle is carried now and first read at stage 12
+## The bundle, the address, the base, and the counter
 
-`Run.services` is `sdk/_engine/services.py`'s eight ports, and nothing this stage does looks at it.
-It is here because `Run` is constructed by `api.py` at 10.3, and a constructor's shape is what every
-call site is written against - each of `cli/commands/`, `sdk/testing.py` at 16.5, and every test
-that drives a workflow. The first member to read it is `run.step` at stage 12: the journal's entries
-through `services.store`, the pre-step reset through `services.workspaces`, the dispatch through
-`services.agents`. Adding the field then would mean revisiting every one of those sites for a value
-that had been available all along, and it would make this stage's wiring mimed rather than real -
-`container.real()`'s output would have nowhere to go, which is the one thing the walking skeleton
-exists to disprove.
+`Run.services` is `sdk/_engine/services.py`'s eight ports. It was carried unread from 10.3, on the
+argument that a constructor's shape is what every call site is written against - each of
+`cli/commands/`, `sdk/testing.py` at 16.5, and every test that drives a workflow - and `run.step` is
+the member that now reads it: the ledger through `services.store`, the checkout through
+`services.workspaces`, the dispatch through `services.agents`, the entry's timestamp through
+`services.clock`.
+
+`scope` and `base` join it for the same reason and from the same caller. `api.run` already computes
+both - `RunScope(project, label)` is the address it writes the record under, and `RunSpec.base_sha`
+is the resolved commit it pins for exactly this purpose (§3.6: so that "a commit landing on `main`
+between run and resume" cannot change "the first step's starting head"). Deriving either inside
+`step` would mean this module reading `run.json` back through the store to learn something the
+caller had in a local variable.
+
+`fingerprints` is the run's shared counter, and it is a constructor argument **because 13.1 has to
+be able to hand it to a child**. §3.6 scopes `n` per `(namespace, step name)` and `Journal.__init__`
+argues that one counter per run is what makes that key mean anything; a counter built privately in
+here would look identical at stage 12, where a run has exactly one namespace, and would be rule 1's
+fix silently removed the moment `run.worktree()` cut the second. So the seam is a field with a
+default, filled by nothing today and by `worktree()` tomorrow.
 
 ## `Stop` is re-exported, never redefined
 
@@ -150,15 +174,19 @@ module-level list here would be a second one, holding only the workflows that ha
 imported.
 
 No `Run` factory and no `Run.child`. Constructing the root `Run` is the composition root's business
-at 10.3, and cutting a child is `run.worktree` at stage 12; a helper here would prejudge both.
+at 10.3, and cutting a child is `run.worktree` at stage 13; a helper here would prejudge both.
 """
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, is_dataclass
+from dataclasses import dataclass, field, is_dataclass
 from inspect import iscoroutinefunction
 
 from agl.ports.errors import InputError, Stop
+from agl.ports.home_layout import RunScope
+from agl.sdk._engine.journal import Fingerprints
 from agl.sdk._engine.services import Services
+from agl.sdk._engine.steps import Steps
+from agl.sdk.roles import Role
 
 __all__ = ["Run", "Stop", "Workflow", "workflow"]
 
@@ -169,11 +197,11 @@ class Run[P = object]:
 
     Frozen for `Services`' own reason: a run is what this invocation was assembled with, and
     reassigning a field halfway through would leave two halves of a workflow disagreeing about
-    which parameters they were given. Slotted, so the surface is the two fields below and an
-    attribute nobody declared cannot be attached to it.
+    which parameters they were given. Slotted, so the surface is the fields below and an attribute
+    nobody declared cannot be attached to it.
 
-    Five of §3.3's six members belong to stages 12 to 15 and are absent rather than stubbed - see
-    the module docstring, which also says why the bundle is carried before anything reads it.
+    Three of §3.3's six members belong to stages 13 to 15 and are absent rather than stubbed - see
+    the module docstring, which also argues each field below.
     """
 
     params: P
@@ -182,7 +210,121 @@ class Run[P = object]:
     the way in, before anything runs, so nothing here re-checks it."""
 
     services: Services
-    """The ports this run is served by. Carried, and first read by `run.step` at stage 12."""
+    """The ports this run is served by, and what `step` reaches every one of its dependencies
+    through. Typed as port ABCs throughout, so a workflow cannot tell a fake bundle from a real
+    one and cannot grow a branch on which it got."""
+
+    scope: RunScope
+    """Where this run's records go: `projects/<project>/runs/<label>/`, plus a namespace per
+    worktree once 13.1 cuts one. The address a step's entry is written under and the scope its
+    counter is keyed by (§3.6, rule 1)."""
+
+    base: str
+    """The commit this namespace's chain starts at - `RunSpec.base_sha`, resolved.
+
+    **A 40- or 64-character object name and never a ref expression.** `Journal`'s class docstring
+    argues it at length: this is hashed into every first fingerprint in the namespace and handed to
+    `restore`, and a ref name in either place is a run that re-fingerprints itself the day something
+    lands on that ref. Not re-checked here - `Journal` refuses an empty one and git judges the rest
+    at `restore`, where the judging happens anyway."""
+
+    fingerprints: Fingerprints = field(default_factory=Fingerprints)
+    """§3.6's counter `n`, one per run and shared by every namespace's journal.
+
+    Defaulted, because a root `Run` is the run and has nobody to inherit one from; a keyword all the
+    same, because 13.1's `run.worktree()` must hand *this* object to the child it cuts. The module
+    docstring says what a second counter over one run would cost."""
+
+    _steps: Steps = field(init=False, repr=False, compare=False)
+    """The engine `step` delegates to - `sdk/_engine/steps.py`, holding this namespace's checkout
+    and the walk over it.
+
+    Derived rather than passed, because it is a function of the four fields above and a caller free
+    to supply a different one could hand a `Run` an engine addressing another namespace. Built in
+    `__post_init__` through `object.__setattr__`, which is how `Entry` sets its own derived field on
+    a frozen dataclass. Out of `repr` and out of `__eq__`: two `Run`s are the same run when they
+    were assembled from the same four values, and mutable plumbing is not a fifth."""
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "_steps", Steps(self.services, self.scope, self.base, self.fingerprints)
+        )
+
+    @property
+    def activity(self) -> str | None:
+        """What the agent serving this Run is doing right now, or `None` when nothing is running.
+
+            Text(run.activity or "")      # §3.7's board, inside a view re-invoked per frame
+
+        **The string is the adapter's own** (§3.7): whichever backend is serving this step formats
+        its own line - `Bash: ./gradlew build`, `Edit: domain/usecase.kt` - and the framework passes
+        it through untouched. There is no `Activity` type, no shared vocabulary of verbs and no
+        table here that maps one backend's words onto another's, so two providers in one run will
+        word the same work differently and that is the accepted cost.
+
+        **Live-only, and never persisted.** It is derived from a call that is in flight, so a step
+        **replayed from cache reports nothing at all** - correctly, because nothing is running - and
+        no part of it reaches an entry, a fingerprint or the store. An adapter with nothing to say
+        never reports, so `None` is an ordinary answer during a step and not a sign of trouble;
+        anything that renders this must read it as decoration rather than as progress.
+
+        A plain attribute and not a call, because §3.7's views are re-invoked every frame:
+        `Text(run.activity)` is already live, which is why the plan builds no `Activity` component
+        and puts no activity parameter on any view signature. It is cleared when the step ends, on
+        every ending there is - the value returned, the agent raised, the task was cancelled.
+        """
+        return self._steps.activity
+
+    async def step[R](
+        self, name: str, role: Role[R], *, commit: str | None = None, **inputs: object
+    ) -> R:
+        """Run one step, or replay it. §3.3's "the only thing that persists anything".
+
+            findings = await run.step("review", reviewer)
+            await run.step("repair", implementer, findings=findings.high(),
+                           commit="address review findings")
+
+        Resolves an entry from `(label, namespace, name)` plus a fingerprint over the role, the
+        inputs and this namespace's starting head. **On a hit it returns the stored value without
+        running anything** - no agent, no adapter, no cost. On a miss it restores the checkout to
+        the last good head, builds an `AgentTask` from the `Role`, dispatches it to that model's
+        provider, commits or wipes per `commit=`, and records what came back.
+
+        **`commit=` is the one place in AGL where a mistake destroys work.** Given, the framework
+        commits whatever is dirty under that message and records the resulting head. Omitted, it
+        restores the checkout to the last good head and removes everything that was not in it -
+        `reset --hard` *and* `clean -fd` - so a read-only step is genuinely read-only and cannot
+        leave a scratch file, a cache directory or a partial edit behind. Either way it happens
+        whether this step returned or raised.
+
+        **So a step without `commit=` should use a role declaring `Restriction.NO_VCS_WRITES`.**
+        The framework does not check the combination, does not inspect what the role declared and
+        does not compare HEAD before and after (§3.3) - it does one predictable thing per `commit=`.
+        An agent that commits during a step that passed no `commit=` will have that work discarded,
+        silently, because the wipe does not care what it is throwing away. Pairing the two is the
+        author's job; §3.11's lint plugin is where a machine catches it.
+
+        **The message is not in the fingerprint** (§3.6): it is cosmetic, so rewording it and
+        replaying must not re-run an agent. The trade is that a replayed step keeps the commit it
+        already made, message and all.
+
+        **`**inputs` are fingerprinted and nothing else.** They must be JSON-serialisable or built
+        from dataclasses - `InputError` otherwise, naming the path to the offending value - and any
+        change to one re-runs the step and everything downstream of it, which is what gives replay
+        its build-system cascade. They are not interpolated into the prompt: `sdk/_engine/steps.py`
+        argues why, and what to write instead when a value has to reach the agent.
+
+        **The result is the role's reporting-tool payload**, read back as the dataclass the role
+        declared, on a fresh run and on a replay alike. A role declaring no reporting tool is an
+        effect step: its result is `None` and its effect is commits. `Role[P = None]` is what makes
+        `outcome = await run.step("implement", implementer)` an error at the line that wrote it.
+
+        `name` is opaque and validated on the way in - filesystem- and ref-safe, from
+        `[A-Za-z0-9._-]` - because it is concatenated into a path. `R` rather than `P`: `Run[P]`
+        already binds the workflow's params, and PEP 695 refuses a method parameter shadowing its
+        class's.
+        """
+        return await self._steps.step(name, role, commit=commit, inputs=inputs)
 
 
 # The one shape a workflow's function has. Private, because it is a spelling convenience rather

@@ -111,6 +111,7 @@ adapter. No module outside it may import from `agl.adapters.*`. Enforced by cont
 | `questions.py` | Re-export facade over `ports.questions` — no logic |
 | `testing.py` | The harness workflow authors test against: run a workflow on an all-fakes bundle, script agent replies and questions, drive kill-and-resume |
 | `_engine/journal.py` | Internal: fingerprints, entries and replay — the ledger under `steps/` that makes a run resumable |
+| `_engine/steps.py` | Internal: what `run.step` is a delegate to — the journal lookup, the `AgentTask` a `Role` becomes, the dispatch, the commit-or-wipe and the entry write, in that order. It lives here and not in `workflow.py` because `sdk/` keeps its plumbing under `_engine/`, and because the one member that persists anything should not be read past on the way to the decorator. Also holds the cell behind `run.activity`: the last string the serving adapter reported, live-only and never persisted, which a frozen `Run` has nowhere to keep |
 | `_engine/worktrees.py` | Internal: namespace → worktree mapping, nested `worktrees/<name>/` storage, per-namespace head chaining |
 | `_engine/integration.py` | Internal: per-target **serialized** merge, the lease, the build gate, and revert on failure |
 

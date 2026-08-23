@@ -1,0 +1,622 @@
+"""What a reporting-tool declaration promises: one dataclass, one schema, one typed result.
+
+Four properties carry this suite. **The schema is asserted structurally**, as the whole object a
+vendor is handed, because it is a stored format - it goes into a step's fingerprint, so a change to
+how it is derived re-runs every step ever recorded, and a test that checked only "it has a `type`"
+would let that change through. **Every refused field type is pinned by its message**, naming the
+field, since the reader of an `InputError` is a workflow author looking for the line they wrote -
+`tests/sdk/test_params.py` pins the same module's other refusals the same way. **A malformed
+payload does not raise**, which is asserted by there being no `pytest.raises` around any of it:
+§3.3 rejects one back to the agent inside the same conversation, and a suite that accepted an
+exception would pass against exactly the design this module exists to implement. And **the round
+trip is measured through `json.dumps`**, not asserted about, because "survives JSON unchanged" is
+the rule the supported field list is derived from.
+
+The fingerprint half is measured against `journal.base_of` rather than restated:
+`tests/sdk/test_journal.py` already pins that a hand-built `Tool`'s handler is not a term, and what
+is new here is that a tool *derived* from a declaration behaves the same way - and that its
+description is a term, which is §3.6's own example of a change that must re-run a step.
+"""
+
+import json
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import FrozenInstanceError, asdict, dataclass, field, make_dataclass
+from enum import StrEnum
+from pathlib import Path
+from types import MappingProxyType
+from typing import Any, Final, assert_type
+
+import pytest
+
+from agl.ports.agent import Claude, Tool, ToolResult
+from agl.ports.errors import InputError, InternalError
+from agl.ports.run import JsonValue
+from agl.sdk._engine.journal import base_of, canonical_json
+from agl.sdk.tools import ReportingTool, reporting_tool
+
+_HEAD: Final = "4a91c07f2b3e8d15c6a0b7f31d92e8054c6a0f13"
+
+
+@dataclass(frozen=True)
+class Finding:
+    """A nested payload dataclass, with an optional field and two required ones."""
+
+    file: str
+    severity: str
+    line: int | None = None
+
+
+@dataclass(frozen=True)
+class Findings:
+    """§3.3's `findings = await run.step("review", reviewer)` / `findings.high()`, as a payload:
+    one field of every supported kind, and the method the workflow calls on what comes back."""
+
+    summary: str
+    findings: list[Finding]
+    confidence: float = 1.0
+    blocking: bool = False
+    tags: tuple[str, ...] = ()
+
+    def high(self) -> list[Finding]:
+        return [found for found in self.findings if found.severity == "high"]
+
+
+REPORT: Final = reporting_tool("report_findings", "report what the review found", Findings)
+
+_ONE_HIGH: Final[Mapping[str, JsonValue]] = MappingProxyType(
+    {
+        "summary": "one thing to fix",
+        "findings": [
+            {"file": "a.py", "severity": "high", "line": 3},
+            {"file": "b.py", "severity": "low"},
+        ],
+        "tags": ["review"],
+    }
+)
+
+
+async def _never_called(payload: Mapping[str, JsonValue]) -> ToolResult:
+    """A handler is a callable and a callable's `repr` carries an object id, so no fingerprint may
+    hold one. Nothing in this suite runs an agent, which is why nothing calls this."""
+    return ToolResult(text="")
+
+
+_HANDLER: Final[Callable[[Mapping[str, JsonValue]], Awaitable[ToolResult]]] = _never_called
+
+
+def _tool[P](
+    declared: ReportingTool[P],
+    handler: Callable[[Mapping[str, JsonValue]], Awaitable[ToolResult]] = _HANDLER,
+) -> Tool:
+    """A declaration converted the way 12.1's `Run.step` will convert one: the three declared terms,
+    plus a handler bound at dispatch. This is the only place in the suite that builds a `Tool`."""
+    return Tool(
+        name=declared.name,
+        description=declared.description,
+        payload_schema=declared.payload_schema,
+        handler=handler,
+    )
+
+
+def _base(tool: Tool) -> str:
+    """One step's base fingerprint, with every term but the tool held still."""
+    return base_of(
+        instructions="review the worktree",
+        model=Claude.SONNET,
+        restrictions=frozenset(),
+        tools=(tool,),
+        inputs={},
+        head=_HEAD,
+    )
+
+
+# --- the derived schema, asserted as the whole object -------------------------------------------
+
+
+def test_the_derived_schema_is_the_object_a_vendor_is_handed() -> None:
+    """The stored format, in full. Nested objects, an optional as `anyOf`, arrays with their item
+    schema, `required` holding exactly the fields with no default, and `additionalProperties`."""
+    assert dict(REPORT.payload_schema) == {
+        "type": "object",
+        "properties": {
+            "summary": {"type": "string"},
+            "findings": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "file": {"type": "string"},
+                        "severity": {"type": "string"},
+                        "line": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
+                    },
+                    "required": ["file", "severity"],
+                    "additionalProperties": False,
+                },
+            },
+            "confidence": {"type": "number"},
+            "blocking": {"type": "boolean"},
+            "tags": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["findings", "summary"],
+        "additionalProperties": False,
+    }
+
+
+def test_the_schema_carries_the_two_keys_both_adapters_look_for() -> None:
+    """`claude_code/_tools.py::_schema` and `openai/_tools.py::_advertised` each supply `type` and
+    `properties` when a schema omits them - the Claude SDK re-reads a dict without both as a
+    `{name: python type}` shorthand. A derived schema needs neither supplied."""
+    schema = dict(REPORT.payload_schema)
+    assert schema["type"] == "object"
+    assert isinstance(schema["properties"], dict)
+
+
+def test_the_schema_is_wrapped_the_way_a_tools_is() -> None:
+    """`Tool.__post_init__`'s proxy, one layer earlier: a caller that kept a reference cannot edit a
+    schema already inside a fingerprint. `json.dumps` refusing it is §3.6 rule 4's whole hazard, and
+    `base_of` handling it anyway is the rule being kept."""
+    assert isinstance(REPORT.payload_schema, MappingProxyType)
+    with pytest.raises(TypeError):
+        json.dumps(REPORT.payload_schema)
+    assert len(_base(_tool(REPORT))) == 64
+
+
+def test_a_field_with_a_default_is_not_required_and_one_without_it_is() -> None:
+    schema = dict(REPORT.payload_schema)
+    assert schema["required"] == ["findings", "summary"]
+
+
+def test_reordering_two_fields_costs_no_agent_run() -> None:
+    """`required` is sorted, so a cosmetic edit does not move the fingerprint. `properties` needs no
+    sorting of its own: it is a JSON object and canonical JSON sorts an object's keys."""
+
+    @dataclass(frozen=True)
+    class OneWay:
+        alpha: str
+        beta: str
+
+    @dataclass(frozen=True)
+    class TheOther:
+        beta: str
+        alpha: str
+
+    one = reporting_tool("report", "report it", OneWay)
+    other = reporting_tool("report", "report it", TheOther)
+    assert dict(one.payload_schema) == dict(other.payload_schema)
+    assert _base(_tool(one)) == _base(_tool(other))
+
+
+def test_a_payload_with_no_fields_is_a_declaration_and_not_a_refusal() -> None:
+    """A reporting tool whose payload has no fields still captures the one fact a reporting step
+    turns on: that the agent fired it at all."""
+
+    @dataclass(frozen=True)
+    class Done:
+        pass
+
+    declared = reporting_tool("done", "say that you have finished", Done)
+    assert dict(declared.payload_schema)["properties"] == {}
+    assert declared.read({}) == Done()
+
+
+# --- every refused field type, each naming the field ---------------------------------------------
+
+
+class Severity(StrEnum):
+    HIGH = "high"
+
+
+@dataclass(frozen=True)
+class HasMapping:
+    counts: dict[str, int]
+
+
+@dataclass(frozen=True)
+class HasSet:
+    files: set[str]
+
+
+@dataclass(frozen=True)
+class HasEnum:
+    severity: Severity
+
+
+@dataclass(frozen=True)
+class HasFixedTuple:
+    span: tuple[int, str]
+
+
+@dataclass(frozen=True)
+class HasBareList:
+    items: list  # type: ignore[type-arg]  # the bare annotation is the point of this one
+
+
+@dataclass(frozen=True)
+class HasWideUnion:
+    line: str | int
+
+
+@dataclass(frozen=True)
+class HasThreeArmedOptional:
+    line: str | int | None
+
+
+@dataclass(frozen=True)
+class HasPath:
+    where: Path
+
+
+@dataclass(frozen=True)
+class HasNothing:
+    nothing: None
+
+
+@dataclass(frozen=True)
+class HasAny:
+    anything: Any
+
+
+@dataclass(frozen=True)
+class Node:
+    """A payload that contains itself, at module level so that the forward reference resolves and
+    the refusal is the cycle's own rather than the annotation's."""
+
+    children: list[Node]
+
+
+@pytest.mark.parametrize(
+    ("payload", "named"),
+    [
+        (HasMapping, "counts"),
+        (HasSet, "files"),
+        (HasEnum, "severity"),
+        (HasFixedTuple, "span"),
+        (HasBareList, "items"),
+        (HasWideUnion, "line"),
+        (HasThreeArmedOptional, "line"),
+        (HasPath, "where"),
+        (HasNothing, "nothing"),
+        (HasAny, "anything"),
+    ],
+)
+def test_an_unsupported_field_type_is_refused_naming_the_field(
+    payload: type[object], named: str
+) -> None:
+    """Refused where it is declared, not at the call that would have gone wrong - `sdk/params.py`'s
+    stance, and its reason: a package that cannot be invoked correctly should not import."""
+    with pytest.raises(InputError) as refusal:
+        reporting_tool("report", "report it", payload)
+    assert named in str(refusal.value)
+
+
+def test_a_payload_that_contains_itself_is_refused_rather_than_recursing() -> None:
+    """Without this the derivation is a `RecursionError`, which names nothing an author can fix."""
+    with pytest.raises(InputError) as refusal:
+        reporting_tool("report", "report it", Node)
+    assert "children" in str(refusal.value)
+
+
+def test_an_annotation_that_cannot_be_resolved_is_refused_where_it_is_written() -> None:
+    """`sdk/params.py`'s refusal, for the same reason: the fields are read for their types, so each
+    has to name something importable from where the dataclass is. Built through `make_dataclass`
+    because PEP 649 resolves a forward reference written the ordinary way, even a local one."""
+    payload = make_dataclass("Payload", [("nested", "Nowhere")], frozen=True)
+    with pytest.raises(InputError) as refusal:
+        reporting_tool("report", "report it", payload)
+    assert "cannot be resolved" in str(refusal.value)
+
+
+def test_a_payload_that_is_not_a_dataclass_is_refused() -> None:
+    with pytest.raises(InputError) as refusal:
+        reporting_tool("report", "report it", str)
+    assert "builtins.str" in str(refusal.value)
+
+
+def test_a_payload_instance_where_the_class_belonged_is_refused() -> None:
+    """The mistake `sdk/workflow.py::_check_params` refuses in the same words, one layer along."""
+    with pytest.raises(InputError) as refusal:
+        reporting_tool("report", "report it", Findings(summary="", findings=[]))  # type: ignore[arg-type]
+    assert "never an instance" in str(refusal.value)
+
+
+def test_an_empty_name_and_an_empty_description_are_refused_as_a_tools_would_be() -> None:
+    """`Tool.__post_init__`'s two checks, made where the declaration is written."""
+    with pytest.raises(InputError):
+        reporting_tool("", "report it", Findings)
+    with pytest.raises(InputError):
+        reporting_tool("report", "", Findings)
+
+
+# --- a valid payload, and the round trip ---------------------------------------------------------
+
+
+def test_a_valid_payload_becomes_the_instance_the_workflow_declared() -> None:
+    assert REPORT.rejection(_ONE_HIGH) is None
+    assert REPORT.read(_ONE_HIGH) == Findings(
+        summary="one thing to fix",
+        findings=[Finding("a.py", "high", 3), Finding("b.py", "low")],
+        tags=("review",),
+    )
+
+
+def test_an_absent_optional_field_leaves_the_dataclasss_own_default() -> None:
+    """Nothing is passed for it, so the default written on the author's line is what stands."""
+    read = REPORT.read({"summary": "nothing", "findings": []})
+    assert (read.confidence, read.blocking, read.tags) == (1.0, False, ())
+
+
+def test_an_instance_survives_the_round_trip_through_json_unchanged() -> None:
+    """instance -> payload -> `json.dumps` -> payload -> instance, equal. This is the rule the
+    supported field list is derived from, so it is measured rather than asserted about."""
+    original = Findings(
+        summary="two things",
+        findings=[Finding("a.py", "high", 3), Finding("b.py", "low")],
+        confidence=0.25,
+        blocking=True,
+        tags=("review", "spec"),
+    )
+    written = json.dumps(asdict(original))
+    assert REPORT.read(json.loads(written)) == original
+
+
+def test_a_json_array_comes_back_as_the_sequence_its_field_declared() -> None:
+    """JSON has one bracket for a list and a tuple, so the declared type is the only thing that can
+    tell them apart on the way back - which is what makes `tuple[X, ...]` round-trip at all."""
+    read = REPORT.read({"summary": "x", "findings": [], "tags": ["a", "b"]})
+    assert isinstance(read.tags, tuple)
+    assert isinstance(read.findings, list)
+
+
+def test_no_payload_this_module_accepts_is_one_the_journal_would_refuse() -> None:
+    """A payload instance travels on into the next step's `**inputs` - §3.3's own example passes
+    `findings=highs` - where `journal._canonical` fingerprints it and refuses what it cannot walk.
+    The supported field list is drawn inside that walker's set, and this is the measurement."""
+    assert canonical_json({"findings": REPORT.read(_ONE_HIGH)})
+
+
+# --- the rejection path: every malformed shape answers, and none of them raises -------------------
+
+
+def test_an_unknown_key_is_rejected_and_names_the_key_and_the_fields_there_are() -> None:
+    refusal = REPORT.rejection({"summary": "x", "findings": [], "notes": "extra"})
+    assert refusal is not None
+    assert "notes" in refusal
+    assert "summary" in refusal
+
+
+def test_a_missing_required_key_is_rejected_and_says_what_was_expected() -> None:
+    refusal = REPORT.rejection({"summary": "x"})
+    assert refusal is not None
+    assert "report_findings.findings" in refusal
+    assert "required" in refusal
+
+
+def test_a_wrongly_typed_value_is_rejected_naming_the_field_and_what_arrived() -> None:
+    refusal = REPORT.rejection({"summary": 3, "findings": []})
+    assert refusal is not None
+    assert "report_findings.summary" in refusal
+    assert "a string" in refusal
+    assert "3" in refusal
+
+
+def test_a_fault_nested_inside_an_array_is_rejected_at_its_own_path() -> None:
+    refusal = REPORT.rejection({"summary": "x", "findings": [{"file": "a.py"}]})
+    assert refusal is not None
+    assert "report_findings.findings[0].severity" in refusal
+
+
+def test_a_field_declared_as_an_object_and_sent_as_a_string_is_rejected() -> None:
+    refusal = REPORT.rejection({"summary": "x", "findings": ["not an object"]})
+    assert refusal is not None
+    assert "report_findings.findings[0]" in refusal
+
+
+def test_true_is_not_a_whole_number() -> None:
+    """`bool` is an `int` in Python and `true` is not a number in JSON, so coercing here would let a
+    model answer a count with a flag - `journal._canonical` takes the same care for the same reason.
+    """
+    refusal = REPORT.rejection(
+        {"summary": "x", "findings": [{"file": "a.py", "severity": "high", "line": True}]}
+    )
+    assert refusal is not None
+    assert "report_findings.findings[0].line" in refusal
+
+
+def test_a_whole_number_is_accepted_for_a_float_field() -> None:
+    """JSON writes `2.0` as `2`, so refusing an int here refuses a value this module produced."""
+    assert REPORT.read({"summary": "x", "findings": [], "confidence": 1}).confidence == 1.0
+
+
+def test_a_non_finite_number_is_rejected_rather_than_stored() -> None:
+    """`json.loads` reads a bare `Infinity` token - which is not in JSON's grammar - as a float, and
+    the store refuses to write one down as an `InternalError`. Caught here, the model is told."""
+    refusal = REPORT.rejection(json.loads('{"summary": "x", "findings": [], "confidence": NaN}'))
+    assert refusal is not None
+    assert "report_findings.confidence" in refusal
+    assert "a finite number" in refusal
+
+
+def test_null_for_a_field_that_is_not_optional_is_rejected() -> None:
+    refusal = REPORT.rejection({"summary": None, "findings": []})
+    assert refusal is not None
+    assert "report_findings.summary" in refusal
+
+
+def test_null_for_an_optional_field_is_accepted() -> None:
+    sent = {"file": "a.py", "severity": "low", "line": None}
+    assert REPORT.read({"summary": "x", "findings": [sent]}).findings[0].line is None
+
+
+def test_every_problem_in_one_payload_is_reported_at_once() -> None:
+    """A model told about one fault per turn pays a turn per fault, and there is a live session
+    holding the reasoning that produced the call - which is the whole of §3.3's argument."""
+    refusal = REPORT.rejection(
+        {"summary": 3, "notes": "extra", "findings": [{"severity": 1}], "blocking": "yes"}
+    )
+    assert refusal is not None
+    assert refusal.count("\n  - ") == 5
+
+
+def test_a_payload_dataclass_that_refuses_its_own_value_rejects_rather_than_raising() -> None:
+    """A payload states its own rules in `__post_init__`, the way every dataclass here does. On a
+    fresh call that belongs in front of the model with everything else."""
+
+    @dataclass(frozen=True)
+    class Bounded:
+        score: int
+
+        def __post_init__(self) -> None:
+            if self.score < 0:
+                raise InputError("a score is not negative")
+
+    declared = reporting_tool("report", "report it", Bounded)
+    refusal = declared.rejection({"score": -1})
+    assert refusal is not None
+    assert "a score is not negative" in refusal
+
+
+# --- read, and what a failure means on the way back off the ledger -------------------------------
+
+
+def test_a_recorded_value_that_no_longer_fits_the_payload_is_an_internal_error() -> None:
+    """AGL wrote the value and AGL is reading it, so a disagreement is ours - `journal.py`'s test
+    for whose fault an error is. §3.6 expects the fingerprint to have discarded this entry; the
+    module docstring records the two ways it may not have."""
+    with pytest.raises(InternalError) as fault:
+        REPORT.read({"summary": "x"})
+    assert "report_findings" in str(fault.value)
+
+
+def test_a_recorded_value_that_is_not_an_object_at_all_is_an_internal_error() -> None:
+    """`read` takes `object`: a parsed file is anything, an effect step's recorded `null` too."""
+    with pytest.raises(InternalError):
+        REPORT.read(None)
+
+
+# --- the fingerprint consequences §3.6 names ------------------------------------------------------
+
+
+def test_editing_a_derived_tools_description_changes_the_steps_base() -> None:
+    """§3.6's own reason for putting the role in the fingerprint: halt, edit, resume, and you must
+    not replay what the old wording produced. Measured against `base_of`, not restated."""
+    reworded = reporting_tool(REPORT.name, "report every problem you found", Findings)
+    assert _base(_tool(REPORT)) != _base(_tool(reworded))
+
+
+def test_a_derived_tools_handler_is_not_a_term_in_the_base() -> None:
+    """`tests/sdk/test_journal.py` pins this for a hand-built `Tool`; what is new is that a tool
+    12.1 derives from a declaration behaves identically. It has to: the handler is bound per
+    invocation, closing over that one call's capture cell, so a base holding one would differ from
+    itself on the next call."""
+
+    async def other(payload: Mapping[str, JsonValue]) -> ToolResult:
+        return ToolResult(text="a different handler entirely")
+
+    assert _base(_tool(REPORT)) == _base(_tool(REPORT, other))
+
+
+def test_editing_the_payload_dataclass_changes_the_steps_base() -> None:
+    """The cascade §3.6 promises: change what the agent is asked to report, and the step re-runs."""
+
+    @dataclass(frozen=True)
+    class Wider:
+        summary: str
+        findings: list[Finding]
+        confidence: float = 1.0
+        blocking: bool = False
+        tags: tuple[str, ...] = ()
+        reviewed_at: str = ""
+
+    widened = reporting_tool(REPORT.name, REPORT.description, Wider)
+    assert _base(_tool(REPORT)) != _base(_tool(widened))
+
+
+def test_the_schema_is_derived_from_the_fields_and_not_from_the_payloads_name() -> None:
+    """Which is the recorded limit of §3.6's "a stale entry is discarded rather than failing to
+    parse - that falls out free". It is free for every *structural* change; swapping a payload for a
+    structurally identical one leaves the base untouched, and `journal.py`'s rule 6 - the qualified
+    type name a dataclass input contributes - has no counterpart here. Pinned as the behaviour it
+    is, and reported as a finding rather than presented as a promise."""
+
+    @dataclass(frozen=True)
+    class SameShape:
+        summary: str
+        findings: list[Finding]
+        confidence: float = 1.0
+        blocking: bool = False
+        tags: tuple[str, ...] = ()
+
+    twin = reporting_tool(REPORT.name, REPORT.description, SameShape)
+    assert _base(_tool(REPORT)) == _base(_tool(twin))
+
+
+# --- the type chain §3.3 promises -----------------------------------------------------------------
+
+
+async def _step[P](declared: ReportingTool[P], payload: Mapping[str, JsonValue]) -> P:
+    """A stand-in for 12.1's `Run.step`, carrying the declaration's type parameter through the way
+    that method must. Nothing here is the journal; the point is what mypy makes of the result."""
+    return declared.read(payload)
+
+
+@pytest.mark.asyncio
+async def test_the_payload_type_carries_through_to_what_the_workflow_calls() -> None:
+    """§3.3: `findings = await run.step("review", reviewer)` then `findings.high()`. `assert_type`
+    is the half `mypy --strict` checks; the call below is the half pytest checks."""
+    findings = await _step(REPORT, _ONE_HIGH)
+    assert_type(findings, Findings)
+    assert [found.file for found in findings.high()] == ["a.py"]
+
+
+# --- the re-export half --------------------------------------------------------------------------
+
+
+def test_tool_and_tool_result_are_the_ports_own_types_and_not_copies() -> None:
+    """`sdk/tools.py` is a facade *and* a module with logic; this is the facade half. A workflow
+    author's `Tool` has to be the one that crosses `AgentTask.tools`, or nothing it builds fits."""
+    from agl.ports import agent
+    from agl.sdk import tools
+
+    assert tools.Tool is agent.Tool
+    assert tools.ToolResult is agent.ToolResult
+
+
+def test_a_declaration_is_not_a_tool_and_carries_no_handler() -> None:
+    """The design constraint the module is built on: `AgentTask.tools` holds ordinary `Tool`s, so
+    the adapter never learns which one is the reporting one, and a `Role` reused across concurrent
+    runs holds nothing that belongs to one of them."""
+    assert not isinstance(REPORT, Tool)
+    assert not hasattr(REPORT, "handler")
+
+
+def test_a_declaration_holds_the_three_terms_a_tool_contributes_to_a_fingerprint() -> None:
+    """§3.6 rule 4, and the reason a declaration without a handler is the honest shape."""
+    derived = _tool(REPORT)
+    assert (derived.name, derived.description) == (REPORT.name, REPORT.description)
+    assert dict(derived.payload_schema) == dict(REPORT.payload_schema)
+
+
+def test_a_declaration_is_frozen() -> None:
+    """It is a module-level value shared across steps and across concurrent runs."""
+    with pytest.raises(FrozenInstanceError):
+        REPORT.name = "renamed"  # type: ignore[misc]
+
+
+def test_the_default_factory_case_is_optional_too() -> None:
+    """`dataclasses` insists on a field with neither a default nor a default factory, and that is
+    the whole of what "required" means here - a sentinel of our own would answer it twice."""
+
+    @dataclass(frozen=True)
+    class Collected:
+        names: list[str] = field(default_factory=list)
+
+    declared = reporting_tool("collect", "report what you collected", Collected)
+    assert dict(declared.payload_schema)["required"] == []
+    assert declared.read({}) == Collected()
+
+
+def test_a_sequence_of_declarations_is_ordinary_data() -> None:
+    """Tools keep their declared order and are not sorted (§3.6 rule 4), so a `Role` holding two of
+    these is holding a sequence and nothing more."""
+    declarations: Sequence[ReportingTool[Findings]] = (REPORT,)
+    assert [declared.name for declared in declarations] == ["report_findings"]

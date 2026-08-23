@@ -9,22 +9,29 @@ agreeing about one name.
 §3.6 writes the fingerprint in three lines, and the first half of this module is those three lines:
 
     base   = sha256(canonical_json({role, inputs, head}))
-    n      = times `base` was used earlier in this namespace, for this step name  (0, 1, 2, ...)
+    n      = entries claimed earlier in this namespace, for this step name  (0, 1, 2, ...)
     digest = sha256(base + ":" + str(n))                            <- the entry's filename
 
 `canonical_json` is the text, `base_of` is the hash of it, and `Fingerprints` is `n`. Three names
 rather than one call, deliberately: the replay walk needs them at different moments - a base
-computed before there is anything to look up, a counter that ticks once per invocation whether the
-step replayed or ran - and a rule that can only be broken all at once is a rule nobody can show is
-load-bearing one piece at a time.
+computed before there is anything to look up, and a counter that answers an address before the
+step runs but only advances once an entry exists at it - and a rule that can only be broken all at
+once is a rule nobody can show is load-bearing one piece at a time.
 
-**Every rule below fails the same way, and the way is silence.** Not an exception, not a wrong
-answer, not a damaged file: a digest that differs from the one already on disk, an entry that is
+**Every rule below fails in silence, and most of them fail in the cheap direction.** Not an
+exception, not a damaged file: a digest that differs from the one already on disk, an entry that is
 therefore not found, and a step that runs its agent again and writes a second entry beside the
 first. The run still finishes and the output is still right. The only symptoms are the bill and the
-wait. That is why §3.6 states three of these in the plan itself rather than leaving them to this
+wait. That is why §3.6 states four of these in the plan itself rather than leaving them to this
 stage, and it is why each rule below is written with its failure attached rather than as a
 convention.
+
+**Two of them fail in the expensive direction instead, and both are collisions.** Rule 6 below and
+the surrogate refusal argued in `_checked_text` are the two places where two different inputs could
+reach one canonical text - and a collision here is not a miss, it is a false cache **hit**: an
+entry found under a digest that something else computed, and its recorded result handed back for a
+step whose inputs were not these. Nothing re-runs, nothing raises, and the answer is wrong. Both
+are therefore written with the colliding pair spelled out.
 
 **Rule 1 - the counter is scoped per `(namespace, step name)`, and never per invocation.** The key
 is `(scope, step, base)`. Concurrent siblings produce identical bases by construction: `T-01` and
@@ -38,6 +45,15 @@ is just as sharp: two differently-named steps sharing a role, inputs and head ar
 different `steps/<name>/` directories, so their counts are separate ledgers and have to be separate
 counts.
 
+**And it advances when an entry is written, not when a step is called** (§3.6, in those words). A
+step that raised is not done - "a step is done when its file is there" - so it consumed no slot,
+and a retry inside the same run has to land at the address the crashed attempt would have. Advance
+on the call instead and the retry lands at `n = 1`, a later resume walks the same calls, asks for
+`n = 0`, finds nothing, and pays an agent for work already on the ledger. A replay hit advances it
+for the mirror-image reason: the entry exists, so a second identical call must look one slot
+further or it replays the first one's result forever. "Claimed" therefore means *written by this
+walk or replayed by this walk*, and never *ran*.
+
 **Rule 2 - sort every set, wherever it appears.** `frozenset[Restriction]` has no stable iteration
 order across processes: `Restriction` is a `StrEnum`, `Enum.__hash__` hashes the member name, and
 `PYTHONHASHSEED` randomises it. Measured while this was written, seeds 1, 3, 5, 11, 13 and 31337
@@ -46,16 +62,15 @@ the whole failure in one line: same role, same inputs, same head, different dige
 port is right to promise no ordering - a set is not a level and has none - so sorting is this
 module's obligation and nobody else's. The obligation is not discharged by sorting `restrictions`
 on the way past, either: a set reached through `inputs` has the identical defect, including one
-`dataclasses.asdict` hands back out of a frozen dataclass field, which it deep-copies as a
-`frozenset` and not as a list. So the sort lives in the walker, at every depth, keyed on each
-element's own canonical text - a total order that does not ask the elements to be comparable with
-one another.
+held in a frozen dataclass's field, which rule 6's walker hands on as the `frozenset` it is and not
+as a list. So the sort lives in the walker, at every depth, keyed on each element's own canonical
+text - a total order that does not ask the elements to be comparable with one another.
 
-**Rule 3 - `**inputs` must be JSON-serialisable, and the refusal has to say where.** Dataclasses go
-through `dataclasses.asdict` and everything else is refused. §3.3's own tickets example passes
-`findings=highs`, a list of the workflow's own dataclasses, and the one-line shortcut that would
-make that work is `repr()` - whose default embeds an object id, so the text differs in the next
-process and the fingerprint with it, which is rule 2's failure arriving through a different door.
+**Rule 3 - `**inputs` must be JSON-serialisable, and the refusal has to say where.** Dataclasses
+are unpacked field by field (rule 6) and everything else is refused. §3.3's own tickets example
+passes `findings=highs`, a list of the workflow's own dataclasses, and the one-line shortcut that
+would make that work is `repr()` - whose default embeds an object id, so the text differs in the
+next process and the fingerprint with it, which is rule 2's failure through a different door.
 The `InputError` names the offending type *and* the path to it inside `inputs`
 (`inputs.findings[0].deadline is a datetime`), because a value nested three levels down a list of
 dataclasses is not findable from its type alone, and it says why: this value would be fingerprinted,
@@ -78,6 +93,30 @@ different insertion orders are two fingerprints; without the second, a `json.dum
 ever changes is a silent reformat of every base ever computed. Both flags are written in exactly one
 expression below, `_dumps`, which is what keeps the text that is hashed and the text a set is sorted
 on the same text.
+
+**Rule 6 - a dataclass contributes its qualified type name, at every depth.** §3.6, and the one
+rule here whose failure is a false cache hit rather than a re-run: unpacked by field name alone,
+`Finding("T-01", 3)` and `Ticket("T-01", 3)` are one canonical text, so changing an input's type
+while keeping its shape finds the old type's entry and **replays the wrong result**. Nothing
+re-runs and nothing raises. `type(value).__module__` and `__qualname__` are the name, because two
+identically-named dataclasses in two modules are two types and a workflow that swapped one for the
+other changed its inputs.
+
+*The depth is the whole of the implementation.* `dataclasses.asdict` recurses, turning a nested
+dataclass into a plain `dict` before any walker here could see it, so tagging what `asdict` returns
+names the outermost type and erases every one below it - `Outer(inner=Inner(1))` and
+`Outer(inner=Other(1))` would still be one fingerprint. The fields are therefore walked here
+(`dataclasses.fields` plus `getattr`) and handed back to `_canonical`, which puts this branch in
+the path of every dataclass however deep, and inside lists, tuples, mappings and sets alike.
+
+*The encoding is a stored format, and it is injective by refusal.* A dataclass canonicalises to its
+fields plus one reserved key, `_TYPE_KEY`, holding the qualified name. That is only one-to-one if
+nothing else can produce the same object, so `_checked_key` refuses that one key everywhere: in a
+`Mapping` a workflow passes, and in a dataclass field name too. Loud where the alternative is
+silent, and the cost is one string out of every key there is. What it does **not** close is the
+collision JSON's own vocabulary imposes and no type name could: a set, a tuple and a list holding
+the same members are one array, because JSON has one bracket for all three. That predates this rule
+and is unchanged by it.
 
 ## The entry, and why the file existing is the whole of the ledger
 
@@ -127,9 +166,11 @@ and none of them in a condition.
 ## The walk, and the one value it is forbidden to look up
 
 `Journal` is §3.6's replay loop over one namespace: compute the base from the role, the inputs and
-the starting head; take the counter; read; and either hand back what is recorded or restore, run,
-commit-or-wipe, and write. The two halves above are what it is built out of, and the loop adds
-exactly one piece of state - `last_good`, the commit this namespace is known to be at.
+the starting head; take the counter's address; read; and either hand back what is recorded or
+restore, run, commit-or-wipe, and write - claiming the slot on whichever of those two endings it
+reached. The two halves above are what it is built out of, and the loop adds exactly one piece of
+state - `last_good`, the commit this namespace is known to be at - and one lock, because §3.6
+serializes steps within a namespace and the class docstring argues what that lock is holding shut.
 
 **`last_good` is chained logically from recorded entries and is never read from the physical
 worktree**, which is the sentence §3.6 calls load-bearing and the reason `step` computes its own
@@ -170,6 +211,7 @@ The rule is not "this module raises `InputError`"; it is that the class names wh
 belongs to, and the two halves of this module take their values from different people.
 """
 
+import asyncio
 import dataclasses
 import json
 import unicodedata
@@ -202,6 +244,16 @@ __all__ = [
 
 # Rule 5, and the only place these are written - see `_dumps`.
 _SEPARATORS: Final = (",", ":")
+
+# Rule 6's tag: the key a dataclass writes its qualified type name under, and the one key no
+# `Mapping` and no dataclass field reaching `_canonical` may be spelled with. This is a **stored
+# format** in the same sense `base_of`'s object is - every digest ever written over a dataclass was
+# computed with this string in it - so respelling it re-runs every step recorded under the old one.
+# Chosen to be a string nobody types by accident and one that reads as not-yours where it turns up
+# in `_checked_key`'s refusal, which names AGL rather than leaving the reader to guess whose key it
+# is. Note it is a perfectly legal dataclass field name - two trailing underscores mean no name
+# mangling - which is why `_checked_key` is spent on field names too and not only on a `Mapping`'s.
+_TYPE_KEY: Final = "__agl_type__"
 
 # §3.6's four entry fields, in the order that section writes them. This is the published shape of
 # every file under `steps/`, which a later AGL reading an older ledger depends on - and which the
@@ -288,10 +340,19 @@ def base_of(
 class Fingerprints:
     """The counter `n`, scoped per `(namespace, step name)`. One instance per run.
 
-    `next` is called **once per step invocation, whether that step replays or re-runs**, and that
-    is the whole mechanism behind §3.6's "`n` is never persisted; replay walks the same calls in
-    the same order and reproduces the same values". A counter that ticked only on a miss would
-    produce `n = 0` on the second run of a step that replayed at `n = 1` on the first.
+    **Two methods and not one, which is rule 1's second half.** `digest` answers "what address is
+    this invocation's", and `claimed` says "an entry now exists at it". §3.6: "the counter advances
+    when an entry is written, not when a step is called". A single read-modify-write cannot say
+    that - it advances on every invocation, a step whose worker raised included, and the crash is
+    not journalled. So the retry that follows it inside the same run lands at `n = 1`, and a later
+    resume walking the same calls asks for `n = 0`, finds nothing there, and pays an agent for work
+    that is already on the ledger.
+
+    **A replay hit claims a slot too**, and that half matters just as much in the other direction:
+    the entry exists, so a second identical call has to look one slot further or it hands back the
+    first one's result forever. "Claimed" is *written by this walk or replayed by this walk*, and
+    never *ran* - which is the whole mechanism behind §3.6's "`n` is never persisted; replay walks
+    the same calls in the same order and reproduces the same values".
 
     A plain class and not a dataclass, and deliberately mutable: it is the one piece of state the
     journal keeps, it exists to be advanced, and a frozen thing returning a new copy would leave
@@ -300,21 +361,39 @@ class Fingerprints:
     """
 
     def __init__(self) -> None:
-        # No lock, and none needed. `next` is synchronous and contains no `await`, so under asyncio
-        # the read-modify-write below cannot interleave with another call to it - the engine is
-        # single-threaded by construction, and a step's siblings are tasks on one event loop.
+        # No lock, and the reason is no longer "one call, no `await` inside it". The pair below is
+        # a read and a later write with the whole of a step between them, so it is not atomic and
+        # this object does not pretend otherwise. What makes it safe is where the pair is spent:
+        # the scope is in the key, so the only key two coroutines can contend for is one they both
+        # reach through the same namespace - and `Journal.step` holds that namespace's lock across
+        # both calls. The counter is deterministic under concurrency because of rule 1 and that
+        # lock together; neither is sufficient alone.
         self._counts: dict[tuple[RunScope, StepName, str], int] = {}
 
-    def next(self, scope: RunScope, step: StepName, base: str) -> str:
-        """The digest for this invocation, advancing the count for `(scope, step, base)`.
+    def digest(self, scope: RunScope, step: StepName, base: str) -> str:
+        """The address for `(scope, step, base)` at its present count: `sha256(base + ":" + n)`.
 
-        Shadowing the builtin as a *method* name is fine and is kept: `counter.next(...)` reads as
-        the next one, and nothing in this module or any other loses access to `next()` by it.
+        A pure query, and that is what lets `Journal.step` take it once - before the walk can
+        suspend - and spend the one string on both the read and the write. Asking twice with
+        nothing claimed in between gives the same answer twice, deliberately: an address is a
+        question about the ledger, and asking it is not an event.
+        """
+        count = self._counts.get((scope, step, base), 0)
+        return sha256(f"{base}:{count}".encode()).hexdigest()
+
+    def claimed(self, scope: RunScope, step: StepName, base: str) -> None:
+        """Record that an entry now exists at the digest this key last answered with.
+
+        The three arguments are the caller's and nothing here checks that they are the ones the
+        digest was taken with - the same stance `write_entry` takes about its address, and for the
+        same reason: AGL's own composition puts one triple in both places. Claiming under a
+        different key would advance a ledger nothing wrote to *and* leave this one a slot short,
+        which is this module's failure mode in both of its directions at once. That is why the two
+        calls live inside one method, `Journal.step`, rather than being an interface anything else
+        is invited to pair up for itself.
         """
         key = (scope, step, base)
-        count = self._counts.get(key, 0)
-        self._counts[key] = count + 1
-        return sha256(f"{base}:{count}".encode()).hexdigest()
+        self._counts[key] = self._counts.get(key, 0) + 1
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -494,13 +573,28 @@ class Journal:
     and its own checkout. What they share is a `Fingerprints`, and only that; see below.
 
         entry = read(steps/<name>/<digest>.json) or None
-        if entry: last_good = entry.head; return entry.value
+        if entry: claim(); last_good = entry.head; return entry.value
         restore(last_good)                       # unconditional - see below
-        result = run_worker()
-        commit_all(commit) if commit is not None else restore(last_good)
+        try:    result = run_worker()
+        finally: commit_all(commit) if commit is not None else restore(last_good)
         write(path, {fingerprint, value: result, head: head(), at: now()})
-        last_good = head()
+        claim(); last_good = head()
         return result
+
+    **Steps in one namespace are serialized, and the lock is held across the whole of `step`.**
+    §3.6: "a namespace's workspace is single-threaded". Rule 1's counter buys determinism at the
+    *address* level and no further; the `Workspace` is one checkout, and §3.3's own example gathers
+    two reviewers over it. Overlapped, A's pre-run restore wipes the files B's worker has just
+    written, B's `commit_all` records A's changes under B's message, and A's `head()` after its own
+    commit reads B's - a wrong answer, a mislabelled commit and a corrupted chain, none of which is
+    a re-run and none of which raises. So a `gather` over same-namespace steps is legal and simply
+    does not overlap. It costs latency and nothing else, and an author who wants real concurrency
+    opens a `worktree()`, which is what the trees root is flat for.
+
+    The lock is on this object because the `Workspace` is: one namespace, one checkout, one chain,
+    one lock. It is also what makes `Fingerprints`' two calls a pair - `digest` and `claimed` are
+    separated by the whole of a step, and the only counter key two coroutines can contend for is
+    one they both reach through this `Journal`.
 
     **`last_good` is initialised to `base` and is never `None`.** §3.6 writes the pre-run guard as
     `if last_good:`, as though there were a moment before the chain starts. There is not, and three
@@ -532,14 +626,29 @@ class Journal:
     Stage 12's `Run.step` spreads a `Role`'s fields into these keywords. The parameter list is long
     for that reason and is expected to shorten by one stage.
 
-    **A crashed step leaves no entry, and there is no failure path here.** No `finally`, no wipe on
-    the way out of an exception, nothing shielded: §3.6's pseudocode has none of it, and its own
-    argument is that the *next* attempt's unconditional pre-run restore is what makes a crash's
-    leavings harmless. The commit-or-wipe that runs "on success and on failure alike" is 12.1's,
-    and the `asyncio.shield` a cancelling task needs - `await restore(...)` in a `finally` inside
-    one re-raises `CancelledError` before it runs - is 12.4's. Both are named in the build order as
-    those deliverables' own acceptance criteria, so anticipating them here would be writing the
-    half of them that nothing tests.
+    **A crashed step leaves no entry, and the commit-or-wipe runs anyway.** §3.3: "the wipe runs
+    whether the step succeeded or raised", which is one `finally` around the worker and nothing
+    else. The two halves are deliberately not symmetrical, and the asymmetry is the design: the
+    *ending* runs on both paths, because otherwise a failed reviewer's scratch files sit in the
+    checkout the retry is about to work in and the next agent reviews them; the *entry* is written
+    only on the way out through the bottom, because "a step is done when its file is there" and a
+    step that raised is not done. That is what makes the next attempt re-run it, and it is why the
+    write, the claim and the `_last_good` assignment are all below the `try` rather than inside it.
+
+    An exception from the ending itself replaces the worker's, with the worker's kept as its
+    `__context__` - ordinary `finally` semantics, and the right ones here: a `commit_all` or a
+    `restore` that would not go is a fact about the checkout the next step is about to be handed,
+    and is more urgent than the reason this step stopped.
+
+    **And the ending runs to completion even when the task around it is being cancelled**, which
+    is `_ended` below and is the one place in this walk where ordinary `await` is not enough.
+    Written plainly, `await self._workspace.restore(...)` inside a `finally` is aborted at its own
+    first suspension the moment another cancellation arrives - and another one arrives whenever a
+    supervisor cancels until the task dies or a person presses Ctrl-C twice - which leaves a wipe
+    that got as far as `reset --hard` and no further, and so leaves every untracked file the
+    cancelled step created sitting in the checkout the next step is handed. That is §3.3's
+    contamination arriving through the one door nothing was watching. `_ended` says what it costs
+    to close it, and why `asyncio.shield` on its own is not the closing.
 
     Nothing gets a sequence number: replay walks the workflow in order, so the order is the
     program's and not a field (§3.6, "ordering is free").
@@ -562,7 +671,9 @@ class Journal:
         is what makes the count per-(namespace, step name) rather than per-object - and a counter
         built in this constructor would be per-`Journal`, which for a workflow that opens one
         `Journal` per namespace happens to look identical and for one that opens two over a scope
-        is rule 1's failure with rule 1's fix removed.
+        is rule 1's failure with rule 1's fix removed. The serialization lock below is the same
+        composition read the other way round: two `Journal`s over one scope would be two locks over
+        one namespace, which is not a lock at all.
 
         `base` is the whole of the initial state, for the reasons the class docstring gives.
         """
@@ -584,6 +695,12 @@ class Journal:
         # Deliverable 14.1 adds a third - `integrate()` writing `IntegrationOutcome.head` here -
         # and the module docstring says what it costs to leave it out.
         self._last_good = base
+        # §3.6's "a namespace's workspace is single-threaded", and this is where it is spent.
+        # Constructed here rather than lazily inside `step`: a lock built on first use would be
+        # built twice by two coroutines that arrived together, which is two locks and no exclusion,
+        # in the exact case the lock exists for. `asyncio.Lock()` has needed no running loop since
+        # 3.10, so a `Journal` is still constructible from synchronous code.
+        self._running = asyncio.Lock()
 
     async def step(
         self,
@@ -603,7 +720,9 @@ class Journal:
         workspace commits whatever is dirty under that message; omitted, it is restored to
         `last_good`, so a read-only role cannot leave a scratch file, a cache directory or a
         partial edit behind. The framework does not inspect what the role declared and does not
-        compare HEAD before and after (§3.3) - it does one predictable thing per `commit=`.
+        compare HEAD before and after (§3.3) - it does one predictable thing per `commit=`, **on
+        success and on failure alike**, and only the entry is conditional on there having been no
+        failure. The class docstring argues that asymmetry.
 
         **The message is not in the fingerprint**, which is `base_of`'s doing and is why this
         parameter is absent from the call below. §3.6: a message is cosmetic, and "including it
@@ -614,65 +733,177 @@ class Journal:
         The value comes back as `JsonValue`. Turning it into the dataclass a workflow declared is
         the Role's business at stage 12, and a stale entry is discarded rather than failing to
         parse, because changing the declared type changes the tool schema and so the fingerprint.
-        """
-        base = base_of(
-            # `self._last_good`, and never `await self._workspace.head()`. The class docstring and
-            # §3.6 both make this the load-bearing line: a head read from the worktree here is how
-            # a run whose children have landed re-runs every one of its own steps on every resume,
-            # in silence. A `head` parameter on this method would be the same hole with a caller
-            # to blame, which is why there is none - the base is computed here or nowhere.
-            instructions=instructions,
-            model=model,
-            restrictions=restrictions,
-            tools=tools,
-            inputs=inputs,
-            head=self._last_good,
-        )
-        # Taken here, synchronously, before the first `await` in this method - and this is a
-        # precondition of `Fingerprints`' own contract rather than a stylistic preference. Rule 1
-        # makes the counter deterministic for *siblings*, because siblings occupy different
-        # namespaces; it does nothing for two concurrent steps of one name in one scope, which
-        # `asyncio.gather(journal.step("review", ...), journal.step("review", ...))` is. Those two
-        # share a `(scope, step, base)` key, so a suspension before this line would let the
-        # interleaving decide who gets `n = 0` - and the interleaving differs on resume. With no
-        # suspension before it, the order is the order the coroutines were created, which is the
-        # program's own order and is the same on every run.
-        digest = self._fingerprints.next(self._scope, name, base)
-        entry = await read_entry(self._store, self._scope, name, digest)
-        if entry is not None:
-            # A hit advances the chain from what was recorded, not from where the tree happens to
-            # be. This is the assignment §3.6's "chained logically" clause is about: on a resume
-            # the physical worktree may be far ahead of this namespace's own history.
-            self._last_good = entry.head
-            return entry.value
 
-        await self._workspace.restore(self._last_good)
-        result = await worker()
+        **The lock spans the whole method, and the whole is what §3.6 asks for.** Two steps in one
+        namespace share one `Workspace`, and every moment of the walk touches it: the pre-run
+        restore, the worker, the commit-or-wipe, the `head()` the entry records. A lock around any
+        part of that would leave the rest overlapping, which is the same defect with a smaller
+        window. It also covers `_last_good` and the counter's two calls, which is why there is one
+        lock here and no second one anywhere.
+        """
+        async with self._running:
+            base = base_of(
+                # `self._last_good`, and never `await self._workspace.head()`. The class docstring
+                # and §3.6 both make this the load-bearing line: a head read from the worktree here
+                # is how a run whose children have landed re-runs every one of its own steps on
+                # every resume, in silence. A `head` parameter on this method would be the same
+                # hole with a caller to blame, which is why there is none - the base is computed
+                # here or nowhere.
+                instructions=instructions,
+                model=model,
+                restrictions=restrictions,
+                tools=tools,
+                inputs=inputs,
+                head=self._last_good,
+            )
+            # Taken here, synchronously, before this method's first suspension - a precondition of
+            # `Fingerprints`' own contract rather than a stylistic preference, and one the lock
+            # above does not make redundant. The lock already keeps two same-name steps in this
+            # namespace from interleaving at all, so the *order* they take their addresses in is
+            # the order they acquired: FIFO, which is creation order, which is the program's own.
+            # But that leans on asyncio's wake order, an implementation property of the runtime.
+            # Taking the address before anything can suspend makes the counter's order the order
+            # the coroutines were created in without asking the runtime for anything - which is
+            # what has to be true on the resume too, since the resume differs precisely in timing.
+            digest = self._fingerprints.digest(self._scope, name, base)
+            entry = await read_entry(self._store, self._scope, name, digest)
+            if entry is not None:
+                # A hit claims the slot: the entry exists, so the next identical call in this
+                # namespace has to look one further or it replays this same result forever.
+                self._fingerprints.claimed(self._scope, name, base)
+                # And it advances the chain from what was recorded, not from where the tree happens
+                # to be. This is the assignment §3.6's "chained logically" clause is about: on a
+                # resume the physical worktree may be far ahead of this namespace's own history.
+                self._last_good = entry.head
+                return entry.value
+
+            await self._workspace.restore(self._last_good)
+            try:
+                result = await worker()
+            finally:
+                # §3.3: "the wipe runs whether the step succeeded or raised". A `finally` and not a
+                # pair of paths, because the two endings are the same two endings either way - and
+                # because the failure this covers is not the crash, it is the *next* step: whatever
+                # a step that raised left in the checkout is what the retry's agent would otherwise
+                # be looking at. The entry is not written here, and that asymmetry is the class
+                # docstring's: the ending runs on both paths and the record only on one. "Both
+                # paths" includes the third one a `finally` is not enough for on its own - see
+                # `_ended`, which is why this line is a call and not the two it makes.
+                await self._ended(commit)
+
+            # The *ending* head is read from the worktree, and that is not a contradiction of the
+            # rule above: §3.6 defines it as "worktree HEAD after this step completed", and the
+            # whole reason it is recorded is that only the worktree knows what the worker
+            # committed. One read covering both branches, as §3.6 writes it - `commit_all` also
+            # answers with the resulting head, but spending its return value would give the effect
+            # ending and the read-only ending two different sources for one field, and the field is
+            # the chain.
+            head = await self._workspace.head()
+            await write_entry(
+                self._store,
+                self._scope,
+                name,
+                digest,
+                # `fingerprint=digest`: the entry is filed under the digest and claims the digest.
+                # `write_entry` records what it is handed without comparing (deliberately - see its
+                # docstring), so composing an entry that claimed anything else would pass here and
+                # miss on every future read, which is this module's failure mode in its best
+                # disguise.
+                Entry(fingerprint=digest, value=result, head=head, at=self._clock.now()),
+            )
+            # Claimed **after** the write and not before it, which is §3.6's "the counter advances
+            # when an entry is written, not when a step is called" at the one line where the two
+            # readings differ. Everything above this can raise - the worker most of all - and a
+            # step that raised wrote no entry, so it consumed no slot and its retry inside this
+            # same run belongs at the address it would have used. Claiming earlier puts the retry
+            # at `n = 1`, where a later resume asking for `n = 0` finds nothing and pays again.
+            self._fingerprints.claimed(self._scope, name, base)
+            self._last_good = head
+            return result
+
+    async def _ended(self, commit: str | None) -> None:
+        """Run this step's ending, and do not come back until it has actually happened.
+
+        `_ending` below is the whole of what §3.3 asks for and is two lines long. This method is
+        the reason it is reached through anything at all, and what it exists for is the third way
+        out of a step - not returning and not raising, but being cancelled.
+
+        **A plain `await` in a `finally` is not run to the end inside a task that is being
+        cancelled hard.** The first cancellation is what *starts* the ending: it is delivered at
+        the worker's own suspension, and the `finally` then begins. A second one - a supervisor
+        cancelling until the task dies, a person pressing Ctrl-C again, a scope aborting twice -
+        lands on whatever the ending is suspended on and aborts it where it stands. §3.3's wipe is
+        `reset --hard` *and* `clean -fd`, so "where it stands" is very often between the two, and
+        what survives is exactly the untracked scratch file the wipe exists to remove, in the
+        checkout the next step is about to be handed. The step is over either way; the
+        contamination is the next step's problem, and it is silent.
+
+        **`asyncio.shield` alone is not the fix, and it fails in the shape that looks like one.**
+        `await asyncio.shield(ending)` re-raises `CancelledError` in *this* task the moment this
+        task is cancelled, and leaves `ending` running, detached. The `finally` then returns with
+        the wipe not done but merely *in progress*, so whether the checkout is clean when anything
+        next looks at it is a question about scheduling. A test written against that passes and
+        fails by turns and proves nothing either way.
+
+        So the shield is wrapped in a loop over `ending.done()`, and the loop is the half that
+        makes this a wait rather than a wrapper: the shield keeps `ending` alive through a
+        cancellation, and the loop takes the shield again afterwards, absorbing one cancellation
+        per turn, until the ending is genuinely finished. Nothing here can outlast the ending, and
+        nothing here cancels it.
+
+        **The cancellation is re-raised, and that is the point rather than a leftover.** A step
+        that swallowed one would return normally into a workflow that carried on to the next step,
+        which is a run that was told to stop and did not - the worst of the outcomes available, and
+        worse than the leavings this method is here to sweep up. What a cancelled step gets from
+        this is the promise that its ending happened before it died, and nothing else.
+
+        **Nothing here calls `Task.uncancel()`**, which is worth stating rather than leaving to be
+        found. Absorbing a cancellation without uncancelling it leaves `Task.cancelling()` counting
+        requests that were swallowed, and `asyncio.timeout` and `TaskGroup` compare exactly that
+        count against their own to decide whether a `CancelledError` was theirs - so a step that
+        absorbed *extra* cancellations inside one of those scopes hands back a `CancelledError` the
+        scope no longer recognises, which is a timeout arriving under the wrong name. It is left
+        alone because no such scope exists: nothing in AGL opens a `TaskGroup` or a deadline around
+        a step, §3.7 has no timeouts anywhere by design, and matching the bookkeeping of a caller
+        nobody has written yet is guessing at it.
+        """
+        ending = asyncio.create_task(self._ending(commit))
+        cancellation: asyncio.CancelledError | None = None
+        while not ending.done():
+            try:
+                await asyncio.shield(ending)
+            except asyncio.CancelledError as raised:
+                # This task's cancellation and never the ending's: nothing cancels that one, which
+                # is the whole of what the shield buys. Kept rather than re-raised here, because
+                # re-raising here is precisely the bug - the ending is still running.
+                cancellation = raised
+            except Exception:
+                # The ending itself failed, so `ending` is done and this loop is over. Broken out
+                # of rather than propagated from here, so that the failure and any cancellation
+                # that arrived alongside it are weighed in one place, below.
+                break
+        failed = ending.exception()
+        if cancellation is not None:
+            if failed is not None:
+                # Both happened. The cancellation still wins, for the reason above - and the
+                # failure is chained rather than dropped, which is also what keeps it from being
+                # an exception asyncio logs at collection time as one nobody ever retrieved.
+                raise cancellation from failed
+            raise cancellation
+        if failed is not None:
+            raise failed
+
+    async def _ending(self, commit: str | None) -> None:
+        """One of §3.3's two endings, chosen by `commit=` and by nothing else.
+
+        A coroutine of its own only because `_ended` runs it as a task; the framework does not
+        inspect what the role declared and does not compare HEAD before and after, so this is the
+        whole of the decision and there is no third branch to add to it.
+        """
         if commit is not None:
             await self._workspace.commit_all(commit)
         else:
             await self._workspace.restore(self._last_good)
-
-        # The *ending* head is read from the worktree, and that is not a contradiction of the rule
-        # above: §3.6 defines it as "worktree HEAD after this step completed", and the whole reason
-        # it is recorded is that only the worktree knows what the worker committed. One read
-        # covering both branches, as §3.6 writes it - `commit_all` also answers with the resulting
-        # head, but spending its return value would give the effect ending and the read-only ending
-        # two different sources for one field, and the field is the chain.
-        head = await self._workspace.head()
-        await write_entry(
-            self._store,
-            self._scope,
-            name,
-            digest,
-            # `fingerprint=digest`: the entry is filed under the digest and claims the digest.
-            # `write_entry` records what it is handed without comparing (deliberately - see its
-            # docstring), so composing an entry that claimed anything else would pass here and miss
-            # on every future read, which is this module's failure mode wearing its best disguise.
-            Entry(fingerprint=digest, value=result, head=head, at=self._clock.now()),
-        )
-        self._last_good = head
-        return result
 
 
 def _dumps(value: JsonValue) -> str:
@@ -724,19 +955,42 @@ def _canonical(value: object, where: str) -> JsonValue:
         # Rule 2. Sorted on each element's own canonical text so the order is total without the
         # elements having to be comparable with each other - `frozenset({1, "a"})` has no `<`.
         # An element's path is `{where}[]`: a set has no positions, so the path names the set and
-        # not a slot in it. (Accepted, and named rather than hidden: two distinct elements whose
-        # canonical text is identical - a `Point(1, 2)` and a `Vector(1, 2)` in one set - tie, and
-        # a stable sort leaves ties in iteration order. Breaking the tie would mean putting a type
-        # name into the fingerprint, which is a change to a stored format for an exotic case.)
+        # not a slot in it. (A tie - two elements whose canonical text is identical - costs nothing
+        # in the array they are sorted into, since equal keys mean equal text and the order between
+        # them cannot change the result. What a tie used to cost was a collision between two
+        # *different* sets: `{Point(1, 2)}` and `{Vector(1, 2)}` were one fingerprint. Rule 6 closes
+        # that one, because each element now carries its own qualified type name. What is left is
+        # the collision JSON's vocabulary imposes and no type name can close - a set, a tuple and a
+        # list holding the same members are one array, because JSON has one bracket for all three.)
         return sorted((_canonical(item, f"{where}[]") for item in value), key=_dumps)
     if isinstance(value, list | tuple):
         return [_canonical(item, f"{where}[{index}]") for index, item in enumerate(value)]
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        # Rule 3's supported case. A dataclass *class* is not an instance and falls through to the
-        # refusal below: `asdict` cannot take one, and a workflow passing a class where it meant an
-        # instance wants to hear about it rather than to be given a fingerprint over its name.
-        # Sets survive `asdict` as sets, which is the whole reason the branch above exists.
-        return _canonical(dataclasses.asdict(value), where)
+        # Rule 3's supported case, and rule 6. A dataclass *class* is not an instance and falls
+        # through to the refusal below: a workflow passing a class where it meant an instance wants
+        # to hear about it rather than to be given a fingerprint over its name.
+        #
+        # **The fields are walked here rather than through `dataclasses.asdict`, and that is rule
+        # 6's whole implementation.** `asdict` recurses, so a nested dataclass arrives as a plain
+        # `dict` and a tag applied to what it returned would name the outer type and erase every
+        # one below it - `Outer(inner=Inner(1))` and `Outer(inner=Other(1))` would stay one
+        # fingerprint. Handing each field back to `_canonical` instead puts this branch in the path
+        # of every dataclass at every depth, and inside a list, a tuple, a mapping or a set alike.
+        # Nothing is lost by dropping `asdict`: it deep-copies, and this rebuilds. What it does not
+        # do is recurse into sets, which is why the branch above already had to exist.
+        #
+        # The field names go through `_checked_key` for one reason: it refuses `_TYPE_KEY`, and a
+        # field spelled that - legal Python, no mangling with two trailing underscores - would
+        # otherwise overwrite the tag and hand this dataclass another type's fingerprint.
+        kind = type(value)
+        tagged: dict[str, JsonValue] = {
+            _TYPE_KEY: _checked_text(f"{kind.__module__}.{kind.__qualname__}", f"{where}'s type")
+        }
+        for field in dataclasses.fields(value):
+            tagged[_checked_key(field.name, where)] = _canonical(
+                getattr(value, field.name), f"{where}.{field.name}"
+            )
+        return tagged
     raise InputError(
         f"{where} is a {type(value).__name__}, which cannot be canonicalised: a step's inputs are "
         f"fingerprinted, and a fingerprint is what a resume compares to decide whether to replay "
@@ -778,16 +1032,34 @@ def _normalised(moment: datetime) -> datetime:
 
 
 def _checked_key(key: object, where: str) -> str:
-    """A JSON object's keys are strings. `json` would coerce anything else, and so rename it.
+    """A JSON object's keys are strings, and one string is this module's rather than the caller's.
 
     Held to `_checked_text` as well, for the reason a key is the same boundary as a value: it goes
     into the same text through the same encoder.
+
+    **`_TYPE_KEY` is refused, and that refusal is the whole of what makes rule 6 injective.** A
+    dataclass canonicalises to its fields plus that one key holding its qualified type name, so a
+    `Mapping` free to spell the same key could render byte-for-byte as a dataclass and share its
+    fingerprint - a false cache **hit**, one input handed back another's recorded result, which is
+    the expensive direction and the one this module spends refusals on. Every dataclass field name
+    comes through here for the same reason, since `__agl_type__` is a legal one.
+
+    Refusing rather than escaping is the trade this module makes elsewhere: it costs exactly one
+    string out of every key there is, it fails loudly at the moment the value is passed, and the
+    alternative - reserving nothing and hoping - fails silently a run later and cannot be noticed.
     """
     if not isinstance(key, str):
         raise InputError(
             f"{where} is keyed by {key!r}, a {type(key).__name__}, and a JSON object is keyed by "
             f"strings - canonicalising this would silently rename the key, and a renamed key is a "
             f"different fingerprint from the one this step's entry was written under"
+        )
+    if key == _TYPE_KEY:
+        raise InputError(
+            f"{where} is keyed by {_TYPE_KEY!r}, which AGL reserves: it is the key a dataclass "
+            f"writes its qualified type name under, so a mapping carrying it would canonicalise to "
+            f"the same text as some dataclass and one of the two would replay the other's recorded "
+            f"result. Spell the key some other way"
         )
     return _checked_text(key, f"the key {key!r} in {where}")
 

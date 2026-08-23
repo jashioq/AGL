@@ -38,10 +38,18 @@ import pytest
 from agl.config import container, registry
 from agl.ports import errors
 from agl.ports.errors import AglError, InputError, exit_code_for
+from agl.ports.home_layout import RunScope
+from agl.ports.ids import ProjectName, RunLabel
 from agl.ports.tree_layout import TreesRoot
+from agl.sdk._engine.journal import Fingerprints
 from agl.sdk._engine.services import Services
 from agl.sdk.params import arg, parse
 from agl.sdk.workflow import Run, Stop, Workflow, workflow
+
+# Where a run's records go and the commit its chain starts at. Nothing in this file takes a step,
+# so neither is ever spent; `tests/sdk/test_run_step.py` is where they are.
+SCOPE: Final = RunScope(ProjectName("myapp"), RunLabel("auth"))
+BASE: Final = "4a91c07f2b3e8d15c6a0f31d8e2b47c9a6013f5e"
 
 # `asyncio_mode = "strict"` turns a missing marker into a test pytest silently skips, so every
 # async test below carries `@pytest.mark.asyncio` of its own.
@@ -97,8 +105,24 @@ def _returns_an_awaitable(run: Run[NoParams]) -> Awaitable[None]:
 
 def _services(tmp_path: Path) -> Services:
     """A bundle from the composition root, on fakes - target #8's, and the only honest way to fill
-    eight fields typed as port ABCs. Nothing this stage does reads it; `run.step` at 12 will."""
+    eight fields typed as port ABCs. `run.step` is what reads it, and reads it lazily: no port
+    below is touched by building a `Run` or by any test in this file."""
     return container.fakes(TreesRoot(tmp_path / "trees")).services
+
+
+def _run[P](params: P, tmp_path: Path, *, fingerprints: Fingerprints | None = None) -> Run[P]:
+    """A `Run` over a fakes bundle at a fixed scope and base.
+
+    `fingerprints` is spelled out rather than defaulted through, because the one test below that
+    supplies its own is testing exactly that it can - that is 13.1's seam.
+    """
+    return Run(
+        params=params,
+        services=_services(tmp_path),
+        scope=SCOPE,
+        base=BASE,
+        fingerprints=Fingerprints() if fingerprints is None else fingerprints,
+    )
 
 
 def _point(name: str, attribute: str) -> EntryPoint:
@@ -153,7 +177,7 @@ async def test_the_chain_api_py_will_write_carries_no_any(tmp_path: Path) -> Non
     assert_type(wf.params, type[object])
     params = parse(wf.params, [])
     assert_type(params, object)
-    run = Run(params=params, services=_services(tmp_path))
+    run = _run(params, tmp_path)
     assert_type(run, Run[object])
     await wf.fn(run)
     assert run.params == NoParams()
@@ -167,7 +191,7 @@ async def test_the_run_carries_the_params_instance_the_workflow_declared(tmp_pat
     """`agl run tickets -n auth -r "add oauth" -c 4`, from the parse to what the workflow reads."""
     _handed.clear()
     params = parse(TicketsParams, ["-r", "add oauth", "-c", "4"])
-    run = Run(params=params, services=_services(tmp_path))
+    run = _run(params, tmp_path)
     assert_type(run, Run[TicketsParams])
     await tickets.fn(run)
     assert _handed == [run]
@@ -175,18 +199,52 @@ async def test_the_run_carries_the_params_instance_the_workflow_declared(tmp_pat
 
 
 def test_the_run_carries_the_bundle_the_container_built(tmp_path: Path) -> None:
-    """Carried and not read: stage 12's `run.step` is the first member that looks at it, and the
-    field is here now because 10.3 constructs the `Run` and every call site is written against
-    it."""
+    """The same object, not a copy: `run.step` reaches every port through this, so a `Run` holding
+    a bundle assembled elsewhere would be a workflow writing to a second ledger."""
     services = _services(tmp_path)
-    assert Run(params=NoParams(), services=services).services is services
+    assert Run(params=NoParams(), services=services, scope=SCOPE, base=BASE).services is services
 
 
-def test_a_run_holds_nothing_it_did_not_declare() -> None:
-    """Slotted, so the surface is the two fields below. Five of §3.3's six members belong to stages
-    12 to 15 and are absent rather than stubbed, and an attribute a caller attached to a `Run`
-    would be a sixth that nobody declared and that replay would never see."""
-    assert Run.__slots__ == ("params", "services")
+def test_the_run_carries_the_address_and_the_base_api_py_already_computed(tmp_path: Path) -> None:
+    """`scope` and `base` are `api.run`'s two locals, handed over rather than re-derived. Both are
+    read on the first step - the address an entry is written under, and the commit the chain starts
+    at - and neither is reachable from anything else a `Run` holds."""
+    run = _run(NoParams(), tmp_path)
+    assert (run.scope, run.base) == (SCOPE, BASE)
+
+
+def test_a_run_can_be_handed_the_counter_a_parent_is_already_using(tmp_path: Path) -> None:
+    """13.1's seam, pinned while it is cheap to.
+
+    §3.6 scopes `n` per `(namespace, step name)`, which only means anything if every namespace in a
+    run counts against one object. `run.worktree()` is what will pass it; what this asserts is that
+    there is a way in at all, because a counter built privately in `__post_init__` would look
+    identical today - a run has one namespace at stage 12 - and would be rule 1's fix silently
+    removed the moment a child was cut.
+    """
+    counter = Fingerprints()
+    assert _run(NoParams(), tmp_path, fingerprints=counter).fingerprints is counter
+
+
+def test_a_run_holds_nothing_it_did_not_declare(tmp_path: Path) -> None:
+    """Slotted, so the surface is the fields below. Four of §3.3's six members belong to stages
+    12.4 to 15 and are absent rather than stubbed, and an attribute a caller attached to a `Run`
+    would be one more that nobody declared and that replay would never see.
+
+    `_steps` is the engine `step` delegates to, derived in `__post_init__` from the four public
+    fields - `Entry` sets its own derived field the same way - and it is deliberately not a
+    constructor argument: a caller free to supply one could hand a `Run` an engine addressing
+    another namespace's checkout.
+    """
+    assert Run.__slots__ == ("params", "services", "scope", "base", "fingerprints", "_steps")
+    with pytest.raises(TypeError, match="_steps"):
+        Run(
+            params=NoParams(),
+            services=_services(tmp_path),
+            scope=SCOPE,
+            base=BASE,
+            _steps=None,  # type: ignore[call-arg]
+        )
 
 
 # --- `Stop`, and the ordering hazard it comes with ---------------------------------------------

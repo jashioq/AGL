@@ -69,10 +69,11 @@ to resume or to clear. It is the one value in AGL with no other copy anywhere (`
 the cost of writing it early is a stale record after a crash - which `clear` takes away - and the
 cost of writing it late is a run that happened and cannot be named.
 
-**No worktree, no branch, no journal, no step, no lock, and no persistence beyond `run.json`.**
-`Run.step` is stage 12 and needs stage 11's fingerprinting underneath it; the base worktree is 13.4;
-integration is 14. `RunSpec.branch` is written here and no branch is created to match it - the
-record says where the run's work will go, and the thing that puts it there arrives later.
+**No worktree, no branch, no lock, and no persistence beyond `run.json`.** Steps persist their own
+entries, from inside the workflow, through the `Run` built on the last line; the base worktree is
+13.4's to provision eagerly, and until then `run.step` opens it on first use; integration is 14.
+`RunSpec.branch` is written here and no branch is created to match it - the record says where the
+run's work will go, and the thing that puts it there arrives later.
 
 ## `run` catches nothing at all, which is how the `Stop` ordering hazard is met
 
@@ -192,7 +193,11 @@ async def run(
     )
     await services.store.write_record(scope, spec.to_json())
 
-    await wf.fn(Run(params=given, services=services))
+    # The `Run` is built from what this function already computed and nothing else: `scope` is the
+    # address the record above went to, and `base` is the same resolved commit the record pins. No
+    # worktree is provisioned here - `run.step` opens this namespace's checkout on first use, and
+    # 13.4 is what provisions the run's own worktree eagerly and per §3.9.
+    await wf.fn(Run(params=given, services=services, scope=scope, base=spec.base_sha))
 
 
 async def resume(services: Services, project: ProjectName, label: RunLabel) -> None:

@@ -1,10 +1,17 @@
 """What a fingerprint promises: the same step twice is one digest, and a different step is another.
 
-Every rule this module is built on fails as **replay never hits** - a digest that differs from the
+Most rules this module is built on fail as **replay never hits** - a digest that differs from the
 one on disk, an entry that is not found, an agent that runs again and a bill nobody asked for. None
 of them raises. So there is no test here of the form "it did not crash": each one below is either
 two computations that must agree, or two that must differ, and the interesting half of the suite is
 the agreements.
+
+**Two of them fail the other way, and those two are the disagreements that matter.** Rule 6 (a
+dataclass contributes its qualified type name) and the surrogate refusal are collisions: two
+different inputs reaching one canonical text, an entry found that belongs to neither, and a
+recorded result replayed for a step whose inputs were not those. Nothing re-runs and nothing
+raises; the answer is simply wrong. Both are tested as "these two must differ", which is why the
+`!=` assertions below carry a second one holding still whatever the first is not about.
 
 **Two of those agreements cannot be proved inside one interpreter, and are the reason this file
 spawns processes.** A `frozenset`'s iteration order is fixed for the life of a process and one
@@ -31,7 +38,7 @@ import subprocess
 import sys
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from collections.abc import Set as AbstractSet
-from dataclasses import dataclass
+from dataclasses import astuple, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from types import MappingProxyType
@@ -108,6 +115,55 @@ def _digest(base: str, count: int) -> str:
     return hashlib.sha256(f"{base}:{count}".encode()).hexdigest()
 
 
+def _take(counter: Fingerprints, scope: RunScope, step: StepName, base: str = _BASE) -> str:
+    """One address, and the claim that follows an entry landing at it.
+
+    `Journal.step` spends `digest` and `claimed` a whole step apart - §3.6's "the counter advances
+    when an entry is written, not when a step is called" - and the two tests below this section's
+    heading are the ones about that gap. Everything under "Rule 1" is about the counter's *key*
+    instead, so it takes the pair together and reads the way one invocation reads.
+    """
+    digest = counter.digest(scope, step, base)
+    counter.claimed(scope, step, base)
+    return digest
+
+
+# --- The counter advances on a claim, and a claim is an entry ------------------------------------
+
+
+def test_asking_for_an_address_twice_is_the_same_address_twice() -> None:
+    """`digest` is a query and asking it is not an event.
+
+    This is what lets `Journal.step` take the address once, before its first suspension, and spend
+    the one string on both the read and the write - and it is half of §3.6's "the counter advances
+    when an entry is written, not when a step is called". A `digest` that advanced by being called
+    would put a step's write at a different address from its read, so every step would miss its own
+    entry on the very next walk.
+    """
+    counter = Fingerprints()
+    assert counter.digest(_SCOPE, _STEP, _BASE) == counter.digest(_SCOPE, _STEP, _BASE)
+    assert counter.digest(_SCOPE, _STEP, _BASE) == _digest(_BASE, 0)
+
+
+def test_a_step_that_claims_nothing_leaves_the_next_call_at_the_same_address() -> None:
+    """The other half, and §3.6's own reason for it: a step that crashed consumed no slot.
+
+    "A step that crashes and is retried within one run must not consume a slot - the crash is not
+    journalled, so a retry landing at `n = 1` is a slot a later resume asks for at `n = 0`, misses,
+    and pays an agent for again." Here that is the arithmetic on its own: two invocations, one
+    claim, and the retry is still `n = 0`. `test_journal_walk.py` runs the same claim through a
+    real walk with a worker that raises, and `test_kill_and_resume.py` runs it across a process.
+    """
+    counter = Fingerprints()
+    crashed = counter.digest(_SCOPE, _STEP, _BASE)
+    retried = counter.digest(_SCOPE, _STEP, _BASE)
+    counter.claimed(_SCOPE, _STEP, _BASE)
+    after = counter.digest(_SCOPE, _STEP, _BASE)
+
+    assert crashed == retried == _digest(_BASE, 0), "an invocation that claimed nothing advanced n"
+    assert after == _digest(_BASE, 1), "an entry was claimed and the next call did not move on"
+
+
 # --- Rule 1: the counter is scoped per (namespace, step name) ----------------------------------
 
 
@@ -121,8 +177,8 @@ def test_two_concurrent_siblings_both_get_n_zero_rather_than_racing_for_it() -> 
     for a digest that is not there and both re-run, forever, silently.
     """
     counter = Fingerprints()
-    first = counter.next(_SCOPE.inside(Namespace("T-01")), _STEP, _BASE)
-    second = counter.next(_SCOPE.inside(Namespace("T-02")), _STEP, _BASE)
+    first = _take(counter, _SCOPE.inside(Namespace("T-01")), _STEP)
+    second = _take(counter, _SCOPE.inside(Namespace("T-02")), _STEP)
     assert first == _digest(_BASE, 0)
     assert second == _digest(_BASE, 0)
 
@@ -137,13 +193,13 @@ def test_the_order_two_siblings_happen_to_run_in_does_not_decide_either_digest()
     t01, t02 = _SCOPE.inside(Namespace("T-01")), _SCOPE.inside(Namespace("T-02"))
     forwards = Fingerprints()
     one_way = {
-        "T-01": forwards.next(t01, _STEP, _BASE),
-        "T-02": forwards.next(t02, _STEP, _BASE),
+        "T-01": _take(forwards, t01, _STEP),
+        "T-02": _take(forwards, t02, _STEP),
     }
     backwards = Fingerprints()
     other_way = {
-        "T-02": backwards.next(t02, _STEP, _BASE),
-        "T-01": backwards.next(t01, _STEP, _BASE),
+        "T-02": _take(backwards, t02, _STEP),
+        "T-01": _take(backwards, t01, _STEP),
     }
     assert one_way == other_way
 
@@ -151,7 +207,7 @@ def test_the_order_two_siblings_happen_to_run_in_does_not_decide_either_digest()
 def test_a_retry_loop_in_one_scope_counts_up_so_it_cannot_hit_its_own_cache() -> None:
     """§3.6's "why the counter": same role, no inputs, no commits, and nothing else varying."""
     counter = Fingerprints()
-    digests = [counter.next(_SCOPE, _STEP, _BASE) for _ in range(3)]
+    digests = [_take(counter, _SCOPE, _STEP) for _ in range(3)]
     assert digests == [_digest(_BASE, 0), _digest(_BASE, 1), _digest(_BASE, 2)]
     assert len(set(digests)) == 3
 
@@ -164,14 +220,14 @@ def test_two_step_names_in_one_scope_count_independently() -> None:
     would give the second one `n = 1` and a digest no entry it ever wrote will match.
     """
     counter = Fingerprints()
-    quality = counter.next(_SCOPE, StepName("review_quality"), _BASE)
-    security = counter.next(_SCOPE, StepName("review_security"), _BASE)
+    quality = _take(counter, _SCOPE, StepName("review_quality"))
+    security = _take(counter, _SCOPE, StepName("review_security"))
     assert quality == security == _digest(_BASE, 0)
 
 
 def test_a_digest_is_a_filename_the_layout_will_spend_without_asking_again() -> None:
     """The consumer: `home_layout._checked_digest` refuses anything that is not 64 lowercase hex."""
-    digest = Fingerprints().next(_SCOPE, _STEP, _base())
+    digest = Fingerprints().digest(_SCOPE, _STEP, _base())
     entry = step_entry(AglHome(Path("/agl-home")), _SCOPE, _STEP, digest)
     assert entry.name == f"{digest}.json"
 
@@ -276,7 +332,7 @@ def test_a_dataclass_in_inputs_fingerprints_the_same_in_every_process() -> None:
     )
     assert len(reprs) > 1, (
         f"every interpreter printed the same repr - {reprs} - so the heap address did not move "
-        f"and this test cannot tell a repr() shortcut apart from dataclasses.asdict"
+        f"and this test cannot tell a repr() shortcut apart from walking the fields"
     )
 
 
@@ -287,7 +343,7 @@ def test_a_value_the_walker_cannot_take_names_its_type_and_the_path_to_it() -> N
     """`inputs.findings[0].deadline is a datetime` - the type alone would not be findable.
 
     A value three levels down a list of the workflow's own dataclasses is the shape §3.3 actually
-    passes, and `dataclasses.asdict` deep-copies a `datetime` field out as a `datetime`. It is an
+    passes, and rule 6's walker hands a `datetime` field on as the `datetime` it is. It is an
     `InputError` and not an `InternalError`: this came from a workflow author's `**inputs`, so exit
     2 sends them to their own declaration rather than to a bug report about the framework.
     """
@@ -315,9 +371,9 @@ def test_a_plain_object_in_inputs_is_refused_at_the_key_that_holds_it() -> None:
 def test_the_walkers_other_refusals_each_name_what_they_found() -> None:
     """Non-finite floats, non-string keys, surrogates, and a dataclass class rather than one of it.
 
-    A `dataclass` *class* is refused rather than unpacked: `asdict` cannot take one, and a workflow
-    that passed the class where it meant an instance wants to hear so rather than to be handed a
-    fingerprint over something else.
+    A `dataclass` *class* is refused rather than unpacked: it has no field values to walk, and a
+    workflow that passed the class where it meant an instance wants to hear so rather than to be
+    handed a fingerprint over something else.
     """
 
     @dataclass(frozen=True)
@@ -334,6 +390,147 @@ def test_the_walkers_other_refusals_each_name_what_they_found() -> None:
         canonical_json({"text": chr(0xD83D) + chr(0xDE00)})
     with pytest.raises(InputError, match="cannot be canonicalised"):
         canonical_json({"finding": Finding})
+
+
+# --- Rule 6: a dataclass contributes its qualified type name -------------------------------------
+
+# Two pairs of twins, and the pairs differ in where the swap is. `Finding`/`Ticket` are the pair
+# §3.6 names; `Inner`/`Other` exist to be *nested* inside an outer type that does not change, which
+# is the half a tag applied at the top level alone would miss. Every twin is declared with the same
+# field names in the same order and is only ever built with the same values, so the sole difference
+# between the two canonical texts is the one rule 6 puts there.
+
+
+@dataclass(frozen=True)
+class Finding:
+    ticket: str
+    severity: int
+
+
+@dataclass(frozen=True)
+class Ticket:
+    ticket: str
+    severity: int
+
+
+@dataclass(frozen=True)
+class Inner:
+    tokens: int
+
+
+@dataclass(frozen=True)
+class Other:
+    tokens: int
+
+
+@dataclass(frozen=True)
+class Outer:
+    budget: Inner | Other
+
+
+@dataclass(frozen=True)
+class _Elsewhere:
+    """`Finding`'s namesake in another package - the same qualified *name*, a different module.
+
+    A second class called `Finding` cannot be declared beside the first in one module, so this one
+    is declared under a private name and then relocated: `__qualname__` is set to the name it is
+    standing in for and `__module__` to a package this repository does not have. Both attributes
+    are writable on a class object, which is what makes the one term this test varies - the module
+    half of the qualified name - expressible at all while every other term is held identical.
+    """
+
+    ticket: str
+    severity: int
+
+
+_Elsewhere.__qualname__ = "Finding"
+_Elsewhere.__module__ = "another.package"
+
+
+@dataclass(frozen=True)
+class _Smuggled:
+    """A dataclass whose one field is spelled with rule 6's reserved key.
+
+    Legal Python: two trailing underscores mean no name mangling, so this really is a field called
+    `__agl_type__`, and unpacking it without a check would overwrite the tag and hand this
+    dataclass whatever type name it was carrying. `_checked_key` refuses it instead.
+    """
+
+    __agl_type__: str
+
+
+def test_two_dataclasses_with_one_shape_are_two_fingerprints() -> None:
+    """§3.6's own pair, and the one failure in this file that is a false cache **hit**.
+
+    "`asdict` erases the type, so `Finding("T-01", 3)` and `Ticket("T-01", 3)` fingerprint
+    identically and changing an input's type while keeping its shape replays the old result."
+    Every other rule here fails by missing, which costs a re-run; this one finds an entry that
+    belongs to different inputs and hands its recorded value back. Nothing raises and nothing
+    re-runs - the answer is simply another step's.
+    """
+    assert _base(inputs={"findings": [Finding("T-01", 3)]}) != _base(
+        inputs={"findings": [Ticket("T-01", 3)]}
+    )
+    assert astuple(Finding("T-01", 3)) == astuple(Ticket("T-01", 3)), (
+        "the two twins no longer hold the same values, so this test would pass on the values alone"
+    )
+
+
+def test_two_identically_named_dataclasses_in_two_modules_are_two_fingerprints() -> None:
+    """The name is qualified: `__module__` and `__qualname__`, not `__name__`.
+
+    Two `Finding`s in two packages are two types, and a workflow that swapped an import for the
+    other one changed its inputs. A tag carrying the bare class name would call them one and replay
+    the first one's result under the second - the same false hit, arriving through the half of the
+    name a shorter spelling drops.
+    """
+    assert Finding.__qualname__ == _Elsewhere.__qualname__, "the term this test holds still"
+    assert Finding.__module__ != _Elsewhere.__module__, "the term this test varies"
+    assert _base(inputs={"finding": Finding("T-01", 3)}) != _base(
+        inputs={"finding": _Elsewhere("T-01", 3)}
+    )
+
+
+def test_a_nested_dataclass_carries_its_own_type_and_not_only_the_outermost_one() -> None:
+    """Where `dataclasses.asdict` defeats the obvious fix, spelled as a test.
+
+    `asdict` recurses: it turns `Outer(Inner(1))` into `{"budget": {"tokens": 1}}` before any
+    walker sees it, so a type name attached to what `asdict` returned names `Outer` and erases
+    `Inner` entirely. The outer type is held identical here on purpose - only the nested one moves,
+    which is exactly the case the top-level-only version of rule 6 replays.
+    """
+    assert _base(inputs={"plan": Outer(Inner(1))}) != _base(inputs={"plan": Outer(Other(1))})
+    # And the same swap wherever the walker has to recurse to reach it: a list, a tuple, a mapping
+    # and a set each have their own branch, and rule 6 has to be reached through all four.
+    for wrap in (list, tuple, frozenset):
+        assert _base(inputs={"plan": wrap([Outer(Inner(1))])}) != _base(
+            inputs={"plan": wrap([Outer(Other(1))])}
+        ), f"a dataclass inside a {wrap.__name__} kept its shape and lost its type"
+    assert _base(inputs={"plan": {"a": Outer(Inner(1))}}) != _base(
+        inputs={"plan": {"a": Outer(Other(1))}}
+    )
+
+
+def test_the_type_name_is_written_under_one_reserved_key_that_nothing_else_may_hold() -> None:
+    """The encoding, pinned - and the refusal that makes it one-to-one.
+
+    The tag is a key inside the object rather than a wrapper around it, which is only injective if
+    a `Mapping` a workflow passes cannot spell the same key. So `__agl_type__` is refused wherever
+    a key is checked: in a mapping, and in a dataclass field name too, since two trailing
+    underscores mean Python does not mangle it and it is a perfectly legal field. Refusing is loud
+    where the alternative is silent - a mapping that rendered as a dataclass would replay that
+    dataclass's recorded result, and nothing anywhere would say so.
+
+    The text is spelled out because it is a **stored format**: every digest ever written over a
+    dataclass was computed with these characters in it, so respelling the key re-runs every step
+    recorded under the old one.
+    """
+    assert canonical_json(Inner(1)) == '{"__agl_type__":"test_journal.Inner","tokens":1}'
+
+    with pytest.raises(InputError, match="reserves"):
+        canonical_json({"impostor": {"__agl_type__": "test_journal.Inner", "tokens": 1}})
+    with pytest.raises(InputError, match="reserves"):
+        canonical_json(_Smuggled("test_journal.Inner"))
 
 
 # --- Rule 4: what a tool contributes, and what it must not --------------------------------------
@@ -447,8 +644,8 @@ def test_a_set_nested_inside_inputs_is_sorted_too_and_not_only_restrictions() ->
     """The shape claim; the cross-process claim is the one made under seeds above.
 
     Sorting only `restrictions` would leave a set that arrived through `**inputs` - including one
-    `dataclasses.asdict` copies out of a frozen dataclass field as a `frozenset` - unsorted, which
-    is the identical defect in a place nobody thought to look.
+    held in a frozen dataclass's field, which rule 6's walker hands on as the `frozenset` it is -
+    unsorted, which is the identical defect in a place nobody thought to look.
     """
     assert canonical_json({"t": {"b", "a"}}) == '{"t":["a","b"]}'
     assert canonical_json({"t": frozenset({"b", "a"})}) == '{"t":["a","b"]}'
