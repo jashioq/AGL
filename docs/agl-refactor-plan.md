@@ -539,7 +539,8 @@ moment. One operation, used consistently.
 use a role declaring `Restriction.NO_VCS_WRITES`; otherwise an agent that commits during its own run
 will have that work discarded. The framework does not check the combination and does not inspect
 whether HEAD moved — it does the one predictable thing either way. This is the single place in AGL
-where a mistake destroys work rather than merely costing a re-run, so the SDK docs state it plainly,
+where a mistake destroys work rather than merely costing a re-run (one of three — see §3.4 and
+§3.6), so the SDK docs state it plainly,
 and an IDE lint plugin is the right place to catch it.
 
 **The message is outside the fingerprint** (§3.6). It is cosmetic, so changing it must not invalidate
@@ -737,6 +738,18 @@ about, and a failure cannot be attributed. It is also the only thing that catche
 conflicts, where two items each work alone, merge without textual conflict, and the combination is
 broken. That is what a merge train is for.
 
+**Attribution is weaker than serialisation suggests.** Serialising rules out concurrent
+contamination, but the gate has no baseline: a target the parent's own ungated `run.step` already
+broke makes every subsequent child fail the gate and be reverted, each with a `Conflict` naming the
+child. A pre-landing build would be a second build, which this section forbids. So a red gate means
+*the combined tree is broken*, not *this child broke it*.
+
+**And a red gate discards a human's partial resolution** — `restore(before)` is `reset --hard` plus
+`clean -fd`, and when the landing being reverted is one a person resolved by hand, that work is gone.
+This is the same loss §3.4 refuses `abort()`-before-land for, arriving by another door, and it makes
+the **third** path in AGL that destroys work rather than costing a re-run. Accepted for
+v1.1, unmitigated, and named here so it is a decision rather than a surprise.
+
 **Agent self-verification is not a framework concern.** An implementation agent doing TDD runs the
 test suite in its own worktree via its own shell tool, as often as its loop requires. Those runs
 are side effects inside the `implement` step — the framework never sees, counts, or schedules them,
@@ -760,6 +773,18 @@ the one v1.1 accepts.
 **On conflict the framework does not ask.** It returns a `Conflict` outcome and holds the lease;
 the workflow shows its own screen and decides. The lease is scoped to this run's integration
 target, so a human deliberating in one run never blocks another.
+
+**Lifetime: released when the outcome settles — `retry()` and `abort()` are what release it.** Run
+exit is the sweeper, not the lifetime; read literally, "released when the run exits" would serialise
+every landing in a run behind the first one forever. Because the verbs release the lease, the object
+a workflow holds is the engine's own type rather than `ports.IntegrationOutcome` — the port knows
+nothing about a lease.
+
+**The lease must also exclude the target namespace's own steps.** §3.6 single-threads a namespace's
+workspace because two writers of one checkout corrupt each other, and a landing is a second writer of
+the *target's* checkout. So a landing takes the lease and then the target's step lock, both held to
+settlement. The consequence, which is real: a build holds that lock for minutes, so a parent's
+`run.step` queues behind every child's gate.
 
 **A resumed run must be able to find a hold it did not take.** The durable hold is what makes a
 crash-during-conflict recoverable — but `integrate()` is not a step, so nothing journals it, and a
@@ -966,8 +991,9 @@ unchanged and it would wrongly replay. The workspace *is* an input; it just isn'
 head, but `last_good` is chained from step entries and `integrate()` is not a step — so the parent's
 next step to miss its fingerprint would `restore()` to a commit *before* every landed child and
 delete all of it. `IntegrationOutcome.head` carries the value; the engine must write it into the
-parent's chain. This is the one path in the design that destroys work rather than costing a re-run,
-alongside a mispaired `commit=`.
+parent's chain. This is one of the three paths in the design that destroy work rather than costing a
+re-run, alongside a mispaired `commit=` (§3.3) and a red gate discarding a hand-resolved conflict
+(§3.4).
 
 **The starting head is chained logically, not read from disk.** It comes from the previous step's
 recorded `head` in that namespace, never from the physical worktree. Otherwise: root runs `spec` at
@@ -1454,8 +1480,10 @@ from a *ref*, so what the user has checked out, and whether it is dirty, are bot
 decision. It must be **cross-process**: two `agl run` invocations are two processes, so use
 `flock(2)` on a file in the trees root, which releases automatically when the holder dies.
 
-**No build concurrency limit.** The framework's only build is the merge gate, already serialized by
-the queue. Agents running their own test suites are unbounded on purpose, governed solely by the
+**No build concurrency limit.** The framework's only build is the merge gate, serialized by the
+queue **per target** — which since `worktree()` nests is not the same as per run: a grandchild landing
+into `T-01` and `T-01` landing into the root are two locks and two builds, concurrently, in one
+process. Agents running their own test suites are unbounded on purpose, governed solely by the
 workflow's `concurrent`. Across concurrent runs a limiter would bind, but that is the advanced case
 and the operator discovers their machine's limits faster than a config knob teaches them.
 
@@ -1562,7 +1590,7 @@ a lock.
 | `run.commit()` as a separate call | It would run after the entry was written, so the recorded `head` would predate the commit — and `head` is the reset target, so the next fingerprint miss would delete the work. Committing belongs inside the step's atomic unit, hence `commit=`. |
 | Framework enforcement of the `commit=` / `NO_VCS_WRITES` pairing | Neither a call-site check nor a HEAD-moved detector. The framework does one predictable thing either way; the pairing is the author's judgement, documented in the SDK and catchable by an IDE lint plugin. Consistent with `blocked_by`, cycle detection, and loop termination all being the workflow's. |
 | A third `IntegrationOutcome` case for asynchronous landing | Would put a scheduling concept the framework has no vocabulary for into the port, and a PR is a non-idempotent external write that breaks memoization independently (§3.4). v1.1 lands synchronously. |
-| `Integrator.revert()` | Revert-on-gate-failure undoes a successful landing, which is `Workspace.restore(head)` — one primitive at four moments: reset-before-rerun, wipe-on-omitted-`commit=`, revert-on-gate-failure, and abort-on-conflict. |
+| `Integrator.revert()` | Revert-on-gate-failure undoes a successful landing, which is `Workspace.restore(head)` — one primitive at **three** moments: reset-before-rerun, wipe-on-omitted-`commit=`, and revert-on-gate-failure. Abort-on-conflict is *not* one of them: that is `Integrator.abort`, a port call undoing a landing that never completed. |
 | A timeout parameter on `Verifier.verify` | `build_timeout` is project configuration and reaches an implementation where implementations are configured. A hosted verifier with its own deadline would otherwise carry a parameter it can only ignore. |
 | An auto-generated commit message | The message is domain vocabulary — "implement T-01" is something only the workflow knows. Auto-generating it would cost readable history to save one keyword argument. |
 | `run.ask()` | Dissolved into `run.terminal.show()` with an interactive view. One entry point. |

@@ -73,6 +73,17 @@ same-length mutation surviving `git checkout --`: the source was restored, the s
 and the "restored" tree ran mutated bytecode. `inspect.getsource` reads the file and cannot see it;
 `dis` can. Every mutate-restore cycle in this build before stage 8.5 was exposed to this.
 
+**A finding in the code is a report item, not a task.** Stage 14 spent a fifth of its subagent time
+on work nobody asked for, and diagnosed it exactly: *"I applied the stage's rule — report rather than
+resolve — to ambiguities in the plan, and not to findings in the code."* Two forms to watch:
+
+- **A surfaced defect is reported, not patched** — even one the brief called dangerous, even one the
+  plan forbids by name elsewhere. Flagging an addition afterwards is not the same as asking first; it
+  puts the reviewer in the position of auditing rather than reviewing.
+- **Mutation survivors are the deliverable, not a defect to close.** A stage asks for the table. A
+  table with no survivors is a table that has been made to look complete, and the tests written in a
+  rush to close it arrive with no evidence they can fail.
+
 Three standing rules: a run that cannot happen is a **skip with a reason**, never a green; no test
 may pass because something failed; and no test spends tokens.
 
@@ -324,7 +335,7 @@ problems surface here rather than at stage 19.
 | # | Deliverable |
 |---|---|
 | 10.1 | `sdk/params.py` — `arg()`, dataclass → named flags, no positionals (§3.3) |
-| 10.2 | `sdk/workflow.py` — `@workflow` decorator, `Stop`, minimal `Run` carrying `params` only. **Decided at stage 9:** the services bundle `Run` will hold lives in `sdk/_engine/` over port types and is constructed by `container.py` — `config` may import `sdk`, not the reverse. Not `ports/` (a bundle of ABCs is neither an ABC nor a type an ABC speaks) and not eight loose parameters (a ninth port would touch every site) |
+| 10.2 | `sdk/workflow.py` — `@workflow` decorator, `Stop`, minimal `Run` carrying `params` only. **Decided at stage 9:** the services bundle `Run` will hold lives in `sdk/_engine/` and is constructed by `container.py` — `config` may import `sdk`, not the reverse. Not `ports/` (a bundle of ABCs is neither an ABC nor a type an ABC speaks) and not eight loose parameters (a ninth would touch every site). *Amended at stage 14: the bundle is no longer ports-only. `Verifier.verify` takes the build command as a parameter, `Project.build` holds it, and §3.11 refuses `run.project` — three closed doors, so `build: str` joins the bundle as a non-port field wired at the composition root.* |
 | 10.3 | `cli/exit_codes.py` + `api.py` — the five operations, exceptions mapped in one table |
 | 10.4 | `cli/main.py` + `cli/commands/run.py` — parse, resolve config, build container, dispatch. *(Composing before dispatch is correct while `run` is the only command; 11.0 moves it per-operation once `init` and `workflows` exist.)* |
 | 10.5 | `workflows/noop/` — a workflow that does nothing, used as the wiring probe. Deleted at stage 19. Flip stage 9's `test_the_real_entry_point_group_is_readable_and_empty_today` — its name says *today* |
@@ -407,6 +418,7 @@ unmerged and the tree clean. Root `integrate()` raises.
 
 | # | Deliverable |
 |---|---|
+| 15.0 | **Verify or delete stage 14's unverified lease tests, first.** `test_leases.py` and a cancellation test in it are aimed at mutation survivors #4 and #26; they pass, but the agent that wrote them was interrupted before reporting, so there is no evidence they can fail. Re-run both mutations — (#4) `Leases.claim` builds a fresh lock per call, so the lease serialises nothing; (#26) `claim` drops the release covering cancellation between the two acquisitions, whose failure mode is a **silent hang**: no `Lease` exists, `release_all()` cannot recover it, and every later landing into that target waits forever. If a test does not go red, either fix it or delete it and record the gap — an unverified test is worse than an absent one, because it reads as coverage. Note the two survivors share one cause: the lease and the target's step lock have identical granularity and are always taken together, so either alone satisfies every existing assertion |
 | 15.1 | `Run.terminal` wiring — `show()` registers view + args; `pending` map. Plus `sdk/terminal.py` and `sdk/questions.py` as re-export facades over the `ports` types |
 | 15.2 | `on_question` plumbing — framework supplies the asking tool, maps the vendor payload to `Question`, calls the handler, serializes the `Answer` back |
 | 15.3 | Priority integration — agent questions and conflicts at distinct priorities; preemption verified end to end |
