@@ -227,9 +227,13 @@ def test_a_run_can_be_handed_the_counter_a_parent_is_already_using(tmp_path: Pat
 
 
 def test_a_run_holds_nothing_it_did_not_declare(tmp_path: Path) -> None:
-    """Slotted, so the surface is the fields below. One of §3.3's six members belongs to stage 15
-    and is absent rather than stubbed, and an attribute a caller attached to a `Run` would be one
-    more that nobody declared and that replay would never see.
+    """Slotted, so the surface is the fields below, and an attribute a caller attached to a `Run`
+    would be one more that nobody declared and that replay would never see.
+
+    15.1 added §3.3's sixth member and this tuple did not move, which is the shape of that decision
+    rather than an oversight: `terminal` is a property over `services.terminal` and not a field, so
+    a `Run` still holds exactly what it was assembled with.
+    `tests/sdk/test_run_terminal.py` asserts the other half - it reads the bundle's own object.
 
     `worktrees` joined the list at 13.1, beside `fingerprints` and for its reason: it is the run's
     table of taken namespaces (§3.9), defaulted for the root and handed on to every child, so it is

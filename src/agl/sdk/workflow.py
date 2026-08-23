@@ -13,13 +13,36 @@ and what an entry point resolves to is what the registry hands to `api.py`. A de
 returned the function would leave the framework holding a callable with no name, no version and no
 params class, and it would be back to asking a module what it contains.
 
-## What this stage builds, and what it deliberately leaves empty
+## What this module builds: six members, of which four are delegates and one is a read
 
 §3.3 gives `Run` six members - `params`, `step`, `worktree`, `integrate`, `activity`, `terminal` -
-plus `Stop`. **Five of the six are here.** `terminal` is 15. It is not stubbed, not declared raising
-`NotImplementedError`, and not present as an attribute that refuses. A member that exists and
-refuses is a member every caller has to ask about, and `hasattr` on it is exactly the duck typing
-this layer was built to replace.
+plus `Stop`, and 15.1 is where the sixth arrives. It was deliberately absent rather than stubbed
+until then: a member that exists and refuses is a member every caller has to ask about, and
+`hasattr` on it is exactly the duck typing this layer was built to replace.
+
+**`terminal` is a property over `services.terminal`, and not a field.** The bundle has held a
+port-typed `Terminal` since stage 9 and `api.py` is handed one already built, so a field would be
+one object under two names on one frozen dataclass - `run.terminal` and `run.services.terminal`,
+free to be handed different objects by any of the several places a `Run` is constructed - and
+`_child` would have to copy it across in step with `services` for the two to go on agreeing. A
+property has nothing to keep in step, and this class already reads through a field it holds one
+member over. It is a property for a **different reason from `activity`**, which is a property
+because the state behind it is mutable and a frozen slotted dataclass has nowhere to put it; here
+the object is not mutable and is already held, so what is avoided is a second reference rather than
+a second mechanism.
+
+**That is what makes §3.7's single answerer structural rather than maintained.** `_child` copies
+`services` across unchanged, so every `Run` in a tree reads one terminal out of one bundle: there is
+no line anywhere that could build a second, and a question asked from a child worktree joins the
+same queue as one asked from the root. A terminal per `Run` would give a run with four children five
+slots and five sets of queues, four of them drawing over each other on one display, and every
+`pending` reporting a fifth of what is waiting.
+
+**The member is `terminal` and nothing else.** §3.3: "There is no `ask`, no `scope`, no `workspace`,
+no `show`, no `view` attribute." A `run.show(...)` shortcut would be a seventh member and a second
+spelling of `run.terminal.show(...)` - and §3.11's own table records `run.ask()` as "dissolved into
+`run.terminal.show()` with an interactive view. One entry point", which a shortcut would undo one
+line at a time.
 
 **`step`, `worktree` and `integrate` are all delegates**, to `sdk/_engine/steps.py`,
 `sdk/_engine/worktrees.py` and `sdk/_engine/integration.py`. ARCHITECTURE.md §6 carries a row for
@@ -228,6 +251,7 @@ from typing import cast
 
 from agl.ports.errors import InputError, Stop
 from agl.ports.home_layout import RunScope
+from agl.ports.terminal import Terminal
 from agl.sdk._engine.integration import Integration, Leases
 from agl.sdk._engine.integration import integrate as _integrate
 from agl.sdk._engine.journal import Fingerprints
@@ -248,8 +272,9 @@ class Run[P = object]:
     which parameters they were given. Slotted, so the surface is the fields below and an attribute
     nobody declared cannot be attached to it.
 
-    One of §3.3's six members belongs to stage 15 and is absent rather than stubbed - see the module
-    docstring, which also argues each field below.
+    §3.3's six members are all here, and two of them - `activity` and `terminal` - are properties
+    rather than fields, for two different reasons the module docstring argues. The fields below are
+    what this run was assembled with, and it argues each of those too.
     """
 
     params: P
@@ -412,6 +437,46 @@ class Run[P = object]:
         every ending there is - the value returned, the agent raised, the task was cancelled.
         """
         return self._steps.activity
+
+    @property
+    def terminal(self) -> Terminal:
+        """The terminal this run shows on. §3.3's sixth member, and the whole of presentation.
+
+            await run.terminal.show(views.board, tickets=backlog.tickets, runs=children)
+            approval = await run.terminal.show(views.approve, question=q, priority=5)
+
+        **A concrete terminal, not an abstract display** (§3.7). It speaks terminal concepts because
+        it is one: `Screen`, `Rows`, `Text` are its own vocabulary and are free to be as
+        terminal-specific as they like. There is no `Display` port, no `--display` flag and nothing
+        to select between - a shared abstraction would have to be the intersection of a terminal and
+        a browser, which is a worse terminal and a worse browser. A future web module is `run.web`,
+        with websocket concepts on it and live alongside this one.
+
+        **One `show`, and the view's return type decides what it does.** A passive `Screen` goes to
+        the slot and answers `None` immediately; a `Screen[T]` joins a queue at its `priority` and
+        blocks until a person answers, yielding the `T` their response produced. Both are awaited,
+        because from here both are "put this in front of someone". `ports/terminal.py` holds the
+        whole contract and both implementations satisfy it identically.
+
+        **`show` registers the view and its arguments, not a value** - the redraw loop invokes the
+        view again every frame - which is why `Text(run.activity)` is live with no component of its
+        own and why passing the live dict of child `Run`s works. **Purity is the workflow's side of
+        that bargain**: no I/O, no store reads, no sorting a thousand items, ten times a second.
+        Nothing in this layer checks it, warns about it or could: a view is an ordinary function and
+        the requirement is §3.7's, stated everywhere it is relied on and enforced nowhere.
+
+        **The same object for every `Run` in the tree**, because `_child` copies `services` across
+        and this reads out of it. That is §3.7's single answerer made structural: two agents in two
+        worktrees asking at once stack in one set of queues on one display, and `pending` counts all
+        of them. Screen identity is the registration and never the `Screen` value, so two children
+        asking the same question are two questions and get two answers - that is the terminal's own
+        rule and nothing here can weaken it.
+
+        A property over `services.terminal` rather than a field, which the module docstring argues:
+        the bundle already holds the object, and a field would be a second name for it on a frozen
+        dataclass with a `_child` obliged to keep the two agreeing.
+        """
+        return self.services.terminal
 
     async def step[R](
         self, name: str, role: Role[R], *, commit: str | None = None, **inputs: object

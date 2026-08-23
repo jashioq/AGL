@@ -59,11 +59,12 @@ nothing: it reads packaging metadata and sorts strings.
 ## What `run` does, in order, and the two things it deliberately does not
 
 Load the workflow, refuse a label that is already taken, pin the base ref to a full object name,
-write `run.json`, provision the run's own `_base` worktree from that pin, then await the workflow's
-function and give back every integration lease it was still holding. The order is load-and-parse
-first because those two refuse with no I/O at all - §3.3's "before anything runs" read as strictly
-as it can be - then the conflict check, which decides whether this run may exist, then the three
-that are addressed to the repository.
+write `run.json`, provision the run's own `_base` worktree from that pin, then open the terminal,
+await the workflow's function inside it, and give back every integration lease it was still holding.
+The order is load-and-parse first because those two refuse with no I/O at all - §3.3's "before
+anything runs" read as strictly as it can be - then the conflict check, which decides whether this
+run may exist, then the three that are addressed to the repository, and the terminal last of all
+because it is the only one of them a person can see.
 
 **The record is written before the workflow is invoked**, so a crash mid-run leaves something behind
 to resume or to clear. It is the one value in AGL with no other copy anywhere (`ports/store.py`), so
@@ -123,6 +124,42 @@ two lines of `run` are a `finally` around the workflow's function. A `finally` s
 names no class and cannot decide anything: control leaves it carrying whatever arrived, `Stop`
 subclass and all. What would break the criterion is an `except` of any width, which is why the
 sentence above is written about that word rather than about `try`.
+
+**15.1 put an `async with` here and the rule survives it mechanically.** `Terminal.__aexit__` is
+annotated `-> None` on the port; suppressing an exception from a context manager means returning
+something *truthy*, `None` is falsy, and `mypy --strict` is a gate - so no conforming terminal can
+swallow a workflow's `Stop`, and that is a fact about the signature rather than a promise an
+implementation keeps. Like the `finally`, it sees the exception in flight and can decide nothing
+about it. What it can still do is **fail**: a teardown that raises replaces the exception in flight
+with its own. That is the hazard the `finally` has had since 14.1 - `release_all()` could raise too
+- and it is a crash in AGL either way, never a translation of a workflow's.
+
+## The terminal is open around the workflow's function and around nothing else
+
+`ports/terminal.py` makes a `show` outside the context an `InternalError`, on the argument that "the
+framework opens the terminal, so a call outside it is AGL's own ordering bug rather than anything a
+workflow author did". This function is that framework, and until 15.1 nothing here entered one - so
+every `show` in a real run raised. One `async with services.terminal` closes it, and the question
+worth writing down is where it goes, because the answer is not "as early as possible".
+
+**It opens after the record and after `_base`, because nothing above it shows anything.** The
+context is exactly the region in which `show` is legal, and the only thing in this function that can
+`show` is the workflow. Opening earlier would widen that region over code where a `show` would be
+AGL's own bug and would now be quietly accepted, and it would take a person's display over in order
+to draw nothing across the refusals a person has to read - a name nothing registers, a flag the
+params refuse, a label already taken. It is also a real resource and not a flag: `RichTerminal`
+starts a redraw loop and takes the console, so entering before `write_record` would make a failure
+there unwind through a display teardown for a run that does not exist. It is entered exactly once,
+which both implementations require - a second `__aenter__` is refused.
+
+**It closes inside the lease `finally`, and neither ordering is load-bearing.** The two teardowns
+are independent: `release_all()` releases in-process locks and shows nobody anything, and handing
+the display back takes no lease, so neither needs the other and each runs whatever the other does.
+What settles it is scope - the context means "`show` is legal here" and `release_all()` cannot show
+anything, so it belongs outside - and, second, that the display is then handed back before the last
+thing this function does, so a teardown that goes wrong reports onto a terminal that has been
+restored. Written the other way round the `async with` would also have had to take the `finally`
+inside it, and 14.1 argued that construct's scope where it stands.
 
 ## The registry, and the one seam it left open
 
@@ -270,15 +307,25 @@ async def run(
     # out would silently discard a partial resolution somebody may be in the middle of making, which
     # is the shortcut §3.4 forbids by name. `sdk/_engine/integration.py` argues the whole of it.
     try:
-        await wf.fn(
-            Run(
-                params=given,
-                services=services,
-                scope=scope,
-                base=spec.base_sha,
-                leases=leases,
+        # §3.7's terminal, entered around the workflow and around nothing else. `show` outside the
+        # context is `InternalError` by the port's own rule, so without this line every screen in
+        # every real run would refuse - and the region where `show` is legal is exactly the region
+        # a workflow runs in, which is why this is here and not up beside the record write. The
+        # module docstring argues the placement and the ordering against the `finally` below.
+        #
+        # Not an `except` and not able to become one: `__aexit__` is `-> None` on the port, and a
+        # context manager suppresses only by returning something truthy - so a `Stop` on its way
+        # out of `wf.fn` passes through this line untouched, mechanically rather than by promise.
+        async with services.terminal:
+            await wf.fn(
+                Run(
+                    params=given,
+                    services=services,
+                    scope=scope,
+                    base=spec.base_sha,
+                    leases=leases,
+                )
             )
-        )
     finally:
         leases.release_all()
 

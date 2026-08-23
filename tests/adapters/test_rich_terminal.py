@@ -55,9 +55,7 @@ files of one name under different directories would collide at import.
 
 import asyncio
 import io
-import queue
 import sys
-import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -66,7 +64,7 @@ from typing import Final
 import pytest
 from rich.console import Console
 
-from agl.adapters.rich_terminal.terminal import Keys, RichTerminal, StdinKeys
+from agl.adapters.rich_terminal.terminal import RichTerminal, StdinKeys
 from agl.ports.errors import Stop, UpstreamUnavailable
 from agl.ports.terminal import (
     Choice,
@@ -79,6 +77,7 @@ from agl.ports.terminal import (
     TextInput,
 )
 from contracts.terminal import TerminalContract, TerminalDriver
+from instruments.keyboard import Typing
 
 # Module-level tests do not inherit the marker the contract classes set on themselves, and
 # `asyncio_mode = "strict"` turns a missing marker into a test pytest silently skips - which is how
@@ -108,10 +107,6 @@ _WIDTH: Final = 100
 """The console width these tests render at, fixed so that what a frame contains is a fact about the
 terminal rather than about the machine running it. Every string below fits on one line at this
 width, so a test looking for one in the output is not looking for something rich wrapped."""
-
-# What the fake keyboard does between looking at whether it has been stopped. Short, because one
-# test measures how long a shutdown takes with a read in flight.
-_KEYBOARD_POLL: Final = 0.01
 
 # The two responses `question` offers, in the order it offers them. A driver names a response by
 # position, and `respond(0)` in a test body would name nothing a reader can see.
@@ -220,85 +215,6 @@ def unreliable(label: str, wobbles: list[bool]) -> Screen:
     if wobbles[0]:
         raise Wobble("this view cannot draw itself any more")
     return Screen(label)
-
-
-class Typing(Keys):
-    """A keyboard a test types on: lines in from the loop's thread, lines out on a worker thread.
-
-    The injectable half of `Keys` doing the job it exists for - a terminal whose input could only
-    come from a tty is a terminal no test can drive without one. It is a real implementation of
-    that port rather than a stub: the terminal reads it through `run_in_executor` exactly as it
-    reads a keyboard, so every test here goes through the same parse, the same numbering and the
-    same "take the screen to read a line" that a person's keystrokes go through.
-
-    **It polls rather than blocking outright**, for the reason `StdinKeys` does: `stop` has to end
-    a read nobody is ever going to satisfy, and a `Queue.get()` with no timeout could not be
-    interrupted. Ten milliseconds, because one test measures a shutdown against a read in flight.
-
-    `given` is appended to from the worker thread and read from the event loop with no lock, which
-    is sound for the one thing it is used for: `list.append` and `len` are each a single bytecode
-    under the GIL, and no test does anything but wait for the count to reach a number.
-    """
-
-    __slots__ = ("_lines", "_stopped", "_waiting", "given")
-
-    def __init__(self) -> None:
-        self._lines: queue.Queue[str] = queue.Queue()
-        self._stopped = threading.Event()
-        self._waiting = threading.Event()
-        self.given: list[str] = []
-
-    def read(self) -> str | None:
-        self._waiting.set()
-        try:
-            while not self._stopped.is_set():
-                try:
-                    line = self._lines.get(timeout=_KEYBOARD_POLL)
-                except queue.Empty:
-                    continue
-                self.given.append(line)
-                return line
-            return None
-        finally:
-            self._waiting.clear()
-
-    def stop(self) -> None:
-        self._stopped.set()
-
-    def enter(self, *lines: str) -> None:
-        """Type some lines and carry on. They are read in the order they were typed, whenever the
-        terminal gets to them - which is what a keyboard buffer does."""
-        for line in lines:
-            self._lines.put(line)
-
-    async def entered(self, *lines: str) -> None:
-        """Type them and wait until the terminal has taken every one.
-
-        The count is taken **before** the lines go in, because the reader is on another thread and
-        may have one of them before this coroutine gets its next line of execution - a target
-        computed afterwards would be a target one line too far away, and this would wait out its
-        deadline against a terminal doing everything right.
-        """
-        wanted = len(self.given) + len(lines)
-        self.enter(*lines)
-        await self._until(lambda: len(self.given) >= wanted, f"the terminal to read {lines}")
-
-    async def waiting_for_a_key(self) -> None:
-        """Wait until a read is genuinely in flight - the state a shutdown has to survive."""
-        await self._until(self._waiting.is_set, "the terminal to start reading the keyboard")
-
-    async def _until(self, ready: Callable[[], bool], what: str) -> None:
-        loop = asyncio.get_running_loop()
-        expires = loop.time() + DEADLINE
-        while loop.time() < expires:
-            if ready():
-                return
-            await asyncio.sleep(TICK)
-        raise AssertionError(
-            f"{what} was still waiting after {DEADLINE:.0f}s. This terminal reads while a question "
-            f"is on screen, so nothing happening here means either that no question is up or that "
-            f"the reader is not running at all. It has taken {self.given!r}"
-        )
 
 
 class Presses(TerminalDriver):

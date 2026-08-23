@@ -576,8 +576,11 @@ async def test_a_conflicted_landing_comes_back_live_and_abort_puts_the_target_ba
     Four claims in one arrangement. The outcome is the port's second case, with no head and a
     `Conflict` whose `summary` says something - that string is what the workflow puts on a screen,
     and the decision being asked of the person reading it is which of the two verbs to call. Nothing
-    was shown here and nothing could be: `run.terminal` is stage 15, so this deliverable can build
-    both halves of §3.3's snippet and never execute the middle line.
+    is shown here: this deliverable builds both halves of §3.3's snippet and never executes the
+    middle line, which was stage 15's. It is executable now -
+    `tests/sdk/test_terminal_priorities.py` runs the whole snippet on both branches, with a real
+    conflict, the workflow's own view and a person choosing - and this test deliberately stays the
+    one that asks what the two verbs do with nobody watching.
 
     Then `abort()`: the hold goes, the target goes back to where `land` found it - which is the
     state the parent's own step left, not the state the run started in - and the parent's chain
