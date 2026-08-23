@@ -60,8 +60,12 @@ def _compose(harness: container.FakeServices) -> main.Compose:
     That default is `registry.installed()`, so the name `noop` on the command line is resolved
     against the real `agl.workflows` entry-point group rather than against anything this module
     built. The fakes bundle substitutes the *ports*; the registry is not substituted at all.
+
+    `registered` is a callable since 11.0, §3.10's composition being per-command, and here it is one
+    that answers out of a local rather than by resolving a repository - which is why none of this
+    needs a git checkout to reach the installed workflow.
     """
-    return lambda: main.Invocation(services=harness.services, project=PROJECT)
+    return lambda: main.Invocation(registered=lambda: (PROJECT, harness.services))
 
 
 def _main(harness: container.FakeServices, *flags: str) -> int:

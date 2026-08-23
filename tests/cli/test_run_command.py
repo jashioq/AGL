@@ -126,7 +126,7 @@ def _main(harness: container.FakeServices, *argv: str) -> int:
     return main.main(
         argv,
         compose=lambda: main.Invocation(
-            services=harness.services, project=PROJECT, points=POINTS
+            registered=lambda: (PROJECT, harness.services), points=POINTS
         ),
     )
 

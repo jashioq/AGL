@@ -1,13 +1,13 @@
 """`agl run <workflow> -n <label> [workflow flags] [--from <ref>]` - §3.10's first verb.
 
-The command parses its own arguments, calls **one** `api` function, renders what came back, and lets
-whatever was raised leave for `cli/main.py`'s handler. That is the whole list, and the things absent
-from it are the point: §1.4 charges the old CLI with `_cmd_clean` iterating worktrees, deleting
-branches and calling `shutil.rmtree` past the `Store` port, and `_cmd_init` doing build-tool
-detection and TOML rendering in ~150 lines. So this module does not read the store, does not touch
-git, does not decide what `--from` defaults to, does not construct anything and does not know what a
-workflow is. Each of those is `api.py`'s, and the moment a second one appears here §1.4 has happened
-again.
+The command parses its own arguments, asks for the repository a run is addressed to, calls **one**
+`api` function, renders what came back, and lets whatever was raised leave for `cli/main.py`'s
+handler. That is the whole list, and the things absent from it are the point: §1.4 charges the old
+CLI with `_cmd_clean` iterating worktrees, deleting branches and calling `shutil.rmtree` past the
+`Store` port, and `_cmd_init` doing build-tool detection and TOML rendering in ~150 lines. So this
+module does not read the store, does not touch git, does not decide what `--from` defaults to, names
+no class and constructs nothing, and does not know what a workflow is. Each of those is `api.py`'s,
+and the moment a second one appears here §1.4 has happened again.
 
 Two consequences worth naming, because both are refusals a user meets:
 
@@ -18,6 +18,40 @@ duplication being repaired, and a library caller has to get the same answer as `
 **A flag the workflow will not take is refused by the workflow's own parser**, in `sdk/params.py`,
 which is the only module that knows what flags this workflow has. The tail below is handed over
 unread.
+
+## This command asks for its own prerequisites, which is not this command deciding anything
+
+§3.10: "Composition is per-command, not universal. `main.py` resolves settings and dispatches; each
+operation then resolves its own prerequisites. `run`, `resume` and `clear` resolve a project and
+build a container; `init` takes settings alone; `list_workflows` takes neither." What `cli/main.py`
+hands over is therefore a `Registered` - a callable that resolves the project and builds the
+container *when it is called* - rather than the project and the container themselves, and the one
+line in `execute` that calls it is this command's clause of that sentence. 16.4's `init` writes the
+project file a container needs in order to exist and will not have such a line; `agl workflows`
+lists what is merely installed and will not have one either.
+
+The distinction that keeps this a dumb command (§1.4) is between *whether* and *what*. This module
+imports neither `config.container` nor `config.sources`, names no adapter, reads nothing off what
+comes back and cannot tell a real bundle from `container.fakes()`. It supplies one bit - that a run
+needs a repository - which is the one bit only a command knows, because it is the bit that says
+which verb this is. Everything about how that answer is assembled stayed in `cli/main.py`, where
+§1.4 put it, and a `container.real` appearing here would be the charge repeating with better
+manners.
+
+The call is placed *after* the two values argv already settled, and the order is the same argument
+`main` makes one layer up: a label the filesystem would not take is refused before a settings file
+is read, so someone who typed `-n my/label` outside a registered repository is told about the label
+they typed rather than about a repository they did not mean to be asked about.
+
+**`Registered` is declared here and named from `cli/main.py`, because the imports only go one way.**
+`main` imports this module to declare the subcommand, so this module cannot import `main` back, and
+one of the two has to spell `Callable[[], tuple[ProjectName, Services]]` while the other names it.
+Written here it is written once - `main` annotates `Invocation.registered` as
+`run_command.Registered`, the field's type stated where the parameter that receives it lives - and
+written there it would have to be written twice, this file already importing both halves of it. A
+`TYPE_CHECKING` block would be the third option and there is not one anywhere in this codebase. When
+16.2 and 16.3 add commands taking the same callable, `cli/commands/__init__.py` is where it moves:
+both import through it already, and the move changes a name and no type.
 
 ## The grammar, and the one thing the generic parser is allowed to know
 
@@ -103,7 +137,7 @@ out of that one table, from the exception that reached it.
 
 import argparse
 import asyncio
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from importlib.metadata import EntryPoint
 from typing import Final
 
@@ -113,7 +147,7 @@ from agl.ports.ids import ProjectName, RunLabel
 from agl.sdk._engine.services import Services
 from agl.sdk.params import RefusingParser
 
-__all__ = ["NAME", "declare", "execute"]
+__all__ = ["NAME", "Registered", "declare", "execute"]
 
 # The subcommand, spelled once: `main._dispatch` compares against this name rather than a literal.
 NAME: Final = "run"
@@ -135,6 +169,12 @@ _NOTHING_TO_REPORT: Final = 0
 # What `add_subparsers` returns. Private in `argparse` and there is no public spelling of it; the
 # alternative is `Any`, which is the one thing `mypy --strict` is here to keep out of the seam.
 type _Commands = argparse._SubParsersAction[RefusingParser]
+
+
+type Registered = Callable[[], tuple[ProjectName, Services]]
+"""A registered repository, asked for rather than received: the project this invocation addresses
+and the ports built for it. `cli/main.py` produces it and `execute` calls it - see the docstring for
+why the alias is written on this side of the import."""
 
 
 def declare(commands: _Commands) -> RefusingParser:
@@ -175,25 +215,31 @@ def declare(commands: _Commands) -> RefusingParser:
 
 
 def execute(
-    services: Services,
-    project: ProjectName,
+    registered: Registered,
     parsed: argparse.Namespace,
     argv: Sequence[str],
     *,
     points: Iterable[EntryPoint] | None = None,
 ) -> int:
-    """Read what the parser understood, run it, and say it finished.
+    """Read what the parser understood, ask for a repository, run it, and say it finished.
 
-    `argv` is everything the generic parser did not recognise - the workflow's own flags, unread
-    here and unread by `api.run`, which passes them to `sdk/params.py`.
+    `registered` is §3.10's per-command composition reaching the one command that needs it: a run is
+    addressed to a project and served by ports, and this is where those are asked for. `argv` is
+    everything the generic parser did not recognise - the workflow's own flags, unread here and
+    unread by `api.run`, which passes them to `sdk/params.py`.
 
-    Nothing is caught. A workflow's `Stop`, a label already taken, a name nothing registers and a
-    flag the workflow refuses all leave as themselves, and `cli/main.py`'s handler is the one place
-    an exception becomes a number (§3.1). `api.run` catches nothing either, which is how a
-    `ReviewNotConverging` arrives at that handler as the object the workflow raised.
+    Nothing is caught. A workflow's `Stop`, a label already taken, a name nothing registers, a flag
+    the workflow refuses and a repository nobody registered all leave as themselves, and
+    `cli/main.py`'s handler is the one place an exception becomes a number (§3.1). `api.run` catches
+    nothing either, which is how a `ReviewNotConverging` arrives at that handler as the object the
+    workflow raised - and how the `NotFoundError` naming `agl init` arrives with the message
+    `config/toml_file.py` wrote where the facts were.
     """
     name = _said(parsed, _WORKFLOW)
     label = RunLabel(_said(parsed, _LABEL))
+    # Only now, and only because this verb needs one: everything argv can refuse by itself has been
+    # refused, so a mistyped label is not answered with a sentence about an unregistered repository.
+    project, services = registered()
     asyncio.run(
         api.run(
             services,

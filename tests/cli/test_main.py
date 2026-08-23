@@ -12,6 +12,13 @@ so the suite hands in `container.fakes()` and an `Invocation` carrying entry poi
 constructs itself. Nothing here reaches into a module's internals to do it, and nothing here needs a
 git repository, an `AGL_HOME` or an installed distribution.
 
+**Two tests are the deliberate exception, and both are about the composition itself.** 11.0 put the
+project and the container behind a callable on the `Invocation`, so what has to be shown is that
+composing no longer resolves either - and a seam that substitutes the composition cannot be used to
+assert what the real composition does. Those two set `AGL_HOME` and a working directory with no
+repository above it and let `main` compose for real, which is also the only route to §3.10's answer
+for an unregistered repository: `NotFoundError`, exit 3, naming `agl init`.
+
 **The ordering criterion is pinned twice, and neither pin is the exit code.** §3.1 makes it a
 stage-10 acceptance criterion that `Stop` is caught before `AglError`, and an outcome-only test
 cannot fail on a swap: `exit_status` reads 7 out of the one table whichever clause caught it. What
@@ -32,6 +39,7 @@ import pytest
 
 from agl.cli import main
 from agl.config import container, registry
+from agl.ports.errors import NotFoundError
 from agl.ports.home_layout import RunScope
 from agl.ports.ids import ProjectName, RunLabel
 from agl.ports.tree_layout import TreesRoot
@@ -92,13 +100,41 @@ def _fakes(tmp_path: Path) -> container.FakeServices:
 
 
 def _compose(harness: container.FakeServices) -> main.Compose:
-    """`main`'s seam, filled in: the fakes bundle, this project, and this module's workflows."""
-    return lambda: main.Invocation(services=harness.services, project=PROJECT, points=POINTS)
+    """`main`'s seam, filled in: the fakes bundle, this project, and this module's workflows.
+
+    `registered` is a callable because §3.10's composition is per-command, and here it is one that
+    answers without reading anything - which is the whole of what a `run` invocation needs from a
+    registered repository, and exactly what a real one would have had to resolve a project to get.
+    """
+    return lambda: main.Invocation(
+        registered=lambda: (PROJECT, harness.services), points=POINTS
+    )
 
 
 def _main(harness: container.FakeServices, *argv: str) -> int:
     """One `agl` invocation, through the real parser and the real handler."""
     return main.main(argv, compose=_compose(harness))
+
+
+def _unregistered(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A machine with an AGL home and a working directory that is nobody's project.
+
+    `AGL_HOME` is set in the process environment because that is where `sources.resolve` reads it,
+    and it reads it inside `_compose` rather than at import - so setting it before `main` is called
+    is what reaches it. An empty directory is a legitimate home: `toml_file.read_settings` treats a
+    missing `config.toml` as a file that said nothing, which is what makes settings resolvable on a
+    machine where AGL has never run.
+
+    The working directory has no `.git` above it anywhere, which is the first of the two absences
+    `config/toml_file.py` raises `NotFoundError` for - the other being a repository no project file
+    names. Both carry `agl init`, and this is the cheaper one to arrange.
+    """
+    home = tmp_path / "home"
+    home.mkdir()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.setenv("AGL_HOME", str(home))
+    monkeypatch.chdir(elsewhere)
 
 
 def _clauses() -> list[str]:
@@ -367,6 +403,52 @@ def test_the_composition_happens_once_and_only_after_argv_is_understood(tmp_path
     composed.clear()
     assert main.main(("run", "probe"), compose=counting) == 2
     assert composed == [], "argv was refused and the world was resolved anyway"
+
+
+def test_composing_resolves_settings_and_not_a_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """11.0's whole change, measured on the composition stage 10 would have failed this on.
+
+    Before this deliverable `_compose` resolved the project and built the container before the
+    dispatch chose a command, so in the directory below it raised - and `agl init`, the command
+    whose job is to make that directory a project, could not have been reached from here whatever
+    16.4 wrote. Now composing asks the environment and stops, and the refusal arrives only when
+    something calls the thunk that would resolve a repository.
+
+    The private `_compose` is called on purpose: `compose=` substitutes the thing under test, and
+    the two halves being asserted - that composing returns, and that calling *then* raises - are
+    only distinguishable on the real one.
+    """
+    _unregistered(tmp_path, monkeypatch)
+
+    invocation = main._compose()
+
+    assert isinstance(invocation, main.Invocation)
+    with pytest.raises(NotFoundError) as caught:
+        invocation.registered()
+    assert "agl init" in str(caught.value)
+
+
+def test_an_unregistered_repository_exits_three_naming_agl_init(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """§3.10: "A command invoked in an unregistered repository gets `NotFoundError` -> exit 3,
+    naming `agl init`, which is run once per project and never again."
+
+    The same fact as the test above, through the real entry point with no seam filled in at all -
+    the real parser, the real `_compose`, the real dispatch, the real handler. What it adds is the
+    route out: the refusal is raised inside a command, which is inside `main`'s `try`, so it leaves
+    as a number and a sentence rather than as a traceback, and the sentence is the one
+    `config/toml_file.py` wrote where the facts were rather than one re-worded on the way past.
+    """
+    _unregistered(tmp_path, monkeypatch)
+
+    assert main.main(("run", "probe", "-n", "auth")) == 3
+
+    captured = capsys.readouterr()
+    assert "agl init" in captured.err
+    assert captured.out == ""
 
 
 def test_main_writes_no_exit_code_of_its_own(tmp_path: Path) -> None:

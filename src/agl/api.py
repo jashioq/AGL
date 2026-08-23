@@ -8,19 +8,39 @@ command. This module closes both: the five operations §3.10 names are functions
 from a test, a harness or another program, and `cli/` is left with argv, an event loop and an exit
 code.
 
-The division is exact. `cli/main.py` (10.4) resolves configuration once, builds the container, and
-dispatches to one of the five; everything that decides anything - which workflow, whether the label
-is free, what a run's record says - is here. A command that grew a second `read_record`, or a second
-opinion about what `--from` defaults to, would be §1.4 happening again.
+The division is exact. `cli/main.py` resolves configuration and dispatches to one of the five;
+everything that decides anything - which workflow, whether the label is free, what a run's record
+says - is here. A command that grew a second `read_record`, or a second opinion about what `--from`
+defaults to, would be §1.4 happening again.
 
-## Every operation takes the `Services` bundle, and does not build one
+## Composition is per-command (§3.10), and the five signatures below are where that is written
+
+"`main.py` resolves settings and dispatches; each operation then resolves its own prerequisites.
+`run`, `resume` and `clear` resolve a project and build a container; `init` takes settings alone;
+`list_workflows` takes neither." That is not a note about the CLI, it is the shape of this module -
+and a uniform signature is exactly what made composition universal in the first place. 10.4 handed
+every operation a `Services` so that the dispatch had one shape to remember, and 11.0 is the bill:
+`init` *writes* the project file a container needs in order to be constructible, so an `init` taking
+a bundle is an operation nothing could ever reach, and `list_workflows` reads packaging metadata, so
+a `list_workflows` taking one makes `agl workflows` demand a registered repository in order to list
+what is merely installed.
+
+So the three operations addressed to a run take `(services, project, ...)`, `init` takes `Settings`,
+and `list_workflows` takes nothing but the entry-point seam this module already had. Five signatures
+where there was one shape is the price, and it is paid in exactly one place - `cli/main.py`'s
+dispatch, the only caller that has to know all five - rather than by the two operations that would
+otherwise have had to be built out of reach.
+
+## No operation builds a port, including the ones that are handed none
 
 `config/container.py` is the only module that may say `new` (contract 5), so an `api` that
-constructed its own ports would be a second composition root and `lint-imports` would say so. Taking
-the bundle is also what makes measurable target #8 reachable: an operation runs end to end on
-`container.fakes()` with no network, no git and no process, because substituting every
-implementation at once is one argument rather than a fixture. `tests/test_api.py` does exactly that,
-which is the walking skeleton proved from the library side before 10.4 wires the argv side.
+constructed its own ports would be a second composition root and `lint-imports` would say so. That
+is why `init` losing the bundle is not `init` gaining a container: what it is handed shrank, and
+what it may construct is unchanged at nothing. Taking the bundle rather than building one is also
+what keeps measurable target #8 reachable: an operation runs end to end on `container.fakes()` with
+no network, no git and no process, because substituting every implementation at once is one argument
+rather than a fixture. `tests/test_api.py` does exactly that, which is the walking skeleton proved
+from the library side before 10.4 wired the argv side.
 
 `run` takes the project's **name** and not `config.schema.Project`. A run's address under `AGL_HOME`
 is `RunScope(project, label)` and the name is the whole of what that needs; the rest of a `Project`
@@ -110,6 +130,7 @@ from collections.abc import Iterable, Sequence
 from importlib.metadata import EntryPoint
 
 from agl.config import registry
+from agl.config.schema import Settings
 from agl.ports.errors import ConflictError, InternalError
 from agl.ports.home_layout import RunScope
 from agl.ports.ids import ProjectName, RunLabel
@@ -197,31 +218,39 @@ async def clear(
     raise _unbuilt("clear", "16.3")
 
 
-async def init(services: Services) -> None:
+async def init(settings: Settings) -> None:
     """Register this repository as a project: `agl init` (§3.10). **Deliverable 16.4.**
 
-    Its arguments are that deliverable's to settle, and this signature is deliberately not a claim
-    about them: `init` is the one operation that *creates* the project file every other one is
-    already resolved against, so what it is handed cannot be read off `container.real`'s inputs the
-    way the rest of this module's can. §3.10 has it detect the git root, ask for the build command,
-    pick a trees root and write `AGL_HOME/projects/<name>.toml`.
+    `Settings` and nothing beside it, which is the one signature here that could not have been read
+    off `container.real`'s inputs: this is the operation that *creates* the project file every other
+    one is already resolved against, so a `Project` does not exist when it is called and a container
+    built from one cannot either. Settings alone resolve fine outside a registered repository -
+    `schema.Settings` is written to that requirement in as many words - and `home` is the whole of
+    what this needs, `AGL_HOME/projects/<name>.toml` being where the answer goes.
+
+    §3.10 has it detect the git root, ask for the build command, pick a trees root and write that
+    file. Detecting the git root is left here rather than passed in because `cli/main.py` no longer
+    asks the working directory anything: `Path.cwd()` travels inside the callable that resolves a
+    project, and a command that has no project to resolve never invokes it.
     """
     raise _unbuilt("init", "16.4")
 
 
-def list_workflows(
-    services: Services, *, points: Iterable[EntryPoint] | None = None
-) -> tuple[str, ...]:
+def list_workflows(*, points: Iterable[EntryPoint] | None = None) -> tuple[str, ...]:
     """Every registered workflow name, sorted: `agl workflows` (§3.10). The command is 16.4's.
 
     Nothing is imported to answer it, which is `registry.names`' own guarantee: one workflow package
     that fails to import still appears here, and a broken third-party package cannot take down the
     command an operator runs to find out what they have.
 
-    Sync, because it awaits nothing, and it reads nothing out of `services` - the bundle is taken
-    for the reason every operation takes it, so that `cli/main.py` has one dispatch shape rather
-    than five signatures to remember. That the listing does not need a container is worth 16.4's
-    attention when it decides how much configuration `agl workflows` should insist on.
+    Neither a bundle nor a project, which §3.10 states outright and which the body is the argument
+    for: this reads packaging metadata, a fact about the installation and not about any repository.
+    10.4 handed it a `Services` it never read, so that the dispatch had one shape - and the shape
+    was the defect, because a listing that took a container could only be produced from inside a
+    registered repository, which is the one place an operator asking "what do I have installed?" is
+    least likely to be standing.
+
+    Sync, because it awaits nothing.
     """
     return registry.names(_points(points))
 

@@ -1,7 +1,9 @@
 """Stage 10's walking skeleton, driven from the library side: `api.run` on `container.fakes()`.
 
-Everything here runs on the all-fakes bundle - no network, no git, no process - which is measurable
-target #8 and the reason every operation takes the bundle rather than building one. The workflows
+Every operation addressed to a run goes through the all-fakes bundle - no network, no git, no
+process - which is measurable target #8 and the reason those three take a bundle rather than build
+one. The other two take no bundle at all, which is §3.10's per-command composition arriving as a
+signature at 11.0: `init` takes settings alone, `list_workflows` takes neither. The workflows
 are declared in this module and reached through hand-constructed `EntryPoint` values, exactly as
 `tests/config/test_registry.py` and `tests/sdk/test_workflow.py` do: an entry point is a name, a
 `module:attr` string and a group, so §3.3's registration line resolves without installing a package.
@@ -26,7 +28,7 @@ from typing import Final
 import pytest
 
 from agl import api
-from agl.config import container, registry
+from agl.config import container, registry, sources
 from agl.ports.errors import ConflictError, InputError, InternalError, NotFoundError, exit_code_for
 from agl.ports.home_layout import RunScope
 from agl.ports.ids import ProjectName, RunLabel
@@ -277,11 +279,49 @@ async def test_a_stop_subclass_leaves_api_run_unwrapped_and_exits_seven(tmp_path
 # --- the rest of the surface ---------------------------------------------------------------------
 
 
-def test_list_workflows_is_the_registrys_sorted_names(tmp_path: Path) -> None:
+def test_list_workflows_is_the_registrys_sorted_names() -> None:
     """§3.10's `agl workflows`, complete: 16.4 adds the command that prints this and nothing more.
     Sorted, so a listing is stable across environments rather than ordered by whatever sequence a
     metadata scan produced, and nothing is imported to answer it."""
-    assert api.list_workflows(_fakes(tmp_path).services, points=POINTS) == ("halting", "probe")
+    assert api.list_workflows(points=POINTS) == ("halting", "probe")
+
+
+def test_list_workflows_needs_no_bundle_and_no_registered_repository(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """§3.10: "`list_workflows` takes neither." The call below is the whole assertion.
+
+    Not a stronger version of the test above but a different claim, and 11.0's half of §3.10: this
+    reads packaging metadata, which is a fact about the installation, so it must answer from a
+    directory that is not a git repository, has no project file naming it, and never built a port.
+    A `Services` parameter it did not read would have made `agl workflows` refuse here with
+    `NotFoundError` - a listing of what is installed, withheld until the operator registers a
+    repository they were not asking about.
+    """
+    monkeypatch.chdir(tmp_path)
+
+    assert api.list_workflows(points=POINTS) == ("halting", "probe")
+
+
+@pytest.mark.asyncio
+async def test_init_takes_settings_alone_and_is_reachable_outside_a_registered_repository(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """§3.10: "`init` takes settings alone." That this refuses with 16.4's `InternalError` and not
+    with `NotFoundError` is the point of the test - it is what "reachable in principle" means.
+
+    `init` writes `AGL_HOME/projects/<name>.toml`, so the repository it is run in is by definition
+    not registered yet and no container can be built for it. Stage 10 composed before dispatching,
+    which made this call unreachable rather than unbuilt: the `NotFoundError` would have arrived
+    before the operation did, and no amount of work on 16.4 could have produced a command that ran.
+    So the settings come from `resolve_settings` with a literal mapping - the pure core, no process
+    environment touched - and the cwd is a directory with no `.git` above it anywhere.
+    """
+    monkeypatch.chdir(tmp_path)
+    settings = sources.resolve_settings(sources.Overrides(), {"AGL_HOME": str(tmp_path)})
+
+    with pytest.raises(InternalError, match=r"16\.4"):
+        await api.init(settings)
 
 
 @pytest.mark.asyncio
@@ -290,10 +330,11 @@ async def test_the_unbuilt_operations_name_their_deliverable(tmp_path: Path) -> 
     built. `InternalError` - exit 70 - because at this stage no CLI verb reaches any of them, so a
     call is AGL's own bug rather than anything the caller supplied."""
     services = _fakes(tmp_path).services
+    settings = sources.resolve_settings(sources.Overrides(), {"AGL_HOME": str(tmp_path)})
 
     with pytest.raises(InternalError, match=r"16\.2"):
         await api.resume(services, PROJECT, LABEL)
     with pytest.raises(InternalError, match=r"16\.3"):
         await api.clear(services, PROJECT, LABEL)
     with pytest.raises(InternalError, match=r"16\.4"):
-        await api.init(services)
+        await api.init(settings)

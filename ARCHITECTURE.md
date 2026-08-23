@@ -130,10 +130,10 @@ adapter. No module outside it may import from `agl.adapters.*`. Enforced by cont
 | `config/toml_file.py` | The only module that knows TOML. Resolves the project by walking up to the git root |
 | `config/container.py` | The composition root, the only module that constructs adapters. Builds the typed services bundle and assembles the routing runner |
 | `config/registry.py` | Workflow discovery through the `agl.workflows` entry points. No `importlib`, no `getattr` |
-| `cli/main.py` | Parse argv, resolve config, build the container, dispatch |
+| `cli/main.py` | Parse argv, resolve settings, dispatch. **Composition is per-command** (§3.10): the project and the container are deferred into a callable the dispatch hands on, and only a command addressed to a repository calls it — `init` writes the project file a container needs, and `workflows` needs neither |
 | `cli/exit_codes.py` | Re-exports `EXIT_CODES` and `exit_code_for` from `ports/errors.py` and holds no table of its own — the table is there, in exactly one place. What to do with an exception that is **not** an `AglError` is this module's only decision |
 | `cli/commands/` | One module per subcommand: run, resume, clear, init, workflows |
-| `api.py` | run · resume · clear · init · list_workflows |
+| `api.py` | run · resume · clear · init · list_workflows. Each takes what it needs and no more: the first three a `Services` and a project, `init` the settings alone, `list_workflows` neither |
 
 ## 7. How to run the gates
 
