@@ -39,7 +39,7 @@ cannot place is a module in the wrong ring.
 The alternative to a bundle is `Run(params, store, workspaces, history, integrator, verifier,
 terminal, clock, agents)`, and the cost of it is measured in what one more field does. With a
 bundle, adding one is a field here and a line in `container.real` and `container.fakes`. Without
-one, it is every construction site: `api.py`, each of `cli/commands/`, `sdk/testing.py`, and every
+one, it is every construction site: `api.py`, each of `cli/commands/`, `agl/testing.py`, and every
 test that drives a workflow - none of which mention that port or want to. The bundle is what keeps
 "add a port" proportional to the port rather than to the number of places a `Run` is built. 14.0
 spent that exactly once, on `build`, and it cost the two lines the paragraph promises.

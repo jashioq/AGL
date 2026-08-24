@@ -92,9 +92,10 @@ the only thing on the instance is the CLI path, and everything a run needs is bu
 idea and a reader who has met one should not have to learn a second vocabulary. They cannot be
 *shared* - `.importlinter` contract 4 forbids one adapter importing another, which is the rule
 working rather than an obstacle - so `config/container.py` imports the two modules rather than the
-two names, and compiles stage 11's workflow-level scripting vocabulary into one callable per
-provider. That is a constraint on stage 11's design, recorded here because this is where somebody
-would otherwise expect the sugar to live.
+two names, and compiles the workflow-facing scripting vocabulary into one callable per provider.
+16.5 built that: `sdk.testing.Reply` is the vocabulary and `container._openai_script` is this
+provider's half of the compilation. The constraint is recorded here because this is where somebody
+would otherwise expect the sugar to live, and it is still the reason there is none.
 
 ## What an unscripted run does, and why it does not read the prompt
 
@@ -361,7 +362,7 @@ class Conversation:
 
         **That used to be a divergence between the two fakes**, argued from where the catch is
         written: one line of this adapter's own here, the vendor's over there and outside AGL's
-        source. The distinction does not survive contact with who a fake serves. `sdk/testing.py`
+        source. The distinction does not survive contact with who a fake serves. The harness
         exists for workflow authors, both runners carry on, and whose `except` did it is invisible
         from an author's side - what they observe is not. A fake that killed a run its runner would
         have carried through is a `--dry-run` reporting a failure that anger would not, whichever

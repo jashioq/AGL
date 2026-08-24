@@ -8,7 +8,15 @@ suite accepting a `SystemExit` would pass against exactly the bug this module ex
 **No positional ever reaches `argparse`**, asserted against the built parser and not against a parse
 that happened to work - a parse proves only that nothing needed one. And **what `to_json` renders
 survives `json.dumps` and `RunSpec`**, because a parameter that cannot be written down is a run that
-cannot resume. Declaration faults are pinned where they are written, since a workflow package that
+cannot resume.
+
+16.2 adds the fifth, one direction over: **`from_json` is `to_json`'s inverse and refuses everything
+that is not it.** `agl resume <label>` reads the record instead of a command line, so the read side
+is what makes "params come from `run.json`" true - and it is a refusal point rather than a coercion
+point, which is a claim only a test that hands it `"4"` where a record held `4` can hold still. The
+section at the bottom is that, plus the one widening the round trip actually needs.
+
+Declaration faults are pinned where they are written, since a workflow package that
 cannot be invoked correctly should fail when it is imported rather than when somebody types a flag;
 and a refusal is checked on its message wherever that message carries the fact the reader needs
 next, which field or flag or type it was.
@@ -23,7 +31,7 @@ import pytest
 from agl.ports.errors import InputError
 from agl.ports.ids import RunLabel
 from agl.ports.run import RunSpec
-from agl.sdk.params import RefusingParser, arg, parse, parser_for, to_json
+from agl.sdk.params import RefusingParser, arg, from_json, parse, parser_for, to_json
 
 
 @dataclass(frozen=True)
@@ -47,6 +55,29 @@ class Mixed:
 @dataclass(frozen=True)
 class NoParams:
     """A workflow that takes nothing - `noop` at 10.5, and every workflow before it needs one."""
+
+
+@dataclass(frozen=True)
+class Widening:
+    """A `float` field whose default is an `int` - legal, and what `from_json` has to admit back.
+
+    `arg()` takes any of the four as a default and only `bool` has a rule about its own, so a run
+    where `--ratio` went unpassed holds the `int` 3 and `to_json` stores an `int`. A read side
+    demanding a `float` would refuse a record AGL itself wrote.
+    """
+
+    ratio: float = arg("--ratio", default=3)
+
+
+@dataclass(frozen=True)
+class Unstorable:
+    """A field type `arg()` will declare and neither direction can carry.
+
+    `parser_for` refuses it at the parse, naming the field, and never sees it again; `from_json` is
+    reached without a parse at all - `agl resume` reads a record - so it has to refuse it too.
+    """
+
+    tags: list[str] = arg("--tags")
 
 
 # --- §3.3's example ------------------------------------------------------------------------------
@@ -296,3 +327,91 @@ def test_a_value_of_no_storable_type_is_refused() -> None:
     """A params instance can be built by hand, so the render checks rather than assumes."""
     with pytest.raises(InputError, match="`run.json` cannot"):
         to_json(TicketsParams(request=object()))  # type: ignore[arg-type]
+
+
+# --- reading the record back ----------------------------------------------------------------------
+
+
+def test_the_record_round_trips_back_into_the_instance_it_was_rendered_from() -> None:
+    """`from_json` is `to_json`'s inverse for every type `arg()` admits - which is the whole claim.
+
+    All four in one instance, because the read side dispatches per field type and a test over one
+    of them would say nothing about the other three. Equality is the assertion and the types come
+    with it: a dataclass compares field by field, and `4 == 4.0` is true, so `type` is asked
+    separately for the two that could be confused.
+    """
+    given = parse(Mixed, ["-r", "add oauth", "-c", "4", "--ratio", "2.5", "-v"])
+
+    read_back = from_json(Mixed, dict(to_json(given)))
+
+    assert read_back == given
+    assert type(read_back.concurrent) is int
+    assert type(read_back.ratio) is float
+
+
+def test_the_record_round_trips_through_json_as_the_real_store_writes_it() -> None:
+    """The path an actual resume takes: `to_json`, `RunSpec`, a file, `json.loads`, and back.
+
+    The in-memory store hands a copy of the mapping straight back, so a `from_json` that only ever
+    saw one would be tested against values that never met an encoder. `json` is what the filesystem
+    store puts between the two directions, and it is the thing that could quietly change a type.
+    """
+    stored = json.loads(json.dumps(dict(to_json(parse(TicketsParams, ["-r", "add oauth"])))))
+
+    assert from_json(TicketsParams, stored) == TicketsParams(request="add oauth", concurrent=3)
+
+
+def test_a_workflow_with_no_parameters_reads_back_from_an_empty_record() -> None:
+    assert from_json(NoParams, {}) == NoParams()
+
+
+def test_an_int_is_admitted_where_a_float_is_declared() -> None:
+    """The one widening, and it is the round trip rather than a courtesy - see `_ADMITTED`.
+
+    `--ratio` is never passed, so the instance holds the `int` its declaration defaulted to and the
+    record stores an `int`. A read side demanding a `float` back would refuse a record `to_json`
+    produced, which is the one thing an inverse may not do.
+    """
+    given = parse(Widening, [])
+
+    assert dict(to_json(given)) == {"ratio": 3}
+    assert from_json(Widening, {"ratio": 3}) == given
+
+
+def test_a_field_the_record_does_not_carry_is_refused_by_name() -> None:
+    """A workflow that gained a parameter and kept its version. Named, because "the params do not
+    match" leaves the reader to work out which field moved."""
+    with pytest.raises(InputError, match="'concurrent'"):
+        from_json(TicketsParams, {"request": "add oauth"})
+
+
+def test_a_key_the_class_does_not_declare_is_refused_by_name() -> None:
+    """The other direction: a parameter the workflow dropped. `RunSpec.from_json`'s stance, one
+    layer up - a record carrying keys this class does not know was written by another version of
+    the workflow, and this refuses records rather than migrating them."""
+    with pytest.raises(InputError, match="'urgency'"):
+        from_json(TicketsParams, {"request": "x", "concurrent": 3, "urgency": "high"})
+
+
+def test_a_value_of_another_type_is_refused_rather_than_converted() -> None:
+    """The refusal-not-coercion rule, at the one value that makes it tempting.
+
+    `"4"` is what `-c 4` looked like before `argparse` converted it, and converting it here would
+    hand the run a parameter nobody chose - and every fingerprint taken over it would be taken over
+    a value the first invocation never had. The version stamp is what should have caught this; what
+    is left for this module is to be loud rather than helpful.
+    """
+    with pytest.raises(InputError, match="never converted"):
+        from_json(TicketsParams, {"request": "x", "concurrent": "4"})
+
+
+def test_a_field_type_neither_direction_can_carry_is_refused() -> None:
+    """`parser_for` refuses this at the parse and never sees it again; a resume reads a record with
+    no parse in front of it, so the read side refuses it too, in the same four-type vocabulary."""
+    with pytest.raises(InputError, match="a str, an int, a float or a bool"):
+        from_json(Unstorable, {"tags": ["a", "b"]})
+
+
+def test_from_json_refuses_something_that_is_not_a_params_dataclass() -> None:
+    with pytest.raises(InputError, match="not a dataclass"):
+        from_json(int, {})

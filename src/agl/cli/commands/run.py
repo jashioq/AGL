@@ -43,15 +43,15 @@ The call is placed *after* the two values argv already settled, and the order is
 is read, so someone who typed `-n my/label` outside a registered repository is told about the label
 they typed rather than about a repository they did not mean to be asked about.
 
-**`Registered` is declared here and named from `cli/main.py`, because the imports only go one way.**
-`main` imports this module to declare the subcommand, so this module cannot import `main` back, and
-one of the two has to spell `Callable[[], tuple[ProjectName, Services]]` while the other names it.
-Written here it is written once - `main` annotates `Invocation.registered` as
-`run_command.Registered`, the field's type stated where the parameter that receives it lives - and
-written there it would have to be written twice, this file already importing both halves of it. A
-`TYPE_CHECKING` block would be the third option and there is not one anywhere in this codebase. When
-16.2 and 16.3 add commands taking the same callable, `cli/commands/__init__.py` is where it moves:
-both import through it already, and the move changes a name and no type.
+**`Registered` lives in `cli/commands/__init__.py`, and 16.2 is what put it there.** It was declared
+in this module at 10.4, because the imports only go one way - `main` imports this module to declare
+the subcommand, so this module cannot import `main` back, and one of the two had to spell
+`Callable[[], tuple[ProjectName, Services]]` while the other named it. This file predicted the move
+in as many words: "When 16.2 and 16.3 add commands taking the same callable,
+`cli/commands/__init__.py` is where it moves: both import through it already, and the move changes a
+name and no type." `agl resume` is that second consumer and the move is made, at the cost of one
+import line here. Left in place it would now be `resume.py` importing a sibling *command* in order
+to name a parameter neither of them owns; that package's own docstring argues the rest.
 
 ## The grammar, and the one thing the generic parser is allowed to know
 
@@ -102,18 +102,30 @@ workflow's declared flags are on its params class, which is reached by loading i
 `api.run` in order to look at the shape of a workflow. That is §1.4's charge with better manners,
 and `api.run` cannot do the check for us either, because the generic list is not a fact it knows.
 
-So the collision stands, and what makes it survivable is that it is loud in the case that matters.
-The generic parser runs first and wins, and the workflow's flag is then simply never given a value:
-if it is required - which is what `arg()` with no `default` means - `sdk/params.py` refuses the run
-with "the following arguments are required", naming the flag the user thought they had passed, at
-exit 2 and before anything runs. The silent case is a colliding flag that has a default, which
-quietly keeps it; that is the cost, it is this small, and `tests/cli/test_run_command.py` pins both
-halves so a later stage that decides to spend a registry load on the check has to come here first.
+**16.4 revisited this and it stays declined, on a sharper version of the same argument.** The cost
+is not one registry load but one on *every* `agl run`: importing a third-party package before every
+run, in order to answer a question the user already gets a loud answer to. The generic parser runs
+first and wins, and the workflow's flag is then simply never given a value - so if it is required,
+which is what `arg()` with no `default` means, `sdk/params.py` refuses the run with "the following
+arguments are required", naming the flag the user thought they had passed, at exit 2 and before
+anything runs. The silent case is a colliding flag that has a default, which quietly keeps it; that
+is the cost, it is this small, and `tests/cli/test_run_command.py` pins both halves so a later stage
+that decides to spend a registry load per run has to come here first.
 
-`-h` is the one collision with a different shape: the generic parser answers it, prints AGL's help
-and exits 0, so a workflow's `-h` is unreachable rather than shadowed. `sdk/params.py` builds the
-workflow's parser with `add_help=False` for exactly this - "two parsers claiming it would make one
-word mean two helps depending on where it appeared".
+**What 16.4 did change is that the collision is now visible before it is hit.** `agl workflows
+<workflow>` prints the flags a workflow declares, beside the generic ones `agl run -h` prints, so an
+operator can see the overlap rather than deduce it from a refusal. That is the half of stage 10's
+gap that was worth building, and it is built as a verb of its own rather than as a second meaning
+for a word.
+
+`-h` is the one collision with a different shape, and it keeps meaning exactly one thing: the
+generic parser answers it, prints AGL's `run` help and exits 0, so a workflow's `-h` is unreachable
+rather than shadowed. `sdk/params.py` builds the workflow's parser with `add_help=False` for exactly
+this - "two parsers claiming it would make one word mean two helps depending on where it appeared" -
+and making `-h` mean the workflow's help whenever a workflow name happens to be present is that same
+objection with a positional standing in for the parser. So the gap is closed by a signpost instead:
+the description this module gives `agl run -h` names `agl workflows <workflow>`, which is where that
+help lives. `cli/commands/workflows.py` argues the whole of it.
 
 ## `allow_abbrev=False`, restated here because a subparser does not inherit it
 
@@ -137,17 +149,17 @@ out of that one table, from the exception that reached it.
 
 import argparse
 import asyncio
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Iterable, Sequence
 from importlib.metadata import EntryPoint
 from typing import Final
 
 from agl import api
+from agl.cli.commands import Registered
 from agl.ports.errors import InternalError
-from agl.ports.ids import ProjectName, RunLabel
-from agl.sdk._engine.services import Services
+from agl.ports.ids import RunLabel
 from agl.sdk.params import RefusingParser
 
-__all__ = ["NAME", "Registered", "declare", "execute"]
+__all__ = ["NAME", "declare", "execute"]
 
 # The subcommand, spelled once: `main._dispatch` compares against this name rather than a literal.
 NAME: Final = "run"
@@ -171,12 +183,6 @@ _NOTHING_TO_REPORT: Final = 0
 type _Commands = argparse._SubParsersAction[RefusingParser]
 
 
-type Registered = Callable[[], tuple[ProjectName, Services]]
-"""A registered repository, asked for rather than received: the project this invocation addresses
-and the ports built for it. `cli/main.py` produces it and `execute` calls it - see the docstring for
-why the alias is written on this side of the import."""
-
-
 def declare(commands: _Commands) -> RefusingParser:
     """Add `agl run` to the generic parser, and hand the subparser back for inspection.
 
@@ -189,7 +195,9 @@ def declare(commands: _Commands) -> RefusingParser:
         help="start a run",
         description=(
             "Start a run of a workflow. Flags this parser does not recognise belong to the "
-            "workflow and are passed to it; `agl workflows` lists what is installed."
+            "workflow and are passed to it, so this help lists AGL's own and no workflow's: "
+            "`agl workflows` lists what is installed, and `agl workflows <workflow>` prints the "
+            "flags one of them takes."
         ),
         allow_abbrev=False,
     )

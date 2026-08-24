@@ -73,13 +73,14 @@ ordering the framework never promised and fails on a change to scheduling. The s
 on whatever it likes. One knob, no ordering, and a runner that is safe to share between two
 reviewers running at once, because the only per-run state is the `Conversation` built for that call.
 
-**How stage 11 reaches it.** `sdk/` and `adapters/` are siblings and may not import each other
-(`ARCHITECTURE.md` §2), so `sdk/testing.py` cannot name `Script` or `Conversation` at all. The
-composition root can name both, and is already the only module that may say `new` - so a
-workflow-level scripting vocabulary lives in `sdk/`, and `config/container.py` compiles it into one
-of these callables on the way to constructing this class. That is a constraint on stage 11's design
-and it is recorded here because this module is where somebody would otherwise expect the sugar to
-live.
+**How the workflow-facing vocabulary reaches it.** `sdk/` and `adapters/` are siblings and may not
+import each other (`ARCHITECTURE.md` §2), so `sdk/testing.py` cannot name `Script` or `Conversation`
+at all. The composition root can name both, and is already the only module that may say `new` - so
+the scripting vocabulary lives in `sdk/` and `config/container.py` compiles it into one of these
+callables on the way to constructing this class. 16.5 built exactly that: `sdk.testing.Reply` is the
+vocabulary and `container._claude_script` is the compilation. The constraint is recorded here
+because this module is where somebody would otherwise expect the sugar to live, and it is still the
+reason there is none.
 
 ## What an unscripted run does, and why it does not read the prompt
 
@@ -335,7 +336,7 @@ class Conversation:
         **Where the catch is written is not something a workflow author can see**, and that is what
         settled this. It used to be the argument for letting an exception propagate from here while
         the other fake caught: there the catching is that adapter's own line and here it is the
-        vendor's, outside AGL's source. But `sdk/testing.py` exists for workflow authors, both
+        vendor's, outside AGL's source. But the harness exists for workflow authors, both
         runners carry on, and from an author's side the provenance of an `except` is invisible -
         what they observe is not. A fake that killed a run its runner would have carried through is
         a `--dry-run` reporting a failure that anger would not. **"Stricter" is not a defence**:

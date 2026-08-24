@@ -44,7 +44,7 @@ Named for what it is - a clock whose hands move only when something moves them -
 not `FakeClock` or `StubClock`, for `MemoryStore`'s reason. §1.9's charge against the previous
 implementation was that its fakes lived in `tests/fakes.py` and so "cannot power product modes";
 this is the clock plan target #8 rests on ("every command runs end-to-end on fakes alone") and the
-one `sdk/testing.py` hands a workflow author so that a run is identical twice. A name that says
+one `agl/testing.py` hands a workflow author so that a run is identical twice. A name that says
 "test double" invites the next reader to keep it out of the container, which is where it belongs.
 
 **Frozen by default, and that is the port's own clause rather than a limitation.** "Nothing is
@@ -127,7 +127,7 @@ class SystemClock(Clock):
 class ManualClock(Clock):
     """A `Clock` frozen at the moment it was given, until something moves it.
 
-    Not a test double: this is the clock the all-fakes bundle runs on and the one `sdk/testing.py`
+    Not a test double: this is the clock the all-fakes bundle runs on and the one `agl/testing.py`
     hands a workflow author, which is why it is named for what it does rather than for the role it
     plays in a test. The module docstring argues the name, the default, and the split between
     `advance` and `set_to`.

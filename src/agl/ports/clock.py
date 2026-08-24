@@ -4,7 +4,7 @@ Reading the current time is an input from outside the process, exactly as readin
 running an agent is, and it gets a port for the same reason those do: so the framework can be
 handed a different one. Two things want that. §3.6 stamps every step entry with `at`, and a test
 that asserts what was recorded has to know what the answer will be; and the harness workflow
-authors test against (`sdk/testing.py`) has to be able to produce a run that is identical twice.
+authors test against (`agl/testing.py`) has to be able to produce a run that is identical twice.
 
 **`at` is never read for control flow.** §3.6 says so where it defines the entry - `at` is for
 debugging and for the view - and that is what makes an injected clock safe rather than a hole. A

@@ -83,14 +83,31 @@ holding a lone surrogate, which is what `os.fsdecode` makes of an argv byte that
 it; here a person typed it, and exit 70 is wrong. `to_json` runs before the run does, so this is
 still "before anything runs".
 
-## `to_json`, and why no `from_json` beside it
+## `to_json` and `from_json`, and why the second one waited for 16.2
 
 `ports/run.py` keeps both directions together and says why: `run.json`'s key names are that type's
 wire format, written out by hand, and two hand-written lists that must agree belong in one place.
 Neither half reaches here. The keys are the author's field names and the values the author's field
-types, both *derived*, so there is no list to drift; and the read-back `agl resume` needs (16.2)
-must decide what a wrongly-typed value means - a question about a record AGL wrote, answerable only
-beside the `workflow_version` comparison resume performs anyway.
+types, both *derived*, so there is nothing here for the two directions to drift apart about - which
+is why `from_json` could be written the day it was needed rather than the day `to_json` was, and
+why what it costs is one paragraph and not a schema.
+
+**`from_json` is a refusal point and never a coercion point.** It hands back the values the record
+holds, at the types the record holds them, and refuses everything else: a key the class does not
+declare, a field the record does not carry, and a value whose type the field does not admit. It
+does not convert `"4"` into `4`, and there is no version of this that should - a record is what a
+previous invocation of *this* workflow wrote through `to_json`, so a value needing conversion is a
+value some other params class produced.
+
+**Which is why the refusal is `InputError` and not `ports/run.py`'s `InternalError`.** That module
+raises 70 because "nobody types this file - AGL writes it and AGL reads it", and at its layer a bad
+record is indistinguishable from our own bug. Here it is distinguishable, because `api.resume`
+compares `workflow_version` with `==` before it calls this: a record that got past that comparison
+claims to have been written by the very workflow now reading it. So a mismatch here means the
+workflow's params class moved and its `version` did not, which is a declaration fault in a package
+the operator installed - `config/registry.py`'s case exactly, and this module's own rule ("every
+refusal is `InputError`") without an exception being made for it. Exit 2 sends the reader to the
+`@workflow(version=...)` line they can change; exit 70 would send them to file a bug against AGL.
 
 Not checked, deliberately: that the params class is **frozen**. A mutable one still parses and still
 renders, and probing `__dataclass_params__` - the only way to ask - is the guessing §1.2 charges.
@@ -107,7 +124,7 @@ from typing import Any, Final, NoReturn, get_type_hints, overload
 from agl.ports.errors import InputError
 from agl.ports.run import JsonValue
 
-__all__ = ["RefusingParser", "arg", "parse", "parser_for", "to_json"]
+__all__ = ["RefusingParser", "arg", "from_json", "parse", "parser_for", "to_json"]
 
 # The one key `arg()` writes into `field(metadata=...)`, namespaced because metadata is shared.
 _METADATA_KEY: Final = "agl.sdk.params"
@@ -121,6 +138,21 @@ _FLAG_CHARACTERS: Final = frozenset(ascii_letters + digits + "-_")
 # The field types a shell hands over as text, each its own `argparse` converter - which is what
 # makes a refusal read "invalid int value: 'banana'". `bool("false")` is `True`: hence the switch.
 _PARSEABLE: Final = (str, int, float)
+
+# What a field of each declared type may hold when its value comes back off `run.json` - the read
+# side of `_storable`, and the whole of what `from_json` checks a value against.
+#
+# **`float` admits an `int`, and that is the round trip rather than a courtesy.** `arg(default=3)`
+# on a `float`-annotated field is legal - `arg` takes any of the four as a default and `_consumes`
+# has a rule about `bool`'s alone - so a run where that flag went unpassed stores the `int` 3, and
+# a `from_json` demanding a `float` back would refuse a record AGL itself wrote through `to_json`.
+# PEP 484 makes the same widening for the same reason.
+#
+# **`bool` is deliberately not listed against `int` and does not need to be**: `isinstance(True,
+# int)` is already true, which is Python's own answer to whether a `bool` is an `int`, and the same
+# `arg(default=True)`-on-an-`int`-field round trip depends on it. Nothing here contradicts that
+# answer in order to be tidier than the language.
+_ADMITTED: Final = ((bool, (bool,)), (int, (int,)), (float, (int, float)), (str, (str,)))
 
 
 @dataclass(frozen=True, slots=True)
@@ -223,6 +255,88 @@ def to_json(instance: object) -> Mapping[str, JsonValue]:
         spec.name: _storable(f"{kind}.{spec.name}", getattr(instance, spec.name))
         for spec in fields(instance)
     })
+
+
+def from_json[T](params: type[T], data: Mapping[str, JsonValue]) -> T:
+    """`RunSpec.params` as the instance of `params` a resumed workflow is handed - `to_json`'s
+    inverse, and the one place `agl resume <label>`'s "params come from `run.json`" is performed.
+
+    Exact, for every value `to_json` can produce: the four types `arg()` admits are scalars, so
+    there is nothing here to reconstruct and nothing to walk - each value is handed to the
+    constructor as the record holds it, and the instance is the one the first invocation held.
+
+    `InputError` for a record this class cannot take, in the three shapes that has: a field the
+    record does not carry, a key the class does not declare, and a value of a type the field does
+    not admit. Nothing is converted on the way past - the module docstring argues both the refusal
+    and the class, and the short version is that `api.resume` has already compared
+    `workflow_version` with `==`, so a record reaching here disagreeing with the class is a
+    workflow whose params moved while its version stood still.
+
+    The keys are the field names, derived, which is what leaves the two directions with no list to
+    keep in agreement - and the reason a change to the shape below is a change to one function
+    rather than to a wire format two functions spell out.
+    """
+    kind = _describe(params)
+    declared = _field_names(params)
+    hints = _hints(params)
+    missing = [name for name in declared if name not in data]
+    unknown = sorted(repr(key) for key in data if key not in declared)
+    if missing or unknown:
+        raise InputError(
+            f"the stored parameters are not {kind}'s: missing {missing}, unexpected {unknown}. A "
+            f"record carries the parameters the run was started with, and `agl resume` compares "
+            f"`workflow_version` before it reads them - so a record whose keys are not this "
+            f"class's was written by a workflow that changed its params and kept its version. "
+            f"Bump the version, or `agl clear` the run and start it again"
+        )
+    # The class as a factory of itself, exactly as `parse` spells it and for `parse`'s reason:
+    # `dataclasses` generates `__init__` at runtime, so no static type describes what it takes, and
+    # `Callable[..., T]` keeps the one knowable thing. `T` is inferred here too, never asserted.
+    factory: Callable[..., T] = params
+    return factory(
+        **{name: _restored(f"{kind}.{name}", hints.get(name), data[name]) for name in declared}
+    )
+
+
+def _field_names(params: object) -> tuple[str, ...]:
+    """This params dataclass's fields, in declaration order - the keys `run.json` holds them under.
+
+    Takes `object` so that `is_dataclass`'s type guard narrows nothing in the caller, where
+    `params` has to stay the `type[T]` it was declared or the factory above loses its return type.
+    `sdk/workflow.py::_check_params` takes the same argument for the same reason.
+    """
+    if not is_dataclass(params):
+        raise InputError(f"{_describe(params)} is not a dataclass of `arg()` fields (§3.3)")
+    return tuple(spec.name for spec in fields(params))
+
+
+def _restored(where: str, hint: object, value: JsonValue) -> JsonValue:
+    """`value` itself, if this field's declared type admits it - and never a value converted into
+    one that would.
+
+    Two refusals, and they are the same one seen from either end. A field declared something the
+    record cannot hold at all is `_consumes`' refusal arriving on the read side, at a workflow whose
+    params class grew a `list[str]` since the run started. A value the field does not admit is that
+    class changing one field's type - `concurrent: str` where the record holds `4` - which the
+    version stamp is what should have caught and which converting would hide: the workflow would be
+    handed a parameter nobody chose, and every fingerprint taken over it would be taken over a
+    value the first invocation never had.
+    """
+    for declared, admitted in _ADMITTED:
+        if hint is declared:
+            if isinstance(value, admitted):
+                return value
+            raise InputError(
+                f"{where} is declared a {_describe(hint)} and the record holds {value!r}. A run's "
+                f"parameters are read back exactly as they were stored and never converted into "
+                f"what a field now says it holds, so this is the workflow's params class having "
+                f"moved under a version that did not"
+            )
+    raise InputError(
+        f"{where} is a {_describe(hint)}, and a parameter is a str, an int, a float or a bool: "
+        f"what a shell hands over as text and what `run.json` holds unchanged. This record was "
+        f"written when the field was one of the four, and reading it back needs it to still be"
+    )
 
 
 def _storable(where: str, value: object) -> JsonValue:

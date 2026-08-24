@@ -196,7 +196,7 @@ def test_the_fake_is_frozen_and_a_hundred_readings_are_one_value() -> None:
     """The port's own clause - "they may be equal, and under a frozen clock they always are".
 
     Not a limitation of the fake: it is what makes this an honest implementation of the port
-    rather than one that merely compiles, and what lets `sdk/testing.py` produce a run twice.
+    rather than one that merely compiles, and what lets `agl/testing.py` produce a run twice.
     """
     clock = ManualClock(_MOMENT)
 

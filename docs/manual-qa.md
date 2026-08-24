@@ -30,7 +30,8 @@ model behind it: `tests/instruments/loopback.py` binds `127.0.0.1` and answers a
 process out of canned data, and a scripted `claude_agent_sdk` `Transport` drives the adapter with
 no CLI at all. Every command below **spends real tokens unless the entry says otherwise** — that
 is what makes it a manual entry. Entries 6, 7 and 11 are the exceptions and are free; entry 15 is
-free on one backend and paid on the other, and says so at the top.
+free on one backend and paid on the other, and entry 16 is free in one half and paid in the other.
+Each says so at the top.
 
 **Environment these entries were measured in**, so a later reader can tell a drift from a
 disagreement:
@@ -1340,3 +1341,145 @@ that the model is told the name of the thing it is filling in. Whether a model h
 treats it as a field, refuses it as unfamiliar — is not something anybody has watched. Note anything
 strange; a rewrite to a friendlier value is a **stored format** change and re-runs the ledger, so it
 is worth knowing before somebody proposes one.
+
+---
+
+## 16. What Codex does when a tool call outlives `tool_timeout_sec`
+
+**Raised by:** stage 16.1 — §3.7 (plan line ~1205) and
+`src/agl/adapters/openai/runner.py`'s "Tool supply" section, which sets `tool_timeout_sec=86_400`
+through a `-c` override (`_TOOL_SECONDS`).
+
+**This is a behavioural claim and there is no free instrument for it.** 16.1 was asked whether
+preflight could catch it and the answer is no; the reasoning is under "If it is wrong" below,
+because it is the same reasoning that says what to do when it happens.
+
+**Assumed.** Three things, and only the first is measured:
+
+1. That this build's config loader accepts `mcp_servers.agl.tool_timeout_sec` and carries the value
+   into the server configuration `codex exec` uses. **Measured, free — see the command.**
+2. That a value it accepts is a value it *applies* to a streamable-HTTP MCP tool call. Nothing has
+   watched a tool call outlive 60 seconds and survive.
+3. That when a tool call does time out, the harness **returns an error to the model** rather than
+   **aborting the turn**. `docs/codex-cli-findings.md` §4 names both as live possibilities and says
+   8.2 "must check what Codex does when a tool call *does* time out, because … [they] are different
+   outcomes for §3.7". Nobody has. §3.7 has no question timeouts by design, so on the backend with
+   no second asking mechanism a timeout ends the question with nothing to fall back to.
+
+**Already covered, free — and one of these corrects an assumption this file used to rest on.**
+
+- **The key is accepted and its value is echoed back.** `codex mcp list --json` and
+  `codex mcp get agl --json`, given the adapter's own override, both report
+  `"tool_timeout_sec": 86400.0` on codex-cli 0.149.0 with an empty `CODEX_HOME`. Entry 12 records
+  the same measurement from the other end.
+- **A wrong *type* is loud.** `tool_timeout_sec="forever"` fails the load by name:
+  `invalid type: string "forever", expected f64 in mcp_servers.agl.tool_timeout_sec`. So the
+  integer AGL sends can never be silently coerced or dropped for being malformed.
+- **An unknown *key* is silent, and that is the correction.** `mcp_servers.agl.nonsense_key=1` is
+  accepted by `codex mcp list` **and** by the full config loader behind `codex debug prompt-input`,
+  both exiting 0 with no mention of it; an unknown top-level key is ignored the same way. Entry 12
+  and the findings' §0 say "a value its loader dislikes is refused by name", which is true of a bad
+  value for a *known* key and **not** of a key the loader no longer knows. So a release that renamed
+  or removed `tool_timeout_sec` would drop AGL's override in silence and put the timeout back at the
+  documented default of 60 seconds — under a person's thinking time, which is exactly how
+  `MID_RUN_QUESTIONS` dies quietly.
+- **Everything below the harness is exercised on every `scripts/check`.**
+  `tests/adapters/test_openai_runner.py` drives the real in-process MCP server over real HTTP from a
+  stub CLI, so the asking tool, its handler and the round trip are covered; what is not covered is
+  this vendor's clock on top of them.
+
+**Command, part one — free, no model, no tokens, one second.** Confirm the key still lands, against
+whatever `codex` is installed now:
+
+```bash
+EMPTY=$(mktemp -d)
+CODEX_HOME=$EMPTY codex mcp get agl --json \
+  -c 'mcp_servers.agl={url="http://127.0.0.1:8765/mcp",tool_timeout_sec=86400,startup_timeout_sec=30,default_tools_approval_mode="auto"}'
+```
+
+What passes: `"tool_timeout_sec": 86400.0` in the output. A `null`, an absent field, or a load error
+naming the key is the silent-drop case above and is a change to `_TOOL_SECONDS`' spelling in
+`src/agl/adapters/openai/runner.py`, not a change to anything in `sdk/`.
+
+**Command, part two — paid, and it is the reason this entry exists.** The claim is about what
+happens *at* the deadline, so it needs a real tool call that outlives one. A 24-hour call cannot be
+waited on, so lower the number for the experiment and hold the tool. In a scratch git repository, on
+an authenticated machine, with `_TOOL_SECONDS` temporarily set to `5` in
+`src/agl/adapters/openai/runner.py`:
+
+```bash
+.venv/bin/python -c "
+import asyncio, time
+from pathlib import Path
+from agl.adapters.openai.runner import OpenAiRunner
+from agl.ports.agent import AgentTask, OpenAI, Tool, ToolResult
+
+async def slow(payload):
+    await asyncio.sleep(20)          # four times the lowered deadline
+    return ToolResult(text='Answered, late. Say the single word: late')
+
+tool = Tool(
+    name='ask_the_person',
+    description='Ask the person running this task a question and wait for their answer.',
+    payload_schema={'type': 'object', 'properties': {'question': {'type': 'string'}},
+                    'required': ['question']},
+    handler=slow,
+)
+task = AgentTask(
+    instructions='Call ask_the_person once with any question, wait for the answer, and then '
+                 'reply with exactly the single word it tells you to say.',
+    workspace=Path.cwd(),
+    model=OpenAI.LUNA,
+    restrictions=frozenset(),
+    tools=(tool,),
+)
+print('OUTCOME:', asyncio.run(OpenAiRunner().run(task, on_activity=print)))
+"
+```
+
+Read the three outcomes apart, and **record which one happened verbatim** — this is the whole value
+of the run:
+
+- **The handler's answer arrives late and the agent uses it.** The deadline is advisory for a
+  streamable-HTTP server and §3.7's collision is not real. Best case; nothing to change.
+- **The tool call fails and the agent carries on**, closing its turn without the word. The deadline
+  is enforced and reported to the model. This is the case the adapter is written for, and 86 400
+  seconds is what keeps it from happening — but note what it means: a person who takes longer than
+  the deadline gets an agent that guesses, which is the silent failure `sdk/roles.py` refuses.
+- **The turn aborts** — a non-zero exit, a `turn.failed`, or a stream that stops. Then a timed-out
+  question kills the step rather than degrading it. Loud, and the better of the two failures.
+
+Restore `_TOOL_SECONDS` afterwards. **Run this as part of entry 12's session if possible** — the
+same repository and the same login serve both, and entry 12 must pass first or nothing here is
+readable.
+
+**If it is wrong.** The repair depends on which outcome came back, and none of them is in `sdk/`:
+
+- **Aborts the turn.** `MID_RUN_QUESTIONS` on this backend is then held together by a number, which
+  is what `docs/codex-cli-findings.md` §9 pressure 3 already calls "a capability held together with
+  tape" and carries to stage 17. The honest moves are to keep the day-long deadline and say so, or
+  to drop the member from that adapter's `_CAPABILITIES` and let §3.2's preflight route asking roles
+  to the other backend — which is a legal, tested position (`tests/contracts/_agent_questions.py`
+  branches on the capability the adapter itself reported).
+- **Errors the tool.** Nothing changes; the deadline stays where it is and this entry becomes a
+  measurement rather than a risk.
+
+**Why preflight does not check any of this, which 16.1 was asked to settle.** Part one's command is
+free and local, so a check is *possible*; it is still the wrong place, for four reasons that stack:
+
+- **It is not preflight's to make.** `sdk/_engine/preflight.py` takes an `AgentRunner` and roles and
+  names no vendor, and the harness binary may appear only under `src/agl/adapters/openai/`
+  (`scripts/check`'s containment gate). The only home is `OpenAiRunner.check_ready`, which is the
+  adapter's readiness probe and fires for every run on that backend.
+- **`check_ready` cannot see a role.** It takes a `ModelId`, so it cannot tell a run that asks
+  questions from one that never will, and refusing the second over an asking mechanism it does not
+  use is a false refusal. The member that *is* about asking is `capabilities()`, and the findings
+  refuse to probe there by name: `_CAPABILITIES` is a frozen constant because "probing at preflight
+  would make the answer depend on whether a network was up when it was asked".
+- **It answers a narrower question than the one at stake.** It catches assumption 1 and is silent on
+  2 and 3 — and 3 is the collision §3.7 actually names.
+- **Its refusal is not one an operator can act on.** `AgentRunner.check_ready` asks for "a reason a
+  person can act on — the harness is not on `PATH`, its version is too old, the session is not
+  authenticated". "Your `codex` no longer parses a key AGL sends" is fixed by a released AGL, not by
+  anything on their machine. It is drift detection, and drift detection belongs in a pass a human
+  runs once — which is this file.

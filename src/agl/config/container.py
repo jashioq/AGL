@@ -24,9 +24,10 @@ argues why not `ports/` and why not eight loose parameters.
 
 Nothing about `real()` or `fakes()` changed, and the split is along the one line that matters: the
 type is eight ABCs and a `str`, which anything may name, and the construction is eight class names,
-which only this module may. `FakeServices` stays here for that reason - its fields *are* concrete
-adapters, so it could not move without carrying `MemoryStore`, `HeadlessTerminal` and
-`FakeRepository` into a package that contract 5 forbids them to reach.
+which only this module may. `FakeServices` stays here for that reason - it *constructs* nothing, but
+three of its fields are still declared at concrete adapter types (`FakeRepository`, `FakeVerifier`,
+`ManualClock`, the three whose fakes answer a question their port cannot), so it could not move
+without carrying those names into a package that contract 5 forbids them to reach.
 
 ## The ninth field, and why the composition root is the thing that fills it
 
@@ -136,7 +137,7 @@ file imports the two *modules* and never the two names, which is the pattern `te
 test_routing.py` set for the first file to import both. Qualified at every use, one vendor's fake
 cannot end up serving both keys.
 
-## The hand-off, and the shape stage 16.5 needs
+## The hand-off, and the shape stage 16.5 needed
 
 `fakes()` returns a `FakeServices`, which carries the port-typed `Services` a workflow runs on
 *and* the concrete fakes a test drives. Both halves are needed and neither substitutes for the
@@ -146,17 +147,50 @@ a `Terminal` has no "what did you draw". The concrete objects beside it are the 
 they are the only ones a test can ask.
 
 The agent runners are the exception and are not exposed, because their input is the argument: a
-caller passes a `Script` per provider and reads what happened through the repository, the store and
+caller passes an agent per provider and reads what happened through the repository, the store and
 the terminal. That keeps the direction honest - scripting is a thing done before the run, and there
 is no recorder on any fake for a test to read afterwards, which `adapters/shell/fake.py` argues at
 length.
 
-Stage 16.5 builds `sdk/testing.py` on top of this and already knows it "cannot name the fake's
-scripting types", `sdk/` and `adapters/` being siblings: a workflow-facing scripting vocabulary
-lives there in ports vocabulary, and this module compiles it into the callable the fake consumes.
-The shape left for that is a keyword-only, per-provider script parameter - a differently typed
-parameter can be added beside `claude=` and `openai=` without moving anything, and the compilation
-step has a place to stand that is already allowed to name `Conversation`.
+**Two names for one object was a defect, and `with_terminal` and `with_store` are the repair.**
+Substituting a port used to be `dataclasses.replace(harness.services, terminal=...)`, which reaches
+one of the two views and leaves the sibling field pointing at the object that was just discarded -
+so `harness.terminal` afterwards named something no run would ever use, silently, and a test reading
+both read the wrong one. The two methods below swap a member in **both** views at once, which is the
+only shape in which the two cannot come apart.
+
+That is not `Services` growing behaviour, and the distinction is the one that module's own docstring
+draws. `Services` is the *type every layer above receives*, so a `with_store()` there would be a
+second place that knows how a bundle is assembled, and a member a workflow could reach.
+`FakeServices`
+is not a bundle: it is a handle on one, produced by exactly one function, in the composition root,
+reachable only by a caller that already asked for fakes. Its two methods assemble nothing - each
+takes an object the caller built and says "these two names go on meaning it" - so there is no second
+answer here to what a bundle is made of.
+
+**Only two of the five fields have one**, and which two is not an accident. `MemoryStore` and
+`HeadlessTerminal` add no member to their ports at all, so their fields can be typed at the port
+with nothing lost and a substituted implementation can stand in them honestly. `FakeRepository`,
+`FakeVerifier` and `ManualClock` each carry the observation surface that is the whole reason the
+sibling field exists - `tip`, `answers`, `advance` - so widening one of those to its port would take
+away what it is for. A caller substituting one of those three builds a `Services` for a `Run` and
+leaves this object alone, which is what `tests/sdk/test_run_integrate.py` does and says.
+
+## The workflow-facing vocabulary, compiled here
+
+Stage 16.5 built `sdk/testing.py` on top of this and already knew it "cannot name the fake's
+scripting types", `sdk/` and `adapters/` being siblings: the workflow-facing scripting vocabulary
+lives there in ports vocabulary, and **this module compiles it into the callable the fake
+consumes**. That is `agent=` below, keyword-only beside `claude=` and `openai=` exactly as this
+paragraph promised it would be, and `_performs` is the compilation - the one place allowed to name
+`Conversation`, holding the whole of what a `Reply` means.
+
+`agent=` is one parameter and not two because the vocabulary carries no vendor's name: a
+`sdk.testing.Agent` dispatches on `AgentTask.model` if it cares, so one of them serves both
+providers and a workflow author never writes the word Claude in a test unless their own role does.
+The two raw parameters stay, and a raw script for a provider replaces the compiled one **for that
+provider only** - the more specific wins, which is the one rule here and the escape hatch for a
+negotiation a declarative `Reply` cannot express.
 
 ## Errors, and one refusal that is deliberately not here
 
@@ -178,8 +212,8 @@ the other, and a caller wanting a real store under fake agents is describing an 
 that should write the four lines itself rather than a switch every reader has to account for.
 """
 
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
 from typing import Final
@@ -204,11 +238,15 @@ from agl.adapters.shell.fake import FakeVerifier
 from agl.adapters.shell.verifier import ShellVerifier
 from agl.adapters.system_clock import ManualClock, SystemClock
 from agl.config.schema import AgentSettings, Project, Settings
-from agl.ports.agent import AgentRunner, Provider
+from agl.ports.agent import AgentOutcome, AgentRunner, Provider, ToolResult
 from agl.ports.errors import UpstreamUnavailable
+from agl.ports.questions import Answer, Question
+from agl.ports.run import JsonValue
+from agl.ports.store import Store
 from agl.ports.terminal import Terminal
 from agl.ports.tree_layout import TreesRoot
 from agl.sdk._engine.services import Services
+from agl.sdk.testing import Agent, Reply
 
 __all__ = ["FAKE_BUILD", "FakeServices", "Services", "fakes", "real"]
 
@@ -234,6 +272,11 @@ class FakeServices:
 
     The three git fakes are absent by design, not omission: all three are views of `repository`,
     and asserting through the repository is asserting about all of them at once.
+
+    **Substitute through this object and never around it.** `with_terminal` and `with_store` are the
+    two members below, and the module docstring argues both why they exist and why only those two
+    fields have one. A `replace(harness.services, terminal=...)` reaches one of the two views and
+    leaves the other naming the object it just discarded - which nothing anywhere would report.
     """
 
     services: Services
@@ -243,20 +286,63 @@ class FakeServices:
     """The one repository behind `workspaces`, `history` and `integrator`. Shared, and the
     module docstring says why that is the invariant this class exists to make unmissable."""
 
-    store: MemoryStore
-    """The same object as `services.store`, at the type that can be read back."""
+    store: Store
+    """The same object as `services.store`, and `with_store` is what keeps that true.
+
+    Typed at the port rather than at `MemoryStore`, which costs nothing: that class adds no member
+    to `Store` at all, so the concrete type never bought a question this one cannot answer. What it
+    buys is that a caller wrapping the ledger - to watch what a run recorded, or to stop one between
+    two steps, which is what `agl/testing.py` does - can put the wrapper here and have both names go
+    on meaning it."""
 
     verifier: FakeVerifier
-    """The same object as `services.verifier`. `answers()` scripts a build command's verdict."""
+    """The same object as `services.verifier`. `answers()` scripts a build command's verdict.
 
-    terminal: HeadlessTerminal
-    """The same object as `services.terminal`. `ARCHITECTURE.md` records the headless terminal as
-    doubling as the terminal's fake, so there is no third implementation to reach for here."""
+    At its own type and with no `with_verifier` beside it, for the module docstring's reason:
+    `answers` is the whole point of the field, and a `Verifier`-typed one would be a name with
+    nothing to ask."""
+
+    terminal: Terminal
+    """The same object as `services.terminal`, and `with_terminal` is what keeps that true.
+
+    Typed at the port for `store`'s reason, one field over: `HeadlessTerminal` adds no member to
+    `Terminal`, so nothing is lost, and the terminal is the fake most often substituted - it refuses
+    every `Screen[T]` with `UpstreamUnavailable`, correctly, so a test about a workflow that asks a
+    person something has to put a terminal here that can answer. `ARCHITECTURE.md` records the
+    headless terminal as doubling as the terminal's fake, and it is still what `fakes()` builds."""
 
     clock: ManualClock
     """The same object as `services.clock`. Exposed because target #10 - kill at every step
     boundary, resume, assert identical final state - needs time to move on purpose rather than by
     itself, and `Clock` has one member and it is a reading."""
+
+    def with_terminal(self, terminal: Terminal) -> FakeServices:
+        """This bundle with `terminal` in place of the headless one, in both views at once.
+
+            services = harness.with_terminal(RichTerminal(console, keys)).services
+
+        The substitution `dataclasses.replace(harness.services, terminal=...)` used to be, made
+        whole: `services.terminal` and `terminal` are one object afterwards, so a test that shows a
+        screen through the run and reads the terminal afterwards is reading the same one. Everything
+        else is carried across unchanged and by identity - the repository the three git fakes share
+        included, which is what makes the result still one bundle rather than a copy of one.
+
+        A new object rather than a mutation, because this class is frozen for `Services`' reason: a
+        bundle is what an invocation was assembled with, and a field reassigned halfway through
+        would leave two halves of a run disagreeing about which terminal they were shown on.
+        """
+        return replace(self, services=replace(self.services, terminal=terminal), terminal=terminal)
+
+    def with_store(self, store: Store) -> FakeServices:
+        """This bundle with `store` in place of the in-memory one, in both views at once.
+
+        `with_terminal`'s shape and its whole argument, one field over. The caller this exists for
+        is `agl/testing.py`, which wraps the ledger to record what each step wrote and to stop a run
+        at a step boundary - both of which are things done *to* the store the bundle already holds,
+        so a wrapper that left `store` naming the object underneath it would be the exact defect
+        this pair was written to close.
+        """
+        return replace(self, services=replace(self.services, store=store), store=store)
 
 
 def real(settings: Settings, project: Project) -> Services:
@@ -298,6 +384,7 @@ def fakes(
     *,
     files: Mapping[str, bytes] | None = None,
     build: str = FAKE_BUILD,
+    agent: Agent | None = None,
     claude: claude_fake.Script | None = None,
     openai: openai_fake.Script | None = None,
 ) -> FakeServices:
@@ -318,10 +405,21 @@ def fakes(
     gate can choose its own. There is no `build_timeout` beside it: `FakeVerifier` takes none, "a
     build that is a dict lookup cannot run past one".
 
-    `claude` and `openai` are one script per provider - an agent's conduct, in the only vocabulary
-    the port has - and `None` on either means that provider's `unscripted` default, which is what
-    lets a whole workflow run on fakes without anybody writing an agent first. Keyword-only, so
-    stage 16.5's workflow-level scripting vocabulary can arrive beside them.
+    `agent` is **the workflow-facing way in** and the one most callers want: a
+    `sdk.testing.Agent` is `(AgentTask) -> Reply`, named in ports vocabulary and in no vendor's, and
+    it is compiled below into one script per provider. One parameter for both providers, because the
+    vocabulary has no provider in it - an agent that cares which model it is serving reads
+    `task.model` and says so itself.
+
+    `claude` and `openai` are one raw script per provider - an agent's conduct, in the only
+    vocabulary the port has - and are the escape hatch for what a `Reply` cannot express, a
+    negotiation branching on an answer above all (`sdk/testing.py` says which cases those are). A
+    raw script replaces the compiled one **for its own provider**: the more specific wins, and the
+    other provider keeps whatever `agent` gave it.
+
+    `None` everywhere means each provider's `unscripted` default, which is what lets a whole
+    workflow
+    run on fakes without anybody writing an agent first. All four are keyword-only.
     """
     # One repository, constructed here and handed to all three. There is no parameter through
     # which a caller could supply a second, which is the point: three separately constructed
@@ -344,10 +442,19 @@ def fakes(
             # everything available rather than one operator's configuration - and both fakes cost
             # nothing to hold. Qualified by module on both lines: the two `FakeAgentRunner`s are
             # unrelated classes of one name, and an unqualified import would serve one twice.
+            #
+            # `_claude_script` and `_openai_script` are the compilation stage 7 left here: they
+            # are the two functions in AGL allowed to name a `Conversation`, and each turns the
+            # provider-blind `Agent` into that provider's `Script`. A raw script wins over a
+            # compiled one, per provider, which is the docstring's one rule.
             agents=RoutingAgentRunner(
                 {
-                    Provider.CLAUDE: claude_fake.FakeAgentRunner(claude),
-                    Provider.OPENAI: openai_fake.FakeAgentRunner(openai),
+                    Provider.CLAUDE: claude_fake.FakeAgentRunner(
+                        claude if claude is not None else _claude_script(agent)
+                    ),
+                    Provider.OPENAI: openai_fake.FakeAgentRunner(
+                        openai if openai is not None else _openai_script(agent)
+                    ),
                 }
             ),
             build=build,
@@ -358,6 +465,86 @@ def fakes(
         terminal=terminal,
         clock=clock,
     )
+
+
+def _claude_script(agent: Agent | None) -> claude_fake.Script | None:
+    """`agent` as the callable Claude Code's fake consumes, or `None` for its own default.
+
+    Half of the compilation stage 7 named this module for. `adapters/claude_code/fake.py` states
+    the constraint in as many words - `sdk/` and `adapters/` are siblings, so the vocabulary module
+    "cannot name `Script` or `Conversation` at all", and "the composition root can name both". So
+    the two spellings of this function are the seam, and everything they do is in `_performs`.
+
+    Two functions rather than one generic over the conversation type, because the two
+    `Conversation` classes are unrelated by construction: contract 4 forbids one adapter importing
+    another, so there is no base class and no protocol either of them was written against, and a
+    parameter typed as one of them would silently serve that vendor's fake under both keys - which
+    is the failure `tests/config/test_container.py` already asks each provider a question only its
+    own script can answer to catch.
+    """
+    if agent is None:
+        return None
+
+    async def script(conversation: claude_fake.Conversation) -> AgentOutcome:
+        return await _performs(
+            agent(conversation.task),
+            ask=conversation.ask,
+            call=conversation.call,
+            report=conversation.report,
+        )
+
+    return script
+
+
+def _openai_script(agent: Agent | None) -> openai_fake.Script | None:
+    """`agent` as the callable the OpenAI adapter's fake consumes, or `None` for its own default.
+
+    `_claude_script`'s other half, and its whole argument. The two bodies are the same three lines
+    on two unrelated types.
+    """
+    if agent is None:
+        return None
+
+    async def script(conversation: openai_fake.Conversation) -> AgentOutcome:
+        return await _performs(
+            agent(conversation.task),
+            ask=conversation.ask,
+            call=conversation.call,
+            report=conversation.report,
+        )
+
+    return script
+
+
+async def _performs(
+    reply: Reply,
+    *,
+    ask: Callable[[Question], Awaitable[Answer | None]],
+    call: Callable[[str, Mapping[str, JsonValue]], Awaitable[ToolResult]],
+    report: Callable[[str], None],
+) -> AgentOutcome:
+    """Do what `reply` describes, through the three things a `Conversation` offers, and answer.
+
+    **The whole of what a `Reply` means, in one place and in the order `sdk/testing.py` documents**:
+    every activity line, then every question, then every call, then the outcome. Written once and
+    handed the three bound methods rather than the conversation itself, because that is the one
+    shape both vendors' `Conversation` can be passed to - see `_claude_script` for why there is no
+    type either of them shares.
+
+    **What comes back from `ask` and from `call` is deliberately dropped here.** A `Reply` is a
+    value the author computed before the run and it has nowhere to put an answer, which is the
+    limitation `sdk/testing.py` states plainly rather than works around: an agent whose next move
+    depends on what it was told is a raw `claude=` or `openai=` script. Neither result is thrown
+    away in any sense that matters, either - the answer went to the workflow's own handler and the
+    refusal to the workflow's own tool, and both of those are the author's code.
+    """
+    for line in reply.activity:
+        report(line)
+    for question in reply.asks:
+        await ask(question)
+    for made in reply.calls:
+        await call(made.tool, made.payload)
+    return AgentOutcome(stop_reason=reply.stop_reason, text=reply.says)
 
 
 def _agents(agents: AgentSettings) -> AgentRunner:

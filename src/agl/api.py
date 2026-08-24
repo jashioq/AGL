@@ -1,5 +1,8 @@
 """AGL's own operations - run, resume, clear, init, list_workflows - as an importable library.
 
+(Plus `workflow_help`, which is 16.4's `agl workflows <name>` and extends §3.10's grammar; the
+section on the two listing functions argues why it is a name of its own and not a parameter.)
+
 §1.5's charge is that there was no importable AGL: `main()` *was* the composition, every decision
 lived inside an `argparse` callback, and `_cmd_run` ended in a bare `except Exception` rendering any
 bug as `error: <str>`. §1.4's is the same fault from the other side - `_cmd_clean` and `_cmd_init`
@@ -25,8 +28,9 @@ a bundle is an operation nothing could ever reach, and `list_workflows` reads pa
 a `list_workflows` taking one makes `agl workflows` demand a registered repository in order to list
 what is merely installed.
 
-So the three operations addressed to a run take `(services, project, ...)`, `init` takes `Settings`,
-and `list_workflows` takes nothing but the entry-point seam this module already had. Five signatures
+So the three operations addressed to a run take `(services, project, ...)`; `init` takes `Settings`
+plus what the invocation said - a `cwd` and how to ask one question, both argued below - and
+`list_workflows` takes nothing but the entry-point seam this module already had. Five signatures
 where there was one shape is the price, and it is paid in exactly one place - `cli/main.py`'s
 dispatch, the only caller that has to know all five - rather than by the two operations that would
 otherwise have had to be built out of reach.
@@ -53,18 +57,34 @@ signature a library caller has to satisfy, in exchange for seven fields nothing 
 There is no `asyncio.run` in this file and there must not be. `Store` and `History` are async
 because an implementation may go out of process, and a library that started a loop of its own could
 not be called from inside one - which is precisely what 16.5's harness, and every `pytest.mark
-.asyncio` test below, do. `list_workflows` is the one operation that is not async, because it awaits
-nothing: it reads packaging metadata and sorts strings.
+.asyncio` test below, do.
+
+**Three of the six are not async, and the rule is the same one read the other way**: a function that
+awaits nothing is not declared async in order to look like its neighbours. `list_workflows` reads
+packaging metadata and sorts strings, `workflow_help` imports a package and formats a parser, and
+`init` walks the filesystem and writes one file - no port is involved in any of them, which is the
+same fact stated in the vocabulary that decides it. `cli/main.py` gives that as its reason for
+leaving `asyncio.run` to the command rather than to the dispatch: two of the five commands start no
+loop, and a dispatch that awaited everything would make them pretend otherwise.
 
 ## What `run` does, in order, and the two things it deliberately does not
 
-Load the workflow, refuse a label that is already taken, pin the base ref to a full object name,
-write `run.json`, provision the run's own `_base` worktree from that pin, then open the terminal,
-await the workflow's function inside it, and give back every integration lease it was still holding.
-The order is load-and-parse first because those two refuse with no I/O at all - §3.3's "before
-anything runs" read as strictly as it can be - then the conflict check, which decides whether this
-run may exist, then the three that are addressed to the repository, and the terminal last of all
-because it is the only one of them a person can see.
+Load the workflow, refuse a label that is already taken, ask §3.2's preflight whether the backends
+this workflow names are ready and can do what its roles require, pin the base ref to a full object
+name, write `run.json`, provision the run's own `_base` worktree from that pin, then open the
+terminal, await the workflow's function inside it, and give back every integration lease it was
+still holding. The order is load-and-parse first because those two refuse with no I/O at all -
+§3.3's "before anything runs" read as strictly as it can be - then the conflict check, which
+decides whether this run may exist, then preflight, then the three that are addressed to the
+repository, and the terminal last of all because it is the only one of them a person can see.
+
+**Preflight sits between the conflict check and the record**, and both sides of that are the same
+argument read in two directions. It is the one refusal here that costs real turns - `check_ready`
+asks a live harness - so every refusal that is free goes in front of it. And it is the last thing
+that can refuse while this run has left *nothing* behind: `write_record` and `workspaces.open` are
+both durable, so a run refused after them is one an operator has to `agl clear` before they can
+retry the one they meant. A missing binary or a logged-out session is exactly the failure somebody
+fixes in ten seconds and immediately re-runs, and it should cost them one command and not two.
 
 **The record is written before the workflow is invoked**, so a crash mid-run leaves something behind
 to resume or to clear. It is the one value in AGL with no other copy anywhere (`ports/store.py`), so
@@ -76,8 +96,11 @@ end and the reason those two lines are in the order they are. `WorkspaceProvider
 enumeration on purpose (`ports/workspace.py`), so `run.json` is the only thing that names a run at
 all: a crash after `open()` must still leave a record naming the label, or `agl/<label>` and
 `.trees/<label>/_base/` are a branch and a directory nothing can ever reach again. Writing first
-costs a record for a run whose checkout was never cut, which is one `agl clear` away; writing second
-costs a leak that no command in AGL has a way to address.
+costs a record for a run whose checkout was never cut, which is one `agl clear -f` away; writing
+second costs a leak that no command in AGL has a way to address. 16.3 is what put the flag in that
+sentence, and `clear` says why: the containment question is asked about `agl/<label>`, a run refused
+here never created one, and both `History` implementations raise for a ref that names nothing rather
+than answering "no". `-f` asks nothing, so it is the spelling that reaches this state.
 
 **The exposure this changed, stated rather than left to be found.** §3.9's known leak is a crash
 between `open()` and the first entry write, and 13.4 makes that window start earlier - at this
@@ -161,6 +184,14 @@ thing this function does, so a teardown that goes wrong reports onto a terminal 
 restored. Written the other way round the `async with` would also have had to take the `finally`
 inside it, and 14.1 argued that construct's scope where it stands.
 
+**`resume` carries the same three lines and it had to be built to notice.** A resumed run shows the
+same screens the run showed, so the whole of the argument above applies to it word for word - and
+`docs/agl-build-stages.md` records that "nothing in the repository would notice its absence",
+because until 15.1 no test drove a `show` through an `api` entry point at all and the hole was
+therefore invisible for every stage that had one. What closes it is not a rule written here but a
+test per entry point that goes red when the line is deleted, which `tests/sdk/test_run_terminal.py`
+now holds for both.
+
 ## The registry, and the one seam it left open
 
 `config/registry.py` split itself into a pure core taking entry points and one impure line asking
@@ -187,35 +218,240 @@ workflow again, and the registry indexes by the **entry-point key**. Storing wha
 itself would produce a record that resumes only while the two agree, and fails with "no workflow
 named ..." on the day a package renames one of them - naming the string the operator never typed.
 
-## Four operations are declared and one is built
+## What `resume` does, in order, and the one thing it deliberately does not
 
-§3.10's five verbs are this module's row in `ARCHITECTURE.md` §6, and the CLI's dispatch is written
-against the surface rather than against whichever half of it exists today. So `resume`, `clear` and
-`init` are here as signatures that refuse, each naming the deliverable that fills it in - 16.2, 16.3
-and 16.4 - and the refusal is an `InternalError` because at this stage nothing can reach one: the
-CLI has no such verb, so arriving here is our bug and not the caller's mistake.
+Read the record and refuse a label that has none, parse it, load the workflow the record names,
+refuse a version that is not the one it was stamped with, rebuild the params instance out of the
+record, ask preflight the same two questions `run` asked, reopen the run's own `_base` worktree
+from the commit the record pins, and then open the terminal and await the workflow's function
+inside it. The shape is `run`'s with the two durable writes taken out and one comparison put in,
+which is the honest description of what a resume is: the same run, walked again.
 
-`list_workflows` is built, because it is genuinely complete: §3.10's `agl workflows` is "list what's
-registered", `registry.names` is that list already sorted, and what 16.4 adds is a command that
-prints it. A stub would have been a stub of one expression.
+**And the refusals in front of preflight are all four of them, which is `run`'s rule and not a
+resemblance to it.** Preflight is the one call here that costs real turns, so everything that can
+refuse for free goes first: the record's existence, its shape, the workflow's name, its version and
+its params. Each of those is a store read or a comparison, and an ordering that spent a
+`check_ready` on a live harness before telling a workflow author they edited a params dataclass and
+left the `version` line alone would be charging for the most common way any of this fires.
+
+**The record is not rewritten, and that is §3.6 rather than an economy.** `base_sha` pins the
+resolved commit "not just the ref name" so that a commit landing on `main` between run and resume
+cannot move the first step's starting head - so a resume that re-resolved `base_ref` and stored the
+answer would perform the failure the field exists to prevent, in the operation the field exists
+for. The same reading covers the rest of it: `created_at` is when the run started rather than when
+it was last picked up, and a `workflow_version` stamped over instead of compared against is a
+migration written as an assignment.
+
+**The version comparison is `ConflictError`, the same class `run` answers a taken label with**, and
+the symmetry is the argument. Both are the two ways a run and a world fail to match: `run` finds
+the world already holding the name it was given, `resume` finds it holding a different workflow
+under the name the record gives. Neither is `NotFoundError` - in both cases everything named was
+found - and `ports/errors.py` puts that distinction on the class in as many words, "the world
+already holds something this operation would have to take or overwrite ... the exact mirror of
+`NotFoundError`".
+
+**`workspaces.open` is called here for `run`'s own reason**, and the fact that it is idempotent is
+what makes that free rather than merely safe. §3.9 promises `agl/<label>` is a real ref a person can
+`git log` from run start, and `run.step`'s open is lazy, so a resumed run whose workflow takes no
+step would otherwise leave nothing - and the state a resume exists to recover from is a crash,
+which includes a crash between `write_record` and `open` that left a record naming a checkout
+nobody ever cut. On a run that has one, "an existing workspace is returned exactly as it stands"
+means this line reads a table and returns, ignoring the base it was handed, so it cannot rewind a
+checkout that has advanced.
+
+## What `clear` does, in order, and why the records go last
+
+§3.10's own list is "`.trees/<label>/`, the `agl/_work/<label>/*` child branches, and the run
+directory". In order: read the record and refuse a label that has none, enumerate the run's
+namespaces, take each child's checkout back and then delete the line of work it carried, take the
+run's own `_base` checkout back, decide about `agl/<label>`, and remove the records last.
+
+**The records go last because they are the enumeration.** `Store.namespaces` is the only place the
+set of namespaces a run used is written down - `WorkspaceProvider` deliberately offers none, and
+`ports/store.py` names `clear` as that member's one consumer - so a `clear` that removed the records
+first would have thrown away, in one call, the list of everything it still had to take back, and
+every checkout the run held would be stranded with nothing in AGL able to name it again. Nothing
+below that line has to be ordered against anything else: both teardown verbs tolerate absence in the
+port's own words, which is what makes `clear` after a crash the ordinary case and `clear` twice the
+whole of the recovery.
+
+**Each namespace is `remove` then `discard`, in that order, because the port says why**: "an
+implementation is within its rights to refuse to delete a line of work that something still has
+open, and calling these in this order means no caller has to know whether it does."
+
+**And every one of them is a bare `Namespace`, never a path and never a scope**, which is §3.9's
+decision paying out three stages later. `AGL_HOME` nests arbitrarily, so the enumeration below is a
+real traversal through `RunScope.inside`; the trees root is flat, because a worktree inside another
+worktree's working tree is untracked files to the parent. Namespace names are therefore unique
+run-wide rather than merely among siblings, so a scope two levels down in the store is one flat
+directory in the trees root and the provider takes the name alone. Without run-wide uniqueness this
+loop would have to carry each namespace's ancestry to the provider and the provider would have to
+compose a nested path out of it - which is the shape §3.9 refused.
+
+## The leak `clear` does not close, stated exactly
+
+**What is left behind.** A child's checkout directory `.trees/<label>/<namespace>/`, that child's
+branch `agl/_work/<label>/<namespace>`, and - because that directory is still standing -
+`.trees/<label>/` itself, whose `rmdir` in `_trees.tidied` then declines.
+
+**What causes it.** `Store.namespaces` reports a namespace because something was *recorded* under
+it. `sdk/_engine/steps.py` opens a child's checkout at the top of its first step and writes that
+step's entry at the bottom, so a crash in between leaves a directory this module cannot see. §3.9
+calls that window "a crash between a *child's* `open()` and its first entry write" and does not say
+how long it is; the honest answer is the length of that first step, which is an agent turn.
+
+**Why it cannot be closed within the ports.** No port can enumerate `agl/_work/<label>/*`, by
+design. `History` is five questions about the past and none of them is a listing; `ports/workspace
+.py` argues at length that a provider offers no enumeration, "because an enumeration method would
+buy tidiness by requiring that every implementation be able to list, which a service handing out
+checkouts to many clients may not honestly be able to do". Nor can this module go and look: a
+`Services` carries no trees root, and a `clear` that computed a path under one would be §1.4's
+`_cmd_clean` reaching past the `Store` port, inside the operation that exists to answer that charge.
+
+**Why §3.10 accepts it** - the same asymmetry the branch decision below is made on. A retained
+directory and a retained ref cost a stale name. The verb that would find them costs a port member
+that every implementation has to provide and every contract suite has to assert, for one caller and
+one crash.
+
+**It is child-only, and that is what writing `run.json` before provisioning buys.** The run's own
+checkout and its own branch are addressed by `namespace=None`, which is derivable from the label
+alone, so `clear` reaches both with no enumeration at all - `ids.py` refuses every spelling of
+`_base` as a `Namespace`, so a caller cannot even build the alternative. A record on disk is the
+whole of what `clear` needs, and `run` writes one before it provisions for exactly this reason.
+
+**`clear` cannot report any of it, and does not pretend to.** `_trees.tidied` swallows the failed
+`rmdir` by design - "a failure of any kind means the directory is still wanted or already gone" - so
+a leaked child leaves `.trees/<label>/` standing with no signal anywhere on this path. Every way of
+producing one is either a new port member or a filesystem read from a module that holds no root, so
+what is owed is this paragraph rather than an invented warning.
+
+## All five verbs are built, and 16.4 is the deliverable that finished the surface
+
+§3.10's five verbs are this module's row in `ARCHITECTURE.md` §6, and the CLI's dispatch has been
+written against that surface since 10.4 rather than against whichever part of it existed. `init` was
+a signature that refused, naming this deliverable; it is a function now, `_unbuilt` is gone with it,
+and nothing in AGL declares an operation it cannot perform.
+
+## `init` takes a `cwd`, and that is the one place §3.10's "settings alone" is read against
+
+§3.10 asks `init` to "take settings alone" *and* to "detect the git root", and after 11.0 the two
+cannot both be literally true: `Path.cwd()` travels inside `cli/main.py`'s deferred thunk, so an
+`init` taking `Settings` and nothing else would have to read the working directory ambiently from
+here. It takes a `cwd: Path` instead, and the argument has three parts.
+
+**This is a library.** `agl.api.init(settings, cwd, ask)` is callable from a test, a harness or
+another program without `os.chdir`, which is process-global, hostile to a suite that runs workflows
+in-process, and irreversible in the way that matters - a failure between the chdir and the restore
+leaves every later test somewhere else. An ambient read would make `init` the one operation in this
+module that cannot be driven except by moving the whole process.
+
+**The working directory is environment**, and `config/sources.py` states the contract that closes
+this: "nothing downstream may re-read the environment or re-parse a settings file. After `resolve`
+returns, the answer is fixed for the invocation." A `Path.cwd()` below that line is a second answer
+to a question the composition root closed, free to differ from the first the moment anything in the
+process moves - and `sources.Resolved.project(cwd)` already takes the directory as an argument for
+exactly this reason, so an `init` that read it would be the one asker that did not.
+
+**And "settings alone" is drawn against "resolve a project and build a container".** The sentence it
+lives in is about *composition*: "`run`, `resume` and `clear` resolve a project and build a
+container; `init` takes settings alone; `list_workflows` takes neither." What it fixes is that
+`init` needs no container - it writes the file a container is built from. A `cwd` is neither a
+container nor a project; it is what the invocation said, the same category as `argv` on `run` and
+`label` on `resume`, and it is what keeps `Path.cwd()` written exactly once in the process
+(`cli/main.py` reads it, `Invocation` carries it, this takes it).
+
+## `init` asks through a callable, and this module never names `input`
+
+§3.10 has `init` "ask for the build command", and `_BUILD_GUESSES` is named there only to say why:
+inferring it is unreliable, so AGL asks instead of guessing. There is therefore no build-tool
+detection anywhere in this codebase, which is half of §1.4's charge against `_cmd_init` answered by
+not writing something.
+
+The question is put through `ask`, a `Callable[[str], str]` this function is handed. It has **no
+default**, and that is the decision rather than an omission. `api.clear`'s docstring settles the
+matching case one direction over: a sentence printed from here "would be one a library caller, a
+harness and 16.5's testing bundle could not see and could not suppress", and there is no `print`
+under `src/agl/` outside `cli/`. Reading a person's stdin is that same boundary from the other side,
+and `input()` writes its prompt to stdout on the way. A parameter with no default is what keeps
+`input` out of this module *mechanically*: it cannot be called without a caller saying how the
+question is asked, and `cli/main.py` is where the real answer - `Invocation.ask`, defaulting to
+`input` - is written down, once, at the edge where a person is.
+
+It is deliberately not `points=`' shape. That seam spells its real default `None` because
+`registry.installed()` is a call that must be deferred and is inert when it happens; there is no
+honest `None` here, because this module would have to name `input` to interpret one.
+
+**The prompt is this module's**, because the question is: what AGL needs is the command a merge gate
+runs, and the CLI's job is to carry the words to a person and the answer back. A blank answer is
+refused rather than looped on - a loop is an interaction run against a callable that may not be a
+person at all - and refused *before* anything is written, which is `schema.Project`'s own rule about
+a blank build applied one step earlier, where the operator can still retype it.
+
+## `list_workflows` and `workflow_help` are two functions, and the split is the guarantee
+
+`agl workflows` lists, and `agl workflows <name>` prints one workflow's own flags (16.4 - and see
+`cli/commands/workflows.py`, which records that the second half extends §3.10's grammar). The
+temptation is one function with an optional name; they are two, for three reasons that are really
+one.
+
+**The listing imports nothing and that is its whole value.** `config/registry.py`: "one workflow
+package that fails to import still appears in the listing, and every other workflow still runs. A
+registry that imported the world to print a list would let any broken third-party package take down
+the command an operator runs to find out what they have." A function that sometimes loads a package
+cannot carry that promise in its name, its docstring or its type - and the promise is the reason the
+listing is worth having on a machine where something is broken.
+
+**The return types differ** - a tuple of names, or one block of help text - so a single function
+would answer at a union that every caller narrows, on a parameter that is also what decides which
+half of the union comes back.
+
+**And they are two different registry operations**: `registry.names` never calls `load`, and `load`
+is the one that runs somebody else's code. Two names keep that visible at every call site.
 """
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from importlib.metadata import EntryPoint
+from pathlib import Path
+from typing import Final
 
-from agl.config import registry
+from agl.config import registry, sources, toml_file
 from agl.config.schema import Settings
-from agl.ports.errors import ConflictError, InternalError
+from agl.ports.errors import ConflictError, InputError, NotFoundError
+from agl.ports.history import History
 from agl.ports.home_layout import RunScope
-from agl.ports.ids import ProjectName, RunLabel
+from agl.ports.ids import Namespace, ProjectName, RunLabel
 from agl.ports.run import RunSpec
-from agl.ports.tree_layout import run_branch
+from agl.ports.store import Store
+from agl.ports.tree_layout import TreesRoot, run_branch
 from agl.sdk import params
+from agl.sdk._engine import preflight
 from agl.sdk._engine.integration import Leases
 from agl.sdk._engine.services import Services
 from agl.sdk.workflow import Run, Workflow
 
-__all__ = ["clear", "init", "list_workflows", "resume", "run"]
+__all__ = ["Ask", "clear", "init", "list_workflows", "resume", "run", "workflow_help"]
+
+# Where `init` puts a repository's working checkouts: `<repo's parent>/.agl-trees/<name>`, which is
+# §3.10's own example. Beside the repository and never under it (§3.5), and spelled once - a second
+# module choosing a trees root would be a second answer to where AGL's checkouts live.
+_TREES_DIRNAME: Final = ".agl-trees"
+
+# What `init` asks a person, and the whole of what AGL asks anybody. It says what the command is
+# for, because "build command:" alone invites the *other* build command - the one a workflow writes
+# into a prompt, which §3.11 keeps out of the framework entirely.
+_BUILD_PROMPT: Final = (
+    "What command builds and tests this project? AGL runs it at the merge gate, through a shell, "
+    "in a worktree of its own - `./gradlew build`, `make test`, `npm run build`.\n"
+    "build command: "
+)
+
+
+type Ask = Callable[[str], str]
+"""How `init` puts its one question to whoever is running it: a prompt in, their answer out.
+
+The seam the module docstring argues, and a type rather than a bare `Callable` at two signatures so
+that the two agree by construction. `cli/main.py` holds the real one - `input` - and a test, a
+harness or another program hands in whatever answers for it."""
 
 
 async def run(
@@ -237,8 +473,12 @@ async def run(
 
     Raises, and nothing else reports: `NotFoundError` for a name nothing registers (exit 3),
     `InputError` for flags the workflow's params refuse (exit 2), `ConflictError` for a label that
-    already has a record (exit 4), and whatever the workflow itself raises, untouched - a `Stop`
-    subclass included, which is the ordering criterion §3.1 makes of this stage.
+    already has a record (exit 4), `DeniedError` for a role requiring a capability its backend does
+    not offer (exit 5 - something reachable said no, and `ports/errors.py` names this case on that
+    class), `UpstreamUnavailable` for a harness that is missing, out of date or logged out (exit 6,
+    raised by the adapter that said so and passed on untouched), and whatever the workflow itself
+    raises, untouched - a `Stop` subclass included, which is the ordering criterion §3.1 makes of
+    this stage.
     """
     wf: Workflow[object] = registry.load(_points(points), name, Workflow)
     # Parsed before any port is touched: a flag the workflow will not accept costs nothing to
@@ -251,6 +491,22 @@ async def run(
         raise ConflictError(
             f"run {str(label)!r} already exists - `agl resume {label}` or `agl clear {label}`."
         )
+
+    # §3.2's preflight, and its position is the whole of what 16.1 decided here. It is the one
+    # refusal in this function that costs real turns, so everything that can refuse for free goes
+    # first: the registry, the params, and the conflict check, which is a store read that decides
+    # whether this run may exist at all. And it is *before* the record and before `_base`, because a
+    # run refused at preflight must leave nothing behind - otherwise an operator has to `agl clear`
+    # a run that never started before they can retry the one they meant. Before the terminal too,
+    # for the reason the module docstring already gives about that `async with`: a refusal a person
+    # has to read should not be drawn across a display AGL has taken over.
+    #
+    # `services.agents` and `wf.roles`, not the bundle: `sdk/_engine/preflight.py` takes one port
+    # and the roles, so that the module whose job is to refuse before anything happens cannot grow
+    # a second reader. 16.2 makes this same call from `resume` - the record names the workflow, the
+    # registry hands back the same `Workflow`, and `wf.roles` is the same tuple - so nothing here
+    # has to move for it.
+    await preflight.check(services.agents, wf.roles)
 
     # `base_ref` is what the user said and `base_sha` what it meant now. Without the second, a
     # commit landing between run and resume moves the first step's starting head (§3.6).
@@ -330,45 +586,385 @@ async def run(
         leases.release_all()
 
 
-async def resume(services: Services, project: ProjectName, label: RunLabel) -> None:
-    """Continue a run from its record: `agl resume <label>` (§3.10). **Deliverable 16.2.**
+async def resume(
+    services: Services,
+    project: ProjectName,
+    label: RunLabel,
+    *,
+    points: Iterable[EntryPoint] | None = None,
+) -> None:
+    """Continue a run from its record: `agl resume <label>` (§3.10).
 
-    The label only - params come from `run.json`, which is why nothing here takes argv - and a
-    missing label errors symmetrically with `run`'s refusal of an existing one. It reads the record,
-    compares `workflow_version` with `==`, and replays through the journal, none of which exists
-    before stages 11 and 12.
+    The label only - params come from `run.json`, which is why nothing here takes argv, no workflow
+    name and no `--from`. Every one of those is read back out of the record instead: the
+    entry-point key the run was started with, the version it was stamped under, the commit it was
+    pinned to, and the parameters it was given. §3.10: "`resume` takes the label only; params come
+    from `run.json`. `resume` on a missing label errors symmetrically. Keeping both verbs makes a
+    typo'd label a loud error rather than a silent replay of something unrelated."
+
+    Raises, and nothing else reports: `NotFoundError` for a label with no record (exit 3, the exact
+    mirror of `run`'s refusal of one that has, and the two messages are written as a pair) and for a
+    workflow the record names that nothing registers, `ConflictError` for a record whose
+    `workflow_version` is not the installed workflow's (exit 4), `InputError` for a record whose
+    params that workflow's current class will not take (exit 2, `sdk/params.py`'s refusal),
+    `DeniedError` and `UpstreamUnavailable` out of preflight exactly as `run` raises them, and
+    whatever the workflow itself raises, untouched - a `Stop` subclass included, which is §3.1's
+    ordering criterion and is as true of this function as of `run`, for the same reason: there is
+    no `except` here either.
+
+    **The record is read and never rewritten**, and the absence is §3.6's whole point about a
+    resume rather than an economy. `base_sha` "pins the resolved commit, not just the ref name"
+    precisely so that "a commit landing on `main` between run and resume" cannot move "the first
+    step's starting head" - so a resume that re-resolved `base_ref` and wrote the answer down would
+    be the failure that field exists to prevent, performed by the operation the field exists for.
+    Nothing else in the record has a reason to move either: `created_at` is when the *run* started,
+    not when it was last picked up, and `workflow_version` is compared against rather than updated,
+    a resume that stamped the installed version over the recorded one being a migration written as
+    an assignment.
     """
-    raise _unbuilt("resume", "16.2")
+    scope = RunScope(project, label)
+    record = await services.store.read_record(scope)
+    if record is None:
+        # §3.10's symmetric refusal, and the mirror image of `run`'s above: that one says the label
+        # is taken and names the two verbs that free it, this one says it is free and names the
+        # verb that takes it. Read as a pair, they are what makes a typo'd label loud in both
+        # directions rather than a silent replay of something unrelated.
+        raise NotFoundError(
+            f"run {str(label)!r} does not exist - `agl run <workflow> -n {label}` starts one."
+        )
+    spec = RunSpec.from_json(record)
+
+    # `spec.workflow` and never `wf.name`, which is the field's whole job: the registry indexes by
+    # the entry-point key, so a record storing what a workflow calls itself would resume only while
+    # the two agree and would fail naming a string the operator never typed. The module docstring
+    # argues it where the record is written.
+    wf: Workflow[object] = registry.load(_points(points), spec.workflow, Workflow)
+
+    # §3.11's schema migration in one line: "stamp the version, refuse on mismatch. Runs live
+    # hours." Compared with `==` and never parsed, because `ports/run.py` keeps this a `str` for
+    # exactly that - "parsing implies an ordering, an ordering implies 'newer than', and 'newer
+    # than' is the first line of a migration nobody is going to write".
+    #
+    # `ConflictError`, and it is the same class `run` answers a taken label with. The record exists
+    # and the workflow exists and each is fine on its own; what fails is that they do not fit,
+    # which is `ports/errors.py`'s "the world already holds something this operation would have to
+    # take or overwrite ... the exact mirror of `NotFoundError`". Every step already on this run's
+    # ledger was produced by the workflow as it was then, so finishing it under another version is
+    # overwriting a run's history with a stranger's - and `NotFoundError` would be wrong twice
+    # over, the label having been found and the workflow with it.
+    if wf.version != spec.workflow_version:
+        raise ConflictError(
+            f"run {str(label)!r} was started by {spec.workflow!r} version "
+            f"{spec.workflow_version!r} and the installed {spec.workflow!r} is version "
+            f"{wf.version!r}. A run stamps its workflow's version and AGL refuses a mismatch "
+            f"rather than migrating one (§3.11): every step already on this run's ledger was "
+            f"produced by the workflow as it was then. Install {spec.workflow_version!r} to finish "
+            f"this run, or `agl clear {label}` and start it again on {wf.version!r}."
+        )
+
+    # The params, rebuilt from the record rather than parsed from a line nobody typed - §3.3's
+    # "persisted into `run.json`, which is why `agl resume auth` takes no flags", read backwards.
+    #
+    # **What this refusal is**: not an operator-facing check, but the version stamp's backstop. The
+    # values are a record AGL wrote through `params.to_json` rather than something anyone typed, so
+    # the only way it fires is a workflow whose params class moved while its `version` stood still
+    # - the one case the comparison above cannot see, since the two records agree about the version
+    # and disagree about everything the version was supposed to cover.
+    #
+    # **Why it is nonetheless in front of preflight**, which is the ordering rule and not an
+    # exception to it. `run` puts everything that can refuse for free ahead of the one refusal that
+    # costs real turns, and that paragraph is a property of these functions rather than a note
+    # about the params parse: this reads a mapping and compares two key sets, so it costs
+    # microseconds wherever it sits, and an exception to the rule that buys nothing is not an
+    # exception. What leaving it below would cost is a `check_ready` turn on a live harness spent
+    # before the operator is told about it - and forgetting the version line after editing a params
+    # dataclass is the way this fires in practice, repeatedly, to whoever is iterating on the
+    # workflow.
+    given = params.from_json(wf.params, spec.params)
+
+    # §3.2's preflight, over the same tuple `run` walked, and `sdk/_engine/preflight.py` says in as
+    # many words that nothing had to move for this call: the record names the workflow, the
+    # registry hands back the same `Workflow`, and `wf.roles` is the same tuple. It is here for
+    # `run`'s reason and one of its own - a resume happens on a machine the first invocation may
+    # not have been made on, hours later, and "is this backend ready" is the question whose answer
+    # is most likely to have changed in between. Everything above it refuses for free; nothing
+    # below it does.
+    await preflight.check(services.agents, wf.roles)
+
+    # §3.9's `_base`, provisioned here for the reason `run` provisions it: "`agl/<label>` is a real
+    # ref from run start and advances with each `integrate()`, so progress is inspectable live",
+    # and a workflow that takes no step opens nothing of its own - `run.step`'s open is lazy. A
+    # resume that skipped this would make that sentence false for exactly the runs it is most
+    # wanted for, since the state a resume exists to recover from is a crash, and a crash between
+    # `write_record` and `open` leaves a record whose checkout was never cut at all.
+    #
+    # **Idempotent, so this cannot disturb a run that has one**: "an existing workspace is returned
+    # exactly as it stands" (`ports/workspace.py`), which also means the `base` argument is ignored
+    # on a reopen - so this line cannot rewind a checkout that has advanced through steps and
+    # landings, and the `Workspace` is dropped here exactly as `run` drops it.
+    #
+    # `spec.base_sha` and never `spec.base_ref`, which is the whole of what the record's pin buys:
+    # `open` takes a ref expression too, so handing it the ref would cut this checkout from
+    # wherever `main` has got to since the run started, and §3.6 pins the commit so that a resume
+    # hours later starts where the run did.
+    await services.workspaces.open(label, None, spec.base_sha)
+
+    # From here on this is `run`'s last paragraph, line for line, and deliberately so: a resumed
+    # run is the same run. §3.4's lease is constructed above the workflow so that `release_all` can
+    # be the `finally`, §3.7's terminal is entered around the workflow's function and around
+    # nothing else - without which every `show` in a resumed run would raise `InternalError` by the
+    # port's own rule - and there is no `except` of any width, so a workflow's own exception leaves
+    # this function as the object it raised. The `Run` is built from `scope` and `spec.base_sha`,
+    # the address the record is at and the commit it pins, and its three remaining shared tables
+    # take their defaults: §3.6's counter is rebuilt from nothing on purpose ("`n` is never
+    # persisted; replay walks the same calls in the same order and reproduces the same values"),
+    # the namespace table is empty because `worktree()` is what fills it as the workflow walks, and
+    # `Capabilities` holds no record of what preflight saw by `sdk/_engine/preflight.py`'s design.
+    leases = Leases()
+    try:
+        async with services.terminal:
+            await wf.fn(
+                Run(
+                    params=given,
+                    services=services,
+                    scope=scope,
+                    base=spec.base_sha,
+                    leases=leases,
+                )
+            )
+    finally:
+        leases.release_all()
 
 
 async def clear(
     services: Services, project: ProjectName, label: RunLabel, *, force: bool = False
-) -> None:
-    """Take a run away: `agl clear <label> [-f]` (§3.10). **Deliverable 16.3.**
+) -> str | None:
+    """Take a run away: `agl clear <label> [-f]` (§3.10).
 
-    `force` is `git branch -d` versus `-D`: without it the run's branch is deleted only if it is
-    already contained in the base ref, and otherwise kept with a warning, because a retained branch
-    costs a stale ref and a deleted one costs the entire run.
+    The module docstring holds the order and the leak; this one holds the one decision `clear`
+    makes and the one sentence in §3.10 that has no mechanism behind it.
+
+    Answers with the **warning an operator has to read**, or `None` when there is nothing to say.
+    Not a `print`: `api` is a library, and `cli/commands/run.py` is emphatic that a command "renders
+    what came back", so a sentence written to stdout from here would be one a library caller, a
+    harness and 16.5's testing bundle could not see and could not suppress. There is no `print`
+    anywhere under `src/agl/` outside `cli/`, and this operation is not the one that starts.
+
+    A `str | None` and not a value object, because there is exactly one bit here anybody acts on -
+    whether the run's own line of work survived - and the *reason* it survived is what they act on
+    it with. A record of what else was taken away would be a field with no reader: everything else
+    is unconditional, so "it was removed" is the postcondition rather than an outcome.
+
+    Raises, and nothing else reports: `NotFoundError` for a label with no record (exit 3, written as
+    the third member of `run`'s and `resume`'s pair) and for a base ref or a run branch that no
+    longer names anything, `ConflictError` for a line of work something still holds open or a
+    worktree registry another process has wedged (exit 4, out of the adapter that said so), and
+    `InternalError` for a record AGL can no longer read back. There is no `except` here either.
+
+    **Two of those are unreachable with `-f` and one is not**, which is the honest description of
+    what the flag buys beyond `git branch -D`'s semantics. It asks nothing, so it parses no record
+    and looks up no ref: the `InternalError` and the missing-ref `NotFoundError` both belong to the
+    unforced path alone, and `-f` is therefore the spelling that clears a run whose own state has
+    gone wrong. The case an operator actually meets is a run that crashed between `write_record` and
+    `open`: the record names a branch that was never created, and `contains` refuses a ref that
+    names nothing rather than answering "no" (`ports/history.py` argues why that refusal is the
+    right one), so `agl clear <label>` reports the missing ref and `agl clear <label> -f` takes the
+    record away - which is why `run`'s own docstring carries the flag. The `ConflictError` is not
+    skipped: `-f` still deletes the branch, so a line of work something has open refuses either way,
+    and that is §3.10's lock sentence rather than an exception to the flag.
+
+    ## `git branch -d`, and the ref it is asked about
+
+    §3.10: "It deletes `agl/<label>` **only if merged into the base ref**; otherwise it warns and
+    keeps it. `-f` deletes regardless - exactly `git branch -d` versus `-D`. The rationale is
+    asymmetric cost: a retained branch costs a stale ref, a deleted one costs the entire run."
+
+    "Merged" is `History.contains(ancestor, descendant)` with the run's branch as the **ancestor**
+    and the base ref as the **descendant**: is the run's work already in what the base records.
+
+    **`base_ref` and never `base_sha`**, and the two mean different things to this question.
+    `base_sha` is the commit the run was cut from and cannot have moved (§3.6 pins it so that
+    nothing can), so `contains(branch, base_sha)` is true exactly when the run committed nothing at
+    all - it would delete the branches of runs that did no work and keep every branch that did,
+    which is the answer inverted. `base_ref` is where the work was heading and is the thing that may
+    have advanced to include it. §3.10 says "the base ref" and this is why it has to.
+
+    **The branch AGL is about to delete is `run_branch(label)`, not `RunSpec.branch`.** The record
+    stores a derivable value on purpose, but `WorkspaceProvider.discard` derives its own name from
+    `tree_layout` and takes no branch - so asking about the recorded string would be asking about
+    one ref and deleting another the day the scheme changes. `run` above makes the same argument at
+    the other end: the record and the ref agree by both reading the layout, never by one being
+    handed the other's answer.
+
+    **The question is asked here and not up beside the refusals**, which is `api.py`'s
+    cheapest-refusal-first rule applied rather than excepted from: that rule orders *refusals*, and
+    this is not one - both of its answers are success. It belongs beside the deletion it decides,
+    and after `remove`, because a line of work something still has checked out is one an
+    implementation may refuse to delete.
+
+    ## "It refuses while a run holds a lock" (§3.10), measured rather than implemented
+
+    **There is no durable "this run is live" lock in AGL and this deliverable did not invent one.**
+    §3.11 refuses stored status by name, on the grounds that two sources of truth is what forces
+    reconciliation code to exist, and a liveness flag is stored status wearing another word.
+    §3.4's `Leases` are in-process, so a second `agl` invocation cannot see them at all.
+
+    What `clear` does inherit is two real refusals, and neither detects a run in progress:
+
+      * **§3.9's registry mutex.** `_trees.registry_lock` is a cross-process `flock(2)` on a file in
+        the trees root, taken inside `GitWorkspaceProvider.remove` around the `worktree prune` and
+        let go of immediately, so a `clear` and a concurrent `run` cannot mutate `.git/worktrees/`
+        at once. A holder that is wedged is refused on a deadline with `ConflictError`, naming the
+        file. That is a refusal on a *timeout*, not on liveness.
+      * **git's own `worktree lock`, which is the closest thing to the sentence.** Measured against
+        git 2.50.1: `worktree prune` silently skips a locked worktree even after its directory has
+        gone, so the registration survives `remove`; `git branch -D` then refuses with "cannot
+        delete branch ... used by worktree at ...", and `discard` re-raises that as `ConflictError`
+        having asked whether the branch is still there. So `agl clear` on a locked worktree really
+        does refuse, at exit 4, and nothing here catches it.
+
+    What it cannot mean is a refusal AGL raises about its own runs. `GitWorkspaceProvider.remove`
+    inherits neither of `git worktree remove`'s refusals, because it does not call it: it deletes
+    the directory and prunes, which that module chose precisely to avoid "three refusals to tolerate
+    in a verb whose whole job is to be unconditional". So a `clear` aimed at a run that is live in
+    another process takes its checkouts away underneath it, and says nothing.
     """
-    raise _unbuilt("clear", "16.3")
+    scope = RunScope(project, label)
+    record = await services.store.read_record(scope)
+    if record is None:
+        # The third member of the pair `run` and `resume` are written as: that one says the label is
+        # taken and names the two verbs that free it, `resume` says it is free and names the verb
+        # that takes it, and this one says it is free and there is therefore nothing to take away.
+        raise NotFoundError(f"run {str(label)!r} does not exist - there is nothing to clear.")
+
+    # Enumerated before anything is removed and used after the checkouts are gone, which is what
+    # keeps `store.remove` at the bottom of this function: this list is the only record anywhere of
+    # what the run held. `Store.namespaces` answers about immediate children, so `_under` recurses.
+    for namespace in await _under(services.store, scope):
+        # `remove` then `discard`, per namespace, in the order `ports/workspace.py` requires. The
+        # bare `Namespace` is §3.9's flat trees root arriving here - see the module docstring.
+        await services.workspaces.remove(label, namespace)
+        await services.workspaces.discard(label, namespace)
+
+    # The run's own checkout, addressed by the absence of a namespace. This is also the call that
+    # takes `.trees/<label>/` itself away, once the last checkout in it has gone (`_trees.tidied`),
+    # which is why §3.10's directory half needs no verb the port does not already have.
+    await services.workspaces.remove(label, None)
+
+    branch = run_branch(label)
+    # `-f` deletes regardless, so it asks nothing and reads nothing - which is also why the record
+    # is parsed here rather than beside the existence check above. `RunSpec.from_json` refuses a
+    # record AGL cannot read back, and `clear` is the one command that has to keep working on a run
+    # whose state has gone wrong: `agl clear <label> -f` takes it away knowing only the label.
+    kept = (
+        None
+        if force
+        else await _kept(services.history, label, branch, RunSpec.from_json(record).base_ref)
+    )
+    if kept is None:
+        await services.workspaces.discard(label, None)
+
+    # Last, and the module docstring argues it: this is the enumeration, and removing it first would
+    # strand every checkout it names. At depth zero it takes the record, the entries and every
+    # nested scope under them (`ports/store.py`), which is §3.10 removing a run wholesale.
+    await services.store.remove(scope)
+    return kept
 
 
-async def init(settings: Settings) -> None:
-    """Register this repository as a project: `agl init` (§3.10). **Deliverable 16.4.**
+def init(settings: Settings, cwd: Path, ask: Ask) -> Path:
+    """Register this repository as a project: `agl init` (§3.10). Answers with the file it wrote.
 
-    `Settings` and nothing beside it, which is the one signature here that could not have been read
-    off `container.real`'s inputs: this is the operation that *creates* the project file every other
-    one is already resolved against, so a `Project` does not exist when it is called and a container
-    built from one cannot either. Settings alone resolve fine outside a registered repository -
+    No bundle and no project, which is the one signature here that could not have been read off
+    `container.real`'s inputs: this is the operation that *creates* the project file every other one
+    is already resolved against, so a `Project` does not exist when it is called and a container
+    built from one cannot either. `Settings` resolve fine outside a registered repository -
     `schema.Settings` is written to that requirement in as many words - and `home` is the whole of
-    what this needs, `AGL_HOME/projects/<name>.toml` being where the answer goes.
+    what is read off them, `AGL_HOME/projects/<name>.toml` being where the answer goes.
 
-    §3.10 has it detect the git root, ask for the build command, pick a trees root and write that
-    file. Detecting the git root is left here rather than passed in because `cli/main.py` no longer
-    asks the working directory anything: `Path.cwd()` travels inside the callable that resolves a
-    project, and a command that has no project to resolve never invokes it.
+    `cwd` is where to start looking for a git root and `ask` is how the build command is asked for;
+    the module docstring argues both at length, and neither is a container.
+
+    **Sync, for `list_workflows`' reason**: it awaits nothing. No port is touched - `Store` holds
+    runs and this is not one, and `config/toml_file.py` is "the only module that knows TOML", so the
+    write goes there. So `cli/commands/init.py` starts no event loop, which is what `cli/main.py`
+    means by leaving the loop to the command rather than to the dispatch.
+
+    ## What it does, in order, and why that is the order
+
+    Find the git root, name the project after it, refuse a repository that already has a file, pick
+    a trees root, refuse one that would sit inside the repository, ask for the build command, refuse
+    a blank answer, and write. Everything that can refuse without asking anybody anything goes
+    first, which is `run`'s rule about preflight applied to the one thing here that costs more than
+    a syscall: a person's attention. A build command typed into a prompt and then thrown away
+    because the project was registered last week is that rule ignored.
+
+    **The name is the repository's directory name**, which is what makes §3.10's example file
+    consistent with itself - `repo = "/Users/jan/dev/myapp"` and `name = "myapp"` - and what makes
+    `agl init` take no arguments at all. A directory name the filesystem admits and `ids.py` does
+    not is `ProjectName`'s own `InputError`, uncaught here for the reason this module catches
+    nothing: it says which characters it refused and where, and a sentence added on the way past
+    would be a fourth copy of that rule.
+
+    **All five of §3.10's keys are written**, `build_timeout` included, and the number is not stated
+    here: `sources.DEFAULT_BUILD_TIMEOUT` is where the fourth layer lives and this reads it. So a
+    freshly registered project resolves its timeout from the *file* rather than from the default
+    layer, which is what makes the value visible to somebody who wants to change it - and which
+    means a project keeps the timeout it was registered with if AGL's own default later moves.
+    `sources.py` states that property beside the constant.
+
+    **The trees root is `<repo's parent>/.agl-trees/<name>`**, §3.10's example, and beside the
+    repository rather than under it (§3.5). `check_trees_root` is asked all the same and is not a
+    formality: `.agl-trees` may already be a symlink into the repository, and that is a *resolved*
+    fact no rule about the unresolved path can see - which is the whole reason 16.1 made the check
+    impure and exported it. Asked here, where the root is chosen, rather than only in the reader,
+    which would let `init` write a file the next command refuses.
+
+    Raises, and nothing else reports: `NotFoundError` for a directory that is not inside a git
+    repository (exit 3, `git_root`'s own message), `ConflictError` for a repository that already has
+    a project file (exit 4, the same class `run` answers a taken label with and written as the
+    fourth member of that family), and `InputError` for a directory whose name is not a usable
+    project name, a trees root that resolves inside the repository, a blank build command and a file
+    that cannot be written (exit 2). There is no `except` here either.
     """
-    raise _unbuilt("init", "16.4")
+    # §3.10's "detects the git root", by walking the filesystem: `toml_file.git_root` is the same
+    # walk `resolve_project` makes, so the root this registers under and the root a later invocation
+    # looks the project up by are found the one way. Uncaught, and its message already says AGL
+    # works on a repository and to run `agl init` inside one - which is what was just typed.
+    root = toml_file.git_root(cwd)
+    name = ProjectName(root.name)
+
+    # §3.10's "runs once per repo", refused for free and in front of the question below. The write
+    # refuses again out of an exclusive create, which is what makes it race-free rather than early;
+    # `config/toml_file.py` argues the pair, and the path comes back because the refusal after it
+    # names the file this is about.
+    destination = toml_file.check_unregistered(settings.home, name)
+
+    trees = TreesRoot(root.parent / _TREES_DIRNAME / str(name))
+    toml_file.check_trees_root(destination, root, trees.path)
+
+    # The one thing AGL cannot work out for itself (§3.10), asked through the seam and stripped
+    # because what comes back is a line somebody typed, newline and all.
+    build = ask(_BUILD_PROMPT).strip()
+    if not build:
+        # `schema.Project` refuses a blank build where the file is *read*, and this is that rule one
+        # step earlier: a file written blank is one every later command refuses, so the operator
+        # would learn about it from a command that was not asking. Nothing has been written yet.
+        raise InputError(
+            "a build command is what AGL runs at the merge gate before a run's work is landed "
+            "(§3.10), so an empty one would make every gate pass without building anything. "
+            "Nothing has been written - run `agl init` again and give the command this project is "
+            "built and tested with. If it genuinely has none, that is a decision to make in the "
+            "project's settings file rather than a value that arrives here empty"
+        )
+    # All five of §3.10's keys, and the timeout is **read** rather than restated:
+    # `sources.DEFAULT_BUILD_TIMEOUT` is "the only place in AGL that states any of" the fourth
+    # layer, and this is its second reader. Writing the key rather than leaving the file silent
+    # about it is the editing-surface decision `sources.py` argues where the constant lives - a
+    # build that outgrows ten minutes is the ordinary case, and a knob absent from the one file an
+    # operator would open is a knob nobody finds.
+    return toml_file.write_project(
+        settings.home, name, root, trees, build, sources.DEFAULT_BUILD_TIMEOUT
+    )
 
 
 def list_workflows(*, points: Iterable[EntryPoint] | None = None) -> tuple[str, ...]:
@@ -390,6 +986,95 @@ def list_workflows(*, points: Iterable[EntryPoint] | None = None) -> tuple[str, 
     return registry.names(_points(points))
 
 
+def workflow_help(name: str, *, points: Iterable[EntryPoint] | None = None) -> str:
+    """One workflow's own flags, as help text: `agl workflows <name>` (16.4). The command prints it.
+
+    §3.10 writes `agl workflows` with no argument, so this half is an extension of that grammar and
+    is reported as one; `cli/commands/workflows.py` holds the argument for it and the gap it closes.
+
+    **This is the one operation that loads a workflow in order to look at it**, and the sentence
+    `cli/commands/run.py` uses to decline exactly that - "§1.4's charge with better manners" - is
+    about a command that loads one on *every* `agl run` in order to police flags nobody asked about.
+    Here the load happens behind an explicit request for that workflow by name, so a package that
+    fails to import fails loudly for the name that was asked for and for no other, and
+    `list_workflows` still answers about all of them without importing anything.
+
+    `params.parser_for` and not a format of our own: that function is public "because a parser can
+    be inspected", the parser it builds is the very one `agl run <name>` parses with, and
+    `format_help()` is argparse's own rendering of it. So what an operator reads here is what will
+    actually be accepted, rather than a second description of it kept in agreement by nobody. The
+    `prog=` is `agl run <name>` for the same reason `parse` passes it: the usage line has to name
+    the command these flags are typed on, which is not this one.
+
+    `add_help=False` on that parser means `-h` is absent from what comes back, which is correct and
+    is the other half of the decision. `agl run <name> -h` prints AGL's `run` help and always will;
+    two parsers claiming one word would make it mean two helps depending on where it appeared
+    (`sdk/params.py`), and this command exists so that the second help has a name of its own.
+
+    Raises, and nothing else reports: `NotFoundError` for a name nothing registers (exit 3, listing
+    what is registered), `InputError` for an entry point that will not load or loads the wrong
+    object and for a params class `parser_for` refuses (exit 2), and `ConflictError` for a name two
+    installed packages both register (exit 4) - every one of them the registry's own, unwrapped.
+
+    Sync, because it awaits nothing. It does import a package, which is the difference from
+    `list_workflows` that the module docstring makes the argument for two functions out of.
+    """
+    wf: Workflow[object] = registry.load(_points(points), name, Workflow)
+    return params.parser_for(wf.params, prog=f"agl run {name}").format_help()
+
+
+async def _under(store: Store, scope: RunScope) -> tuple[Namespace, ...]:
+    """Every namespace recorded anywhere below `scope`, parents before the children they carry.
+
+    `Store.namespaces` answers about immediate children only "and the caller recurses through
+    `RunScope.inside`", which is that port's own instruction and the reason this is a traversal
+    rather than a loop: §3.6 nests `worktrees/` arbitrarily, and a flattened answer from the port
+    would have lost which parent each name hung from - which is what the recursion needs.
+
+    The **names alone** come back, deliberately flattened here where the port would not flatten
+    them. A namespace's ancestry is what addresses it in the store and is nothing to the trees root,
+    which is flat and whose names are unique run-wide (§3.9), so the one consumer of this list
+    passes each name to a provider that takes a bare `Namespace`. Handing back scopes would be
+    handing the caller a depth it must then throw away.
+
+    Order is `Store.namespaces`' stable order, walked depth-first, so one recorded set yields one
+    sequence and a `clear` that failed halfway fails the same way twice. Nothing here depends on the
+    order being any particular one: the trees root is flat and the child branches are siblings, so
+    there is no containment between two of these to get wrong.
+    """
+    found: list[Namespace] = []
+    for namespace in await store.namespaces(scope):
+        found.append(namespace)
+        found.extend(await _under(store, scope.inside(namespace)))
+    return tuple(found)
+
+
+async def _kept(history: History, label: RunLabel, branch: str, base_ref: str) -> str | None:
+    """Why `branch` was kept, in the words an operator reads - or `None`, meaning delete it.
+
+    §3.10's `git branch -d`, and the whole of the decision is the one call below. `contains` is
+    asked with the run's own line of work as the ancestor and the base ref as the descendant, which
+    is "is this run's work already in what the base records"; `clear`'s docstring argues why the ref
+    and not the pin, and why the question sits here rather than in front of the removals.
+
+    A `History` and not a `Services`, for `preflight.check`'s reason: the function that decides
+    whether a name survives should not be able to grow a second reader of anything.
+
+    The sentence names both refs and the flag, because those are the three things somebody does
+    something with next: the branch is what `git log` is pointed at, the base ref is what it is not
+    yet in, and `-f` is the other way out. `NotFoundError` if the base ref no longer names anything
+    - the work is unmerged into something that is gone, and the answer is `-f` rather than a guess.
+    """
+    if await history.contains(branch, base_ref):
+        return None
+    return (
+        f"the branch {branch!r} was kept: it is not yet in {base_ref!r}, and everything else this "
+        f"run held has been taken away. A retained branch costs a stale ref and a deleted one "
+        f"costs the entire run (§3.10), so AGL keeps it and says so. `git log {branch}` is what is "
+        f"still there; `agl clear {label} -f` deletes it regardless."
+    )
+
+
 def _points(points: Iterable[EntryPoint] | None) -> Iterable[EntryPoint]:
     """What is installed, unless the caller brought its own - the seam the module docstring argues.
 
@@ -398,19 +1083,3 @@ def _points(points: Iterable[EntryPoint] | None) -> Iterable[EntryPoint]:
     one `run` loads from would be a registry with two answers.
     """
     return registry.installed() if points is None else points
-
-
-def _unbuilt(operation: str, deliverable: str) -> InternalError:
-    """The refusal a declared-but-unbuilt operation raises, naming the deliverable that fills it.
-
-    `InternalError` - exit 70, "file a bug" - because at this stage the CLI has no verb that reaches
-    any of them, so a call is a fault in AGL rather than in what the caller supplied. It is not
-    `NotImplementedError`: `errors.py`'s classes are the only ones AGL refuses with, and the builtin
-    would arrive at `cli/exit_codes` as an untranslated exception, which resolves to the same 70 by
-    a route that reads as an accident.
-    """
-    return InternalError(
-        f"`agl {operation}` is declared in `agl.api` and not built yet - deliverable {deliverable} "
-        f"is what fills it in. Nothing in this version of AGL should be able to call it: the CLI "
-        f"has no {operation} command until then"
-    )

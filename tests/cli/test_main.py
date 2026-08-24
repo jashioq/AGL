@@ -38,12 +38,20 @@ from typing import Final
 import pytest
 
 from agl.cli import main
-from agl.config import container, registry
+from agl.config import container, registry, sources
 from agl.ports.errors import NotFoundError
 from agl.ports.home_layout import RunScope
 from agl.ports.ids import ProjectName, RunLabel
 from agl.ports.tree_layout import TreesRoot
 from agl.sdk.workflow import Run, Stop, workflow
+
+# `agl init` is the one command that reads `settings` and `cwd`, and no invocation below is one -
+# but neither field is optional (`cli/main.py` argues why), so both carry a real value nothing here
+# looks at. `/nowhere` is absolute, which is the whole of what `AglHome` insists on, and no file
+# under it is ever opened: `read_settings` treats a missing `config.toml` as a file that said
+# nothing.
+ELSEWHERE: Final = Path("/nowhere")
+SETTINGS: Final = sources.resolve_settings(sources.Overrides(), {"AGL_HOME": str(ELSEWHERE)})
 
 PROJECT: Final = ProjectName("myapp")
 LABEL: Final = RunLabel("auth")
@@ -107,7 +115,10 @@ def _compose(harness: container.FakeServices) -> main.Compose:
     registered repository, and exactly what a real one would have had to resolve a project to get.
     """
     return lambda: main.Invocation(
-        registered=lambda: (PROJECT, harness.services), points=POINTS
+        registered=lambda: (PROJECT, harness.services),
+        settings=SETTINGS,
+        cwd=ELSEWHERE,
+        points=POINTS,
     )
 
 
@@ -471,6 +482,38 @@ def test_main_writes_no_exit_code_of_its_own(tmp_path: Path) -> None:
     assert not written, (
         f"agl/cli/main.py writes {written}. Exit codes are read out of `ports/errors.py`'s one "
         f"table through `cli/exit_codes.exit_status`, and nothing else here is a number"
+    )
+
+
+def test_the_working_directory_is_read_exactly_once_in_the_whole_of_agl() -> None:
+    """§1.4's charge, counted: `Git(Path.cwd())` was constructed **four times**, once per command.
+
+    16.4 is where this stopped being free. `Path.cwd()` used to sit inside the thunk that resolves a
+    project, which was the whole of what needed it; `agl init` is the second reader - §3.10 has it
+    find its own git root - so the honest choices were a second read in the `init` path or one read
+    hoisted here and carried on the `Invocation`. Four started as two, so the count is the test.
+
+    **A source scan, for `test_main_writes_no_exit_code_of_its_own`'s reason**: "it works" is true
+    of a codebase with the expression in five places, and the claim is about where the expression
+    is. `ast` rather than `grep` so that the sentences *about* `Path.cwd()` - and there are several,
+    including in `api.py` and `sdk/roles.py` - are not counted as reads of it. `os.getcwd` is
+    counted with it, because a second spelling of one process-global is the way a count like this
+    quietly stops meaning anything.
+    """
+    root = Path(inspect.getfile(main)).parents[1]
+    reads = [
+        (module.relative_to(root), node.lineno)
+        for module in sorted(root.rglob("*.py"))
+        for node in ast.walk(ast.parse(module.read_text(encoding="utf-8")))
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and (node.value.id, node.attr) in {("Path", "cwd"), ("os", "getcwd")}
+    ]
+
+    assert [str(where) for where, _ in reads] == ["cli/main.py"], (
+        f"AGL asks the process where it is standing in {reads}. It is read once, by `_compose`, "
+        f"and carried on the `Invocation`: `_registered` receives it and so does `api.init`, which "
+        f"takes a `cwd` parameter precisely so that nothing below `cli/` has to ask"
     )
 
 

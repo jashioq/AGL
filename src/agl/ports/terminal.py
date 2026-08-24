@@ -10,8 +10,9 @@ component types its own methods speak.
 own signature. Were it in `sdk/terminal.py`, beside the workflow authors who write views, this
 module would have to import `sdk` and contract 1's one-way flow - `workflows` -> {`sdk`,
 `adapters`} -> `ports` - would invert on its lowest edge. So they live here, and `sdk/terminal.py`
-and `sdk/questions.py` are pure re-export facades holding no logic: that is how an author writes
-`from agl.sdk import Screen` and never reaches into `ports`.
+and `sdk/questions.py` are pure re-export facades holding no logic, re-exported in turn by
+`sdk/__init__.py`: that is how an author writes `from agl.sdk import Screen` and never reaches into
+`ports`.
 
 ## Terminal-shaped, and still a port
 

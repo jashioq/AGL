@@ -16,14 +16,18 @@ include_external_packages = True
 
 # 1. The one dependency rule, high to low. `sdk` and `adapters` sit at the same level and are
 #    independent of each other: `|` means neither may import the other (`:` would mean they may).
+#    `agl.testing` joins `agl.cli` at the top for the same reason, added at 16.5: it is the harness
+#    a workflow author tests against, it imports `agl.api` and `agl.config` exactly as `agl.cli`
+#    does, and nothing in AGL imports it - so it is a sibling of the CLI rather than a layer of its
+#    own, and the `|` is what says the two may not import each other.
 #    Fails open, like contracts 2, 3 and 4: a top-level member nobody adds below is not at the
 #    bottom of the stack but outside it, free to import anything, with all six contracts kept.
 #    tests/test_contract_listings.py is what notices - it walks src/agl/ and compares.
 [importlinter:contract:1]
-name = Layers flow one way only: cli -> api -> config -> workflows -> {sdk, adapters} -> ports, and sdk and adapters never import each other
+name = Layers flow one way only: {cli, testing} -> api -> config -> workflows -> {sdk, adapters} -> ports, and neither pair imports the other
 type = layers
 layers =
-    agl.cli
+    agl.cli | agl.testing
     agl.api
     agl.config
     agl.workflows

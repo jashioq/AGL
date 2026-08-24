@@ -39,24 +39,35 @@ The repair is deliberately not a branch. A `_compose` that read `parsed.command`
 much for one verb and that much for another would put per-command knowledge in the one function that
 must not hold any, and every command added after it would edit that function. Instead `_compose`
 resolves settings and returns a **thunk**: `Invocation.registered` is a callable that resolves the
-project and builds the container *when called*, and the command's own clause is what calls it. `run`
-calls it; 16.4's `init` and `workflows` will not. That is the whole of "each operation resolves its
-own prerequisites" - the command supplies one bit, whether it needs a repository, and learns nothing
-about what the answer is made of, which is what keeps it as dumb as §1.4 requires.
-`cli/commands/run.py` holds the `Registered` alias and argues why it is written on that side.
+project and builds the container *when called*, and the command's own clause is what calls it.
+`run`, `resume` and `clear` call it; `init` and `workflows` do not. That is the whole of "each
+operation resolves its own prerequisites" - the command supplies one bit, whether it needs a
+repository, and learns nothing about what the answer is made of, which is what keeps it as dumb as
+§1.4 requires.
+`cli/commands/__init__.py` holds the `Registered` alias and argues why it lives in the package both
+commands already import through rather than on either of them.
 
-`Path.cwd()` travels inside the thunk with the rest of it, which is the half that matters for 16.4:
-`agl init` detects its own git root, and it can only do that in a process where this module has not
-already refused to start over the absence of the file init is about to write.
+## `Path.cwd()` is written once, and 16.4 is where that stopped being free
+
+It used to sit inside the thunk, which was the right place while `_registered` was its only reader:
+a command with no project to resolve never invoked it. `agl init` is the second reader - it detects
+its own git root, and §3.10 has it run in exactly the repository no project file names yet - and
+`api.init` takes a `cwd: Path` rather than reading one, for the three reasons `api.py` gives. So it
+is read **here**, once, before either destination: `_compose` reads it, `Invocation` carries it,
+`_registered` receives it, and the `init` clause hands it on. The alternative was a second
+`Path.cwd()` in the `init` path, and the first line of this docstring is a charge about a value
+being constructed four times. Two is where four starts. `tests/cli/test_main.py` scans every module
+under `src/` for the expression and counts one.
 
 ## The seam: `Invocation`, and why the composition is a parameter with a real default
 
-Everything below the parser needs three things - the workflows this invocation can reach, and, for
-the commands addressed to a repository, its ports and the project they serve - and every one of them
-is an answer about the machine AGL is running on. `_compose` is the impure step that asks the one
-question every command shares: the environment, through `sources.resolve`. The other two are asked
-by `_registered`, when a command asks for them, and by `api.run`'s own `points=None`, which is
-`registry.installed()`.
+Everything below the parser needs five things - the settings, the directory this was typed in, how
+to put a question to whoever typed it, the workflows this invocation can reach, and, for the
+commands addressed to a repository, its ports and the project they serve. Every one of them is an
+answer about the machine AGL is running on, and `_compose` is the impure step that asks them: the
+environment through `sources.resolve`, and the working directory. The last two are deferred - the
+project and the container to `_registered`, when a command asks for them, and what is installed to
+`api`'s own `points=None`, which is `registry.installed()`.
 
 `compose=` is a keyword-only parameter defaulting to `None`, meaning that one. It is the seam
 `api.run` already established for `points=` and it is spelled the same way deliberately - "the
@@ -124,17 +135,39 @@ become one. `tests/cli/test_main.py` scans this module's source for an integer l
 `api.py` is async and starts no loop, deliberately: a library that started one could not be called
 from inside one, which is what 16.5's harness and every `pytest.mark.asyncio` test do. The loop
 therefore belongs to the edge, and the edge is either this module or the command. It is the command,
-so that `agl workflows` (16.4) - whose operation is sync, because it awaits nothing - is not made to
-pretend otherwise by a dispatch that awaits everything.
+so that `agl workflows` and `agl init` - whose operations are sync, because they await nothing - are
+not made to pretend otherwise by a dispatch that awaits everything. Three commands start a loop and
+two do not, which is a fact each command states in its own file and this module never asks about.
 
-## Only `run` exists
+## All five verbs exist, and 16.4 is what made that true
 
-`resume`, `clear`, `init` and `workflows` are deliverables 16.2, 16.3 and 16.4, and there is no stub
-for any of them here: a subcommand that parses and then refuses is a command whose grammar was
-guessed a stage early, and `api.py` already declares the four signatures the dispatch will be
-written against. `_dispatch` grows one clause per command, and its own refusal is `InternalError`
-for the reason `api._unbuilt` gives - argparse admits only the names declared here, so arriving with
-another one is AGL's bug and not the caller's mistake.
+§3.10's grammar is five lines and there are five clauses below. The dispatch has been written
+against that whole surface since 10.4 - `api.py` declared the signatures and this module grew one
+clause per command as each was built, rather than a stub that parsed and then refused, which would
+have been a grammar guessed a stage early. `_dispatch`'s own refusal is `InternalError`: argparse
+admits only the names declared here, so arriving with another one is AGL's bug and not the caller's
+mistake.
+
+The clauses differ in exactly what §3.10's per-command composition says they should. `run`, `resume`
+and `clear` take `registered`; `init` takes the settings, the directory and the ask; `workflows`
+takes neither a project nor settings. `points` stops at the three that resolve a workflow name -
+`clear` loads none, and `init` has none to load.
+
+**The tail belongs to `run` alone, and 16.2 is where that stopped being a sentence.** `run` is the
+only verb whose line carries arguments AGL deliberately does not understand, so every other clause
+refuses what the generic parser did not recognise instead of carrying it. The refusal is written
+here, beside the `parse_known_args` that produced the tail, rather than in each command: a command
+that had to be handed a tail in order to refuse it would need a parameter for the thing it has no
+use for, and none of the four takes an `argv` at all for exactly that reason.
+
+16.3 generalised the helper rather than forking it, and 16.4 had to generalise what it *says* for
+the same reason. 16.2 wrote it as "this command takes a label and nothing else", which `agl clear
+<label> [-f]` made false; 16.3 rewrote it around the record a run's arguments are read back from,
+which `agl init` and `agl workflows` make false in turn, neither being addressed to a run at all.
+What is true of all four is about `agl run` rather than about them: it is the only command that
+names a workflow, and a workflow's flags are the only arguments AGL does not understand. One
+sentence, four callers, and the signpost to `agl workflows <workflow>` in it - which is where a
+person who typed a workflow's flag on the wrong line finds out what that workflow takes.
 """
 
 import argparse
@@ -146,10 +179,17 @@ from pathlib import Path
 from traceback import print_exception
 from typing import Final
 
+from agl.api import Ask
+from agl.cli import commands
+from agl.cli.commands import clear as clear_command
+from agl.cli.commands import init as init_command
+from agl.cli.commands import resume as resume_command
 from agl.cli.commands import run as run_command
+from agl.cli.commands import workflows as workflows_command
 from agl.cli.exit_codes import exit_status
 from agl.config import container, sources
-from agl.ports.errors import AglError, InternalError, Stop
+from agl.config.schema import Settings
+from agl.ports.errors import AglError, InputError, InternalError, Stop
 from agl.ports.ids import ProjectName
 from agl.sdk._engine.services import Services
 from agl.sdk.params import RefusingParser
@@ -181,14 +221,20 @@ class Invocation:
     arguments. Frozen for `Services`' reason: it is what this invocation was assembled with, and two
     halves of a dispatch disagreeing about which store they were given is not a state worth having.
 
-    There is no `settings` field, and the absence is a decision rather than an oversight. No command
-    declared today reads settings - `run` reads them only through the ports the container built out
-    of them - so a field here would be a general facility with no consumer, added on the strength of
-    a guess about a second one. 16.4 brings `init`, which takes `Settings` and nothing else, and it
-    is the deliverable that adds the field, beside its one reader and in the same edit.
+    **`settings` and `cwd` arrived at 16.4, with `init`.** Until then no command read either: `run`
+    reads its settings only through the ports the container built out of them, and the working
+    directory travelled inside `registered`'s thunk because `_registered` was its only reader. `agl
+    init` is the second reader of both - it takes `Settings` because it writes a file under
+    `AGL_HOME`, and a `cwd` because §3.10 has it find its own git root and `api.py` argues why that
+    is a parameter rather than an ambient read. So the two fields are here beside their readers and
+    in the deliverable that produced them, which is what the sentence they replaced promised.
+
+    Neither is optional, and that is deliberate. A `Settings | None` would be a field two of five
+    clauses narrow every time, and a `cwd` defaulted to anything would be a second place the process
+    could be asked where it is standing.
     """
 
-    registered: run_command.Registered
+    registered: commands.Registered
     """How to reach a registered repository: called by the clause of a command that needs one, and
     by nothing in this module. Deferred rather than resolved, because `agl init` writes the project
     file this would look for and `agl workflows` never looks for it - see the module docstring.
@@ -197,10 +243,34 @@ class Invocation:
     what `api` takes and it says why: the rest of a `Project` has already been spent by the
     container in constructing the ports handed back beside it."""
 
+    settings: Settings
+    """What this installation is configured with, resolved once by `sources.resolve`. Read by the
+    `init` clause alone: the other four reach configuration through the ports built out of it, and
+    `agl init` is the command that runs where no container can be built."""
+
+    cwd: Path
+    """The directory this invocation was typed in - the one place in the process `Path.cwd()` is
+    read, carried rather than re-asked. `_registered` resolves the project from it and `agl init`
+    finds its git root in it; see the module docstring for why that is one read and not two."""
+
     points: Iterable[EntryPoint] | None = None
     """The `agl.workflows` entry points to resolve a workflow name against, or `None` for what is
     installed. `api.run` declares this seam and this field is it, threaded one layer up so argv can
     reach it: `None` is what every real invocation means, and every real invocation passes it."""
+
+    ask: Ask = input
+    """How `agl init` puts its one question to whoever is running it. `api.init` requires one and
+    holds no default, so that `api` - a library - cannot read a person's stdin by omission; this is
+    where the real answer is written, at the edge, where `print` already lives.
+
+    `input` and not a terminal. `Terminal` is a port, `init` is composed without one on purpose, and
+    `container.real` would build a `RichTerminal` that takes the console over and starts a redraw
+    loop - which is a great deal of machinery for one line of text, on the one command that runs
+    before AGL knows anything about this repository.
+
+    A field with a real default rather than a module attribute a test monkeypatches, which is
+    `points`' argument and `compose=`'s: a suite that had to patch `builtins.input` to drive `agl
+    init` would be reaching past every seam this module has."""
 
 
 type Compose = Callable[[], Invocation]
@@ -246,10 +316,14 @@ def parser() -> RefusingParser:
     `parser_class=` restates at the type level what `add_subparsers` already does at runtime.
     """
     root = RefusingParser(prog=_PROGRAM, description=_DESCRIPTION, allow_abbrev=False)
-    commands = root.add_subparsers(
+    declared = root.add_subparsers(
         dest=_COMMAND, metavar="<command>", required=True, parser_class=RefusingParser
     )
-    run_command.declare(commands)
+    run_command.declare(declared)
+    resume_command.declare(declared)
+    clear_command.declare(declared)
+    init_command.declare(declared)
+    workflows_command.declare(declared)
     return root
 
 
@@ -266,26 +340,39 @@ def _compose() -> Invocation:
     `Overrides()` - the flag layer says nothing. §3.10's grammar has no configuration flag, and
     `sources.Overrides` is where one would arrive if a later stage adds `--home` or `--build`: the
     field exists, typed, on the object this passes, so the parser is all that would have to change.
+
+    **`Path.cwd()` is written here and nowhere else in AGL.** Two commands need the directory this
+    was typed in - `agl init` to find a git root, everything addressed to a repository to resolve a
+    project - and one read serves both because the answer is carried rather than re-asked. The
+    module docstring argues it; `ask` takes its real default off `Invocation`, which is the same
+    decision about the other process-global this file reaches for.
     """
     resolved = sources.resolve(sources.Overrides())
-    return Invocation(registered=lambda: _registered(resolved))
+    cwd = Path.cwd()
+    return Invocation(
+        registered=lambda: _registered(resolved, cwd), settings=resolved.settings, cwd=cwd
+    )
 
 
-def _registered(resolved: sources.Resolved) -> tuple[ProjectName, Services]:
-    """The project this directory is in and the ports built for it - asked for, never volunteered.
+def _registered(resolved: sources.Resolved, cwd: Path) -> tuple[ProjectName, Services]:
+    """The project `cwd` is in and the ports built for it - asked for, never volunteered.
 
     §1.4's whole charge lives in these two lines and both happen at most once per invocation:
-    `Path.cwd()` is written once, where it was written four times, and `container.real` is the only
-    `new` in the process. They sit behind a callable rather than beside `sources.resolve` because
-    `Resolved.project` reads a file `agl init` has not written yet, and `agl workflows` reads no
-    project file at all.
+    `container.real` is the only `new` in the process, and the working directory this resolves
+    against was read once, by `_compose`, where it was read four times. They sit behind a callable
+    rather than beside `sources.resolve` because `Resolved.project` reads a file `agl init` has not
+    written yet, and `agl workflows` reads no project file at all.
 
-    `NotFoundError` when this directory is not inside a git repository, or is inside one that no
-    project file names. Deliberately not caught: `config/toml_file.py` raises it where the facts
-    are, its message already sends the reader to `agl init` - run once per project and never again -
-    and `main`'s handler resolves it to 3 out of the one table.
+    `cwd` is a parameter for `api.init`'s reason one layer down: `sources.py`'s contract is that
+    "nothing downstream may re-read the environment", the working directory is environment, and a
+    second read here would be free to disagree with the one `agl init` was handed.
+
+    `NotFoundError` when `cwd` is not inside a git repository, or is inside one that no project file
+    names. Deliberately not caught: `config/toml_file.py` raises it where the facts are, its message
+    already sends the reader to `agl init` - run once per project and never again - and `main`'s
+    handler resolves it to 3 out of the one table.
     """
-    project = resolved.project(Path.cwd())
+    project = resolved.project(cwd)
     return project.name, container.real(resolved.settings, project)
 
 
@@ -293,20 +380,78 @@ def _dispatch(invocation: Invocation, parsed: argparse.Namespace, tail: Sequence
     """The chosen command, handed what was composed and what argv said. One clause per command.
 
     `tail` is what the generic parser did not recognise, and it belongs to `run` alone: a workflow's
-    flags are the only arguments AGL deliberately does not understand. 16.2's `resume` and 16.3's
-    `clear` take a label and nothing else, so the clause each of them adds will refuse a tail rather
-    than carry one.
+    flags are the only arguments AGL deliberately does not understand. The other four declare every
+    argument they take, so all four clauses refuse a tail through one helper rather than carrying
+    one.
 
     Each clause hands on the parts of the invocation its command takes, which is what §3.10's
-    per-command composition looks like from here: `run` takes `registered` because a run is
-    addressed to a repository, and the clauses 16.4 adds will not, because `init` writes what
-    `registered` would look for and `workflows` looks for nothing.
+    per-command composition looks like from here. `run`, `resume` and `clear` take `registered`
+    because all three are addressed to a repository; `init` and `workflows` do not, because `init`
+    writes the very file `registered` would look for and `workflows` looks for nothing - and neither
+    clause may grow a call to it. `points` stops at the three that resolve a workflow name: `clear`
+    loads none and `init` has none to load. `settings`, `cwd` and `ask` stop at `init`, which is the
+    one command composed without a container and therefore the one that needs them by name.
     """
     command = getattr(parsed, _COMMAND)
     if command == run_command.NAME:
         return run_command.execute(invocation.registered, parsed, tail, points=invocation.points)
+    if command == resume_command.NAME:
+        _no_tail(command, tail)
+        return resume_command.execute(invocation.registered, parsed, points=invocation.points)
+    if command == clear_command.NAME:
+        _no_tail(command, tail)
+        return clear_command.execute(invocation.registered, parsed)
+    if command == init_command.NAME:
+        _no_tail(command, tail)
+        return init_command.execute(invocation.settings, invocation.cwd, invocation.ask)
+    if command == workflows_command.NAME:
+        _no_tail(command, tail)
+        return workflows_command.execute(parsed, points=invocation.points)
     raise InternalError(
         f"`{_PROGRAM} {command}` reached the dispatch and there is no command by that name. The "
         f"parser admits only the subcommands declared in this module, so this is AGL's own bug "
         f"rather than anything you typed - a command was declared and never given a clause here"
     )
+
+
+def _no_tail(command: str, tail: Sequence[str]) -> None:
+    """Refuse what the generic parser did not recognise, for the four commands that declare it all.
+
+    `parse_known_args` carries every argument no parser claimed, and only `run` has a use for one: a
+    workflow's own flags are the arguments AGL deliberately does not understand, and a run is where
+    a workflow is named. The other four declare their whole grammar on their own subparser - a
+    label, `clear`'s `-f`, nothing at all, an optional workflow name - so an argument arriving here
+    is somebody expecting the flags `agl run` took, and the answer is not "unrecognised argument"
+    but where those flags went and how to find out what they are.
+
+    **Written once for all four**, which is why it says what is true of all four, and the sentence
+    has been rewritten twice for that reason. 16.2 wrote "takes a label and nothing else", exact
+    while `resume` was the only caller and false the moment `agl clear <label> [-f]` shared the
+    helper; 16.3 rewrote it around the record a run's arguments are read back from, which `agl init`
+    and `agl workflows` make false in turn, neither being addressed to a run. What holds for all of
+    them is a fact about `agl run` rather than about them - it is the only command that names a
+    workflow, so it is the only one with anything to hand an argument AGL does not understand.
+
+    `InputError`, exit 2 out of the one table: what the caller supplied cannot be used and nothing
+    was attempted. It is refused here, in the dispatch, rather than inside the command, because a
+    command that had to be handed a tail in order to refuse it would carry a parameter for the one
+    thing it has no use for - and not one of the four takes an `argv` at all, which is what makes
+    this structural rather than remembered.
+
+    Deliberately not a refusal argparse could have made. Each subparser declares its own arguments,
+    so `parse_args` would already reject anything else - but `main` parses with `parse_known_args`,
+    once, for `run`'s sake, and a second parse per command in order to get a stricter error is two
+    parsers over one line. One helper, one sentence, and each clause says which commands it is for.
+    """
+    if tail:
+        raise InputError(
+            f"`{_PROGRAM} {command}` does not take {list(tail)}: the arguments on this line are "
+            f"the ones `{_PROGRAM} {command} -h` lists and no others. `{_PROGRAM} run` is the one "
+            f"command that carries arguments AGL does not understand, because it is the one that "
+            f"names a workflow to hand them to - a run's own workflow, its base ref and its "
+            f"parameters are read back afterwards from the record `{_PROGRAM} run` wrote, and the "
+            f"rest of AGL's commands either address a run that already has one or address no run "
+            f"at all. To run a workflow with parameters, start a run: `{_PROGRAM} run <workflow> "
+            f"-n <label> [workflow flags]`; `{_PROGRAM} workflows <workflow>` lists the flags one "
+            f"takes"
+        )

@@ -21,16 +21,20 @@ from typing import Final
 import pytest
 
 from agl.config.schema import AgentSettings
+from agl.config.sources import DEFAULT_BUILD_TIMEOUT
 from agl.config.toml_file import (
     FileAgent,
     FileProject,
     FileSettings,
+    check_trees_root,
+    check_unregistered,
     git_root,
     read_project,
     read_settings,
     resolve_project,
+    write_project,
 )
-from agl.ports.errors import InputError, NotFoundError
+from agl.ports.errors import ConflictError, InputError, NotFoundError
 from agl.ports.home_layout import AglHome, project_config
 from agl.ports.ids import ProjectName
 from agl.ports.tree_layout import TreesRoot
@@ -66,6 +70,18 @@ def _repo(tmp_path: Path, name: str, *, marker: str = "dir") -> Path:
     else:
         (root / ".git").write_text("gitdir: /elsewhere/.git/worktrees/w\n", encoding="utf-8")
     return root
+
+
+def _beside(tmp_path: Path) -> tuple[Path, TreesRoot]:
+    """A repository and a trees root laid out the way `agl init` lays them out: siblings.
+
+    `<parent>/myapp` and `<parent>/.agl-trees/myapp`, which is §3.10's example. The pair is a helper
+    because every write below needs one that survives `check_trees_root` - the reader refuses a
+    nested trees root, so a writer test that used `tmp_path` for both would fail on the way back in
+    and would be measuring the reader.
+    """
+    dev = tmp_path.resolve() / "dev"
+    return dev / "myapp", TreesRoot(dev / ".agl-trees" / "myapp")
 
 
 # --- The global settings file -----------------------------------------------------------------
@@ -314,6 +330,211 @@ def test_a_project_that_was_never_registered_is_not_found(tmp_path: Path) -> Non
     with pytest.raises(NotFoundError) as raised:
         read_project(_home(tmp_path), ProjectName("nobody"))
     assert "agl init" in str(raised.value)
+
+
+# --- The writer, which is only interesting as the reader's inverse ------------------------------
+#
+# 16.4 put `write_project` beside `read_project` because this is "the only module that knows TOML",
+# and the whole of what that buys is one property: a file `agl init` writes is a file `agl run`
+# reads. So the tests below assert the round trip rather than the bytes - a test comparing the
+# rendered text against a literal would pass while agreeing with nothing, and would have to be
+# edited by anybody who changed the spacing.
+
+
+def test_a_file_the_writer_writes_is_one_the_reader_accepts(tmp_path: Path) -> None:
+    """The round trip, which is the writer's entire contract. §3.10's file, written and read back.
+
+    All five keys, `build_timeout` included, and the expected value is spelled as the constant
+    rather than as `600.0`: the number has one home in `sources.DEFAULT_BUILD_TIMEOUT`, `api.init`
+    reads it rather than restating it, and a literal here would be the second copy that arrangement
+    exists to prevent - one that goes on passing on the day the default moves and the writer follows
+    it.
+    """
+    home = _home(tmp_path)
+    repo = tmp_path.resolve() / "dev" / "myapp"
+    trees = TreesRoot(tmp_path.resolve() / "dev" / ".agl-trees" / "myapp")
+
+    written = write_project(
+        home, ProjectName("myapp"), repo, trees, "./gradlew build", DEFAULT_BUILD_TIMEOUT
+    )
+
+    assert written == project_config(home, ProjectName("myapp"))
+    assert read_project(home, ProjectName("myapp")) == FileProject(
+        name=ProjectName("myapp"),
+        repo=repo,
+        trees_root=trees,
+        build="./gradlew build",
+        build_timeout=DEFAULT_BUILD_TIMEOUT,
+    )
+
+
+def test_a_build_command_holding_the_format_s_own_punctuation_round_trips(tmp_path: Path) -> None:
+    """A build command is a shell line, so a quote and a backslash in it are ordinary.
+
+    This is the assertion the escape table exists for, and it is why the value is written as a TOML
+    *basic* string: a literal string admits no escapes at all, so `don't` would end the value early
+    and produce a file `tomllib` refuses - a file `agl init` wrote and no later command could read.
+    """
+    home = _home(tmp_path)
+    build = 'sh -c "make test" && echo don\'t \\ stop'
+
+    write_project(home, ProjectName("myapp"), *_beside(tmp_path), build, DEFAULT_BUILD_TIMEOUT)
+
+    assert read_project(home, ProjectName("myapp")).build == build
+
+
+def test_the_writer_never_writes_over_a_project_file_that_is_already_there(tmp_path: Path) -> None:
+    """§3.10's `agl init` runs once per repo, and running it twice must not take a file away.
+
+    `ConflictError` - exit 4, the class `api.run` answers a taken label with - and the file is
+    asserted untouched afterwards, which is the assertion with teeth: a writer that refused *after*
+    truncating would raise the same class and have destroyed the settings anyway.
+    """
+    home = _home(tmp_path)
+    write_project(home, ProjectName("myapp"), *_beside(tmp_path), "make", DEFAULT_BUILD_TIMEOUT)
+
+    with pytest.raises(ConflictError) as raised:
+        write_project(
+            home, ProjectName("myapp"), *_beside(tmp_path), "ninja", DEFAULT_BUILD_TIMEOUT
+        )
+
+    assert "myapp" in str(raised.value)
+    assert read_project(home, ProjectName("myapp")).build == "make"
+
+
+def test_the_free_refusal_and_the_write_refusal_are_one_message(tmp_path: Path) -> None:
+    """`check_unregistered` answers with the path a new project's file goes to, or refuses.
+
+    Two call sites and one sentence: `api.init` asks this before it puts a question to a person, so
+    that a build command is not typed into a prompt and thrown away, and `write_project` asks the
+    operating system the same thing again at the moment it matters. The messages are compared
+    because two refusals about one fact that drifted apart would be two accounts of what happened.
+    """
+    home = _home(tmp_path)
+    name = ProjectName("myapp")
+
+    assert check_unregistered(home, name) == project_config(home, name)
+
+    write_project(home, name, *_beside(tmp_path), "make", DEFAULT_BUILD_TIMEOUT)
+    with pytest.raises(ConflictError) as free:
+        check_unregistered(home, name)
+    with pytest.raises(ConflictError) as written:
+        write_project(home, name, *_beside(tmp_path), "make", DEFAULT_BUILD_TIMEOUT)
+
+    assert str(free.value) == str(written.value)
+
+
+def test_the_writer_makes_the_projects_directory_when_there_is_none(tmp_path: Path) -> None:
+    """`agl init` is the first thing an installation runs, so `projects/` does not exist yet.
+
+    `_project_files` already treats a missing `projects/` as an empty list rather than a refusal,
+    which is the same fact read from the other side: an installation that has never registered
+    anything is a working installation, and the first `init` is what gives it a directory.
+    """
+    home = _home(tmp_path)
+    assert not home.path.exists()
+
+    write_project(home, ProjectName("myapp"), *_beside(tmp_path), "make", DEFAULT_BUILD_TIMEOUT)
+
+    assert read_project(home, ProjectName("myapp")).build == "make"
+
+
+# --- A trees root inside the repository, which is §3.5 read as a refusal -------------------------
+#
+# Stage 9 declined this check because seeing it needs `Path.resolve()` and `schema.Project` is a
+# pure type - "the same values answer the same way on any machine, with any filesystem underneath".
+# 16.1 put it here, where a `Project` comes out of a file and where the git-root walk already reads
+# the filesystem, and exported it so that 16.4's `init` refuses the same file when it writes one.
+
+
+def _nested(tmp_path: Path, trees: str) -> Path:
+    """A project file whose repo is a real directory and whose trees root is spelled `trees`."""
+    home = _home(tmp_path)
+    repo = tmp_path.resolve() / "myapp"
+    repo.mkdir(parents=True, exist_ok=True)
+    return _project_file(home, "myapp", f'repo = "{repo}"\ntrees_root = "{trees}"\n')
+
+
+def test_a_trees_root_inside_the_repository_is_refused(tmp_path: Path) -> None:
+    """§3.5's "AGL lives outside the target repo", as the one refusal a project file earns that is
+    about two values rather than one.
+
+    What it costs to allow is not subtle: `.trees/<label>/_base/` is a real checkout with a real
+    working tree, so AGL's own worktrees would sit inside the repository they were cut from - in the
+    operator's `git status`, swept up by `git add -A`, and walked by whatever their build walks.
+    §3.10 keeps AGL's state under `AGL_HOME` for exactly that reason.
+
+    The message is asserted to carry the file, both keys and both resolved paths, because a reader
+    holding it has to decide which of the two to move.
+    """
+    path = _nested(tmp_path, str(tmp_path.resolve() / "myapp" / ".agl-trees"))
+    with pytest.raises(InputError) as raised:
+        read_project(_home(tmp_path), ProjectName("myapp"))
+    said = str(raised.value)
+    assert str(path) in said
+    assert "trees_root" in said and "repo" in said
+    assert str(tmp_path.resolve() / "myapp" / ".agl-trees") in said
+    assert str(tmp_path.resolve() / "myapp") in said
+
+
+def test_a_trees_root_that_is_the_repository_itself_is_refused(tmp_path: Path) -> None:
+    """`is_relative_to` calls a path relative to itself, and that answer is the right one here: a
+    trees root *at* the repository is the same failure at its worst, every checkout landing in the
+    working tree's own root."""
+    _nested(tmp_path, str(tmp_path.resolve() / "myapp"))
+    with pytest.raises(InputError):
+        read_project(_home(tmp_path), ProjectName("myapp"))
+
+
+def test_a_trees_root_that_only_resolution_shows_to_be_inside_is_refused(tmp_path: Path) -> None:
+    """**Why this could not live in `schema.Project.__post_init__`.** Spelled through a symlink and
+    a `..`, the value looks like a sibling and is not one, and nothing short of following the link
+    can tell. That read is what makes the check impure, and impure is what stage 9 refused to put
+    into a type whose whole promise is that it answers the same way on any filesystem."""
+    repo = tmp_path.resolve() / "myapp"
+    repo.mkdir()
+    (repo / "inside").mkdir()
+    link = tmp_path.resolve() / "elsewhere"
+    link.symlink_to(repo / "inside", target_is_directory=True)
+    home = _home(tmp_path)
+    _project_file(home, "myapp", f'repo = "{repo}"\ntrees_root = "{link}/../inside/trees"\n')
+    with pytest.raises(InputError) as raised:
+        read_project(home, ProjectName("myapp"))
+    assert "trees_root" in str(raised.value)
+
+
+def test_a_trees_root_beside_the_repository_is_accepted(tmp_path: Path) -> None:
+    """The control, and §3.10's own example file is exactly this shape - `/Users/jan/dev/myapp` and
+    `/Users/jan/dev/.agl-trees/myapp`. A refusal that fired on a sibling would refuse every project
+    the plan prints."""
+    _nested(tmp_path, str(tmp_path.resolve() / ".agl-trees" / "myapp"))
+    project = read_project(_home(tmp_path), ProjectName("myapp"))
+    assert project.trees_root == TreesRoot(tmp_path.resolve() / ".agl-trees" / "myapp")
+
+
+def test_a_file_that_names_only_one_of_the_two_paths_is_not_refused(tmp_path: Path) -> None:
+    """Silence is not a value here (the module's own rule), and a rule about how two paths sit
+    relative to each other has nothing to say when the file supplied one of them. Which silence is
+    itself a problem is 9.2's to decide, when it applies the layer below the file."""
+    home = _home(tmp_path)
+    _project_file(home, "myapp", 'trees_root = "/tmp/agl-trees/myapp"\n')
+    assert read_project(home, ProjectName("myapp")).repo is None
+
+
+def test_the_check_is_exported_so_that_init_can_refuse_before_it_writes(tmp_path: Path) -> None:
+    """16.4 writes the very file the tests above read, and it must refuse the same pair.
+
+    Exported rather than folded into `_project`, so that one helper serves the reader and the
+    writer: a nested trees root is refused when the file is written as well as when it is read, and
+    the two refusals cannot drift into disagreeing about what "inside" means. The path argument is
+    the file the message will name - the writer has one before it writes.
+    """
+    repo = tmp_path.resolve() / "myapp"
+    destination = project_config(_home(tmp_path), ProjectName("myapp"))
+    check_trees_root(destination, repo, repo.parent / ".agl-trees")
+    with pytest.raises(InputError) as raised:
+        check_trees_root(destination, repo, repo / ".agl-trees")
+    assert str(destination) in str(raised.value)
 
 
 # --- Walking up to the git root -----------------------------------------------------------------

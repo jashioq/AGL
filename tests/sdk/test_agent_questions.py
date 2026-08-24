@@ -55,9 +55,12 @@ takes no step at all.
 **A real `RichTerminal`, driven by a scripted keyboard.** `container.fakes()` builds a
 `HeadlessTerminal`, which refuses any `Screen[T]` with `UpstreamUnavailable` - correctly, since a
 workflow needing human input genuinely cannot run with nobody there - so an interactive screen
-cannot be answered on that bundle and the terminal is substituted with `dataclasses.replace`, as
-`tests/test_api.py` and `tests/sdk/test_run_terminal.py` substitute theirs. **A third `Terminal` was
-not written**, and that is the decision rather than a convenience: `adapters/rich_terminal/
+cannot be answered on that bundle and the terminal is substituted through
+`FakeServices.with_terminal`, as `tests/sdk/test_run_terminal.py` substitutes its own - the two
+views of one bundle moving together, which a `dataclasses.replace` of `services` alone would not
+do. The other three ports here have no sibling field and are still a plain `replace`.
+**A third `Terminal` was not written**, and that is the decision rather than a convenience:
+`adapters/rich_terminal/
 headless.py` argues at length why there are two and only two, a hand-rolled queueing terminal in a
 test would be under `tests/contracts/terminal.py`'s eye nowhere at all, and the input port exists
 precisely so the real adapter can be driven without a tty. The keyboard is `instruments.keyboard`,
@@ -394,11 +397,10 @@ def _services(repository: Path, tmp_path: Path, terminal: RichTerminal, script: 
     trees = TreesRoot(tmp_path / "trees")
     harness = container.fakes(trees, claude=script)
     return replace(
-        harness.services,
+        harness.with_terminal(terminal).services,
         store=FilesystemStore(AglHome(tmp_path / "home")),
         workspaces=GitWorkspaceProvider(repository, trees),
         history=GitHistory(repository),
-        terminal=terminal,
     )
 
 

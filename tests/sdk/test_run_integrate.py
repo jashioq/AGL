@@ -843,6 +843,52 @@ async def test_run_exit_gives_the_lease_back_and_leaves_the_adapters_hold_alone(
     )
 
 
+@pytest.mark.asyncio
+async def test_resume_exit_gives_the_lease_back_the_way_run_exit_does(tmp_path: Path) -> None:
+    """The test above, mirrored through `api.resume`. §3.4 makes one claim and there are two exits.
+
+    `api.resume`'s last paragraph says it is "`run`'s last paragraph, line for line, and
+    deliberately so: a resumed run is the same run", and the `finally: leases.release_all()` under
+    it is a copy of the one this file already measures. A copy carrying a claim and no test is what
+    drifts: deleting the clause from `run` fails the test above and deleting it from `resume` used
+    to fail nothing at all, which made half of "the lease is released when the run exits" an
+    unverified sentence in a docstring.
+
+    **The arrangement is the same workflow twice**, which is what makes this a resume rather than a
+    second run. The first invocation walks away holding a conflict, and §3.4's hold is durable - it
+    is a fact about the repository and not about a `FakeIntegrator` - so the resumed walk replays
+    both steps, reaches the same `integrate()` and is answered with a conflict by the target that is
+    still holding the first one. It ends there, holding a lease taken by a `Leases` that only
+    `api.resume` can release.
+
+    **The release is asserted by asking for it again**, exactly as above and for the same reason: a
+    lease is not observable, and a second integration into the same target either returns or waits
+    forever. The ticket is the *resumed* run's, so the lease being re-taken is the one `api.resume`
+    was holding rather than the first invocation's, which `api.run` gave back at its own exit and
+    which is a different table. The bound turns "waits forever" into a failure and not a hung suite.
+    """
+    _LEFT_HOLDING.clear()
+    harness = _harness(tmp_path)
+    points: Sequence[EntryPoint] = (_point(),)
+
+    await api.run(harness.services, PROJECT, "walks-away", LABEL, (), points=points)
+    await api.resume(harness.services, PROJECT, LABEL, points=points)
+
+    assert len(_LEFT_HOLDING) == 4, "the resumed workflow did not reach the end it was written for"
+    _, ticket = _LEFT_HOLDING[2:]
+    assert (_target_dir(tmp_path) / CONTESTED).read_bytes() not in (PARENT_BODY, CHILD_BODY), (
+        "the target's checkout holds one side of the collision whole, so resume exit released the "
+        "adapter's hold as well as the lease - and §3.4 makes the hold durable precisely so that "
+        "this invocation could find one it did not take"
+    )
+
+    again = await asyncio.wait_for(ticket.integrate(), timeout=_LIVENESS)
+
+    assert again.conflicted is True, (
+        "a second integration into a target still holding a landing was not reported as a conflict"
+    )
+
+
 # --- 14.2: the merge gate, and the revert that follows a red one ---------------------------------
 
 

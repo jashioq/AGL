@@ -31,19 +31,21 @@ though `run.terminal` is how one is normally reached: a workflow that factors it
 helper has to annotate the parameter, and `Component` and `Response` are what a helper returning
 part of a screen is annotated with.
 
-## The spelling is `from agl.sdk.terminal import Screen`
+## The spelling is `from agl.sdk import Screen`, and 16.5 is what made it true
 
-`ARCHITECTURE.md` §5 and `ports/terminal.py` both write `from agl.sdk import Screen`, and this
-module does **not** make that true: `src/agl/sdk/__init__.py` holds no re-exports and 15.1
-deliberately adds none. Every other member of the SDK is imported from its own submodule - `from
-agl.sdk.params import arg`, `from agl.sdk.workflow import Run, Stop, workflow`, which is what
-`workflows/noop/` writes - so re-exporting these two modules and no others at package level would
-leave one import style for terminal components and a different one for everything else, and an
-author would have to remember which names fall on which side.
+`ARCHITECTURE.md` §5 and `ports/terminal.py` both write that line, and until 16.5 it raised
+`ImportError`: `src/agl/sdk/__init__.py` held no re-exports, and 15.1 deliberately added none. The
+reason given then was that re-exporting *these two modules and no others* would leave one import
+style for terminal components and a different one for everything else, and that making the shorter
+spelling true is a decision about the SDK's front door - all of it, at once - rather than a decision
+about terminal components.
 
-Making the shorter spelling true is a decision about the SDK's front door - all of it, at once - and
-not a decision about terminal components, so it is not taken here. The two sentences are read as
-naming the package a type belongs to rather than the exact line to type.
+16.5 took that decision, and it took it the other way: `sdk/__init__.py` now re-exports the whole
+authoring surface, so there is one style rather than two and the objection above is answered rather
+than overruled. Both spellings work and name the same objects, this module being where the nine are
+re-exported from and the package root taking them from here. `from agl.sdk import Screen` is the one
+an author writes; `from agl.sdk.terminal import Screen` is what a workflow that prefers submodules
+writes, and it costs nothing.
 """
 
 from agl.ports.terminal import (

@@ -19,12 +19,12 @@ argument at length, and it is one argument covering two modules rather than two.
 takes the first and returns the second, so a facade offering one of the two would send an author
 into `agl.ports` for the other, which is the thing this module exists to prevent.
 
-**The spelling is `from agl.sdk.questions import Question, Answer`.** `ARCHITECTURE.md` §5 writes
-the shorter `from agl.sdk import ...`, and `src/agl/sdk/__init__.py` holds no re-exports that would
-make it true; 15.1 deliberately adds none, because every other SDK member is imported from its own
-submodule and making the short spelling true for two modules alone would leave the surface with two
-import styles. `sdk/terminal.py` argues it in full - the decision is about the SDK's front door and
-not about these types.
+**The spelling is `from agl.sdk import Question, Answer`**, and `from agl.sdk.questions import
+Question, Answer` beside it. 15.1 left the shorter one false - `src/agl/sdk/__init__.py` held no
+re-exports - on the argument that making it true for two modules alone would leave the surface with
+two import styles, and that the decision belonged to a deliverable taking the whole front door at
+once. 16.5 is that deliverable and re-exported all of it, so there is one style; `sdk/terminal.py`
+carries the argument in full, and this module is where the package root takes these two names from.
 
 **What is deliberately not re-exported here is `Role`.** `on_question` is a field on it and
 `sdk/roles.py` is where an author meets both; this module holds the vocabulary that crosses the

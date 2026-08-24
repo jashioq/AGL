@@ -112,7 +112,7 @@ accepted at any `P`, `Run` being covariant in it.
 `Run.services` is `sdk/_engine/services.py`'s eight ports, plus the build command 14.0 put beside
 them because `Verifier.verify` takes one. It was carried unread from 10.3, on the
 argument that a constructor's shape is what every call site is written against - each of
-`cli/commands/`, `sdk/testing.py` at 16.5, and every test that drives a workflow - and `run.step` is
+`cli/commands/`, `agl/testing.py` at 16.5, and every test that drives a workflow - and `run.step` is
 the member that now reads it: the ledger through `services.store`, the checkout through
 `services.workspaces`, the dispatch through `services.agents`, the entry's timestamp through
 `services.clock`.
@@ -143,7 +143,7 @@ takes the default, and `_child` below passes on the objects this `Run` holds.
 inconsistency in the defaulting. `api.run` releases it in a `finally` around the workflow's function
 - §3.4's "the lease is released when the run exits" - so something above the workflow has to be
 holding the handle, and the only way to hold what a defaulted field built is to have built it. The
-default stays because `_child` and `sdk/testing.py` and every test that constructs a `Run` directly
+default stays because `_child` and `agl/testing.py` and every test that constructs a `Run` directly
 still want one, and a required argument would make each of them say `Leases()` to get the thing they
 would have got anyway.
 
@@ -244,7 +244,7 @@ tree, free to hand one a table or a counter that is not the run's, which is the 
 above exist to prevent.
 """
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field, is_dataclass
 from inspect import iscoroutinefunction
 from typing import cast
@@ -255,6 +255,7 @@ from agl.ports.terminal import Terminal
 from agl.sdk._engine.integration import Integration, Leases
 from agl.sdk._engine.integration import integrate as _integrate
 from agl.sdk._engine.journal import Fingerprints
+from agl.sdk._engine.preflight import Capabilities
 from agl.sdk._engine.services import Services
 from agl.sdk._engine.steps import Steps
 from agl.sdk._engine.worktrees import Worktrees
@@ -349,6 +350,24 @@ class Run[P = object]:
     lease
     is released when the run exits"."""
 
+    capabilities: Capabilities = field(default_factory=Capabilities)
+    """§3.2's second preflight check, at step time: what each model's backend reported, asked once.
+
+    `fingerprints`' shape and `fingerprints`' argument, three fields over: defaulted for the root,
+    passed on by `_child`, and never built inside a child. `capabilities()` is contracted stable for
+    the duration of a run (§3.2), so a table per namespace would ask a second time for an answer
+    that cannot have changed.
+
+    **The one of the four shared tables where sharing is an economy rather than the mechanism**, and
+    it is worth saying which kind it is: a second `Fingerprints` or `Worktrees` or `Leases` breaks
+    something, while a second `Capabilities` merely re-asks. That is also why this field is the one
+    a directly-built `Run` can default without arranging anything - it holds no record of what
+    preflight saw, and an empty one answers correctly on its first call.
+
+    `sdk/_engine/preflight.py` argues why the step needs this check at all when `api.run` has
+    already made the same one: the role a workflow hands to `run.step` is routinely
+    `replace(declared_role, on_question=handler)`, so it is not the role preflight was shown."""
+
     _parent: Run[P] | None = field(default=None, repr=False, compare=False)
     """The `Run` that cut this one, or `None` because nothing did. `integrate()`'s one seam.
 
@@ -410,7 +429,9 @@ class Run[P = object]:
 
     def __post_init__(self) -> None:
         object.__setattr__(
-            self, "_steps", Steps(self.services, self.scope, self.base, self.fingerprints)
+            self,
+            "_steps",
+            Steps(self.services, self.scope, self.base, self.fingerprints, self.capabilities),
         )
 
     @property
@@ -667,9 +688,9 @@ class Run[P = object]:
 
         Private, and called once per namespace by `Worktrees.open` - never by `worktree()` directly,
         which is what makes a reopen structurally unable to build a second `Run` over one namespace.
-        The four fields it does not vary are the four a child must not vary: the params and the
-        ports are the run's, and the counter and the table are *this object's* rather than new ones,
-        for the reasons the module docstring gives about each.
+        The fields it does not vary are the ones a child must not vary: the params and the ports are
+        the run's, and every shared table - the counter, the namespaces, the leases, the reported
+        capabilities - is *this object's* rather than a new one, for the reasons each field gives.
 
         **And this is the one line that sets `_parent`**, which follows from that same sentence
         rather than being a second rule to keep: a child is built here exactly once per namespace,
@@ -685,6 +706,7 @@ class Run[P = object]:
             fingerprints=self.fingerprints,
             worktrees=self.worktrees,
             leases=self.leases,
+            capabilities=self.capabilities,
             _parent=self,
         )
 
@@ -760,7 +782,7 @@ class Workflow[P = object]:
     """What `@workflow` produces, what an entry point resolves to, and what `registry.load`
     narrows to with `isinstance`. A workflow, as the framework knows one.
 
-    Four facts and no behaviour. Everything else about running it - fingerprints, replay,
+    Five facts and no behaviour. Everything else about running it - fingerprints, replay,
     worktrees, branch naming, integration, preflight, exit codes, provider routing - is framework,
     and §3.3's table is emphatic that it stays framework.
     """
@@ -784,28 +806,61 @@ class Workflow[P = object]:
     fn: _Function[P]
     """The `async def` itself, unwrapped and unchanged. `api.py` awaits `fn(run)`."""
 
+    roles: tuple[Role[object], ...] = ()
+    """Every role this workflow means to run, so that §3.2's preflight has something to walk.
+
+    **The one field here that is not a fact about the function**, and it exists because the
+    framework cannot otherwise see a single role. §3.3 keeps roles as "reusable module-level
+    declarations" inside the workflow's own package, and a role carrying `on_question` is built
+    inside the workflow function because §3.7's handler is a closure over that `Run`
+    (`sdk/roles.py` says so in as many words) - so there is nothing above to enumerate, and §3.2's
+    "collect the providers named by the workflow's roles" has no mechanism without this line.
+    `sdk/_engine/preflight.py` argues at length why the lazy alternative - checking each role at
+    the step that uses it - fails the stage's own acceptance criterion.
+
+    **`Role[object]` and not `Role[P]`**: `P` here is the *params* class, and a role's parameter is
+    its reporting tool's payload, which is a different type per role and belongs to none of them
+    collectively. `Role` is covariant in that parameter, so a tuple mixing `Role[Findings]` and
+    `Role[None]` widens to this with no cast and no `Any` - checked by `mypy --strict`, which is
+    what makes the widening safe to rely on rather than merely convenient.
+
+    **Defaulted to `()`**, so a workflow that runs no agent declares nothing: `workflows/noop/` is
+    the standing instance and preflight over an empty tuple asks nobody anything. That is not a
+    loophole either. A workflow that names roles here and steps with a role it did not declare is
+    still checked, at the step, by the other half of preflight - the declaration buys the *early*
+    refusal, and nothing rests on it being complete."""
+
 
 def workflow[P](
-    *, name: str, version: str, params: type[P]
+    *, name: str, version: str, params: type[P], roles: Sequence[Role[object]] = ()
 ) -> Callable[[_Function[P]], Workflow[P]]:
     """Declare an async function to be a workflow. §3.3's one line of ceremony.
 
-        @workflow(name="fix", version="1.1", params=FixParams)
+        @workflow(name="fix", version="1.1", params=FixParams, roles=[implementer, reviewer])
         async def fix(run: Run[FixParams]) -> None:
             ...
 
-    Keyword-only, all three required: a positional would make `@workflow("fix", "1.1", FixParams)`
-    a thing to get in the wrong order once and be wrong about for the life of a run's records. The
-    decorated name becomes the `Workflow`, which is what the entry point points at.
+    Keyword-only, the first three required: a positional would make `@workflow("fix", "1.1",
+    FixParams)` a thing to get in the wrong order once and be wrong about for the life of a run's
+    records. The decorated name becomes the `Workflow`, which is what the entry point points at.
+
+    `roles` is what §3.2's preflight walks before the run starts - see `Workflow.roles` for why the
+    framework cannot find them any other way, and `sdk/_engine/preflight.py` for what it does with
+    them. Any sequence is accepted and a tuple is stored, following `Role.tools`: a list is the
+    natural thing to write at a declaration and an immutable value is the right thing for something
+    every run of this workflow shares.
 
     Refuses with `InputError` - the module docstring argues the class - an empty `name` or
     `version`, a `params` that is not a dataclass class, and a function that is not a coroutine
     function. All four at import time, which is where a package that cannot be invoked correctly
-    should fail.
+    should fail. Nothing about `roles` is refused here: every term of a `Role` was already checked
+    by `Role.__post_init__` at the line that declared it, and whether a backend can serve one is
+    what preflight asks a port about.
     """
     _check_text("name", name)
     _check_text("version", version)
     _check_params(params)
+    declared = tuple(roles)
 
     def declare(fn: _Function[P]) -> Workflow[P]:
         if not iscoroutinefunction(fn):
@@ -814,7 +869,7 @@ def workflow[P](
                 f"{fn!r}. A workflow is one async function (§3.3), the framework awaits it, and a "
                 f"plain function returning an awaitable type-checks here and then never yields"
             )
-        return Workflow(name=name, version=version, params=params, fn=fn)
+        return Workflow(name=name, version=version, params=params, fn=fn, roles=declared)
 
     return declare
 

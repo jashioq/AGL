@@ -45,18 +45,21 @@ argument for the side it took).
 
 **A real `RichTerminal` over a console nobody watches.** `container.fakes()` builds a
 `HeadlessTerminal`, which refuses every `Screen[T]` with `UpstreamUnavailable` - correctly, since a
-workflow needing human input cannot run with nobody there - so it is substituted with
-`dataclasses.replace`, exactly as `tests/sdk/test_run_terminal.py` and `tests/sdk/
+workflow needing human input cannot run with nobody there - so it is substituted through
+`FakeServices.with_terminal`, exactly as `tests/sdk/test_run_terminal.py` and `tests/sdk/
 test_agent_questions.py` substitute theirs. **No third `Terminal` is written**: a hand-rolled
 queueing terminal in a test would be under `tests/contracts/terminal.py`'s eye nowhere at all, and
 the whole point of the `Keys` seam is that the real adapter can be driven without a tty. The console
 is a plain `Console(file=StringIO())` and deliberately not `force_terminal=True`, which takes
 `_display.py`'s appending path and so leaves `sys.stdout` and `sys.stderr` alone inside pytest.
 
-**A trap worth naming, because it is silent.** `container.fakes()` holds one terminal under two
-names - `services.terminal` and the sibling `FakeServices.terminal` - and `replace` moves only the
-first. So `harness.terminal` still points at the discarded `HeadlessTerminal` after the
-substitution, and every read here is of the `RichTerminal` the fixture built.
+**The substitution is `harness.with_terminal(...)` and not `dataclasses.replace`, and 16.5 is why.**
+`container.fakes()` holds one terminal under two names - `services.terminal` and the sibling
+`FakeServices.terminal` - and a `replace(harness.services, terminal=...)` moved only the first, so
+`harness.terminal` afterwards named the `HeadlessTerminal` that had just been discarded. Nothing
+reported that and nothing could: the two views simply disagreed. `with_terminal` swaps both at once
+and hands back a bundle, which is the shape in which the disagreement is not expressible; every read
+below is of the `RichTerminal` the fixture built, and now so is `harness.terminal`.
 
 **What is on screen is `RichTerminal.written`**, which is the screen the adapter last **wrote**,
 assigned at the write site after the diff decided the frame changed. It is what the contract suite's
@@ -102,7 +105,7 @@ here is the middle line of §3.3's snippet, which that file could build both hal
 import asyncio
 import io
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Final
@@ -687,7 +690,7 @@ async def test_a_person_who_resolves_the_collision_and_retries_lands_the_work(
     """
     record = _Agent()
     harness = _harness(tmp_path, record)
-    services = replace(harness.services, terminal=terminal)
+    services = harness.with_terminal(terminal).services
 
     async with asyncio.timeout(_HUNG):
         running = asyncio.create_task(
@@ -755,7 +758,7 @@ async def test_a_person_who_gives_up_at_the_conflict_screen_puts_the_target_back
     """
     record = _Agent()
     harness = _harness(tmp_path, record)
-    services = replace(harness.services, terminal=terminal)
+    services = harness.with_terminal(terminal).services
 
     async with asyncio.timeout(_HUNG):
         running = asyncio.create_task(
@@ -872,7 +875,7 @@ async def test_a_conflict_preempts_two_agent_questions_and_the_parents_step_goes
     """
     record = _Agent()
     harness = _harness(tmp_path, record)
-    services = replace(harness.services, terminal=terminal)
+    services = harness.with_terminal(terminal).services
     scene = _staged()
 
     async with asyncio.timeout(_HUNG):
@@ -973,7 +976,7 @@ async def test_pending_is_the_plans_own_map_with_the_conflict_displayed(
     """
     record = _Agent()
     harness = _harness(tmp_path, record)
-    services = replace(harness.services, terminal=terminal)
+    services = harness.with_terminal(terminal).services
     scene = _staged()
 
     async with asyncio.timeout(_HUNG):
@@ -1027,7 +1030,7 @@ async def test_the_board_that_comes_back_shows_what_changed_while_it_was_off_scr
     """
     record = _Agent()
     harness = _harness(tmp_path, record)
-    services = replace(harness.services, terminal=terminal)
+    services = harness.with_terminal(terminal).services
     scene = _staged()
 
     async with asyncio.timeout(_HUNG):

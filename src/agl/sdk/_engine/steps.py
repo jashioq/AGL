@@ -25,6 +25,21 @@ Two things here are ordered all the same, and both are ordered by what §3.6 fin
   `AgentTask.__post_init__` spent on every replayed step of every resume - and, worse, would read
   as though dispatch were the thing being decided rather than the thing being skipped.
 
+## One thing happens before all five: §3.2's capability check over the role handed in
+
+`api.run` runs preflight over the roles the workflow **declared**, at second zero, which is the
+only place a missing harness can be caught before forty minutes of work. This module runs the
+containment half again, per step, over the role it was actually handed - and the two are not the
+same role. §3.7's question handler is a closure over a `Run`, so a role that asks is built inside
+the workflow function as `replace(declared_role, on_question=handler)`, and what preflight saw
+therefore had no `MID_RUN_QUESTIONS` in `requires` while what runs does. Without this line, such a
+role reaching a backend that cannot ask is the silent failure `sdk/roles.py` spends four paragraphs
+refusing: the adapter must not block, so the agent is told no answer is available, the approval
+gate is absent, and the step reports a result.
+
+It is one `capabilities()` call per model per run - the run's own table is passed in - and never a
+`check_ready`, which costs a turn. `sdk/_engine/preflight.py` holds the whole argument.
+
 ## Why this is a module of its own, with `Run.step` a delegate over it
 
 `sdk/workflow.py` is the surface: a decorator, a frozen `Run`, and `Stop`. This is plumbing - a
@@ -245,6 +260,7 @@ from agl.ports.ids import Namespace, StepName
 from agl.ports.run import JsonValue
 from agl.ports.workspace import Workspace
 from agl.sdk._engine.journal import Fingerprints, Journal, canonical_json
+from agl.sdk._engine.preflight import Capabilities
 from agl.sdk._engine.services import Services
 from agl.sdk.roles import Role, RoleIncompleteError
 from agl.sdk.tools import ReportingTool
@@ -277,9 +293,14 @@ class Steps:
     """
 
     def __init__(
-        self, services: Services, scope: RunScope, base: str, fingerprints: Fingerprints
+        self,
+        services: Services,
+        scope: RunScope,
+        base: str,
+        fingerprints: Fingerprints,
+        capabilities: Capabilities,
     ) -> None:
-        """The ports, the address, where this namespace starts, and the run's counter.
+        """The ports, the address, where this namespace starts, the run's counter and its answers.
 
         `base` is **usually** a resolved commit id and is allowed to be a ref expression, which is
         the one thing about this signature that changed at 13.2 and the reason `_namespace` resolves
@@ -291,11 +312,17 @@ class Steps:
         `History.resolve` is not - and it is resolved once, in `_namespace`, before either the
         checkout or the walk sees it. Nothing here checks it: `Journal` refuses an empty one, and
         git judges the rest at `restore`, where the judging happens anyway.
+
+        `capabilities` is the run's table of what each model's backend reported (§3.2), shared down
+        the tree like the counter beside it and passed in for that reason rather than built here:
+        one `Steps` is one namespace, and a table per namespace would re-ask a question the port
+        contracts to answer the same way for the whole run.
         """
         self._services = services
         self._scope = scope
         self._base = base
         self._fingerprints = fingerprints
+        self._capabilities = capabilities
         # The checkout and the walk over it arrive together and exactly once - see `_namespace`,
         # and the module docstring for why the pair is one field rather than two.
         self._opened: tuple[Journal, Workspace] | None = None
@@ -398,6 +425,19 @@ class Steps:
         # First, and before anything is opened: a step name is a path segment, and a name that
         # cannot be one should be refused with nothing provisioned and no agent paid for.
         step = StepName(name)
+        # §3.2's capability check, over the role that will actually run rather than over the one
+        # the workflow declared - and the two differ routinely, because §3.7's handler is a closure
+        # over this `Run`, so a role that asks is spelled `replace(declared, on_question=handler)`
+        # here and reaches `api.run`'s preflight without `MID_RUN_QUESTIONS` in `requires`.
+        # `sdk/_engine/preflight.py` argues why this half is what makes §3.2's third check real,
+        # and why `check_ready` is deliberately not repeated at this line: it costs a turn, and it
+        # asks about a state of the world preflight has already asked about.
+        #
+        # Above the journal lookup, so a role that cannot run is refused with nothing provisioned -
+        # and refused on a replay as well as on a miss, which is the honest reading of "the role
+        # this workflow handed over cannot run here": a workflow whose refusals depended on which
+        # steps happened to be cached would be one that behaved differently on resume.
+        await self._capabilities.require(self._services.agents, role, step=str(step))
         journal, workspace = await self._namespace()
 
         # At most one `ReportingTool` in `role.tools` - `Role.__post_init__` refuses two - so the

@@ -37,6 +37,7 @@ import pytest
 
 from agl.config import container, registry
 from agl.ports import errors
+from agl.ports.agent import Claude, OpenAI
 from agl.ports.errors import AglError, InputError, exit_code_for
 from agl.ports.home_layout import RunScope
 from agl.ports.ids import ProjectName, RunLabel
@@ -44,6 +45,8 @@ from agl.ports.tree_layout import TreesRoot
 from agl.sdk._engine.journal import Fingerprints
 from agl.sdk._engine.services import Services
 from agl.sdk.params import arg, parse
+from agl.sdk.roles import Role
+from agl.sdk.tools import reporting_tool
 from agl.sdk.workflow import Run, Stop, Workflow, workflow
 
 # Where a run's records go and the commit its chain starts at. Nothing in this file takes a step,
@@ -90,6 +93,31 @@ async def fix(run: Run) -> None:
     only because `Run`'s type parameter has a PEP 696 default - `disallow_any_generics` is on - and
     the default being `object` rather than `Any` is what makes the line below an error to remove."""
     assert_type(run.params, object)
+
+
+@dataclass(frozen=True)
+class Findings:
+    """A reporting payload, so that one of the two roles below is a `Role[Findings]` and the other
+    a `Role[None]` - which is what makes the widening to `Role[object]` a real question."""
+
+    high: int
+
+
+# §3.2's motivating pair: one model per provider, in one workflow. Module level, because §3.3 keeps
+# roles "reusable module-level declarations" and because that is exactly the shape preflight can
+# see - a role built inside the workflow function is the case `sdk/_engine/steps.py` checks instead.
+IMPLEMENTER: Final = Role(instructions="implement it", model=Claude.OPUS)
+REVIEWER: Final = Role(
+    instructions="review it",
+    model=OpenAI.SOL,
+    tools=[reporting_tool("report_findings", "report what you found", Findings)],
+)
+
+
+@workflow(name="staffed", version="1.1", params=NoParams, roles=[IMPLEMENTER, REVIEWER])
+async def staffed(run: Run[NoParams]) -> None:
+    """A workflow that declares its roles, which is the whole of what 16.1 added to this decorator.
+    Nothing runs it here - `tests/sdk/test_preflight.py` is where the declaration is spent."""
 
 
 # The load that succeeds into the wrong type. `test_registry.py` uses a string for this too.
@@ -143,6 +171,40 @@ def test_a_decorated_async_function_is_a_workflow_object() -> None:
 def test_the_decorator_holds_the_function_unwrapped() -> None:
     """`api.py` awaits this. Nothing is wrapped around it, so a traceback names the workflow."""
     assert tickets.fn.__qualname__ == "tickets"
+
+
+# --- `roles`, the field 16.1 added so that §3.2's preflight has something to walk ---------------
+
+
+def test_a_workflow_that_declares_no_roles_carries_an_empty_tuple() -> None:
+    """The default, and the reason it is one: `workflows/noop/` runs no agent and declares nothing,
+    and §3.2's preflight over an empty tuple asks no port anything.
+
+    A tuple and not `None`, so that every caller iterates rather than narrowing - `preflight.check`
+    walks it twice and would otherwise carry a guard for a case that means "no roles" anyway."""
+    assert tickets.roles == ()
+
+
+def test_declared_roles_are_kept_in_order_and_stored_as_a_tuple() -> None:
+    """Any sequence in, a tuple out - `Role.tools`' rule one layer up, and for its reason: a list is
+    what an author writes at a declaration and an immutable value is what every run of this workflow
+    should share. Order is kept because a refusal should arrive in the order the roles were written,
+    which is `preflight._models`' own argument for `dict.fromkeys` over a set."""
+    assert staffed.roles == (IMPLEMENTER, REVIEWER)
+    assert isinstance(staffed.roles, tuple)
+
+
+def test_roles_of_two_payload_types_widen_to_one_declaration() -> None:
+    """`Workflow.roles` is `tuple[Role[object], ...]`, and this is the line that has to type-check
+    for that to be usable: `IMPLEMENTER` is a `Role[None]` and `REVIEWER` a `Role[Findings]`, so a
+    workflow declaring both is declaring two different `Role[...]`s in one sequence.
+
+    It works because `Role` is covariant in its payload parameter - `type[P]` and a `-> P` are its
+    only two uses of it - so the widening is checked by `mypy --strict` over `tests/` rather than
+    bought with a `cast` or an `Any` in the signature. The runtime assertion below is a
+    formality; the gate is that this module compiles."""
+    assert_type(staffed.roles, tuple[Role[object], ...])
+    assert [role.model for role in staffed.roles] == [Claude.OPUS, OpenAI.SOL]
 
 
 # --- the narrowing `registry.load` performs ----------------------------------------------------
@@ -245,15 +307,21 @@ def test_a_run_holds_nothing_it_did_not_declare(tmp_path: Path) -> None:
     workflow's function, so the composition root has to be holding the object the run was built
     with.
 
+    `capabilities` joined at 16.1 and is the fourth of that shape: §3.2's record of what each
+    model's backend reported, asked once per model per run because `capabilities()` is contracted
+    stable for the duration of one. It is the only one of the four where sharing is an economy
+    rather than the mechanism - a second table merely re-asks - which is why it is also the only one
+    a directly-built `Run` can default with nothing arranged.
+
     `_parent` joined at 14.0 and is the link `integrate()` walks to reach the namespace a child's
     work lands into. A keyword like the three above, defaulted `None` - which is how a root says it
     is a root - and set by `_child` alone. Private, because §3.3's surface is six members and a
     public one would hand a workflow author a tree to walk.
 
-    `_steps` is the engine `step` delegates to, derived in `__post_init__` from the four public
-    fields - `Entry` sets its own derived field the same way - and it is deliberately not a
-    constructor argument: a caller free to supply one could hand a `Run` an engine addressing
-    another namespace's checkout.
+    `_steps` is the engine `step` delegates to, derived in `__post_init__` from the public fields -
+    `Entry` sets its own derived field the same way - and it is deliberately not a constructor
+    argument: a caller free to supply one could hand a `Run` an engine addressing another
+    namespace's checkout.
     """
     assert Run.__slots__ == (
         "params",
@@ -263,6 +331,7 @@ def test_a_run_holds_nothing_it_did_not_declare(tmp_path: Path) -> None:
         "fingerprints",
         "worktrees",
         "leases",
+        "capabilities",
         "_parent",
         "_steps",
     )

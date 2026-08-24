@@ -26,16 +26,18 @@ rule, one composition root.
 | `config/` | What did the user configure, and which classes satisfy it? | it knows a file format, reads the environment, or says `new` |
 | `cli/` | How does a human invoke it? | it parses argv or maps an exception to an exit code |
 | `api.py` | AGL's own operations | it's run / resume / clear / init / list_workflows |
+| `testing.py` | How does a workflow author test one? | it composes an all-fakes bundle and drives `api` over it |
 
 ## 2. The dependency rule
 
-`cli` → `api` → `config` → `workflows` → {`sdk`, `adapters`} → `ports`
+{`cli`, `testing`} → `api` → `config` → `workflows` → {`sdk`, `adapters`} → `ports`
 
 - `ports` imports **nothing but stdlib**.
 - `adapters` and `sdk` both import `ports`. They are **siblings and may not import each other**.
 - `workflows` import `sdk` and `ports`. Never `adapters`, never `config`.
 - `config` may import everything.
-- `cli` → `api` → `config`.
+- `cli` → `api` → `config`, and `testing` → `api` → `config`. `cli` and `testing` are **siblings and
+  may not import each other**: the harness is a second caller of `api`, not a layer above one.
 
 This is enforced by `.importlinter`, not by convention. A violation is a failing build.
 
@@ -54,13 +56,21 @@ adapter. No module outside it may import from `agl.adapters.*`. Enforced by cont
 - Intended asymmetry: `agl[claude]` is a pip extra; OpenAI support is a separately installed
   binary resolved at preflight. Installing one vendor never drags in the other's SDK.
 
-## 5. Two naming clarifications the tree does not make obvious
+## 5. Three naming clarifications the tree does not make obvious
 
 - **`ports/terminal.py` holds the `Terminal` ABC *and* the component types its own methods
   speak** (`Screen[T]`, `Rows`, `Row`, `Text`, `Choice`, `TextInput`). `sdk/terminal.py` and
-  `sdk/questions.py` are **pure re-export facades** containing no logic, so workflow authors
-  write `from agl.sdk import Screen` and never reach into `ports`. If the components lived in
-  `sdk/`, `ports` would have to import `sdk` and the layering would invert.
+  `sdk/questions.py` are **pure re-export facades** containing no logic, and `sdk/__init__.py`
+  re-exports those in turn, so workflow authors write `from agl.sdk import Screen` and never reach
+  into `ports`. If the components lived in `sdk/`, `ports` would have to import `sdk` and the
+  layering would invert.
+- **`sdk/__init__.py` is the SDK's front door and re-exports the whole authoring surface** — every
+  name from `workflow`, `roles`, `tools`, `params`, `terminal` and `questions` that a workflow is
+  written out of, `__all__` typed out and never computed. Per-submodule imports go on working and
+  name the same objects; `_engine` is not on it and does not become so. `sdk/roles.py` carries the
+  port enums a `Role` is declared out of (`Claude`, `OpenAI`, `ModelId`, `Restriction`,
+  `Capability`, `QuestionHandler`) for the same reason `sdk/tools.py` carries `Tool`, so the front
+  door takes every name from a module in its own package.
 - **There is no `presentation/` layer.** Components live in `ports/terminal.py`, re-exported
   through `sdk/terminal.py`; rendering lives in `adapters/rich_terminal/`. A neutral layer
   between them was considered and rejected: forcing a terminal and a websocket into one shape
@@ -103,17 +113,18 @@ adapter. No module outside it may import from `agl.adapters.*`. Enforced by cont
 
 | Module | Holds |
 |---|---|
-| `workflow.py` | The `@workflow` decorator, the `Run` object a workflow is handed, and `Stop`. A workflow is a decorated async function, never a subclass |
+| `workflow.py` | The `@workflow` decorator, the `Run` object a workflow is handed, and `Stop`. A workflow is a decorated async function, never a subclass. `roles=` is the one thing the decorator takes that is not a fact about the function: roles are module-level declarations inside the workflow's own package, so preflight has no other way to find them |
 | `roles.py` | `Role(instructions, model, restrictions, tools, requires, on_question)`. The author names the model per role; there is no config-level model override |
 | `tools.py` | `Tool` and reporting-tool declaration. A reporting tool's payload becomes the step result |
 | `params.py` | `arg()` — a workflow's params dataclass becomes named CLI flags. No positionals |
 | `terminal.py` | Re-export facade over `ports.terminal` — no logic |
 | `questions.py` | Re-export facade over `ports.questions` — no logic |
-| `testing.py` | The harness workflow authors test against: run a workflow on an all-fakes bundle, script agent replies and questions, drive kill-and-resume |
+| `testing.py` | The **scripting vocabulary** a workflow author writes an agent in: `Reply` (what an agent does for one task), `Call`, and `Agent = (AgentTask) -> Reply`. Port-typed, and it names no vendor and no fake — `sdk/` and `adapters/` are siblings, so `Script` and `Conversation` are not names it may write, and `config/container.py` compiles a `Reply` into the callable each fake consumes. The *builder* is `agl/testing.py`: contract 1 puts `sdk` below `config`, so nothing here can build a bundle |
 | `_engine/journal.py` | Internal: fingerprints, entries and replay — the ledger under `steps/` that makes a run resumable |
 | `_engine/steps.py` | Internal: what `run.step` is a delegate to — the journal lookup, the `AgentTask` a `Role` becomes, the dispatch, the commit-or-wipe and the entry write, in that order. It lives here and not in `workflow.py` because `sdk/` keeps its plumbing under `_engine/`, and because the one member that persists anything should not be read past on the way to the decorator. Also holds the cell behind `run.activity`: the last string the serving adapter reported, live-only and never persisted, which a frozen `Run` has nowhere to keep. And the one place a namespace's base is resolved — `WorkspaceProvider.open` takes a ref expression or a commit id, `Journal` takes only the second, so one `History.resolve` feeds both and the cut and the chain cannot disagree |
 | `_engine/worktrees.py` | Internal: what `run.worktree` is a delegate to — the run's table of taken namespaces and the child `Run` each one carries. **Unique run-wide, not sibling-wide** (§3.9: `AGL_HOME` nests and the trees root is flat, so `T-01`'s child `sub-b` and a top-level `sub-b` are two scopes and one checkout), compared by `Namespace.collision_key`. It computes no path and holds no head: the nested `worktrees/<name>/` storage is `home_layout.scope_dir`'s one loop, and the head a child starts at is the chain in `_engine/journal.py`, read synchronously through `Steps.last_good` |
 | `_engine/integration.py` | Internal: per-target **serialized** merge, the lease, the build gate, and revert on failure |
+| `_engine/preflight.py` | Internal: §3.2's two questions - is this backend ready, and can it do what the role requires - asked at **two moments**. `api.run` asks both over the roles `@workflow(roles=…)` declares, before it writes anything; `run.step` asks the containment half again over the role it was actually handed, because §3.7's handler is a closure over the `Run` and a negotiating role is therefore `replace(declared, on_question=…)` and not the value preflight saw. Takes an `AgentRunner` and roles, never a `Services` |
 
 ### `workflows/` — one package per workflow, registered via the `agl.workflows` entry points
 
@@ -122,19 +133,20 @@ adapter. No module outside it may import from `agl.adapters.*`. Enforced by cont
 | `fix/` | v1.1 — one worktree, sequential steps, two providers: Claude implements, OpenAI reviews |
 | `split/` | v1.1 — N independent chunks, concurrent, each integrated into the run's base |
 
-### `config/`, `cli/`, `api.py` — the edge
+### `config/`, `cli/`, `api.py`, `testing.py` — the edge
 
 | Module | Holds |
 |---|---|
 | `config/schema.py` | Typed settings, with a nested section per connector |
 | `config/sources.py` | Precedence: flags > env > file > defaults, resolved once into an immutable object |
-| `config/toml_file.py` | The only module that knows TOML. Resolves the project by walking up to the git root |
-| `config/container.py` | The composition root, the only module that constructs adapters. Builds the typed services bundle and assembles the routing runner |
+| `config/toml_file.py` | The only module that knows TOML — reading both file shapes and **writing** the project file `agl init` produces, so the two round-trip. Resolves the project by walking up to the git root. Also the one refusal that compares two settings against each other rather than checking one: a `trees_root` resolving to somewhere inside `repo` would put AGL's checkouts in the user's working tree (§3.5), and it is here rather than in `schema.py` because seeing it needs `Path.resolve()` and those types are pure |
+| `config/container.py` | The composition root, the only module that constructs adapters. Builds the typed services bundle and assembles the routing runner. Also the one module that may name both `sdk/testing.py`'s vocabulary and an adapter's `Conversation`, so **it compiles a `Reply` into the callable each agent fake consumes** — `fakes(agent=…)`, one provider-blind agent, one raw `claude=`/`openai=` script per provider as the escape hatch. `FakeServices.with_terminal` / `with_store` swap a fake in both of that class's views at once |
 | `config/registry.py` | Workflow discovery through the `agl.workflows` entry points. No `importlib`, no `getattr` |
-| `cli/main.py` | Parse argv, resolve settings, dispatch. **Composition is per-command** (§3.10): the project and the container are deferred into a callable the dispatch hands on, and only a command addressed to a repository calls it — `init` writes the project file a container needs, and `workflows` needs neither |
+| `cli/main.py` | Parse argv, resolve settings, dispatch. **Composition is per-command** (§3.10): the project and the container are deferred into a callable the dispatch hands on, and only a command addressed to a repository calls it — `init` writes the project file a container needs, and `workflows` needs neither. Also **the one place `Path.cwd()` is read** in AGL: `_compose` reads it, the `Invocation` carries it, and both readers — `_registered` and `agl init` — receive it |
 | `cli/exit_codes.py` | Re-exports `EXIT_CODES` and `exit_code_for` from `ports/errors.py` and holds no table of its own — the table is there, in exactly one place. What to do with an exception that is **not** an `AglError` is this module's only decision |
 | `cli/commands/` | One module per subcommand: run, resume, clear, init, workflows |
-| `api.py` | run · resume · clear · init · list_workflows. Each takes what it needs and no more: the first three a `Services` and a project, `init` the settings alone, `list_workflows` neither |
+| `testing.py` | The harness a workflow author tests against: `harness(tmp_path, agent=…)` builds an all-fakes bundle, `run(workflow, *flags)` and `resume(workflow)` drive `api` over it, `recorded` is every entry the ledger took. A sibling of `cli/` (§2): a second caller of `api`, not a layer above one. Composes the entry point a `Workflow` object *would* be registered as and resolves it through `config/registry.py`, so the harness runs a workflow the way an installed one runs. **`interrupt_after=` is an interruption and not a kill** — in-process, `finally` blocks run — and says so; `tests/instruments/replay.py` is the version that is a kill |
+| `api.py` | run · resume · clear · init · list_workflows, plus `workflow_help` behind `agl workflows <name>`. Each takes what it needs and no more: the first three a `Services` and a project, `init` the settings plus the directory it was invoked in and how to ask one question, the last two neither. **`init` grows a `cwd` where §3.10 says "settings alone"** — that sentence is about needing no *container*, and a library whose one operation could only be driven by `os.chdir` would be worse for keeping it literally |
 
 ## 7. How to run the gates
 

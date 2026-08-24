@@ -23,6 +23,17 @@ wrong: it is open while the workflow runs, it is shut when `api.run` returns, an
 entered at all by a run that died before the workflow - which is where the `async with`'s placement
 after the record and after `_base` becomes observable.
 
+**And the same three lines are asserted of `api.resume`, which is 16.2's half of this file.**
+`docs/agl-build-stages.md` states the hazard in as many words: "`api.resume` needs `async with
+services.terminal` exactly as `api.run` does, and nothing in the repository would notice its
+absence" - because until 15.1 no test drove a `show` through an `api` entry point at all, and every
+SDK terminal test builds its own `Run`, where the context never comes into it. That is the shape of
+the hole rather than one instance of it, so what closes it is one test *per entry point* that goes
+red when the line is deleted: `showing` is driven through `api.run` above and through `api.resume`
+below, and both were checked by deleting the line and watching them fail. A resumed run shows the
+same screens the run showed, and there is nothing weaker than a `show` that can tell whether a
+terminal was entered.
+
 **A view's arguments are registered, not evaluated.** The port promises that `show` keeps the
 function and its arguments and that the loop invokes it again per frame, which is what makes
 `Text(run.activity)` live and what lets a workflow pass the live dict of child runs. What this layer
@@ -105,9 +116,11 @@ def cells(screen: Screen[object]) -> list[str]:
 class _Recording(Terminal):
     """A `Terminal` that keeps what `show` was handed and draws none of it.
 
-    Substituted into the bundle with `dataclasses.replace`, which is what `tests/test_api.py` does
-    for its refusing workspace provider - the port-typed field is the seam, and there is no
-    `terminal=` parameter on `container.fakes()` to reach for instead.
+    Substituted into the bundle with `FakeServices.with_terminal`, which swaps it in the port-typed
+    bundle and in the sibling field at once. A `dataclasses.replace(harness.services, terminal=...)`
+    - which is what this was, and what `tests/test_api.py` still does for its refusing workspace
+    provider, that port having no sibling field - reaches only the first of the two, so
+    `harness.terminal` would afterwards name the `HeadlessTerminal` this replaced.
 
     It is not a second headless terminal and makes no claim to be: `tests/contracts/terminal.py` is
     what says a `Terminal` behaves, and this one deliberately does not. It exists so that a test can
@@ -330,9 +343,55 @@ async def test_the_terminal_is_entered_once_around_the_workflow(tmp_path: Path) 
     """
     harness = _fakes(tmp_path)
     recorder = _Recording()
-    services = replace(harness.services, terminal=recorder)
+    services = harness.with_terminal(recorder).services
 
     await api.run(services, PROJECT, "showing", LABEL, (), points=POINTS)
+
+    assert recorder.entered == 1
+
+
+@pytest.mark.asyncio
+async def test_a_workflow_can_show_a_screen_through_api_resume(tmp_path: Path) -> None:
+    """The same gap, one entry point over - and the one 16.2 had to build something to notice.
+
+    A resumed run shows the same screens the run showed, so `api.resume` needs the `async with`
+    `api.run` has; without it every `show` in a resumed run raises `InternalError` by the port's own
+    rule, and the failure is invisible to every existing terminal test because those build a `Run`
+    directly and never enter a context at all. This is the test that goes red when the line is
+    deleted from `api.resume`, exactly as the one above goes red when it is deleted from `api.run`.
+
+    The record is written by the first invocation, which is what makes a resume possible at all;
+    everything the assertions read is cleared afterwards, so what they see belongs to the resume.
+    """
+    harness = _fakes(tmp_path)
+    await api.run(harness.services, PROJECT, "showing", LABEL, (), points=POINTS)
+    answers.clear()
+    terminals.clear()
+
+    await api.resume(harness.services, PROJECT, LABEL, points=POINTS)
+
+    assert answers == [None]
+    assert terminals == [harness.terminal]
+
+
+@pytest.mark.asyncio
+async def test_the_terminal_is_entered_once_around_a_resumed_workflow(tmp_path: Path) -> None:
+    """Once for the resume too, which a raise cannot say and a count can.
+
+    Both implementations refuse a second `__aenter__` while they are open, so a `HeadlessTerminal`
+    would report an ordering bug by raising - but a raise cannot tell "entered once" from "entered
+    zero times", and zero is the state this section exists to rule out. The recorder's count is
+    reset after the first invocation so that what is counted is the resume's own entry, and the
+    terminal is entered again rather than for a second time: `api.run` left its context before this
+    one opened, which is the case `ports/terminal.py` deliberately leaves open.
+    """
+    harness = _fakes(tmp_path)
+    recorder = _Recording()
+    services = harness.with_terminal(recorder).services
+    await api.run(services, PROJECT, "showing", LABEL, (), points=POINTS)
+    recorder.entered = 0
+
+    await api.resume(services, PROJECT, LABEL, points=POINTS)
 
     assert recorder.entered == 1
 
@@ -370,7 +429,7 @@ async def test_a_run_that_fails_before_the_workflow_never_opens_the_terminal(
     """
     harness = _fakes(tmp_path)
     recorder = _Recording()
-    services = replace(harness.services, workspaces=_Refusing(), terminal=recorder)
+    services = replace(harness.with_terminal(recorder).services, workspaces=_Refusing())
 
     with pytest.raises(ConflictError, match="refused to provision"):
         await api.run(services, PROJECT, "showing", LABEL, (), points=POINTS)
@@ -407,7 +466,7 @@ async def test_show_registers_the_view_and_its_arguments_rather_than_a_screen(
     live.append("T-01 implement")
     harness = _fakes(tmp_path)
     recorder = _Recording()
-    services = replace(harness.services, terminal=recorder)
+    services = harness.with_terminal(recorder).services
 
     await api.run(services, PROJECT, "showing", LABEL, (), points=POINTS)
 

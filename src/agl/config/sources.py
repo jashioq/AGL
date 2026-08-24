@@ -82,6 +82,14 @@ is this one setting resolved from a flag, then the environment, then the file, t
 that order of preference, and `tests/config/test_sources.py` walks exactly that. The default is
 `600.0`, which is what §3.10's example project file writes as `build_timeout = 600`.
 
+Since 16.4 the file layer is normally the one that answers, because `agl init` writes the key -
+reading `DEFAULT_BUILD_TIMEOUT` rather than restating it, so there is still one literal. The default
+layer is what answers for a file somebody took the key out of, and for the files stages 9 to 15
+wrote by hand. One property follows and is worth saying rather than discovering: **a project
+registered today keeps the timeout it was initialised with if AGL's default later moves.** That is
+right for a file somebody may have edited - silently retiming a registered project on upgrade is the
+behaviour nobody wants - and it is what "the file is an editing surface" means in practice.
+
 **`build` has no default.** There is no build command right for an unknown repository, and `agl
 init` asks the operator for one (§3.10). Absent from flags, environment and file alike, that is an
 `InputError` naming the project file it belongs in.
@@ -155,7 +163,14 @@ from agl.config.schema import AgentSettings, ClaudeSettings, OpenAiSettings, Pro
 from agl.ports.errors import InputError
 from agl.ports.home_layout import AglHome, project_config
 
-__all__ = ["Overrides", "Resolved", "resolve", "resolve_project", "resolve_settings"]
+__all__ = [
+    "DEFAULT_BUILD_TIMEOUT",
+    "Overrides",
+    "Resolved",
+    "resolve",
+    "resolve_project",
+    "resolve_settings",
+]
 
 
 # The settings tree's own path segments. Every environment variable name below is composed from
@@ -184,7 +199,21 @@ _USER_HOME: Final = "HOME"
 # The fourth layer, and the only place in AGL that states any of it.
 _DEFAULT_HOME_DIRNAME: Final = ".agl"
 _DEFAULT_ENABLED: Final = True
-_DEFAULT_BUILD_TIMEOUT: Final = 600.0
+
+DEFAULT_BUILD_TIMEOUT: Final = 600.0
+"""Seconds the merge gate's build may take when nothing else said. §3.10 prints `600`.
+
+Public where the other two defaults are private, and 16.4 is why: `agl init` writes this key into
+every project file it creates (§3.10 prints all five), and it writes it by **reading** this name
+rather than by restating the number. So this line stays the only place in AGL that states any of the
+fourth layer, and it now has two readers instead of one - `resolve_project` below, for a file that
+is silent about it, and `api.init`, for the file it is about to write.
+
+The alternative was for `init` to leave the key out and let this layer answer, which costs nothing
+in code and costs the operator the knob: a project file is an editing surface, not a serialisation,
+and `build_timeout` is the one value on it people revisit - a build that outgrows ten minutes is the
+ordinary case. A key that is not in the file is a knob nobody discovers, there being nowhere else
+they would think to look."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -287,7 +316,7 @@ def resolve_project(
             overrides.build_timeout,
             _seconds(environ, _variable(_BUILD_TIMEOUT)),
             said.build_timeout,
-            default=_DEFAULT_BUILD_TIMEOUT,
+            default=DEFAULT_BUILD_TIMEOUT,
         ),
     )
 

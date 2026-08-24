@@ -60,7 +60,7 @@ made to reveal, not a test somebody forgot.
    "Nothing is promised about two readings... Nor are they promised to increase" - so no assertion
    here may rest on one. A clock that never moves passes, which is the point rather than the price:
    a frozen clock is an honest implementation of this port and not one that merely compiles, and it
-   is what lets `sdk/testing.py` produce a run twice. A clock that stepped backwards passes too,
+   is what lets `agl/testing.py` produce a run twice. A clock that stepped backwards passes too,
    since a system clock does that whenever something adjusts it.
 
 2. **That the reading is the current time.** Nothing here knows what time it is. Finding out needs

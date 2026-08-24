@@ -81,16 +81,54 @@ directory, because a linked worktree or a submodule writes a `gitdir:` *file* th
 compared resolved, so a repository reached through a symlink and the same repository reached
 directly are one project.
 
+## The writer sits beside the reader, and the pair is one round trip (16.4)
+
+`agl init` writes `AGL_HOME/projects/<name>.toml`, and rendering it is TOML, so it is this module's
+- ARCHITECTURE.md §6, "the only module that knows TOML". `write_project` is that renderer, and the
+whole of what it owes is stated as a property rather than as care: **a file it writes is one
+`read_project` accepts**, asserted in `tests/config/test_toml_file.py` by writing one and reading it
+back into a `FileProject`. Written anywhere else, the escaping rule and the key names would be a
+second copy of this file's vocabulary, kept in agreement by nobody - which is the exact failure the
+first line of this docstring is about.
+
+**It writes all five of §3.10's keys, `build_timeout` included, and the value is read rather than
+restated.** `api.init` passes `sources.DEFAULT_BUILD_TIMEOUT`, so that line stays "the fourth layer,
+and the only place in AGL that states any of it" and simply gains a second reader; there is no
+number in this module and none in `api.py`. Leaving the key out would have cost no code and would
+have cost the operator the knob - a project file is an editing surface rather than a serialisation,
+`build_timeout` is the one value on it people revisit, and a key that is not in the file is a knob
+nobody discovers. The property that follows is `sources.py`'s to state and is stated there: a
+project keeps the timeout it was registered with when AGL's own default moves.
+
+**It never overwrites.** The file is created exclusively, so a second `agl init` in a repository
+that already has one is a `ConflictError` rather than a silent replacement of settings somebody
+edited. `check_unregistered` is the same refusal asked for free, in front of the question `init`
+puts to a person; `api.init` calls it there, and the exclusive create is what makes the answer
+race-free rather than merely early. Both raise the one message `_already` writes, exactly as
+`check_trees_root` is one rule serving the reader and the writer.
+
 ## What is refused, and with which class
 
 `InputError` (exit 2, "a config file that is malformed or unreadable" in `errors.py`'s own words)
-for malformed TOML, an unreadable file, a value of the wrong type, and a value the 9.1 types would
-reject - every message naming the file and the key. **Unknown keys and unknown tables are refused
-too**, listing what was expected: a typo'd `build_timout` that silently keeps the default is
-exactly the failure a configuration file exists to prevent, and ignoring it costs an operator an
-afternoon. `NotFoundError` (exit 3) for the two absences that are not malformations - not inside a
-git repository, and inside one no project file names - with distinct messages, both pointing at
-`agl init`.
+for malformed TOML, an unreadable file, a value of the wrong type, a value the 9.1 types would
+reject, and a project file that cannot be written - every message naming the file and the key.
+`ConflictError` (exit 4) for the one thing `write_project` refuses: a project file that is already
+there, "the world already holds something this operation would have to take or overwrite"
+(`ports/errors.py`) said about a file rather than about a run label. **Unknown keys and unknown
+tables are refused too**, listing what was expected: a typo'd `build_timout` that silently keeps
+the default is exactly the failure a configuration file exists to prevent, and ignoring it costs an
+operator an afternoon. `NotFoundError` (exit 3) for the two absences that are not malformations -
+not inside a git repository, and inside one no project file names - with distinct messages, both
+pointing at `agl init`.
+
+**One refusal here is not about a single value, and it is the only one: a `trees_root` that
+resolves to somewhere inside `repo`.** §3.5 is "AGL lives outside the target repo" and §3.10 keeps
+AGL's state under `AGL_HOME` "so AGL never appears in `git status`"; a nested trees root breaks both
+by putting AGL's checkouts in the operator's own working tree. Stage 9 declined the check because
+seeing it needs `Path.resolve()` and `schema.Project.__post_init__` is a pure type.
+`check_trees_root` is where it landed - exported, so that 16.4's `init` refuses it when the file is
+written and this module refuses it when the file is read - and its own docstring argues why it is
+here and not in `sdk/_engine/preflight.py`.
 
 `tomllib.load` hands back `dict[str, Any]`. It is narrowed to `object` at the one call site and
 never re-widened, so nothing typed `Any` leaves this module: every value is read through one of
@@ -111,7 +149,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-from agl.ports.errors import InputError, NotFoundError
+from agl.ports.errors import ConflictError, InputError, NotFoundError
 from agl.ports.home_layout import AglHome, project_config, projects_dir, settings_file
 from agl.ports.ids import ProjectName
 from agl.ports.tree_layout import TreesRoot
@@ -120,10 +158,13 @@ __all__ = [
     "FileAgent",
     "FileProject",
     "FileSettings",
+    "check_trees_root",
+    "check_unregistered",
     "git_root",
     "read_project",
     "read_settings",
     "resolve_project",
+    "write_project",
 ]
 
 
@@ -152,6 +193,23 @@ _HOME_KEYS: Final = frozenset({"home", "agl_home", "AGL_HOME"})
 # What git leaves in the root of a working tree - a directory in a plain clone, a file holding a
 # `gitdir:` line in a linked worktree or a submodule.
 _GIT: Final = ".git"
+
+# The escapes a TOML basic string requires, as the format defines them. Every other control
+# character is written `\u00xx` by `_quoted`, which is the format's own fallback. This table is the
+# write side of `tomllib`'s read side, and the round-trip test is what holds the two together.
+_ESCAPED: Final = {
+    "\\": "\\\\",
+    '"': '\\"',
+    "\b": "\\b",
+    "\t": "\\t",
+    "\n": "\\n",
+    "\f": "\\f",
+    "\r": "\\r",
+}
+
+# Below this, a character is a control character and needs the `\u00xx` form; `\x7f` needs it too.
+_FIRST_PRINTABLE: Final = 0x20
+_DELETE: Final = 0x7F
 
 
 @dataclass(frozen=True, slots=True)
@@ -278,6 +336,97 @@ def read_project(home: AglHome, project: ProjectName) -> FileProject:
     return _project(path, document)
 
 
+def check_unregistered(home: AglHome, project: ProjectName) -> Path:
+    """Where a new project's file goes, refusing a name that already has one. §3.10's "once".
+
+    Answers with the path `write_project` will write, so that the caller has the file a refusal
+    would name *before* it does anything a person can see - `api.init` needs it for
+    `check_trees_root`'s message, and needs this refusal in front of the question it asks the
+    operator. `api.py`'s cheapest-refusal-first rule is what puts it there: a build command typed
+    into a prompt and then thrown away is the same waste as a `check_ready` spent before a free
+    comparison, one command earlier in the day.
+
+    **Not the whole of the refusal, and deliberately not.** This is a check and then a write, so two
+    `agl init` runs at once could both pass it; `write_project` creates the file exclusively and
+    raises the same `ConflictError` out of the operating system's own answer. One message, two
+    call sites, exactly as `check_trees_root` serves the reader and the writer.
+
+    `ConflictError` - exit 4 - because the file is found and is fine and AGL will not take it:
+    `ports/errors.py`'s "the world already holds something this operation would have to take or
+    overwrite ... the exact mirror of `NotFoundError`", which is also the class `api.run` answers a
+    label that already exists with. The message covers both ways a name is held, because from here
+    they are indistinguishable: this repository registered already, or a different repository whose
+    directory happens to carry the same name.
+    """
+    path = project_config(home, project)
+    if path.exists():
+        raise ConflictError(_already(path, project))
+    return path
+
+
+def write_project(
+    home: AglHome,
+    project: ProjectName,
+    repo: Path,
+    trees_root: TreesRoot,
+    build: str,
+    build_timeout: float,
+) -> Path:
+    """Write `AGL_HOME/projects/<name>.toml` and answer with where it went. `agl init`'s one write.
+
+    §3.10 prints the file this renders and all five of its keys are written. `build_timeout` is a
+    parameter rather than a number here for the reason the module docstring gives: the value is read
+    off `sources.DEFAULT_BUILD_TIMEOUT` by the caller, so this module renders a float it was handed
+    and states none.
+
+    **Created exclusively**, so this never overwrites; a file already there is `ConflictError` with
+    `check_unregistered`'s message. The exclusive create *is* the check, taken from the operating
+    system rather than from a `stat` this module made a decision on.
+
+    **No `Project` and no `FileProject` in the signature.** The first is 9.2's to build and belongs
+    to the module that applies precedence; building one here would put a `schema` type in the
+    writer's signature and make `agl init` construct the object every *other* command resolves. The
+    second is what this module hands *out*, with every field optional because "the file was silent"
+    is a thing a reader has to be able to say - and a writer that took one would be able to say it
+    too, which is a file with a key missing and no caller who meant it. So the arguments are the
+    five values that are written, at the types the rest of AGL already carries them at, and a caller
+    that has not got one of them cannot call this.
+
+    **The timeout is rendered as the `float` it is** - `600.0` where §3.10's example prints `600` -
+    because coercing it to an integer when it happens to be whole would be this module deciding what
+    a settings value meant, which is the one thing `_wrong` says it does not do. `_seconds` reads
+    either back, so an operator who edits it to `900` is writing a file this reader already accepts.
+    Range is not checked, for `_seconds`' own reason: `schema.Project` refuses a non-finite or
+    non-positive timeout and one copy of that rule is enough.
+
+    `InputError` if the write itself fails, for `_document`'s reason read the other way: "there is
+    no such file" is a fact two readers interpret differently, and a home directory that cannot be
+    written to is a broken installation either way.
+    """
+    path = project_config(home, project)
+    document = "".join(
+        f"{key} = {_quoted(value)}\n"
+        for key, value in (
+            (_NAME, str(project)),
+            (_REPO, str(repo)),
+            (_TREES_ROOT, str(trees_root.path)),
+            (_BUILD, build),
+        )
+    ) + f"{_BUILD_TIMEOUT} = {build_timeout!r}\n"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("x", encoding="utf-8", newline="\n") as handle:
+            handle.write(document)
+    except FileExistsError as error:
+        raise ConflictError(_already(path, project)) from error
+    except OSError as error:
+        raise InputError(
+            f"{path} cannot be written: {error}. That is where AGL keeps this project's settings, "
+            f"so `agl init` has nowhere to record the repository it was run in"
+        ) from error
+    return path
+
+
 def git_root(start: Path) -> Path:
     """The working tree `start` is inside, found by walking up for a `.git` entry.
 
@@ -294,6 +443,55 @@ def git_root(start: Path) -> Path:
         f"{directory} is not inside a git repository: AGL walked up from it to "
         f"{directory.anchor} looking for a {_GIT} entry and found none. AGL works on a "
         f"repository, so run it from inside one - and `agl init` there to register it"
+    )
+
+
+def check_trees_root(path: Path, repo: Path, trees_root: Path) -> None:
+    """Refuse a trees root that resolves to somewhere inside the repository. §3.5's whole rule.
+
+    "AGL lives outside the target repo" (§3.5) and everything of AGL's own lives under `AGL_HOME`
+    "so AGL never appears in `git status`" (§3.10). A `trees_root` under `repo` breaks both at once
+    and breaks them quietly: `.trees/<label>/_base/` is a real checkout with a real working tree, so
+    what the operator gets is AGL's worktrees inside their own repository, in every `git status`,
+    in every `git add -A`, and inside whatever their build walks.
+
+    **Exported, and read by both directions**, which is the reason it is a named function rather
+    than four lines inside `_project`. This module is where a `Project` comes into existence out of
+    a file, and 16.4's `init` is what writes that same file - so one helper serves the reader and
+    the writer, and a nested trees root is refused when it is written as well as when it is read.
+
+    **This lives here and not in `sdk/_engine/preflight.py`**, and the reason is that no path ever
+    reaches preflight. That module takes an `AgentRunner` and roles; `api.run` takes a `ProjectName`
+    and deliberately not a `Project` (its docstring argues that at length); and `Services` holds
+    ports and one build command. Widening any of those three signatures to carry two `Path`s would
+    undo a decision each of them already argues for, in order to move a check into a module that
+    would then have a second reason to exist. `toml_file.py` already walks the filesystem to find a
+    git root, so this is not a new kind of work here either.
+
+    **Resolution is what kept it out of `schema.py`.** Stage 9 declined this check because
+    `Project.__post_init__` is a pure function of its arguments - "the same values answer the same
+    way on any machine, with any filesystem underneath" - and a nested trees root cannot be seen
+    without following symlinks: `/tmp` is a link on macOS, a repository reached through one and the
+    same repository reached directly must compare equal, and `..` in either path has to be spent
+    before the comparison means anything. `Path.resolve()` reads the filesystem, so the check is
+    impure by construction and belongs in the module that already reads files.
+
+    `InputError`, like every other refusal a settings file earns: the operator's file is wrong and
+    they can fix it, and exit 2 sends them to the file rather than to a bug report. The message
+    names the file, both keys and both resolved paths, because a symlinked or `..`-carrying value
+    looks innocent as written and the resolved pair is what makes the overlap visible.
+    """
+    inside = trees_root.resolve()
+    around = repo.resolve()
+    if not inside.is_relative_to(around):
+        return
+    raise InputError(
+        f"{path}: {_TREES_ROOT} is inside {_REPO}. {_TREES_ROOT} resolves to {inside} and {_REPO} "
+        f"to {around}, so AGL's working checkouts would be cut inside the repository they are cut "
+        f"*from* - present in your `git status`, swept up by `git add -A`, and walked by whatever "
+        f"your build walks. AGL lives outside the target repository (§3.5) and keeps its own state "
+        f"under AGL_HOME so that it never appears there (§3.10). Point {_TREES_ROOT} at a "
+        f"directory beside the repository rather than under it"
     )
 
 
@@ -354,9 +552,16 @@ def _project(path: Path, document: Mapping[str, object]) -> FileProject:
     """§3.10's five keys, read out of one already-parsed project file."""
     _only(document, _PROJECT_KEYS, path, "")
     trees = _absolute(document, _TREES_ROOT, path, "")
+    repo = _absolute(document, _REPO, path, "")
+    # Both or neither: `None` means the file was silent about that key, and a rule about how two
+    # paths sit relative to each other has nothing to say when there is only one of them. Which
+    # of the two silences is itself a problem is 9.2's to decide - this module reports what the
+    # file said, and a default is a precedence layer.
+    if repo is not None and trees is not None:
+        check_trees_root(path, repo, trees)
     return FileProject(
         name=_project_name(path, _text(document, _NAME, path, "")),
-        repo=_absolute(document, _REPO, path, ""),
+        repo=repo,
         # `TreesRoot` refuses a relative root; `_absolute` has already refused it here, with the
         # file and the key in the message, so this construction cannot fail.
         trees_root=None if trees is None else TreesRoot(trees),
@@ -504,6 +709,49 @@ def _absolute(table: Mapping[str, object], key: str, path: Path, prefix: str) ->
             f"be invoked and a relative one would name a different directory each time"
         )
     return value
+
+
+def _already(path: Path, project: ProjectName) -> str:
+    """What both halves of the never-overwrite refusal say. One sentence, two call sites.
+
+    It names both ways a project name is held, because from inside this module they are one fact -
+    a file at that path - and the two have different fixes. `agl init` is run once per repository,
+    so the reader is either somebody who already ran it, or somebody whose second repository has the
+    same directory name as their first; §3.6 looks a project up by repository path but addresses it
+    on disk by name, which is what makes the second case a collision at all.
+    """
+    return (
+        f"a project named {str(project)!r} is already registered: {path} exists, and `agl init` "
+        f"writes that file once per repository and never writes over it. If that is this "
+        f"repository, its settings are already there - edit the file to change them, or delete it "
+        f"and run `agl init` again. If it is a different repository whose directory happens to "
+        f"carry the same name, one of the two has to be renamed: a project's name is its "
+        f"directory's name, and that name is the file AGL records its runs beside"
+    )
+
+
+def _quoted(value: str) -> str:
+    """One TOML basic string, escaped as the format defines it. The write side of `tomllib`.
+
+    A basic string rather than a literal (single-quoted) one, because a literal string admits no
+    escapes at all: a build command holding an apostrophe - `don't` - would end the value early and
+    produce a file that will not parse. Basic strings can always be written, at the cost of this
+    table.
+
+    Every control character below `\\x20`, and `\\x7f`, takes the `\\u00xx` form, which is the
+    format's own fallback for the ones with no short escape. Nothing else is touched: `_absolute`
+    and `ids.py` have already refused most of what could be here, and a writer that decided which
+    *printable* characters a value may hold would be a second validator with a second opinion.
+    """
+    escaped = "".join(
+        _ESCAPED[character]
+        if character in _ESCAPED
+        else f"\\u{ord(character):04x}"
+        if ord(character) < _FIRST_PRINTABLE or ord(character) == _DELETE
+        else character
+        for character in value
+    )
+    return f'"{escaped}"'
 
 
 def _wrong(path: Path, key: str, expected: str, got: object) -> InputError:

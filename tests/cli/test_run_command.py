@@ -34,13 +34,21 @@ import pytest
 
 from agl.cli import main
 from agl.cli.commands import run as run_command
-from agl.config import container, registry
+from agl.config import container, registry, sources
 from agl.ports.home_layout import RunScope
 from agl.ports.ids import ProjectName, RunLabel
 from agl.ports.run import JsonValue
 from agl.ports.tree_layout import TreesRoot
 from agl.sdk.params import RefusingParser, arg
 from agl.sdk.workflow import Run, workflow
+
+# `agl init` is the one command that reads `settings` and `cwd`, and no invocation below is one -
+# but neither field is optional (`cli/main.py` argues why), so both carry a real value nothing here
+# looks at. `/nowhere` is absolute, which is the whole of what `AglHome` insists on, and no file
+# under it is ever opened: `read_settings` treats a missing `config.toml` as a file that said
+# nothing.
+ELSEWHERE: Final = Path("/nowhere")
+SETTINGS: Final = sources.resolve_settings(sources.Overrides(), {"AGL_HOME": str(ELSEWHERE)})
 
 PROJECT: Final = ProjectName("myapp")
 LABEL: Final = RunLabel("auth")
@@ -126,7 +134,10 @@ def _main(harness: container.FakeServices, *argv: str) -> int:
     return main.main(
         argv,
         compose=lambda: main.Invocation(
-            registered=lambda: (PROJECT, harness.services), points=POINTS
+            registered=lambda: (PROJECT, harness.services),
+        settings=SETTINGS,
+        cwd=ELSEWHERE,
+        points=POINTS,
         ),
     )
 

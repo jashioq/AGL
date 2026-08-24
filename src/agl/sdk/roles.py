@@ -143,6 +143,26 @@ Preflight is stage 16, and it needs a runner. (`prompt_file` is the one piece of
 and it is not an exception to that sentence: it reads the author's own source tree, at import, and
 `ports/` has no ABC for "open a file the author committed beside their workflow" - see below.)
 
+## The enums a role is declared out of are re-exported here, and this is not a facade
+
+`Role`'s fields are a `ModelId`, a set of `Restriction`, a set of `Capability` and a
+`QuestionHandler`, and all four are `ports/agent.py`'s for the reason `Screen` is
+`ports/terminal.py`'s: an `AgentRunner` speaks them, and `ports` may not import `sdk` without
+contract 1 inverting on its lowest edge. So an author writing `model=Claude.OPUS` beside a `Role`
+would otherwise be reaching into `agl.ports` for half of one declaration - which is exactly what
+`ARCHITECTURE.md` §5's facades exist to prevent, one layer over.
+
+They are re-exported **here** rather than in a facade of their own, and here rather than nowhere,
+because this is the module an author meets them in: `Claude`, `OpenAI` and `ModelId` are what
+`model=` takes, `Restriction` what `restrictions=` takes, `Capability` what `requires=` takes, and
+`QuestionHandler` what `on_question=` is. `sdk/tools.py` set the shape - it re-exports
+`ports.agent.Tool` and `ToolResult` beside the declaration they belong to, and says in its first
+paragraph that it is not one of §5's pure facades either. This module is that same thing: a module
+with logic in it that also carries the port vocabulary its own type is spelled in.
+
+`Tool` is deliberately not among them, though this module imports one: it is `sdk/tools.py`'s
+re-export, beside `ReportingTool`, and a second copy here would be a second front door for one name.
+
 ## `RoleIncompleteError` has no caller here, and that is deliberate
 
 It is raised by 12.1's `Run.step` when a reporting step's agent finishes without ever firing its
@@ -157,11 +177,33 @@ from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 from pathlib import Path
 
-from agl.ports.agent import Capability, ModelId, QuestionHandler, Restriction, Tool
+from agl.ports.agent import (
+    Capability,
+    Claude,
+    ModelId,
+    OpenAI,
+    QuestionHandler,
+    Restriction,
+    Tool,
+)
 from agl.ports.errors import InputError, UpstreamUnexpected
 from agl.sdk.tools import ReportingTool
 
-__all__ = ["Role", "RoleIncompleteError", "prompt_file"]
+# Listed rather than computed, for `sdk/terminal.py`'s reason. The six re-exports are the port
+# vocabulary `Role`'s own fields are spelled in - see the module docstring - and `sdk/__init__.py`
+# takes them from here rather than from `agl.ports.agent`, so that the package's front door and its
+# submodules are one surface rather than two.
+__all__ = [
+    "Capability",
+    "Claude",
+    "ModelId",
+    "OpenAI",
+    "QuestionHandler",
+    "Restriction",
+    "Role",
+    "RoleIncompleteError",
+    "prompt_file",
+]
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

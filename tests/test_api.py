@@ -44,7 +44,7 @@ from agl.adapters.git.history import GitHistory
 from agl.adapters.git.workspace import GitWorkspaceProvider
 from agl.config import container, registry, sources
 from agl.ports.agent import AgentOutcome, Claude, StopReason
-from agl.ports.errors import ConflictError, InputError, InternalError, NotFoundError, exit_code_for
+from agl.ports.errors import ConflictError, InputError, NotFoundError, exit_code_for
 from agl.ports.home_layout import RunScope
 from agl.ports.ids import Namespace, ProjectName, RunLabel
 from agl.ports.run import JsonValue, RunSpec
@@ -575,38 +575,55 @@ def test_list_workflows_needs_no_bundle_and_no_registered_repository(
     assert api.list_workflows(points=POINTS) == ("halting", "probe")
 
 
-@pytest.mark.asyncio
-async def test_init_takes_settings_alone_and_is_reachable_outside_a_registered_repository(
+def test_init_needs_neither_a_bundle_nor_a_registered_repository(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """§3.10: "`init` takes settings alone." That this refuses with 16.4's `InternalError` and not
-    with `NotFoundError` is the point of the test - it is what "reachable in principle" means.
+    """§3.10's per-command composition for the operation it was written about, as a signature.
 
     `init` writes `AGL_HOME/projects/<name>.toml`, so the repository it is run in is by definition
     not registered yet and no container can be built for it. Stage 10 composed before dispatching,
-    which made this call unreachable rather than unbuilt: the `NotFoundError` would have arrived
-    before the operation did, and no amount of work on 16.4 could have produced a command that ran.
-    So the settings come from `resolve_settings` with a literal mapping - the pure core, no process
-    environment touched - and the cwd is a directory with no `.git` above it anywhere.
+    which made this call unreachable rather than merely unbuilt: the `NotFoundError` would have
+    arrived before the operation did. So the settings come from `resolve_settings` with a literal
+    mapping - the pure core, no process environment touched - and what is asserted is that a real
+    `init` runs there and leaves a file, with no `Services` anywhere in the call.
+
+    **The `cwd` is a parameter and this test is what that buys.** `monkeypatch.chdir` is
+    deliberately not called: the directory below is handed over, so the process never moves, and
+    `tests/test_init.py` drives every case the same way. An `init` reading `Path.cwd()` would have
+    made this the file that had to move the process in order to test anything.
     """
-    monkeypatch.chdir(tmp_path)
-    settings = sources.resolve_settings(sources.Overrides(), {"AGL_HOME": str(tmp_path)})
+    monkeypatch.delenv("AGL_HOME", raising=False)
+    home = tmp_path / "home"
+    repo = tmp_path / "dev" / "myapp"
+    (repo / ".git").mkdir(parents=True)
+    settings = sources.resolve_settings(sources.Overrides(), {"AGL_HOME": str(home)})
 
-    with pytest.raises(InternalError, match=r"16\.4"):
-        await api.init(settings)
+    written = api.init(settings, repo, lambda _: "make test")
+
+    assert written == home / "projects" / "myapp.toml"
+    assert written.read_text(encoding="utf-8").splitlines()[0] == 'name = "myapp"'
 
 
-@pytest.mark.asyncio
-async def test_the_unbuilt_operations_name_their_deliverable(tmp_path: Path) -> None:
-    """Declared so the CLI's dispatch is written against the whole surface, and refusing until
-    built. `InternalError` - exit 70 - because at this stage no CLI verb reaches any of them, so a
-    call is AGL's own bug rather than anything the caller supplied."""
-    services = _fakes(tmp_path).services
-    settings = sources.resolve_settings(sources.Overrides(), {"AGL_HOME": str(tmp_path)})
+def test_every_operation_the_module_declares_is_built() -> None:
+    """One list, and nothing on it refuses for being unfinished. 16.4 is what made that true.
 
-    with pytest.raises(InternalError, match=r"16\.2"):
-        await api.resume(services, PROJECT, LABEL)
-    with pytest.raises(InternalError, match=r"16\.3"):
-        await api.clear(services, PROJECT, LABEL)
-    with pytest.raises(InternalError, match=r"16\.4"):
-        await api.init(settings)
+    §3.10's five verbs are `api.py`'s row in `ARCHITECTURE.md` §6 and the CLI's dispatch has been
+    written against the whole surface since 10.4, one clause at a time as each was built. `resume`
+    left the unbuilt list at 16.2 and `clear` at 16.3, each into a suite of its own -
+    `tests/test_resume.py` and `tests/test_clear.py` - and `init` was the one left.
+
+    `workflow_help` is on `__all__` beside them and is not one of §3.10's five: it is the operation
+    behind `agl workflows <name>`, which extends that grammar, and `cli/commands/workflows.py` is
+    where the deviation is argued.
+    """
+    assert set(api.__all__) == {
+        "Ask",
+        "clear",
+        "init",
+        "list_workflows",
+        "resume",
+        "run",
+        "workflow_help",
+    }
+    assert not [name for name in api.__all__ if "unbuilt" in name.lower()]
+    assert not hasattr(api, "_unbuilt")

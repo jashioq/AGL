@@ -31,13 +31,16 @@ is only true if nothing on that path imports it.
 """
 
 import sys
-from dataclasses import fields
+from collections.abc import Callable, Mapping
+from dataclasses import fields, replace
 from pathlib import Path
-from typing import Final, get_type_hints
+from types import MappingProxyType, TracebackType
+from typing import Final, Self, get_type_hints
 
 import pytest
 
 from agl.adapters.claude_code import fake as claude_fake
+from agl.adapters.filesystem.memory_store import MemoryStore
 from agl.adapters.openai import fake as openai_fake
 from agl.config import container
 from agl.config.schema import AgentSettings, ClaudeSettings, OpenAiSettings, Project, Settings
@@ -49,6 +52,8 @@ from agl.ports.agent import (
     ModelId,
     OpenAI,
     StopReason,
+    Tool,
+    ToolResult,
 )
 from agl.ports.clock import Clock
 from agl.ports.errors import InputError, UpstreamUnavailable
@@ -56,11 +61,14 @@ from agl.ports.history import History
 from agl.ports.home_layout import AglHome
 from agl.ports.ids import Namespace, ProjectName, RunLabel
 from agl.ports.integration import Integrator
+from agl.ports.questions import Answer, Question
+from agl.ports.run import JsonValue
 from agl.ports.store import Store
-from agl.ports.terminal import Terminal
+from agl.ports.terminal import Screen, Terminal
 from agl.ports.tree_layout import TreesRoot
 from agl.ports.verifier import Verifier
 from agl.ports.workspace import WorkspaceProvider
+from agl.sdk.testing import Call, Reply
 
 # `asyncio_mode = "strict"` turns a missing marker into a test pytest silently skips, so every
 # async test below carries `@pytest.mark.asyncio` of its own. Not a module-level `pytestmark`:
@@ -420,3 +428,200 @@ def test_a_missing_terminal_extra_refuses_rather_than_falling_back_to_headless(
     with pytest.raises(UpstreamUnavailable) as refused:
         container.real(_settings(tmp_path), _project(tmp_path))
     assert "agl[terminal]" in str(refused.value)
+
+
+# --- 16.5: substituting through the bundle, and compiling the workflow-facing vocabulary ---------
+
+
+class _Recording(Terminal):
+    """A `Terminal` that draws nothing and is not the headless one. Two lines is the whole of it.
+
+    It exists so that `with_terminal` can be handed something distinguishable from what `fakes()`
+    built; `tests/contracts/terminal.py` is what says how a `Terminal` behaves and this makes no
+    claim to. Every member refuses, because no test below shows anything on it.
+    """
+
+    async def show[T](
+        self, view: Callable[..., Screen[T]], /, *, priority: int = 0, **params: object
+    ) -> T:
+        raise AssertionError("nothing in this file shows a screen")
+
+    @property
+    def pending(self) -> Mapping[int, int]:
+        raise AssertionError("nothing in this file reads a queue")
+
+    async def __aenter__(self) -> Self:
+        raise AssertionError("nothing in this file enters a terminal")
+
+    async def __aexit__(
+        self,
+        kind: type[BaseException] | None,
+        raised: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        raise AssertionError("nothing in this file enters a terminal")
+
+
+def test_with_terminal_moves_both_views_of_the_bundle_at_once(tmp_path: Path) -> None:
+    """16.5's first carried finding, as the regression test for it.
+
+    `FakeServices` holds one terminal under two names, and the substitution this replaced -
+    `dataclasses.replace(harness.services, terminal=...)` - moved only `services.terminal`, leaving
+    the sibling field pointing at the object that had just been discarded. Nothing reported that.
+    Both assertions are needed: the first is what the old spelling already satisfied, and the second
+    is the one it failed.
+    """
+    harness = container.fakes(TreesRoot(tmp_path / "trees"))
+    recorder = _Recording()
+
+    substituted = harness.with_terminal(recorder)
+
+    assert substituted.services.terminal is recorder
+    assert substituted.terminal is recorder
+    assert substituted.terminal is substituted.services.terminal
+
+
+def test_with_store_moves_both_views_of_the_bundle_at_once(tmp_path: Path) -> None:
+    """The same, one field over, and the one `agl/testing.py` is built on.
+
+    That module wraps the ledger to record what a run wrote and to stop it at a step boundary, so a
+    wrapper that left `store` naming the object underneath it would make `harness.store` a different
+    ledger from the one the run used - and `agl/testing.py::over` states the agreement as a promise
+    to its caller: "`fakes.store` on the returned `Harness` is that wrapper".
+
+    **A second `MemoryStore` and never `harness.store` itself.** Substituting the object the bundle
+    already holds satisfies both assertions whatever `with_store` does, since the incumbent is the
+    substitute - a test that reads as coverage and measures nothing. `_Recording` above is the same
+    arrangement one field over: something distinguishable from what `fakes()` built. A second
+    `MemoryStore` is enough to be that, and costs nothing to construct.
+    """
+    harness = container.fakes(TreesRoot(tmp_path / "trees"))
+    wrapper = MemoryStore()
+
+    substituted = harness.with_store(wrapper)
+
+    assert substituted.services.store is wrapper
+    assert substituted.store is wrapper
+
+
+def test_a_substitution_carries_every_other_object_across_by_identity(tmp_path: Path) -> None:
+    """A substituted bundle is still *this* bundle, and the git fakes are the sharpest case.
+
+    Three of the ports are views of one `FakeRepository`, so a `with_terminal` that rebuilt anything
+    would hand back a bundle whose repository nothing else in it could see - and the caller's
+    `harness.repository` would be answering about a repository the run never touched.
+    """
+    harness = container.fakes(TreesRoot(tmp_path / "trees"), files={"src/a.txt": b"one\n"})
+
+    substituted = harness.with_terminal(_Recording())
+
+    assert substituted.repository is harness.repository
+    assert substituted.store is harness.store
+    assert substituted.verifier is harness.verifier
+    assert substituted.clock is harness.clock
+    assert substituted.services.workspaces is harness.services.workspaces
+    assert substituted.services.agents is harness.services.agents
+    assert substituted.services.build == harness.services.build
+
+
+@pytest.mark.asyncio
+async def test_one_agent_serves_both_providers(tmp_path: Path) -> None:
+    """The compilation stage 7 left here, and the reason `agent=` is one parameter and not two.
+
+    A `sdk.testing.Agent` is written in ports vocabulary and names no vendor, so the same function
+    has to reach both fakes - which is what lets a workflow author write one agent for a run that
+    addresses two providers, as §3.3's `fix` does. It dispatches on `task.model`, which is the
+    handle `sdk/testing.py` names, and each answer is one only that provider's dispatch produces.
+    """
+
+    def agent(task: AgentTask) -> Reply:
+        return Reply(says=f"served {task.model}")
+
+    harness = container.fakes(TreesRoot(tmp_path / "trees"), agent=agent)
+    agents: AgentRunner = harness.services.agents
+
+    assert (await agents.run(_task(tmp_path, Claude.OPUS))).text == f"served {Claude.OPUS}"
+    assert (await agents.run(_task(tmp_path, OpenAI.SOL))).text == f"served {OpenAI.SOL}"
+
+
+@pytest.mark.asyncio
+async def test_a_raw_script_replaces_the_compiled_agent_for_its_own_provider(
+    tmp_path: Path,
+) -> None:
+    """The one rule about the three parameters: the more specific wins, per provider.
+
+    That is what makes the escape hatch usable a provider at a time - a negotiation written as a
+    raw `Script` on the backend that negotiates, and the declarative agent everywhere else - and
+    the second assertion is what says it is per provider rather than global.
+    """
+
+    async def claude_script(conversation: claude_fake.Conversation) -> AgentOutcome:
+        return AgentOutcome(stop_reason=StopReason.COMPLETED, text="the raw script")
+
+    def agent(task: AgentTask) -> Reply:
+        return Reply(says="the compiled agent")
+
+    harness = container.fakes(TreesRoot(tmp_path / "trees"), agent=agent, claude=claude_script)
+    agents: AgentRunner = harness.services.agents
+
+    assert (await agents.run(_task(tmp_path, Claude.OPUS))).text == "the raw script"
+    assert (await agents.run(_task(tmp_path, OpenAI.SOL))).text == "the compiled agent"
+
+
+@pytest.mark.asyncio
+async def test_a_reply_is_performed_as_activity_then_questions_then_calls(tmp_path: Path) -> None:
+    """The whole of what a `Reply` means, in the order `sdk/testing.py` documents.
+
+    One recorder across all three channels, because the claim is about their order relative to each
+    other and three separate lists could not state it. The `stop_reason` and the closing text come
+    back on the outcome, which is the other half of what a `Reply` carries.
+    """
+    seen: list[str] = []
+
+    async def handler(question: Question) -> Answer:
+        seen.append(f"asked: {question.prompt}")
+        return Answer("go on")
+
+    async def tool(payload: Mapping[str, JsonValue]) -> ToolResult:
+        seen.append(f"called: {payload['note']}")
+        return ToolResult(text="recorded")
+
+    def agent(task: AgentTask) -> Reply:
+        return Reply(
+            activity=["first", "second"],
+            asks=[Question(prompt="anything to add?")],
+            calls=[Call("report", {"note": "the payload"})],
+            says="done",
+            stop_reason=StopReason.LIMIT,
+        )
+
+    harness = container.fakes(TreesRoot(tmp_path / "trees"), agent=agent)
+    declared = Tool(
+        name="report",
+        description="report what happened",
+        payload_schema=MappingProxyType({"type": "object"}),
+        handler=tool,
+    )
+    task = replace(_task(tmp_path, Claude.OPUS), tools=(declared,))
+
+    outcome = await harness.services.agents.run(
+        task, on_question=handler, on_activity=seen.append
+    )
+
+    assert seen == ["first", "second", "asked: anything to add?", "called: the payload"]
+    assert (outcome.text, outcome.stop_reason) == ("done", StopReason.LIMIT)
+
+
+@pytest.mark.asyncio
+async def test_no_agent_and_no_script_is_still_each_providers_own_default(tmp_path: Path) -> None:
+    """`agent=None` changes nothing: `fakes()` with nothing scripted is what it always was.
+
+    Target #8 rests on it - a whole workflow runs on fakes without anybody writing an agent first -
+    and the compilation must not have quietly replaced `unscripted` with an empty `Reply`, which
+    would report nothing and fail every reporting step.
+    """
+    harness = container.fakes(TreesRoot(tmp_path / "trees"))
+
+    outcome = await harness.services.agents.run(_task(tmp_path, Claude.OPUS))
+
+    assert "fake" in outcome.text and outcome.stop_reason is StopReason.COMPLETED
