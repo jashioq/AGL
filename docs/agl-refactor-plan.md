@@ -1600,6 +1600,13 @@ later `agl run … -n auth --from main` takes `open`'s attaching path and starts
 `--from` silently ignored — `base` is consulted only when provisioning. A silently wrong base is not
 a cost the asymmetry argument priced.
 
+**And `-f` cannot free a retained branch.** The same `clear` that keeps `agl/<label>` removes the run
+record on its last line, so a second `agl clear <label> -f` hits `read_record → None →
+NotFoundError` and never reaches the branch. Since `run` refuses a label whose branch exists, a kept
+branch **takes its label permanently** — only `git branch -D` frees it. So the retained side costs a
+stale ref *and a spent label*, still the right trade against a silently wrong base but not the trade
+this section described. Closing it means deciding whether `clear -f` should work with no record.
+
 **The directory half needs no new port verb.** `remove` takes the run's own directory away once the
 last checkout in it is gone, so `clear` is a namespace loop over `remove` and `discard`. **The ref
 half is still open** — no port can enumerate `agl/_work/<label>/*`, by design, and **do not add a
@@ -1751,7 +1758,9 @@ Two rules that matter more than the stage list:
    `api.py`, `sdk/`, `config/`.
 2. **`fix` is ~8 lines** and gets fingerprinted replay, a worktree, preflight, and exit codes free;
    **`split` is ~30** and adds concurrency, child worktrees, and integration with no framework
-   change between them.
+   change between them. Measured at stage 17: 8 logical statements for the workflow §3.3 specifies,
+   plus 4 more to wire one interactive screen (a handler, its body, a `replace` for the asking role,
+   and the board's `show`). The floor is real; §3.7's question wiring sits on top of it.
 3. **Adding an agent backend** touches one adapter package, one line in the container, one config
    section. No workflow changes.
 4. **One run addresses two providers** — `fix` uses Claude to implement and OpenAI to review, in
