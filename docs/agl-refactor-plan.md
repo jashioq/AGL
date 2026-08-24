@@ -395,6 +395,14 @@ class AgentTask:
 commit *)` is a wildcard rule matched with whitespace collapsed, and is the correct form. The old
 code's spelling is quoted in §1.1 as history; it must not be built.
 
+**Preflight needs to see the roles, and a workflow's roles are not reachable from its function.**
+Roles carrying `on_question` are closures over `Run`, built inside the workflow body, so `@workflow`
+takes a keyword-only `roles=` declaring them. That makes preflight two halves: `check_ready` per
+distinct model plus capability containment **at second zero**, and containment only, memoised, at
+every `run.step`. The second half is what makes the third check below real — the natural spelling for
+a handler role is `replace(module_role, on_question=h)`, so the role preflight saw is not the role
+that runs.
+
 **Three preflight checks, before the run starts:**
 
 1. **Provider availability.** Collect the providers named by the workflow's roles; for each, verify
@@ -475,7 +483,7 @@ build commands are therefore independent by design: the prompt's drive the agent
 | | What it is |
 |---|---|
 | **Params** | a dataclass of `arg()` fields — all named flags, no positionals |
-| **Roles** | instructions + model + restrictions + tools + required capabilities + `plan_only` |
+| **Roles** | instructions + model + restrictions + tools + required capabilities + `plan_only`, **declared to `@workflow(roles=…)`** so preflight can see them (§3.2) |
 | **Tools** | the payload schemas agents report through |
 | **Views** | pure functions of state, in `views/`. Nothing renders without them (§3.7) |
 | **Shape** | one async function |
@@ -1583,19 +1591,34 @@ works with no further setup. The standards-template writing in the current `_cmd
 that content is tickets-specific and belongs to the workflow.
 
 **`clear`** removes `.trees/<label>/`, the `agl/_work/<label>/*` child branches, and the run
-directory. Stage 5 closed the directory half of this within the port: `remove` takes the run's own directory
-away once the last checkout in it is gone, so `clear` is a namespace loop over `remove` and
-`discard` with no new verb. **The ref half is still open** — no port can enumerate `agl/_work/<label>/*`,
-by design. The leak is **child-only**: `_base` is `namespace=None` and derivable from the label
-alone, so `clear` reaches it with no enumeration at all, which is what writing `run.json` before
-provisioning buys. But a crash between a *child's* `open()` and its first entry write leaves a
-directory `Store.namespaces` cannot see, and that directory then blocks the rmdir of
-`.trees/<label>/`. Do not add a ref-listing verb to
-`History` to close it. It
-deletes `agl/<label>` **only if merged into the base ref**; otherwise it warns and keeps it. `-f`
-deletes regardless — exactly `git branch -d` versus `-D`. The rationale is asymmetric cost: a
-retained branch costs a stale ref, a deleted one costs the entire run. It refuses while a run holds
-a lock.
+directory. It deletes `agl/<label>` **only if merged into the base ref**; otherwise it warns and
+keeps it. `-f` deletes regardless — exactly `git branch -d` versus `-D`.
+
+The rationale is asymmetric cost: a retained branch costs a stale ref, a deleted one costs the entire
+run. **The retained side is worse than "a stale ref," though**: after `clear` keeps `agl/auth`, a
+later `agl run … -n auth --from main` takes `open`'s attaching path and starts from the old tip, with
+`--from` silently ignored — `base` is consulted only when provisioning. A silently wrong base is not
+a cost the asymmetry argument priced.
+
+**The directory half needs no new port verb.** `remove` takes the run's own directory away once the
+last checkout in it is gone, so `clear` is a namespace loop over `remove` and `discard`. **The ref
+half is still open** — no port can enumerate `agl/_work/<label>/*`, by design, and **do not add a
+ref-listing verb to `History` to close it.**
+
+The leak is **child-only**: `_base` is `namespace=None` and derivable from the label alone, so
+`clear` reaches it with no enumeration, which is what writing `run.json` before provisioning buys.
+But a crash between a *child's* `open()` and its first entry write leaves a directory
+`Store.namespaces` cannot see, and that directory then blocks the rmdir. **That window is a whole
+agent turn, not milliseconds** — the checkout opens at the top of the first step and the entry is
+written after the dispatch. `clear` cannot even report it: `Store.namespaces` cannot see the
+directory, `WorkspaceProvider` will not enumerate, and a `Services` carries no trees root.
+
+**It is specified to refuse while a run holds a lock, and v1.1 has no mechanism for that.** There is
+no durable "this run is live" record, and §3.11 refuses stored status by name. The registry `flock`
+is a millisecond mutex around `worktree add`/`prune`, not a liveness claim — so a `clear` aimed at a
+run live in another process takes its checkouts away underneath it and says nothing. The fix is a
+`flock` on the run directory held for the life of the process: an OS lock that releases on death,
+the same shape §3.9 already uses, and not stored status.
 
 **No `status` command.** `git log agl/<label>` and the live view cover it.
 
