@@ -1,9 +1,21 @@
 """`History` - what changed, and is X already in Y.
 
-Five questions about one repository's recorded past, and nothing that changes it. A run needs to
-know where to start from and what that resolved to; a review step needs to know what an
-implementation step actually did; `clear` needs to know whether a run's work is already contained
-in the base ref before it deletes the name that work is under. Those are the whole of it.
+Six questions about one repository's recorded past, and nothing that changes it. A run needs to
+know where to start from, whether the name it is about to take is free, and what its base resolved
+to; a review step needs to know what an implementation step actually did; `clear` needs to know
+whether a run's work is already contained in the base ref before it deletes the name that work is
+under. Those are the whole of it.
+
+**`exists` is the sixth and it is not the ref listing §3.10 forbids.** That section is explicit -
+"no port can enumerate `agl/_work/<label>/*`, by design, and **do not add a ref-listing verb to
+`History` to close it**" - and the reason it gives is that a listing "would buy tidiness by
+requiring that every implementation be able to list, which a service handing out checkouts to many
+clients may not honestly be able to do" (`ports/workspace.py`, about the sibling refusal). A
+predicate over one name the caller already holds demands nothing of the kind: an implementation
+that can answer `resolve` can answer this, because it is `resolve` with the answer thrown away and
+the refusal turned into a `False`. Nothing about a name the caller has not already composed can be
+learned from it, so it closes none of the leak §3.10 accepts and buys none of the tidiness §3.10
+priced.
 
 **This is not a run log.** The name invites the confusion, so it is worth saying once and plainly:
 nothing here reads or writes AGL's own records. Step entries are `Store`'s, the ledger over them is
@@ -126,13 +138,15 @@ class FileChange:
 
 
 class History(ABC):
-    """Read the repository's past. Five methods, none of which changes anything.
+    """Read the repository's past. Six methods, none of which changes anything.
 
     Every one of them raises from `errors.py` and nothing else - `NotFoundError` for a ref or a
     commit id that names nothing in this repository, `UpstreamUnavailable` when the repository
     itself cannot be reached - so a caller never learns what the thing underneath happened to throw.
+    `exists` is the one exception to the first half of that and is the whole of what it is for: a
+    name this repository does not hold is its `False` rather than its refusal.
 
-    All five are async for one reason: an implementation may have to go out of process, or over a
+    All six are async for one reason: an implementation may have to go out of process, or over a
     network, to answer. A synchronous signature would make every one of these a blocking call inside
     the event loop that is running several agents at once.
     """
@@ -171,6 +185,44 @@ class History(ABC):
 
         `NotFoundError` when the ref names nothing - `errors.py` lists exactly this case - because
         the user typed something well-formed that this repository does not have.
+        """
+
+    @abstractmethod
+    async def exists(self, ref: str) -> bool:
+        """Does this repository hold anything under this name? `resolve` without the answer.
+
+        Defined against the member above rather than in words of its own, and that definition is
+        binding: this answers `True` for exactly the refs `resolve` answers for, and `False` for
+        exactly the refs `resolve` refuses. An implementation that made the two disagree would have
+        two opinions about what its own repository holds, and the caller below would refuse a run
+        over a name nothing could ever have been cut from.
+
+        **Why the pair exists rather than the caller catching the refusal.** `api.py` is the one
+        consumer, and it forbids itself the alternative in as many words: "there is no `except` in
+        this file, and there never may be", a rule each of its five operations restates and one
+        that is worth more as an absolute a reader can grep for than as a qualified rule about
+        which exceptions may be caught for which reasons. A refusal used as a predicate would also
+        be the weaker instrument on its own terms - `NotFoundError` is what `resolve` raises for a
+        ref this repository does not hold *and* what an implementation would raise for a repository
+        it could not read, and an `except` around the call cannot tell those apart, so a repository
+        that had gone away would read as "the name is free" and a run would start over somebody
+        else's work.
+
+        **What it is asked about**, and the whole of AGL's use: `tree_layout.run_branch(label)`,
+        the deliverable branch `agl run` is about to take. §3.10 has `run` refuse an existing label
+        rather than adopt it, and after `clear` keeps an unmerged `agl/<label>` the record is gone
+        while the branch is not - so the record check alone stopped seeing a name that is taken.
+        `clear` already asks `contains` about that same string, which is what makes asking whether
+        it is there at all this port's question and not `WorkspaceProvider`'s: one port already
+        speaks about AGL's own branches by name, and a second one would be two.
+
+        A ref *expression*, resolved however this implementation resolves one - so a repository
+        carrying a tag and a branch of one name answers about whichever `resolve` would answer
+        about. That exposure is `contains`' already, `clear` asking it about the same short name,
+        and `tree_layout`'s `agl/` prefix means such a tag is something a person made deliberately.
+
+        `UpstreamUnavailable` if the repository cannot be reached, which is the reason this is not
+        simply "no exceptions": a `False` means the repository was asked and said no.
         """
 
     @abstractmethod

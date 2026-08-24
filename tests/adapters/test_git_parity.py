@@ -75,6 +75,14 @@ Resource limits are out of scope for the word "divergence" here: a full disk, a 
 PATH_MAX, a repository the user may not write to. Those are the world's answers rather than the
 implementations', and only one of the two is standing in the world at all.
 
+**§3.10's run claim is not a seventh, and it was checked rather than assumed.** `hold` is `flock(2)`
+on the run's directory in one and a process-wide set in the other, and through the port they answer
+alike: a second claim on one label refuses while a first is open, a claim on another label does not,
+and both let go however the body ends - which is what `tests/contracts/_workspace_holding.py`
+asserts of each. Where they part is when the *holder dies*, the kernel dropping one and nothing
+dropping the other, and that is this paragraph's category rather than the list's: a process that has
+stopped is the world's answer, and no test in a suite that died with it could report one.
+
 Named `test_git_parity.py`: `tests/` carries no `__init__.py` - see `tests/conftest.py` for why -
 so pytest's module names are the bare filenames and every one of them has to be unique.
 """

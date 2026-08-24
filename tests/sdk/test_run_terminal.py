@@ -49,7 +49,8 @@ Nothing here asks a question: an interactive screen needs somebody to answer it,
 nobody in a test process either.
 """
 
-from collections.abc import Callable, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, replace
 from importlib.metadata import EntryPoint
 from pathlib import Path
@@ -399,7 +400,8 @@ async def test_the_terminal_is_entered_once_around_a_resumed_workflow(tmp_path: 
 class _Refusing(WorkspaceProvider):
     """A provider that provisions nothing, so that `api.run` fails on its last line before the
     workflow. `tests/test_api.py` carries the same stub for the same one failure `container.fakes()`
-    cannot arrange; the two teardown verbs exist only because the port has three members."""
+    cannot arrange; the two teardown verbs exist only because the port has four members, and `hold`
+    is granted because `api.run` takes the run's claim before the line under test."""
 
     async def open(self, label: RunLabel, namespace: Namespace | None, base: str) -> Workspace:
         raise ConflictError("this provider refused to provision anything, deliberately")
@@ -409,6 +411,15 @@ class _Refusing(WorkspaceProvider):
 
     async def discard(self, label: RunLabel, namespace: Namespace | None) -> None:
         raise AssertionError("nothing in `api.run` deletes a line of work")
+
+    def hold(self, label: RunLabel) -> AbstractAsyncContextManager[None]:
+        return _granted()
+
+
+@asynccontextmanager
+async def _granted() -> AsyncIterator[None]:
+    """A run claim nothing contends for - what `hold` is when the test is about something else."""
+    yield
 
 
 @pytest.mark.asyncio

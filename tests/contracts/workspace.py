@@ -16,13 +16,15 @@ drifting into fiction (§1.9). It is written here, at stage 3, before either exi
 subagent that writes its own tests writes tests that pass - and stage 5 ends with "the contract
 suite passes", a sentence worth something only when the suite had no stake in the outcome.
 
-`WorkspaceContract` is one class assembled from three modules, and only this name is public. Its own
+`WorkspaceContract` is one class assembled from four modules, and only this name is public. Its own
 tests are `open` - provisioning, reopening, and the two addresses a run has. The halves it inherits
 follow seams the ports draw themselves: `_workspace_steps` is `Workspace`, "one isolated checkout,
-already provisioned: where it is, what it is called, and the three things a step does to it", and
-`_workspace_teardown` is the two verbs that unmake one, which `clear` needs apart (§3.10).
-`_workspace_files` under both holds the names and the files every test is built from, and argues
-there why a suite for this port writes into a directory when the store suite refuses to.
+already provisioned: where it is, what it is called, and the three things a step does to it",
+`_workspace_teardown` is the two verbs that unmake one, which `clear` needs apart (§3.10), and
+`_workspace_holding` is `hold`, §3.10's claim that this process is walking this run - a member that
+makes no place and unmakes none, which is why it is neither of the other two.
+`_workspace_files` under all of them holds the names and the files every test is built from, and
+argues there why a suite for this port writes into a directory when the store suite refuses to.
 
 ## Written against the port, never against one tool
 
@@ -59,7 +61,9 @@ made to reveal, not a test somebody forgot.
 2. **Anything about two processes.** Two `agl` invocations sharing one repository are what §3.9's
    cross-process `flock` on the worktree registry exists for, and this suite drives one provider
    object in one process. It cannot start a second, because the fixture hands over an already-built
-   provider and there is no way to ask it for another over the same repository.
+   provider and there is no way to ask it for another over the same repository. That is also the
+   limit on what `_workspace_holding` can show about §3.10's claim - the exclusion is asserted
+   between two claims in one process, and release-on-death is stated there as a gap.
 
 3. **Anything about two things happening at once.** The port states no concurrency clause, so
    nothing here starts two `open` calls together. A provider that serialises every operation behind
@@ -128,6 +132,7 @@ from ._workspace_files import (
     record,
     write,
 )
+from ._workspace_holding import WorkspaceHoldingContract
 from ._workspace_steps import WorkspaceStepContract
 from ._workspace_teardown import WorkspaceTeardownContract
 
@@ -138,13 +143,15 @@ from ._workspace_teardown import WorkspaceTeardownContract
 _RESERVED_BASE_NAME = "_base"
 
 
-class WorkspaceContract(WorkspaceStepContract, WorkspaceTeardownContract):
+class WorkspaceContract(
+    WorkspaceStepContract, WorkspaceTeardownContract, WorkspaceHoldingContract
+):
     """The suite. Everything these two ports promise, and nothing an implementation gets to pick.
 
     Its own tests are `open`: that reopening hands back the same place with whatever the last
     attempt left in it, that `base` is honoured once and ignored afterwards, that `None` addresses
     the run's own workspace and nothing else can, and that two places of one run are two places.
-    The two halves it inherits are named in this module's docstring.
+    The three halves it inherits are named in this module's docstring.
 
     `pytestmark` is on the class rather than on each method because subclasses inherit it, and
     because `asyncio_mode = "strict"` makes the marker the difference between a test that runs and

@@ -89,9 +89,9 @@ adapter. No module outside it may import from `agl.adapters.*`. Enforced by cont
 | `tree_layout.py` | Paths under the trees root — what `Workspace` addresses. Never conflated with `home_layout` |
 | `questions.py` | `Question` and `Answer` — the lowest-common-denominator shape of a mid-run agent question, across vendors |
 | `agent.py` | The `AgentRunner` ABC plus the vocabulary it speaks: `Provider`, `ModelId` (`Claude.*`, `OpenAI.*`), `Restriction`, `Capability`, `AgentTask`, `AgentOutcome`, `Tool` |
-| `workspace.py` | `WorkspaceProvider` and `Workspace` — "give me an isolated place to work from this base; take it back" |
+| `workspace.py` | `WorkspaceProvider` and `Workspace` — "give me an isolated place to work from this base; take it back", plus `hold`: §3.10's claim that this process is walking this run, so a `clear` aimed at a live run refuses instead of taking its checkouts away. The claim is here and **never** on `Store`, whose own docstring argues that the absence of a lock is that port's requirement |
 | `integration.py` | `Integrator`, `IntegrationOutcome`, `Conflict` — "land this workspace into the target, or tell me why not" |
-| `history.py` | `History` — "what changed, and is X already in Y". Diffs, changed files, ancestry over the target repo. **Not a run log** |
+| `history.py` | `History` — "what changed, and is X already in Y". Diffs, changed files, ancestry over the target repo, plus `exists`, which is `resolve` with the refusal turned into a `False` — a predicate over one name the caller composed, and so **not** the ref *listing* §3.10 forbids. **Not a run log** |
 | `verifier.py` | `Verifier` — runs the build gate. One call site: inside integration |
 | `store.py` | `Store` — persists run records and step entries. The contract states atomic writes |
 | `terminal.py` | The `Terminal` ABC plus its component types (see §5) |

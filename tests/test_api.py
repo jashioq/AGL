@@ -30,7 +30,8 @@ worktree. Those two tests build a repository, put `GitWorkspaceProvider` and `Gi
 """
 
 import subprocess
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, replace
 from importlib.metadata import EntryPoint
 from pathlib import Path
@@ -253,10 +254,14 @@ class _Refusing(WorkspaceProvider):
     arrange.
 
     A stub rather than a broken bundle: what the test below needs is `open` raising, and the two
-    teardown verbs exist only because the port has three members - reaching either of them would
+    teardown verbs exist only because the port has four members - reaching either of them would
     mean `run` had started taking workspaces back, which it does not. `ConflictError` is `open`'s
     own refusal class (`ports/workspace.py`), so nothing about the shape of the failure is invented
     for the occasion.
+
+    `hold` is the fourth and is granted rather than refused, because `api.run` takes the run's claim
+    before it writes anything and this test is about the line after that. A stub that refused it
+    would move the failure and assert nothing about the ordering it is here for.
     """
 
     async def open(self, label: RunLabel, namespace: Namespace | None, base: str) -> Workspace:
@@ -267,6 +272,16 @@ class _Refusing(WorkspaceProvider):
 
     async def discard(self, label: RunLabel, namespace: Namespace | None) -> None:
         raise AssertionError("nothing in `api.run` deletes a line of work")
+
+    def hold(self, label: RunLabel) -> AbstractAsyncContextManager[None]:
+        return _granted()
+
+
+@asynccontextmanager
+async def _granted() -> AsyncIterator[None]:
+    """A run claim nothing contends for: what `WorkspaceProvider.hold` is when the test is about
+    something else entirely."""
+    yield
 
 
 @pytest.mark.asyncio
@@ -340,6 +355,46 @@ async def test_the_same_label_twice_is_refused_in_section_3_10s_words(tmp_path: 
     )
     assert exit_code_for(caught.value) == 4
     assert len(handed) == 1, "the refused run invoked the workflow anyway"
+
+
+@pytest.mark.asyncio
+async def test_a_deliverable_branch_that_already_exists_refuses_the_run(tmp_path: Path) -> None:
+    """17.0's refusal, and the defect §3.10 names one paragraph after the asymmetry it argues.
+
+    "A retained branch costs a stale ref" is what the `git branch -d` decision is priced on, and
+    §3.10 then says the retained side is worse than that: after `clear` keeps `agl/auth`, a later
+    `agl run ... -n auth --from main` takes `WorkspaceProvider.open`'s **attaching** path - the
+    branch is there, so `worktree add <path> <branch>` rather than `add -b <branch> ... <base>` -
+    and the run starts from the old tip with `--from` silently ignored, because `base` is consulted
+    only when provisioning.
+
+    The state is arranged through the repository rather than through a `clear`, which is what makes
+    this a test about `run`: what it needs is a world in which `agl/auth` names something and the
+    store does not, and how it got that way is `tests/test_clear.py`'s question. `--from` is passed
+    explicitly, because the flag being ignored is the failure this refusal exists to prevent.
+
+    Both halves of "leaves nothing behind" are asserted: no record, because a refusal in front of
+    `write_record` must leave the label as it found it, and no workflow invocation, because a run
+    that got as far as its function has already started."""
+    handed.clear()
+    harness = _fakes(tmp_path)
+    branch = run_branch(LABEL)
+    harness.repository.move(branch, await harness.services.history.resolve("main"))
+
+    with pytest.raises(ConflictError) as caught:
+        await _run(harness, base_ref="main")
+
+    assert exit_code_for(caught.value) == 4
+    assert branch in str(caught.value), "the refusal does not name the branch that is in the way"
+    assert f"agl clear {LABEL} -f" in str(caught.value), (
+        "the refusal does not say how to free the label. `-f` is the spelling that reaches this "
+        "state: the branch is unmerged, which is why `clear` kept it in the first place"
+    )
+    assert await harness.services.store.read_record(SCOPE) is None, (
+        "a run refused before `write_record` left a record behind, so an operator now has to clear "
+        "a run that never started"
+    )
+    assert handed == [], "the refused run invoked the workflow anyway"
 
 
 @pytest.mark.asyncio

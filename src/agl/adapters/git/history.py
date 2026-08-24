@@ -1,7 +1,8 @@
-"""`GitHistory` - the real `History`: five questions about one repository's past, asked of git.
+"""`GitHistory` - the real `History`: six questions about one repository's past, asked of git.
 
-Where a run starts, what that resolved to, whether one state is already inside another, which files
-differ between two states, and the same difference as a patch a person reads. Nothing here changes
+Where a run starts, what that resolved to, whether a name is held at all, whether one state is
+already inside another, which files differ between two states, and the same difference as a patch a
+person reads. Nothing here changes
 anything, which is the port's design and is also why every invocation below is a read: no ref is
 written, no index is touched, and the repository this is pointed at is the user's own checkout.
 
@@ -57,7 +58,7 @@ workflow committed nothing sits exactly at its base, has nothing to lose and not
 must still be tidied up - which happens only if a state is already inside itself. An implementation
 answering `False` there would keep a stale branch for every run that did nothing, forever.
 
-## `NotFoundError` from all five, for a name this repository does not hold
+## `NotFoundError` from five of the six, for a name this repository does not hold
 
 `refusal=NotFoundError` on every call, which is `_runner.py`'s way of saying that a deliberate "no"
 from *this* question means the thing was not there. `changed_files` is the sharp one: "nothing
@@ -69,6 +70,13 @@ made-up commit id is refused rather than treated as an empty tree.
 they are the two a person's typing reaches - `agl run --from nosuchbranch` is exit 3 and a sentence,
 and "fatal: Needed a single revision" is not that sentence. The three that take ids take them out of
 AGL's own records, where git's own reason is the more useful half of the message.
+
+**`exists` is the sixth and it refuses nothing**, which is what it is for: the port defines it as
+`resolve` with the refusal turned into a `False`, so a name this repository does not hold is one of
+its two answers rather than an error. It is still `refusal=NotFoundError` underneath, because
+`--quiet` is what makes `rev-parse` one of git's exit-status questions and everything that is not a
+0 or a 1 is a repository that could not answer - which is not one of the two answers and must not
+read as "the name is free".
 
 ## `--end-of-options`, and what it is worth here specifically
 
@@ -108,10 +116,10 @@ __all__ = ["GitHistory"]
 
 
 # A backstop for the four calls that read the repository's own data rather than walking a tree: a
-# symbolic ref, a ref lookup, an ancestry question. The runner's default is sized for a checkout of
-# a large repository, which makes it no guard at all on anything this small, and `_runner.py` says a
-# call site that knows its operation's shape passes its own. The two that scale with how much
-# changed keep the runner's default.
+# symbolic ref, two ref lookups and an ancestry question. The runner's default is sized for a
+# checkout of a large repository, which makes it no guard at all on anything this small, and
+# `_runner.py` says a call site that knows its operation's shape passes its own. The two that scale
+# with how much changed keep the runner's default.
 _ASKING: Final = 30.0
 
 # The peel that makes `resolve` answer about a commit and not merely about a ref. An annotated tag
@@ -200,6 +208,32 @@ class GitHistory(History):
                 f"differently here"
             ) from absent
         return _one(answer, "a commit id")
+
+    async def exists(self, ref: str) -> bool:
+        """Whether this repository holds anything under this name. `resolve` without the answer.
+
+        The same invocation as `resolve`, peel and all, with `--quiet` added and the value thrown
+        away - which is how the port's definition of this member ("`True` for exactly the refs
+        `resolve` answers for") is kept by construction rather than by two call sites being written
+        to agree. A ref that exists and names something no run could be cut from - an annotated tag
+        over a tree, say - is `False` here because it is a refusal there, and one member cannot
+        drift from the other while they are the same command.
+
+        `--quiet` is what makes this one of git's exit-status questions - 0 yes, 1 no - and
+        `answers` is what refuses to read anything else as either. That is the whole reason this is
+        not an `except` around `resolve` at the call site: `NotFoundError` covers a ref that is
+        absent and a repository that could not be read, and the caller of this member would take
+        the second for the first and start a run over a branch that is still there.
+        """
+        return await self._git.answers(
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            "--end-of-options",
+            f"{ref}{_PEELED}",
+            refusal=NotFoundError,
+            timeout=_ASKING,
+        )
 
     async def contains(self, ancestor: str, descendant: str) -> bool:
         """Is `ancestor` already part of what `descendant` records? `clear`'s one question (§3.10).

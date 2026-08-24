@@ -28,7 +28,7 @@ which is not far - and why rename detection is not required.
 
 ## Why this suite takes a `WorkspaceProvider`
 
-`History` reads a repository's past and has no member that adds to one, deliberately: five questions
+`History` reads a repository's past and has no member that adds to one, deliberately: six questions
 and nothing that changes anything. So a suite for it has to get its states from somewhere, and
 across both of these ports there is exactly one way to record a state - `Workspace.commit_all`. The
 alternative is an implementation-supplied fixture handing over a prepared history, which is a knob
@@ -102,8 +102,9 @@ stripping, because pinning the string would pin whether a trailing newline belon
 no hunks in it.
 
 **That `NotFoundError` covers a commit id and not only a ref.** The class docstring says "a ref or a
-commit id that names nothing in this repository" for every member, which is read as binding all five
-rather than only the one whose own docstring repeats it.
+commit id that names nothing in this repository" for every member, which is read as binding all of
+them that refuse - which is five of the six, `exists` being the one whose answer to that case is a
+`False`.
 """
 
 from collections.abc import Iterator
@@ -137,11 +138,12 @@ ABSENT_ID: Final = "dead" * 10
 
 
 class HistoryContract(HistoryChangeContract):
-    """The suite. Five questions about one repository's past, and nothing that changes it.
+    """The suite. Six questions about one repository's past, and nothing that changes it.
 
-    Its own tests are where a run starts (`default_ref`), what that resolved to (`resolve`), the
-    one ancestry question AGL asks (`contains`), and the refusal all five share. The half it
-    inherits is `_history_changes`, named in this module's docstring.
+    Its own tests are where a run starts (`default_ref`), what that resolved to (`resolve`),
+    whether a name is held at all (`exists`), the one ancestry question AGL asks (`contains`), and
+    the refusal five of the six share. The half it inherits is `_history_changes`, named in this
+    module's docstring.
 
     `pytestmark` is on the class rather than on each method because subclasses inherit it, and
     because `asyncio_mode = "strict"` makes the marker the difference between a test that runs and
@@ -282,6 +284,53 @@ class HistoryContract(HistoryChangeContract):
             "answer and compares every later one against it"
         )
 
+    async def test_exists_answers_for_exactly_the_refs_resolve_answers_for(
+        self, history: History, provider: WorkspaceProvider, base: str
+    ) -> None:
+        """The port defines this member against `resolve`, so that is what is asserted.
+
+        "`True` for exactly the refs `resolve` answers for, and `False` for exactly the refs
+        `resolve` refuses" is the clause, and it is written that way because the two are one
+        question asked for two different reasons: `api.run` needs to know whether the deliverable
+        branch is already there, and `NotFoundError` is not an answer it may catch. An
+        implementation whose two members disagreed would refuse a run over a name nothing could
+        ever have been cut from, or start one over a branch that is still standing.
+
+        Three refs, and each one is a different way of being present or absent: a branch this suite
+        made, a ref expression the repository does not hold, and a well-formed commit id nothing
+        recorded. The third is the one an implementation built on a name table gets wrong - a
+        recorded id is something `resolve` answers for and is not a name in any listing - and it is
+        also the shape §3.10's leak paragraph is about, so it is asserted rather than assumed.
+
+        `is True` and `is False` rather than truthiness, because a `bool` is what the port answers
+        with and a truthy string would satisfy everything else here.
+        """
+        workspace = await provider.open(LABEL, CHILD, base)
+        write(workspace, ALPHA, body("something to record"))
+        recorded = await record(workspace, "something to record")
+
+        assert await history.exists(workspace.branch) is True, (
+            f"exists says this repository holds nothing under {workspace.branch!r}, which is a "
+            f"line of work it has just recorded a state onto. This is the answer `api.run` refuses "
+            f"a taken deliverable branch on, and a False here is how a run silently attaches to "
+            f"somebody else's work"
+        )
+        assert await history.exists(recorded) is True, (
+            "exists says this repository holds nothing under an id it answered with a moment ago. "
+            "The port defines this member as `resolve` with the answer thrown away, and `resolve` "
+            "takes a recorded id as a name for itself"
+        )
+        assert await history.exists(ABSENT_REF) is False, (
+            f"exists answered True for {ABSENT_REF!r}, which nothing in this repository has ever "
+            f"recorded. A member that answers True for everything makes `api.run` refuse every "
+            f"label there is"
+        )
+        assert await history.exists(ABSENT_ID) is False, (
+            "exists answered True for a well-formed commit id nothing recorded. It is well-formed "
+            "on purpose: an implementation refusing it for its shape rather than for its absence "
+            "would pass a test built on a malformed one without ever looking"
+        )
+
     async def test_contains_answers_the_one_ancestry_question_agl_asks(
         self, history: History, provider: WorkspaceProvider, base: str
     ) -> None:
@@ -350,8 +399,10 @@ class HistoryContract(HistoryChangeContract):
         """One refusal, from `errors.py`, so that a caller never learns what the thing underneath
         threw.
 
-        The port says it of all five members at once: `NotFoundError` for a ref or a commit id that
-        names nothing in this repository. It matters most for `resolve`, where the user typed
+        The port says it of five of the six members at once: `NotFoundError` for a ref or a commit
+        id that names nothing in this repository. `exists` is the sixth and is deliberately not in
+        the list below - answering rather than refusing is the whole of what it is for, and the
+        test above is where that is pinned. It matters most for `resolve`, where the user typed
         something well-formed that this repository does not have and exit 3 is the answer they get
         - but the other three take ids too, and an implementation that answered a made-up id with
         an empty diff, or with every file in the repository, would be answering a question nobody

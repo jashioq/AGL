@@ -69,22 +69,37 @@ loop, and a dispatch that awaited everything would make them pretend otherwise.
 
 ## What `run` does, in order, and the two things it deliberately does not
 
-Load the workflow, refuse a label that is already taken, ask §3.2's preflight whether the backends
-this workflow names are ready and can do what its roles require, pin the base ref to a full object
-name, write `run.json`, provision the run's own `_base` worktree from that pin, then open the
-terminal, await the workflow's function inside it, and give back every integration lease it was
-still holding. The order is load-and-parse first because those two refuse with no I/O at all -
-§3.3's "before anything runs" read as strictly as it can be - then the conflict check, which
-decides whether this run may exist, then preflight, then the three that are addressed to the
-repository, and the terminal last of all because it is the only one of them a person can see.
+Load the workflow, refuse a label that is already taken, refuse a deliverable branch that already
+exists, ask §3.2's preflight whether the backends this workflow names are ready and can do what its
+roles require, pin the base ref to a full object name, claim the run, write `run.json`, provision
+the run's own `_base` worktree from that pin, then open the terminal, await the workflow's function
+inside it, and give back every integration lease it was still holding. The order is load-and-parse
+first because those two refuse with no I/O at all - §3.3's "before anything runs" read as strictly
+as it can be - then the two checks that decide whether this run may exist, then preflight, then the
+claim and the three things addressed to the repository, and the terminal last of all because it is
+the only one of them a person can see.
 
-**Preflight sits between the conflict check and the record**, and both sides of that are the same
+**The branch check is the record check asked about the other half of a label**, and it is 17.0's.
+A `clear` that keeps an unmerged `agl/<label>` (§3.10) takes the record away and leaves the branch,
+so the label reads as free to the store and is not free in the repository - and a `run` that
+carried on would attach to that branch, start from its tip, and ignore `--from` in silence. It sits
+where it does because it costs one repository read: after the record check, which is cheaper, and
+in front of preflight, which is the only refusal here that costs real turns.
+
+**Preflight sits between those refusals and the record**, and both sides of that are the same
 argument read in two directions. It is the one refusal here that costs real turns - `check_ready`
 asks a live harness - so every refusal that is free goes in front of it. And it is the last thing
 that can refuse while this run has left *nothing* behind: `write_record` and `workspaces.open` are
 both durable, so a run refused after them is one an operator has to `agl clear` before they can
 retry the one they meant. A missing binary or a logged-out session is exactly the failure somebody
 fixes in ten seconds and immediately re-runs, and it should cost them one command and not two.
+
+**The run is claimed for the process before either durable line and let go of at the end**, which
+is §3.10's "it refuses while a run holds a lock" arriving three verbs at once: `run` takes it,
+`resume` takes it, and `clear` takes it briefly around its removals, so a `clear` aimed at a run
+live in another `agl` refuses at exit 4 instead of taking that run's checkouts away underneath it.
+It is `WorkspaceProvider.hold`, an OS lock the kernel drops when the holder dies, and it is not
+stored status - which §3.11 refuses by name and which a crash would leave behind as a lie.
 
 **The record is written before the workflow is invoked**, so a crash mid-run leaves something behind
 to resume or to clear. It is the one value in AGL with no other copy anywhere (`ports/store.py`), so
@@ -222,10 +237,12 @@ named ..." on the day a package renames one of them - naming the string the oper
 
 Read the record and refuse a label that has none, parse it, load the workflow the record names,
 refuse a version that is not the one it was stamped with, rebuild the params instance out of the
-record, ask preflight the same two questions `run` asked, reopen the run's own `_base` worktree
-from the commit the record pins, and then open the terminal and await the workflow's function
-inside it. The shape is `run`'s with the two durable writes taken out and one comparison put in,
-which is the honest description of what a resume is: the same run, walked again.
+record, ask preflight the same two questions `run` asked, claim the run, reopen its own `_base`
+worktree from the commit the record pins, and then open the terminal and await the workflow's
+function inside it. The shape is `run`'s with the record write taken out and one comparison put
+in, which is the honest description of what a resume is: the same run, walked again - and the
+claim is `run`'s too, in the same position, because a run being walked again is a run that is
+live.
 
 **And the refusals in front of preflight are all four of them, which is `run`'s rule and not a
 resemblance to it.** Preflight is the one call here that costs real turns, so everything that can
@@ -301,7 +318,8 @@ calls that window "a crash between a *child's* `open()` and its first entry writ
 how long it is; the honest answer is the length of that first step, which is an agent turn.
 
 **Why it cannot be closed within the ports.** No port can enumerate `agl/_work/<label>/*`, by
-design. `History` is five questions about the past and none of them is a listing; `ports/workspace
+design. `History` is six questions about the past and none of them is a listing - `exists` answers
+about one name the caller already composed, which is why it is not one; `ports/workspace
 .py` argues at length that a provider offers no enumeration, "because an enumeration method would
 buy tidiness by requiring that every implementation be able to list, which a service handing out
 checkouts to many clients may not honestly be able to do". Nor can this module go and look: a
@@ -473,12 +491,13 @@ async def run(
 
     Raises, and nothing else reports: `NotFoundError` for a name nothing registers (exit 3),
     `InputError` for flags the workflow's params refuse (exit 2), `ConflictError` for a label that
-    already has a record (exit 4), `DeniedError` for a role requiring a capability its backend does
-    not offer (exit 5 - something reachable said no, and `ports/errors.py` names this case on that
-    class), `UpstreamUnavailable` for a harness that is missing, out of date or logged out (exit 6,
-    raised by the adapter that said so and passed on untouched), and whatever the workflow itself
-    raises, untouched - a `Stop` subclass included, which is the ordering criterion §3.1 makes of
-    this stage.
+    already has a record, for a deliverable branch that already exists, and for a run of this label
+    that is live in another process (exit 4), `DeniedError` for a role requiring a capability its
+    backend does not offer (exit 5 - something reachable said no, and `ports/errors.py` names this
+    case on that class), `UpstreamUnavailable` for a harness that is missing, out of date or
+    logged out (exit 6, raised by the adapter that said so and passed on untouched), and whatever
+    the workflow itself raises, untouched - a `Stop` subclass included, which is the ordering
+    criterion §3.1 makes of this stage.
     """
     wf: Workflow[object] = registry.load(_points(points), name, Workflow)
     # Parsed before any port is touched: a flag the workflow will not accept costs nothing to
@@ -488,8 +507,49 @@ async def run(
     scope = RunScope(project, label)
     if await services.store.read_record(scope) is not None:
         # §3.10's refusal, verbatim but for the em dash, which no message under `src/` spells.
+        # It is left verbatim although the refusal below makes it incomplete: `agl clear auth` may
+        # keep `agl/auth` and leave the label taken, so "or `agl clear auth`" is a first step
+        # rather than the whole way out. What carries an operator on from there is the sentence
+        # `clear` answers with when it keeps a branch (`_kept`), which names the label's fate and
+        # what deletes the ref - and the plan's own words are not this module's to improve.
         raise ConflictError(
             f"run {str(label)!r} already exists - `agl resume {label}` or `agl clear {label}`."
+        )
+
+    # 17.0's refusal, and it is the one above asked about the other half of what a run takes. A
+    # `clear` that kept an unmerged `agl/<label>` (§3.10) took the record away and left the branch,
+    # so from here the label reads as free while the name a run needs is not - and `open` would
+    # take its *attaching* path, cut nothing, and start this run from the old tip with `--from`
+    # silently ignored. §3.10 names that outcome and refuses to price it: "a silently wrong base is
+    # not a cost the asymmetry argument priced."
+    #
+    # **The fix is here and not in the port.** `open`'s "base is consulted only when provisioning"
+    # is correct and argued - a child's base advances with every integration, so re-cutting on a
+    # reopen loses work - and its attaching path is what an `open` after a `remove` needs. What is
+    # wrong is starting a run over a name somebody else's run is still under, which is exactly what
+    # §3.10 refuses one line up and what `ports/workspace.py` gives the reason for: "adopting it is
+    # how a typo'd label silently continues somebody else's work".
+    #
+    # **`ConflictError`, for the reason the neighbouring refusal is one**: everything named was
+    # found, and the world already holds something this operation would have to take or overwrite,
+    # which is `ports/errors.py`'s own line about this class. Exit 4 follows from the class, and
+    # every this-name-is-taken refusal in this module answers with it.
+    #
+    # **Its position is the ordering rule and not an exception to it.** Everything that can refuse
+    # without asking anybody anything goes first, and preflight goes last among the refusals
+    # because it costs real turns. This costs one repository read, so it goes after the record
+    # check - the cheaper of the two, and the one whose message names both ways out - and in front
+    # of preflight.
+    branch = run_branch(label)
+    if await services.history.exists(branch):
+        raise ConflictError(
+            f"the branch {branch!r} already exists, so run {str(label)!r} cannot start: AGL would "
+            f"attach this run to that line of work and carry on from wherever it got to, with "
+            f"whatever `--from` said ignored (§3.10). This is what an unfinished run leaves - "
+            f"`clear` keeps a branch whose work is not yet in the base ref, and takes that run's "
+            f"records away with everything else, so there is nothing left here for `agl clear "
+            f"{label} -f` to address. `git log {branch}` is what is on it, `git branch -D "
+            f"{branch}` frees the label, and any other label starts a run of its own."
         )
 
     # §3.2's preflight, and its position is the whole of what 16.1 decided here. It is the one
@@ -517,73 +577,99 @@ async def run(
         label=label,
         base_ref=ref,
         base_sha=await services.history.resolve(ref),
-        branch=run_branch(label),
+        branch=branch,
         params=params.to_json(given),
         created_at=services.clock.now(),
     )
-    await services.store.write_record(scope, spec.to_json())
 
-    # §3.9's `_base`, cut eagerly and **after** the record, which is the whole of what these two
-    # lines' order buys: `run.json` is the only enumeration `clear` has, so a crash after this call
-    # must still leave a record naming the run - see the module docstring, and `ports/workspace.py`
-    # for why no provider will ever be able to list what it holds.
+    # §3.10's run lock, opened here because here is the first durable thing this function does.
+    # `WorkspaceProvider.hold` is a non-blocking claim on the run's own directory that the OS lets
+    # go of if this process dies - what §3.10 asks for, and what §3.11 will not let it be instead:
+    # "stored status: derivable from which entries exist. Two sources of truth is what forces
+    # `reconcile_on_resume.py` to exist." Everything below is inside it, so it is held for the life
+    # of the invocation, and a `clear` aimed at this run while it runs refuses at exit 4 rather
+    # than taking its checkouts away underneath it.
     #
-    # `spec.base_sha` and never `ref`, never `base_ref`: `open` takes a ref expression or a commit
-    # id, `Journal` takes only the second, and the run's own base is pinned precisely so that a
-    # commit landing on `main` between this line and the first step cannot move where the checkout
-    # was cut from (§3.6). The record and the checkout therefore agree by construction, being the
-    # one value spent twice.
+    # **Above the record and below every refusal**, which is one decision read from two sides. It
+    # has to be above `write_record` and `open`, because those are what a concurrent `clear` would
+    # be racing. It may not be above the refusals, because the claim is what this invocation makes
+    # once it is committed to being a run, and everything before this line is still deciding
+    # whether the run may exist at all. That is also what makes taking it free of consequence: a
+    # claim makes `.trees/<label>/` if it is not there, and every path reaching this line
+    # provisions a checkout inside that very directory two lines down.
     #
-    # The `Workspace` is deliberately dropped rather than carried into `Run`. `open` is idempotent
-    # by contract - "an existing workspace is returned exactly as it stands" - so `run.step`'s lazy
-    # open in `sdk/_engine/steps.py` hands back this very checkout on first use and cuts nothing.
-    # Nothing else moves: this call is not a new path into the engine, it is the same call made
-    # earlier, so that a workflow which takes no steps at all still leaves `agl/<label>` a real ref.
-    await services.workspaces.open(label, None, spec.base_sha)
+    # **A `finally` that cannot be an `except`**, like the two constructs below it: `__aexit__` is
+    # `-> None` on the port, and suppression means returning something truthy, so a workflow's
+    # `Stop` leaves this line as the object it was raised as.
+    async with services.workspaces.hold(label):
+        await services.store.write_record(scope, spec.to_json())
 
-    # §3.4's lease per integration target, constructed here and not left to `Run`'s own default,
-    # because "the lease is released when the run exits" needs something above the workflow to be
-    # holding the handle - and a defaulted field is built where nothing can reach it. This is the
-    # one of `Run`'s three shared tables the composition root passes.
-    leases = Leases()
-    # The `Run` is built from what this function already computed and nothing else: `scope` is the
-    # address the record above went to, and `base` is the same resolved commit the record pins and
-    # the checkout was cut from.
-    #
-    # **The `try` is a `finally` and never an `except`**, which is what keeps the module docstring's
-    # `Stop` argument true: nothing here catches, translates, annotates or re-raises a workflow's
-    # exception, so it still leaves this function as the object it raised. What the `finally` adds
-    # is that an unresolved conflict does not outlive the run holding a lease and a namespace's step
-    # lock - a workflow that returned without deciding, raised, or was stopped mid-decision leaves a
-    # live integration, and the object it is reachable from is going away with the workflow.
-    #
-    # **It releases the lease and deliberately does not abort the adapter's hold.** The hold is
-    # durable by design (§3.4) so that a later invocation can find one it did not take, and 14.0
-    # made a pre-existing hold answer as a `Conflict` rather than exit 70 - so aborting on the way
-    # out would silently discard a partial resolution somebody may be in the middle of making, which
-    # is the shortcut §3.4 forbids by name. `sdk/_engine/integration.py` argues the whole of it.
-    try:
-        # §3.7's terminal, entered around the workflow and around nothing else. `show` outside the
-        # context is `InternalError` by the port's own rule, so without this line every screen in
-        # every real run would refuse - and the region where `show` is legal is exactly the region
-        # a workflow runs in, which is why this is here and not up beside the record write. The
-        # module docstring argues the placement and the ordering against the `finally` below.
+        # §3.9's `_base`, cut eagerly and **after** the record, which is the whole of what these two
+        # lines' order buys: `run.json` is the only enumeration `clear` has, so a crash after this
+        # call must still leave a record naming the run - see the module docstring, and
+        # `ports/workspace.py` for why no provider will ever be able to list what it holds.
         #
-        # Not an `except` and not able to become one: `__aexit__` is `-> None` on the port, and a
-        # context manager suppresses only by returning something truthy - so a `Stop` on its way
-        # out of `wf.fn` passes through this line untouched, mechanically rather than by promise.
-        async with services.terminal:
-            await wf.fn(
-                Run(
-                    params=given,
-                    services=services,
-                    scope=scope,
-                    base=spec.base_sha,
-                    leases=leases,
+        # `spec.base_sha` and never `ref`, never `base_ref`: `open` takes a ref expression or a
+        # commit id, `Journal` takes only the second, and the run's own base is pinned precisely so
+        # that a commit landing on `main` between this line and the first step cannot move where the
+        # checkout was cut from (§3.6). The record and the checkout therefore agree by construction,
+        # being the one value spent twice.
+        #
+        # The `Workspace` is deliberately dropped rather than carried into `Run`. `open` is
+        # idempotent by contract - "an existing workspace is returned exactly as it stands" - so
+        # `run.step`'s lazy open in `sdk/_engine/steps.py` hands back this very checkout on first
+        # use and cuts nothing. Nothing else moves: this call is not a new path into the engine, it
+        # is the same call made earlier, so that a workflow which takes no steps at all still leaves
+        # `agl/<label>` a real ref.
+        await services.workspaces.open(label, None, spec.base_sha)
+
+        # §3.4's lease per integration target, constructed here and not left to `Run`'s own default,
+        # because "the lease is released when the run exits" needs something above the workflow to
+        # be holding the handle - and a defaulted field is built where nothing can reach it. This is
+        # the one of `Run`'s three shared tables the composition root passes.
+        leases = Leases()
+        # The `Run` is built from what this function already computed and nothing else: `scope` is
+        # the address the record above went to, and `base` is the same resolved commit the record
+        # pins and the checkout was cut from.
+        #
+        # **The `try` is a `finally` and never an `except`**, which is what keeps the module
+        # docstring's `Stop` argument true: nothing here catches, translates, annotates or re-raises
+        # a workflow's exception, so it still leaves this function as the object it raised. What the
+        # `finally` adds is that an unresolved conflict does not outlive the run holding a lease and
+        # a namespace's step lock - a workflow that returned without deciding, raised, or was
+        # stopped mid-decision leaves a live integration, and the object it is reachable from is
+        # going away with the workflow.
+        #
+        # **It releases the lease and deliberately does not abort the adapter's hold.** The hold is
+        # durable by design (§3.4) so that a later invocation can find one it did not take, and 14.0
+        # made a pre-existing hold answer as a `Conflict` rather than exit 70 - so aborting on the
+        # way out would silently discard a partial resolution somebody may be in the middle of
+        # making, which is the shortcut §3.4 forbids by name. `sdk/_engine/integration.py` argues
+        # the whole of it.
+        try:
+            # §3.7's terminal, entered around the workflow and around nothing else. `show` outside
+            # the context is `InternalError` by the port's own rule, so without this line every
+            # screen in every real run would refuse - and the region where `show` is legal is
+            # exactly the region a workflow runs in, which is why this is here and not up beside the
+            # record write. The module docstring argues the placement and the ordering against the
+            # `finally` below.
+            #
+            # Not an `except` and not able to become one: `__aexit__` is `-> None` on the port, and
+            # a context manager suppresses only by returning something truthy - so a `Stop` on its
+            # way out of `wf.fn` passes through this line untouched, mechanically rather than by
+            # promise.
+            async with services.terminal:
+                await wf.fn(
+                    Run(
+                        params=given,
+                        services=services,
+                        scope=scope,
+                        base=spec.base_sha,
+                        leases=leases,
+                    )
                 )
-            )
-    finally:
-        leases.release_all()
+        finally:
+            leases.release_all()
 
 
 async def resume(
@@ -645,6 +731,14 @@ async def resume(
     # exactly that - "parsing implies an ordering, an ordering implies 'newer than', and 'newer
     # than' is the first line of a migration nobody is going to write".
     #
+    # The flag is 17.0's and is not a strengthening of the advice for its own sake: an unforced
+    # `agl clear` keeps `agl/<label>` when its work is not yet in the base ref (§3.10), and `run`
+    # now refuses a label whose branch is still standing - so "clear it and start again" without
+    # the flag is an instruction that fails on its second half for exactly the runs this message
+    # is about, which are the ones that got far enough to commit something. `-f` is also the
+    # honest verb here on its own terms: what is being proposed is abandoning this run's work and
+    # starting the same request over on another version of the workflow.
+    #
     # `ConflictError`, and it is the same class `run` answers a taken label with. The record exists
     # and the workflow exists and each is fine on its own; what fails is that they do not fit,
     # which is `ports/errors.py`'s "the world already holds something this operation would have to
@@ -659,7 +753,7 @@ async def resume(
             f"{wf.version!r}. A run stamps its workflow's version and AGL refuses a mismatch "
             f"rather than migrating one (§3.11): every step already on this run's ledger was "
             f"produced by the workflow as it was then. Install {spec.workflow_version!r} to finish "
-            f"this run, or `agl clear {label}` and start it again on {wf.version!r}."
+            f"this run, or `agl clear {label} -f` and start it again on {wf.version!r}."
         )
 
     # The params, rebuilt from the record rather than parsed from a line nobody typed - §3.3's
@@ -707,33 +801,42 @@ async def resume(
     # `open` takes a ref expression too, so handing it the ref would cut this checkout from
     # wherever `main` has got to since the run started, and §3.6 pins the commit so that a resume
     # hours later starts where the run did.
-    await services.workspaces.open(label, None, spec.base_sha)
+    #
+    # §3.10's run lock, in `run`'s position and for `run`'s reason: above everything durable this
+    # function does and below every refusal, so that a `clear` aimed at this run while it is being
+    # walked again refuses at exit 4 instead of taking its checkouts away underneath it. The only
+    # asymmetry with `run` is that a resumed run's directory is usually already there, so the claim
+    # finds it rather than making it - and where a crash left none, this is the same crash the
+    # `open` below is about to provision past anyway.
+    async with services.workspaces.hold(label):
+        await services.workspaces.open(label, None, spec.base_sha)
 
-    # From here on this is `run`'s last paragraph, line for line, and deliberately so: a resumed
-    # run is the same run. §3.4's lease is constructed above the workflow so that `release_all` can
-    # be the `finally`, §3.7's terminal is entered around the workflow's function and around
-    # nothing else - without which every `show` in a resumed run would raise `InternalError` by the
-    # port's own rule - and there is no `except` of any width, so a workflow's own exception leaves
-    # this function as the object it raised. The `Run` is built from `scope` and `spec.base_sha`,
-    # the address the record is at and the commit it pins, and its three remaining shared tables
-    # take their defaults: §3.6's counter is rebuilt from nothing on purpose ("`n` is never
-    # persisted; replay walks the same calls in the same order and reproduces the same values"),
-    # the namespace table is empty because `worktree()` is what fills it as the workflow walks, and
-    # `Capabilities` holds no record of what preflight saw by `sdk/_engine/preflight.py`'s design.
-    leases = Leases()
-    try:
-        async with services.terminal:
-            await wf.fn(
-                Run(
-                    params=given,
-                    services=services,
-                    scope=scope,
-                    base=spec.base_sha,
-                    leases=leases,
+        # From here on this is `run`'s last paragraph, line for line, and deliberately so: a resumed
+        # run is the same run. §3.4's lease is constructed above the workflow so that `release_all`
+        # can be the `finally`, §3.7's terminal is entered around the workflow's function and around
+        # nothing else - without which every `show` in a resumed run would raise `InternalError` by
+        # the port's own rule - and there is no `except` of any width, so a workflow's own exception
+        # leaves this function as the object it raised. The `Run` is built from `scope` and
+        # `spec.base_sha`, the address the record is at and the commit it pins, and its three
+        # remaining shared tables take their defaults: §3.6's counter is rebuilt from nothing on
+        # purpose ("`n` is never persisted; replay walks the same calls in the same order and
+        # reproduces the same values"), the namespace table is empty because `worktree()` is what
+        # fills it as the workflow walks, and `Capabilities` holds no record of what preflight saw
+        # by `sdk/_engine/preflight.py`'s design.
+        leases = Leases()
+        try:
+            async with services.terminal:
+                await wf.fn(
+                    Run(
+                        params=given,
+                        services=services,
+                        scope=scope,
+                        base=spec.base_sha,
+                        leases=leases,
+                    )
                 )
-            )
-    finally:
-        leases.release_all()
+        finally:
+            leases.release_all()
 
 
 async def clear(
@@ -802,32 +905,47 @@ async def clear(
     and after `remove`, because a line of work something still has checked out is one an
     implementation may refuse to delete.
 
-    ## "It refuses while a run holds a lock" (§3.10), measured rather than implemented
+    ## "It refuses while a run holds a lock" (§3.10), and 17.0 is where that became true
 
-    **There is no durable "this run is live" lock in AGL and this deliverable did not invent one.**
-    §3.11 refuses stored status by name, on the grounds that two sources of truth is what forces
-    reconciliation code to exist, and a liveness flag is stored status wearing another word.
-    §3.4's `Leases` are in-process, so a second `agl` invocation cannot see them at all.
+    **The mechanism is `WorkspaceProvider.hold`, taken around every removal below.** §3.10 asked
+    for "a `flock` on the run directory held for the life of the process: an OS lock that releases
+    on death, the same shape §3.9 already uses, and not stored status", and that is what it is:
+    `api.run` and `api.resume` hold it across everything durable they do, this holds it briefly,
+    and a `clear` aimed at a run live in another `agl` refuses with `ConflictError` at exit 4
+    having removed nothing. Nothing is written down anywhere - §3.11 refuses stored status by name,
+    on the grounds that two sources of truth is what forces reconciliation code to exist - and a
+    claim that ends when its holder ends is the one kind of liveness answer no crash leaves stale.
 
-    What `clear` does inherit is two real refusals, and neither detects a run in progress:
+    **What it still does not cover, stated exactly.** The claim is on `.trees/<label>/`, and
+    `remove(label, None)` takes that directory away in the middle of this function, so from that
+    line to the end a concurrent `agl run` under the same label can make a directory of its own and
+    claim that. What is below that line is the branch decision and the record removal; a run that
+    got in would be refused by `run`'s branch check for as long as `agl/<label>` is still there,
+    and would otherwise be racing a record this function is about to delete. Closing it would mean
+    claiming something `clear` does not remove - a never-unlinked file per run, left in the trees
+    root forever, for a window that opens after the destructive half is already done.
 
-      * **§3.9's registry mutex.** `_trees.registry_lock` is a cross-process `flock(2)` on a file in
-        the trees root, taken inside `GitWorkspaceProvider.remove` around the `worktree prune` and
-        let go of immediately, so a `clear` and a concurrent `run` cannot mutate `.git/worktrees/`
-        at once. A holder that is wedged is refused on a deadline with `ConflictError`, naming the
-        file. That is a refusal on a *timeout*, not on liveness.
-      * **git's own `worktree lock`, which is the closest thing to the sentence.** Measured against
-        git 2.50.1: `worktree prune` silently skips a locked worktree even after its directory has
-        gone, so the registration survives `remove`; `git branch -D` then refuses with "cannot
-        delete branch ... used by worktree at ...", and `discard` re-raises that as `ConflictError`
-        having asked whether the branch is still there. So `agl clear` on a locked worktree really
-        does refuse, at exit 4, and nothing here catches it.
+    **Two refusals it inherits, and neither one detects a run in progress.** They are still here,
+    and worth naming because they fire for reasons the claim does not:
 
-    What it cannot mean is a refusal AGL raises about its own runs. `GitWorkspaceProvider.remove`
-    inherits neither of `git worktree remove`'s refusals, because it does not call it: it deletes
-    the directory and prunes, which that module chose precisely to avoid "three refusals to tolerate
-    in a verb whose whole job is to be unconditional". So a `clear` aimed at a run that is live in
-    another process takes its checkouts away underneath it, and says nothing.
+      * **§3.9's registry mutex.** `_trees.registry_lock` is a cross-process `flock(2)` on a file
+        in the trees root, taken inside `GitWorkspaceProvider.remove` around the `worktree prune`
+        and let go of immediately, so a `clear` and a concurrent `run` cannot mutate
+        `.git/worktrees/` at once. A holder that is wedged is refused on a deadline with
+        `ConflictError`, naming the file. That is a refusal on a *timeout*, not on liveness.
+
+      * **git's own `worktree lock`.** Measured against git 2.50.1: `worktree prune` silently skips
+        a locked worktree even after its directory has gone, so the registration survives `remove`;
+        `git branch -D` then refuses with "cannot delete branch ... used by worktree at ...", and
+        `discard` re-raises that as `ConflictError` having asked whether the branch is still there.
+        So `agl clear` on a locked worktree really does refuse, at exit 4, and nothing here catches
+        it.
+
+    `GitWorkspaceProvider.remove` inherits neither of `git worktree remove`'s own refusals, because
+    it does not call it: it deletes the directory and prunes, which that module chose precisely to
+    avoid "three refusals to tolerate in a verb whose whole job is to be unconditional". That is
+    why the claim above had to be AGL's own rather than something read off git.
+
     """
     scope = RunScope(project, label)
     record = await services.store.read_record(scope)
@@ -837,38 +955,63 @@ async def clear(
         # that takes it, and this one says it is free and there is therefore nothing to take away.
         raise NotFoundError(f"run {str(label)!r} does not exist - there is nothing to clear.")
 
-    # Enumerated before anything is removed and used after the checkouts are gone, which is what
-    # keeps `store.remove` at the bottom of this function: this list is the only record anywhere of
-    # what the run held. `Store.namespaces` answers about immediate children, so `_under` recurses.
-    for namespace in await _under(services.store, scope):
-        # `remove` then `discard`, per namespace, in the order `ports/workspace.py` requires. The
-        # bare `Namespace` is §3.9's flat trees root arriving here - see the module docstring.
-        await services.workspaces.remove(label, namespace)
-        await services.workspaces.discard(label, namespace)
+    # §3.10's run lock, around the whole of the teardown and around nothing else. Until 17.0 that
+    # section's last sentence had no mechanism behind it: there is no durable "this run is live"
+    # record, §3.11 refuses stored status by name, and §3.4's leases are in-process, so a `clear`
+    # aimed at a run live in another `agl` took its checkouts away underneath it and said nothing.
+    # Taking the same claim `api.run` holds for the life of its invocation is the whole of what
+    # this operation has to do about it: a live run refuses here, at exit 4, with nothing removed.
+    #
+    # **After the record check and around everything else.** A label with no record is nothing to
+    # clear and nothing to claim, and that refusal is the one this operation shares with its two
+    # neighbours, so it keeps its place at the top. From there down every line is destructive and
+    # belongs inside - `store.remove` included, which is the last of the removals rather than
+    # something after them.
+    #
+    # **Briefly, and it is the same verb a run holds for hours.** One member serves both callers
+    # because it is one question: a separate probe would answer about a moment already past by the
+    # time this acted on it, and refusing is how the answer arrives without one.
+    #
+    # The claim makes `.trees/<label>/` if a crash left none, which costs nothing here: `remove`
+    # below takes that directory away again in this same invocation, once the last checkout in it
+    # has gone (`_trees.tidied`).
+    async with services.workspaces.hold(label):
+        # Enumerated before anything is removed and used after the checkouts are gone, which is what
+        # keeps `store.remove` at the bottom of this function: this list is the only record anywhere
+        # of what the run held. `Store.namespaces` answers about immediate children, so `_under`
+        # recurses.
+        for namespace in await _under(services.store, scope):
+            # `remove` then `discard`, per namespace, in the order `ports/workspace.py` requires.
+            # The bare `Namespace` is §3.9's flat trees root arriving here - see the module
+            # docstring.
+            await services.workspaces.remove(label, namespace)
+            await services.workspaces.discard(label, namespace)
 
-    # The run's own checkout, addressed by the absence of a namespace. This is also the call that
-    # takes `.trees/<label>/` itself away, once the last checkout in it has gone (`_trees.tidied`),
-    # which is why §3.10's directory half needs no verb the port does not already have.
-    await services.workspaces.remove(label, None)
+        # The run's own checkout, addressed by the absence of a namespace. This is also the call
+        # that takes `.trees/<label>/` itself away, once the last checkout in it has gone
+        # (`_trees.tidied`), which is why §3.10's directory half needs no verb the port does not
+        # already have.
+        await services.workspaces.remove(label, None)
 
-    branch = run_branch(label)
-    # `-f` deletes regardless, so it asks nothing and reads nothing - which is also why the record
-    # is parsed here rather than beside the existence check above. `RunSpec.from_json` refuses a
-    # record AGL cannot read back, and `clear` is the one command that has to keep working on a run
-    # whose state has gone wrong: `agl clear <label> -f` takes it away knowing only the label.
-    kept = (
-        None
-        if force
-        else await _kept(services.history, label, branch, RunSpec.from_json(record).base_ref)
-    )
-    if kept is None:
-        await services.workspaces.discard(label, None)
+        branch = run_branch(label)
+        # `-f` deletes regardless, so it asks nothing and reads nothing - which is also why the
+        # record is parsed here rather than beside the existence check above. `RunSpec.from_json`
+        # refuses a record AGL cannot read back, and `clear` is the one command that has to keep
+        # working on a run whose state has gone wrong: `agl clear <label> -f` takes it away knowing
+        # only the label.
+        kept = (
+            None
+            if force
+            else await _kept(services.history, label, branch, RunSpec.from_json(record).base_ref)
+        )
+        if kept is None:
+            await services.workspaces.discard(label, None)
 
-    # Last, and the module docstring argues it: this is the enumeration, and removing it first would
-    # strand every checkout it names. At depth zero it takes the record, the entries and every
-    # nested scope under them (`ports/store.py`), which is §3.10 removing a run wholesale.
-    await services.store.remove(scope)
-    return kept
+        # Last, and the module docstring argues it: this is the enumeration, and removing it first
+        # would strand every checkout it names. At depth zero it takes the record, the entries and
+        # every nested scope under them (`ports/store.py`), which is §3.10 removing a run wholesale.
+        await services.store.remove(scope)
+        return kept
 
 
 def init(settings: Settings, cwd: Path, ask: Ask) -> Path:
@@ -1064,14 +1207,33 @@ async def _kept(history: History, label: RunLabel, branch: str, base_ref: str) -
     something with next: the branch is what `git log` is pointed at, the base ref is what it is not
     yet in, and `-f` is the other way out. `NotFoundError` if the base ref no longer names anything
     - the work is unmerged into something that is gone, and the answer is `-f` rather than a guess.
+
+    **What it says the retained branch costs was wrong until 17.0.** §3.10 priced it as "a stale
+    ref" and then said in the next breath that the retained side is worse than that, because a
+    later `agl run ... -n <label>` took `open`'s attaching path and started from the old tip with
+    `--from` ignored. `run` refuses that outright now, so the real consequence an operator has to
+    read here is that this label is *taken* until the branch goes - which is a thing to act on,
+    where "a stale ref" was a thing to shrug at. The asymmetry argument is left where it belongs,
+    in §3.10 and in `clear`'s own docstring: it is why the branch was kept, not what keeping it
+    costs the person reading this.
+
+    **And what frees it is not `agl clear -f`, which this sentence used to say.** By the time
+    anybody reads this, the records are gone - `clear`'s last line removes them whichever way this
+    decision went - so the flag has nothing left to address and a second `agl clear` answers
+    `NotFoundError` at exit 3. The tense is what makes that honest rather than a correction: `-f`
+    is what *would have* deleted the branch in the call that produced this sentence, and what
+    deletes it now is deleting the ref. Naming a tool to say so follows this same message's
+    existing `git log`, and there is no AGL verb to name instead: `clear` is addressed to a run and
+    this is a branch outliving one, which is the gap §3.10's asymmetry buys and does not close.
     """
     if await history.contains(branch, base_ref):
         return None
     return (
         f"the branch {branch!r} was kept: it is not yet in {base_ref!r}, and everything else this "
-        f"run held has been taken away. A retained branch costs a stale ref and a deleted one "
-        f"costs the entire run (§3.10), so AGL keeps it and says so. `git log {branch}` is what is "
-        f"still there; `agl clear {label} -f` deletes it regardless."
+        f"run held has been taken away, its records included. Until that branch goes, `agl run "
+        f"... -n {label}` is refused rather than started from the wrong place - so `git log "
+        f"{branch}` is what is still there, and `git branch -D {branch}` is what frees the label "
+        f"now. `agl clear {label} -f` is what would have deleted it in this call."
     )
 
 

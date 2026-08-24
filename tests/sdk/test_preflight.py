@@ -31,6 +31,7 @@ a line that is not in their file."
 
 from collections.abc import Sequence
 from collections.abc import Set as AbstractSet
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, replace
 from importlib.metadata import EntryPoint
 from pathlib import Path
@@ -258,6 +259,13 @@ class _Untouched(WorkspaceProvider):
 
     async def discard(self, label: RunLabel, namespace: Namespace | None) -> None:
         raise AssertionError("nothing in `api.run` deletes a line of work")
+
+    def hold(self, label: RunLabel) -> AbstractAsyncContextManager[None]:
+        raise AssertionError(
+            "preflight refused this run and its claim on the trees root was taken anyway. §3.10's "
+            "run lock sits below preflight for the reason the record does: a refusal that costs "
+            "real turns is the last thing that can happen while the run has left nothing behind"
+        )
 
 
 def _fakes(tmp_path: Path) -> container.FakeServices:

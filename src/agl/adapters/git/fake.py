@@ -39,13 +39,23 @@ shared object reached through the filesystem. There is no such object for a fake
 the container builds one - `FakeRepository()` - and hands the same instance to all three, exactly
 as it hands one path to the other three. Stage 9 is where that lands; it is the only difference.
 
-## No lock, and §3.9 is why there is none rather than why there is
+## No registry lock, and §3.9 is why there is none rather than why there is
 
 `_trees.registry_lock` is a cross-process `flock` on git's worktree registry, taken around
 `worktree add` and `prune` because two `agl` invocations are two processes sharing one `.git/`.
 The registry here is a dict inside one `FakeRepository`; a second process gets a different one,
 with nothing to contend over and no way to see what this one is doing. A lock would serialise
 nothing and would let the fake pretend to a guarantee it cannot offer.
+
+**§3.10's run lock is the one that is here, and it is here because it is a port member.** `hold` is
+something `WorkspaceProvider` promises and `api` calls, not plumbing one implementation happens to
+need, so a fake without it would not be a `WorkspaceProvider` at all - and the clause the port
+actually states, that a second claim on one label refuses while a first is open, is a thing one
+process can honestly keep. What it cannot keep is the half that makes the real one worth having,
+which is that the kernel lets go of a killed run's claim; `_CLAIMED` says so beside the set that
+stands in for it. Two fake processes still share no repository, so this is not the paragraph above
+being reversed - it is the other lock, answering a question the port asks rather than one git's
+registry does.
 
 ## The durable hold, decided rather than defaulted
 
@@ -94,6 +104,8 @@ more, because a fake stricter than the thing it stands in for is the same fictio
 way.
 """
 
+from collections.abc import AsyncIterator
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -119,6 +131,25 @@ from agl.ports.tree_layout import (
 from agl.ports.workspace import Workspace, WorkspaceProvider
 
 __all__ = ["FakeHistory", "FakeIntegrator", "FakeRepository", "FakeWorkspaceProvider"]
+
+# Which run directories are claimed right now, by path, and the whole of what the fake's `hold` is.
+#
+# **Module-level and not per-provider**, which is `FakeWorkspaceProvider`'s own rule about state
+# rather than an exception to it: "two of these over one `FakeRepository` are the same provider",
+# because the registry they share lives in the repository. A set on the instance would make two
+# providers two locks, and the real one excludes on an inode that could not care how many objects
+# were built over it. Keyed by the resolved directory, so two trees roots are two locks - the same
+# consequence `_trees.py` states for the registry lock, arrived at the same way.
+#
+# **What it models is the exclusion, and not the release-on-death.** The real lock is `flock(2)`,
+# and its value is that a killed run stops holding its label the instant the kernel closes its
+# descriptors; nothing in one process can stand in for that, and a fake that claimed to would be
+# claiming a guarantee it cannot offer - which is the argument `test_the_registry_lock_is
+# _deliberately_not_taken` already makes about the other lock. What this does hold to is everything
+# the port states: a second `hold` while one is open refuses with `ConflictError`, and the same
+# `hold` succeeds once the first has been let go of. Two `agl` processes on fakes share no
+# repository at all, so there is nothing between them for a cross-process lock to exclude.
+_CLAIMED: Final[set[Path]] = set()
 
 # What git's message cleanup takes away, and the whole of it: space, tab, carriage return and line
 # feed. Measured character by character rather than taken from a definition of "whitespace" - a
@@ -221,6 +252,17 @@ class FakeWorkspaceProvider(WorkspaceProvider):
                 f"deleted. Take the place back first - that is what `remove` is for"
             )
         self._repository.drop(place.branch)
+
+    def hold(self, label: RunLabel) -> AbstractAsyncContextManager[None]:
+        """§3.10's run lock, as far as one process can honestly carry it: an in-process claim.
+
+        Addressed by the same directory the real one locks - `run_trees_dir`, made if it is not
+        there, exactly as `GitWorkspaceProvider.hold` makes it - so that the two agree about what
+        is claimed and about the one side effect taking a claim has. What differs is only the
+        primitive underneath, and `_CLAIMED` above says at length what that difference is and what
+        this can and cannot stand in for.
+        """
+        return _claimed(run_trees_dir(self._trees, label), str(label))
 
     def _cut_from(self, base: str, branch: str) -> str:
         """The state a new line of work starts at, or the refusal a base nobody can find means.
@@ -341,7 +383,7 @@ class _FakeWorkspace(Workspace):
 
 
 class FakeHistory(History):
-    """`History` over one in-memory repository: five questions, none of which changes anything.
+    """`History` over one in-memory repository: six questions, none of which changes anything.
 
     Bound to the repository by construction, which is the port's own design - no method takes one
     - and holding nothing past it. Every answer is derived from the recorded states themselves,
@@ -371,6 +413,26 @@ class FakeHistory(History):
         second copy of `run.py`'s `_check_sha` here to disagree with the one that binds.
         """
         return self._repository.resolve(ref)
+
+    async def exists(self, ref: str) -> bool:
+        """Whether this repository holds anything under this name. `resolve` without the answer.
+
+        Written as the member above with its refusal turned into a `False`, which is the port's own
+        definition of this one, so the two cannot drift apart: an implementation that answered from
+        a second reading of the branch table would be free to disagree with itself about a
+        recorded id, which `resolve` accepts as a name for itself and a table lookup does not.
+
+        The `except` is here rather than at the call site because that is exactly what this member
+        is for. `api.py` may not catch - "there is no `except` in this file, and there never may
+        be" - and an adapter that knows it just asked its own repository about one name is the one
+        place where "not found" can be read as an answer without also swallowing a repository that
+        could not be reached, which cannot happen at all in a fake with no repository to lose.
+        """
+        try:
+            self._repository.resolve(ref)
+        except NotFoundError:
+            return False
+        return True
 
     async def contains(self, ancestor: str, descendant: str) -> bool:
         """Is `ancestor` already part of what `descendant` records? `clear`'s one question (§3.10).
@@ -610,6 +672,35 @@ class FakeIntegrator(Integrator):
                 f"recorded, and landing {target.branch!r} would write over them. Record them or "
                 f"take them away first; nothing here has been changed"
             )
+
+
+@asynccontextmanager
+async def _claimed(directory: Path, label: str) -> AsyncIterator[None]:
+    """Take this run's claim or refuse it at once, and let go of it on the way out however it goes.
+
+    A module-level function rather than a method for the reason `_CLAIMED` is a module-level set:
+    what excludes is the directory, not the object that was asked about it.
+
+    The directory is made before the claim is taken and deliberately not taken away after, which is
+    `_trees.run_lock`'s decision and is followed here so that the two behave alike - `clear`'s own
+    `remove` is what removes it, in the same invocation. The release is in a `finally`, so a run
+    that raised out of the middle of itself does not leave its label claimed for the life of the
+    process; a killed process is the half no fake can answer for.
+    """
+    made(directory)
+    key = directory.resolve()
+    if key in _CLAIMED:
+        raise ConflictError(
+            f"the run {label!r} is already live: something else is holding {directory}, and one "
+            f"run cannot be walked twice at once. AGL takes that lock for the whole of an `agl "
+            f"run` or `agl resume` and lets go of it when that ends, so wait for the invocation "
+            f"that has it or stop it. Nothing here has been changed"
+        )
+    _CLAIMED.add(key)
+    try:
+        yield
+    finally:
+        _CLAIMED.discard(key)
 
 
 def _still_unresolved(pending: Hold, held: Tree) -> tuple[str, ...]:

@@ -55,9 +55,17 @@ name again. That is the same trade §3.10 makes for the run branch itself - a re
 and a deleted run is not - and an enumeration method would buy tidiness by requiring that every
 implementation be able to list, which a service handing out checkouts to many clients may not
 honestly be able to do.
+
+**No stored status, and `hold` below is what keeps it that way.** §3.11 refuses stored status by
+name - "derivable from which entries exist. Two sources of truth is what forces
+`reconcile_on_resume.py` to exist" - so "is this run live?" cannot be a flag anybody writes down.
+It is asked instead by trying to take the run's own lock and being told no, which is a question
+whose answer no crash can leave stale: an exclusion that ends when the holder ends records nothing
+and needs reconciling with nothing.
 """
 
 from abc import ABC, abstractmethod
+from contextlib import AbstractAsyncContextManager
 from pathlib import Path
 
 from agl.ports.ids import Namespace, RunLabel
@@ -66,14 +74,23 @@ __all__ = ["Workspace", "WorkspaceProvider"]
 
 
 class WorkspaceProvider(ABC):
-    """Make an isolated place, take it back, and delete the line of work it carried.
+    """Make an isolated place, take it back, delete the line of work it carried, and claim the run.
 
-    Three methods, and the two teardown verbs are separate because `clear` needs them apart (§3.10).
+    Four methods. The two teardown verbs are separate because `clear` needs them apart (§3.10):
     `clear` takes back every isolated place a run holds unconditionally, deletes the child lines of
     work unconditionally, and deletes the run's own line of work *only if* it is already contained
     in the base ref. That last condition is a question about ancestry, which is `History.contains`'s
     to answer and not this port's - so this port must offer the two halves and hold no policy about
     when either is right.
+
+    The fourth is `hold`, and it is on this port rather than anywhere else because a run's lock is
+    a claim over the very things this port hands out. §3.10 asks for "a `flock` on the run
+    directory held for the life of the process", and the run directory is the one a provider makes
+    when it provisions the run's own place and takes away when the last checkout in it is gone - so
+    the only object in AGL that knows where it is, or that there is one, is this one. `Store` is
+    the other candidate and is refused explicitly: `ports/store.py` argues at length that "there is
+    no lock in this file, and its absence is the requirement", and
+    `tests/adapters/test_filesystem_no_lock.py` is a structural gate holding it to that.
     """
 
     @abstractmethod
@@ -132,6 +149,54 @@ class WorkspaceProvider(ABC):
         it is contained in the base ref (§3.10). Call `remove` first.
 
         **Tolerant of absence**, for `remove`'s reason and in the same words.
+        """
+
+    @abstractmethod
+    def hold(self, label: RunLabel) -> AbstractAsyncContextManager[None]:
+        """Claim this run for this process for as long as the context is open, or refuse.
+
+        §3.10's "it refuses while a run holds a lock", which that section records as a sentence
+        with no mechanism behind it and asks to be closed with "a `flock` on the run directory held
+        for the life of the process: an OS lock that releases on death ... and not stored status".
+        This is the port half of that. `api.run` and `api.resume` hold it across everything durable
+        they do, so it is held for the life of the invocation; `api.clear` holds it around its
+        removals, so a `clear` aimed at a run live in another process refuses instead of taking
+        that run's checkouts away underneath it.
+
+        **`ConflictError`, naming the label, when somebody else has it.** The world already holds
+        something this operation would have to take, which is that class in `errors.py`'s own
+        words, and it is the class §3.10's two neighbouring refusals - a taken label, a line of
+        work something still has open - already answer with, so all three exit 4.
+
+        **Non-blocking, and that is a clause rather than an implementation note.** A caller must be
+        able to write `async with provider.hold(label):` and know that control either enters the
+        body or raises, without a wait it did not ask for: the thing being waited for is a whole
+        run, so an implementation that queued would look wedged where this one is merely refused.
+        Nothing here takes a timeout, because there is no waiting to bound.
+
+        **Exclusion is the clause; how it is released is not.** What every implementation owes is
+        that a second `hold` on one label fails while a first is open and succeeds once it is
+        closed. Releasing on the holder's *death* is what makes this honest for a real one - a
+        crashed run must not lock its own label out forever, and that is why §3.10 asks for an OS
+        lock and not a record - but it is unassertable from inside one process, so the contract
+        suite states it as a gap rather than pretending to test it.
+
+        **One verb for both callers, and no probe.** A separate "is it held?" would answer about a
+        moment already past by the time the caller acted on it, and would need a second member on
+        every implementation to say something the first one says by refusing. The run holds it for
+        its life and `clear` takes it briefly; neither needs a flag.
+
+        Not `async def`, because what a caller wants is the context manager and not a coroutine
+        that yields one: `async with provider.hold(label)` reads as the claim it is, where an
+        `async with await provider.hold(label)` would put the acquisition in the wrong half of the
+        line. Whatever waiting an implementation does happens inside `__aenter__`.
+
+        **The run's own directory is made if it is not there**, which is what lets `api.run` take
+        this before it writes anything. No caller is charged for that: `run` and `resume` provision
+        inside it immediately afterwards, and `clear`'s `remove` takes it away in the same
+        invocation. `label` is the whole of the address, because a run is what is being claimed -
+        `namespace` would be a lock per checkout, which nothing in AGL asks for and which would not
+        answer §3.10's question about the run.
         """
 
 

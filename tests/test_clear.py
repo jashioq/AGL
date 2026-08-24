@@ -36,21 +36,30 @@ it answers "merged" exactly when the run committed nothing - the branch decision
 unmerged and merged tests below are the same run with `main` moved between them, so a `clear` that
 asked about `base_sha` would fail the second and pass the first.
 
-## One test builds a real repository, and only because no fake can answer it
+## §3.10's two locks, and the two tests that are about them
 
-§3.10 ends with "It refuses while a run holds a lock", and the one mechanism in v1.1 that makes that
-sentence true is git's own `worktree lock`: `worktree prune` silently skips a locked entry even
-after its directory has gone, so the registration survives `remove`, and `git branch -D` then
-refuses a branch "used by worktree at ...". A `FakeRepository` has no such concept and cannot grow
-one honestly - the lock is a file inside `.git/worktrees/<name>/`, which is the half of a worktree a
-fake does not have at all. So the last test below puts `GitWorkspaceProvider` and `GitHistory` under
-`api.clear` and asks git itself, exactly as `tests/test_api.py` does for the two claims about a real
-ref, and it asserts the same clear succeeding once the lock is off, so that it is a test about a
-lock rather than about `clear` refusing.
+**AGL's own, which is 17.0's and which the fakes can answer.** §3.10 ends with "It refuses while a
+run holds a lock" and had nothing behind that sentence: no durable "this run is live" record, §3.11
+refusing stored status by name, §3.4's leases in-process. `WorkspaceProvider.hold` is the mechanism
+now - `api.run` and `api.resume` take it across everything durable they do and `api.clear` takes it
+around its removals - and the two tests that drive it issue the `clear` **from inside the
+workflow**, which is the only way one process can be two invocations. The fakes can answer that
+because their claim is a process-wide set; what they cannot answer is release-on-death, and
+`adapters/git/fake.py` says which half is which.
+
+**git's own `worktree lock`, which no fake can grow honestly.** `worktree prune` silently skips a
+locked entry even after its directory has gone, so the registration survives `remove`, and `git
+branch -D` then refuses a branch "used by worktree at ...". The lock is a file inside
+`.git/worktrees/<name>/`, which is the half of a worktree a `FakeRepository` does not have at all.
+So the last test below puts `GitWorkspaceProvider` and `GitHistory` under `api.clear` and asks git
+itself, exactly as `tests/test_api.py` does for the two claims about a real ref, and it asserts the
+same clear succeeding once the lock is off, so that it is a test about a lock rather than about
+`clear` refusing.
 """
 
 import subprocess
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, replace
 from importlib.metadata import EntryPoint
 from pathlib import Path
@@ -135,12 +144,36 @@ async def quiet(run: Run[NoParams]) -> None:
     """
 
 
+# What a `clear` issued from inside a live run raised, at module level because the workflow that
+# issues it has to be: `EntryPoint.load` imports a module and reads an attribute in it.
+refused: Final[list[ConflictError]] = []
+
+
+@workflow(name="clearing", version="1.0", params=NoParams)
+async def clearing(run: Run[NoParams]) -> None:
+    """Clears itself, from inside itself, which is the one way one process can be two invocations.
+
+    §3.10's sentence is about a `clear` in a second `agl` while a run is live in a first, and a
+    suite cannot start a second process and drive `api` in it. What it can do is call `api.clear`
+    at a moment when `api.run` is demonstrably still inside its own claim - which is exactly here,
+    since this function is what `api.run` awaits inside it - and assert that the claim is what
+    refused. The `except` is the test's, not AGL's: `api` catches nothing, so the refusal has to be
+    caught by whoever wants to look at it afterwards.
+    """
+    try:
+        await api.clear(run.services, PROJECT, LABEL)
+    except ConflictError as conflict:
+        refused.append(conflict)
+
+
 def _point(name: str, attribute: str) -> EntryPoint:
     """§3.3's `probe = "agl.workflows.probe:probe"`, pointed at this module instead."""
     return EntryPoint(name=name, value=f"{__name__}:{attribute}", group=registry.GROUP)
 
 
-POINTS: Final = (_point("nesting", "nesting"), _point("quiet", "quiet"))
+POINTS: Final = (
+    _point("nesting", "nesting"), _point("quiet", "quiet"), _point("clearing", "clearing")
+)
 
 
 def _writing(dispatched: list[str]) -> Script:
@@ -367,6 +400,29 @@ class _Recording(WorkspaceProvider):
         self._events.append(f"discard {_named(namespace)}")
         await self._provider.discard(label, namespace)
 
+    def hold(self, label: RunLabel) -> AbstractAsyncContextManager[None]:
+        """Both edges of §3.10's run claim, because both are ordering claims about `clear`.
+
+        Taking it late would leave the removals it exists to guard outside it, and letting go of it
+        early would leave the last of them outside; neither shows up in a list that only records
+        the acquisition. So the sequence below carries a `hold` and a `release`, and they are the
+        first and last lines of it.
+        """
+        return _noted(self._provider.hold(label), self._events)
+
+
+@asynccontextmanager
+async def _noted(
+    claim: AbstractAsyncContextManager[None], events: list[str]
+) -> AsyncIterator[None]:
+    """`claim`, with a line written down on the way in and on the way out."""
+    async with claim:
+        events.append("hold")
+        try:
+            yield
+        finally:
+            events.append("release")
+
 
 class _RecordingStore(Store):
     """The bundle's own store, with the two members `clear` uses written into the same list.
@@ -427,6 +483,9 @@ async def test_the_order_is_enumerate_then_the_checkouts_then_the_records(tmp_pa
         namespace rather than by a name, because `_base` is not a `Namespace` anything can build.
       * **The records go last**, because they are the enumeration this whole sequence was read out
         of. Removing them first strands every checkout they name.
+      * **§3.10's run claim is around all of it.** `hold` is first and `release` is last, so a
+        `clear` racing a live run refuses before it has taken anything and does not let go until
+        the last removal is done - the two halves of the sentence §3.10 had no mechanism for.
 
     The run is arranged as merged first, so the sequence below is the ordinary unforced path with
     the containment question answered "yes" - rather than the shorter one `-f` takes.
@@ -445,6 +504,7 @@ async def test_the_order_is_enumerate_then_the_checkouts_then_the_records(tmp_pa
     await api.clear(services, PROJECT, LABEL)
 
     assert events == [
+        "hold",
         "namespaces under []",
         "namespaces under ['T-01']",
         "namespaces under ['T-01', 'sub-b']",
@@ -455,7 +515,147 @@ async def test_the_order_is_enumerate_then_the_checkouts_then_the_records(tmp_pa
         "remove _base",
         "discard _base",
         "remove the records",
+        "release",
     ]
+
+
+# --- what the retained branch now costs, and the claim that makes `clear` refuse -----------------
+
+
+@pytest.mark.asyncio
+async def test_a_kept_branch_refuses_the_next_run_until_the_branch_goes(tmp_path: Path) -> None:
+    """§3.10's defect, closed end to end: the retained side of the asymmetry, and its real price.
+
+    "A retained branch costs a stale ref" is what the `git branch -d` decision is argued on, and
+    §3.10 then says that side is worse than that - a later `agl run ... -n auth --from main` takes
+    `open`'s attaching path and starts from the old tip with `--from` silently ignored, because
+    "`base` is consulted only when provisioning". The fix is `api.run` refusing the label outright,
+    and this is the whole loop: an unmerged clear keeps the branch, the next run under that label
+    is refused rather than misdirected, `-f` deletes it, and the label works again.
+
+    The last three lines are what make this a test about the branch. Without them a `run` that
+    refused every second invocation for any reason at all would pass, and the sentence being
+    asserted is that the *branch* is what took the label and that removing it gives it back.
+
+    **And what removes it is not `agl clear -f`**, which is worth pinning because both messages
+    used to say so: the same `clear` that keeps the branch removes the run's records, so a second
+    `agl clear auth -f` finds no run and answers `NotFoundError`. That refusal is asserted below,
+    beside the warning that no longer promises otherwise.
+    """
+    harness = _fakes(tmp_path)
+    await _start(harness)
+    branch = run_branch(LABEL)
+
+    kept = await _clear(harness)
+
+    assert kept is not None and branch in kept
+    assert f"-n {LABEL}" in kept, (
+        "the warning does not say that the label is now taken. §3.10 priced this branch as a stale "
+        "ref; what it actually costs is the next run under this label, and that is what an "
+        "operator has to be able to act on"
+    )
+    with pytest.raises(NotFoundError):
+        await _clear(harness, force=True)
+
+    with pytest.raises(ConflictError) as caught:
+        await _start(harness)
+    assert exit_code_for(caught.value) == 4
+    assert branch in str(caught.value)
+    assert await harness.services.store.read_record(SCOPE) is None, (
+        "the refused run wrote a record, so the operator now has two things to clear"
+    )
+
+    harness.repository.drop(branch)
+    await _start(harness, "quiet")
+    assert await harness.services.store.read_record(SCOPE) is not None, (
+        "the label was still refused once the branch it was taken by had gone, so the refusal "
+        "above was about something other than the branch"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_clear_aimed_at_a_live_run_refuses_and_takes_nothing(tmp_path: Path) -> None:
+    """§3.10's last sentence, which had no mechanism behind it until 17.0.
+
+    "It refuses while a run holds a lock" - and there was nothing to refuse with: no durable "this
+    run is live" record, §3.11 refusing stored status by name, and §3.4's leases in-process. So a
+    `clear` aimed at a run live in another `agl` took its checkouts away underneath it and said
+    nothing. What closes it is `WorkspaceProvider.hold`, taken by `api.run` across everything
+    durable it does and by `api.clear` around its removals.
+
+    The `clear` is issued from inside the workflow, which is the only way one process can be two
+    invocations - `api.run` is demonstrably still inside its own claim while it is awaiting this.
+    That is also why the fakes can answer it at all: their claim is a process-wide set, which is
+    the exclusion and not the release-on-death, and `adapters/git/fake.py` says which half is which.
+
+    Two assertions carry it. The refusal is `ConflictError` at exit 4, naming the run - not some
+    other failure the timing happened to produce - and everything the run held is **still there**
+    afterwards, which is the half §3.10 actually cares about: a `clear` that refused after removing
+    two of three checkouts would satisfy the first assertion and destroy the run.
+
+    The last two lines are what make it a test about the claim rather than about `clear` refusing:
+    the same `clear`, over the same run, succeeds once the run has ended and let go.
+    """
+    refused.clear()
+    harness = _fakes(tmp_path)
+
+    await _start(harness, "clearing")
+
+    assert len(refused) == 1, (
+        "a `clear` issued while the run was live did not refuse. §3.10's sentence is that it "
+        "refuses; without the claim it takes the run's checkouts away underneath it and says "
+        "nothing, which is the failure this test exists for"
+    )
+    assert exit_code_for(refused[0]) == 4
+    assert str(LABEL) in str(refused[0])
+    assert await harness.services.store.read_record(SCOPE) is not None, (
+        "the refused `clear` removed the live run's records anyway"
+    )
+    assert harness.repository.tip(run_branch(LABEL)) is not None, (
+        "the refused `clear` deleted the live run's line of work anyway"
+    )
+    assert base_worktree(_trees(tmp_path), LABEL).is_dir(), (
+        "the refused `clear` took the live run's own checkout away anyway - which is exactly the "
+        "sentence §3.10 wrote and had no mechanism for"
+    )
+
+    assert await _clear(harness) is None
+    assert await harness.services.store.read_record(SCOPE) is None
+
+
+@pytest.mark.asyncio
+async def test_a_clear_aimed_at_a_live_resume_refuses_too(tmp_path: Path) -> None:
+    """The same claim, taken by the other verb that walks a run.
+
+    `api.resume` is a run being walked again, so it is live in exactly the sense §3.10's sentence
+    is about - and it is the invocation the sentence matters most for, because a resume is what
+    somebody starts hours later on a run they have half forgotten, which is also when somebody else
+    is most likely to try to tidy it up. Without a claim here, `run` would hold one and `resume`
+    would not, and the same `clear` would be refused or destructive depending on which verb was
+    running.
+
+    The workflow is the one that clears itself, so a resume replays it: the record survived the
+    first refusal, `resume` reads it, loads `clearing` again, and awaits it inside its own claim.
+    `refused` therefore carries one entry per invocation, which is what the count below reads.
+    """
+    refused.clear()
+    harness = _fakes(tmp_path)
+    await _start(harness, "clearing")
+    assert len(refused) == 1, "the run's own claim is what the other test is about"
+
+    await api.resume(harness.services, PROJECT, LABEL, points=POINTS)
+
+    assert len(refused) == 2, (
+        "a `clear` issued while a resume was live did not refuse, so a resumed run has its "
+        "checkouts taken away underneath it where a fresh one does not"
+    )
+    assert exit_code_for(refused[1]) == 4
+    assert await harness.services.store.read_record(SCOPE) is not None, (
+        "the refused `clear` removed the resumed run's records anyway"
+    )
+    assert base_worktree(_trees(tmp_path), LABEL).is_dir(), (
+        "the refused `clear` took the resumed run's own checkout away anyway"
+    )
 
 
 # --- absence, which is the ordinary case ----------------------------------------------------------

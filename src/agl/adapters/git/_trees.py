@@ -1,8 +1,8 @@
-"""The trees root as a filesystem: the directories a run's checkouts sit in, and §3.9's lock.
+"""The trees root as a filesystem: the directories a run's checkouts sit in, and the two locks.
 
 `workspace.py` speaks git - what to add, what to commit, what to prune - and everything it says
-goes through `_runner.py`. Underneath that there is a directory tree to make and unmake and a lock
-file to hold, and none of it involves git at all: a `mkdir`, an `rmtree`, an `rmdir` and an
+goes through `_runner.py`. Underneath that there is a directory tree to make and unmake and two
+locks to hold, and none of it involves git at all: a `mkdir`, an `rmtree`, an `rmdir` and an
 `flock(2)`. That is this module, and the line between the two is that **nothing here runs a
 process and nothing there raises an `OSError`**. It is also where the one platform assumption
 lives, so that the module implementing the ports carries no `fcntl` import: `flock` makes this
@@ -12,7 +12,7 @@ Private by its leading underscore, like `_runner.py` and for the same reason: it
 plumbing rather than a capability anything could implement, and nothing outside `agl/adapters/git/`
 names it.
 
-## The lock, and why each half of it is what it is
+## The registry lock, and why each half of it is what it is
 
 `git worktree add` and `git worktree prune` mutate `.git/worktrees/` and nothing else AGL does
 touches it, so a mutex guards exactly those two calls (§3.9) and is let go of before anything
@@ -41,6 +41,36 @@ group that unwinds; the sleep is where a cancellation lands.
 **Never unlinked.** A lock file deleted on release is one a second process can still be holding by
 inode while a third creates a new file at the same path and takes that - two holders, both
 correct, of a mutex that has quietly become two.
+
+## The run lock, which is the same primitive answering a different question
+
+§3.10 says `clear` "refuses while a run holds a lock" and had no mechanism behind that sentence:
+there is no durable "this run is live" record, §3.11 refuses stored status by name, and the
+registry mutex above is a millisecond lock around two git subcommands rather than a liveness
+claim. The fix §3.10 asks for is "a `flock` on the run directory held for the life of the process:
+an OS lock that releases on death, the same shape §3.9 already uses, and not stored status", and
+`run_lock` is it.
+
+**On the run's own directory**, `.trees/<label>/`, which is the directory `made` creates, `tidied`
+takes away and the registry lock's file is a sibling of. Not a file inside it: a file would have to
+be either unlinked on release - the two-holders hazard above - or left behind in a directory whose
+whole purpose is to be `rmdir`-able once the last checkout in it has gone. The directory is the
+thing being claimed, and `flock(2)` takes a descriptor on one as readily as on a file.
+
+**Non-blocking, and that is the whole difference from `registry_lock`.** That one is a mutex held
+for as long as a checkout takes to write, so a waiter is waiting for work that is genuinely
+happening and polling is right. This one is held for the life of a whole run - hours - so a `clear`
+that waited for it would look wedged rather than refused, and the honest answer is `ConflictError`
+at once, naming the label. There is therefore no deadline here and nothing to sleep on.
+
+**It makes the directory it locks**, because `api.run` takes it before anything durable and a run
+that has provisioned nothing yet has no directory. That costs nothing anywhere it is taken: `run`
+and `resume` provision a checkout inside that very directory, and `clear` goes on to `remove`,
+whose `tidied` takes it away again in the same call.
+
+**Released by the OS if the holder dies**, which is what makes it a liveness claim at all - and the
+reason it is this primitive rather than a PID file or a recorded flag, for the argument the
+registry lock makes one paragraph up.
 """
 
 import asyncio
@@ -56,7 +86,7 @@ from typing import Final
 from agl.ports.errors import AglError, ConflictError, DeniedError, UpstreamUnavailable
 from agl.ports.tree_layout import TreesRoot
 
-__all__ = ["deleted", "made", "registry_lock", "tidied"]
+__all__ = ["deleted", "made", "registry_lock", "run_lock", "tidied"]
 
 
 # The lock file, in the trees root beside the runs. Nothing can collide with it: `ids.py` refuses
@@ -94,6 +124,35 @@ async def registry_lock(trees: TreesRoot) -> AsyncIterator[None]:
     handle = _opened(lock)
     try:
         await _held(handle, lock)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+    finally:
+        os.close(handle)
+
+
+@asynccontextmanager
+async def run_lock(directory: Path, label: str) -> AsyncIterator[None]:
+    """Claim this run for this process for as long as the caller holds it, or refuse at once.
+
+    §3.10's "it refuses while a run holds a lock", made mechanical; the module docstring argues
+    every half of it. The directory is made if it is not there, because the first caller takes this
+    before the run has provisioned anything, and it is deliberately **not** taken away again on the
+    way out - a directory unlinked while somebody may be about to lock it is the two-holders hazard
+    the registry lock is never unlinked to avoid, and `tidied` inside `remove` is what removes this
+    one for real.
+
+    `label` is carried only so that the refusal can name what an operator would type. Nothing here
+    parses it, and the exclusion is between two descriptors on one inode rather than between two
+    strings, so two trees roots over one repository are two locks - the consequence the registry
+    lock states in the same words. Unlocked explicitly and then closed, exactly as `registry_lock`
+    is, and for its reason.
+    """
+    made(directory)
+    handle = _opened_run(directory)
+    try:
+        _claimed(handle, directory, label)
         try:
             yield
         finally:
@@ -160,6 +219,46 @@ def _opened(lock: Path) -> int:
         return os.open(lock, os.O_CREAT | os.O_RDWR, _LOCK_MODE)
     except OSError as error:
         raise _translated(error, f"the worktree lock at {lock}") from error
+
+
+def _opened_run(directory: Path) -> int:
+    """A descriptor on the run's own directory, for `flock` to be taken on.
+
+    `O_RDONLY` because nothing is ever read through it and nothing may be written into it: what is
+    being locked is the directory itself, and a descriptor is only how `flock(2)` is addressed. It
+    is opened after `made`, so the one race left - somebody removing the directory between the two
+    - arrives as the `OSError` every other syscall here is translated the same way.
+    """
+    try:
+        return os.open(directory, os.O_RDONLY)
+    except OSError as error:
+        raise _translated(error, f"the run directory at {directory}") from error
+
+
+def _claimed(handle: int, directory: Path, label: str) -> None:
+    """Take the run lock or refuse it. One attempt, no deadline, nothing to wait for.
+
+    `ConflictError` because that is what this state is: something reachable is holding the run and
+    nothing here has been changed, which is exactly `errors.py`'s "the world already holds
+    something this operation would have to take or overwrite". It is also the class §3.10's two
+    neighbouring refusals already use, so a run and a `clear` that collide with a live invocation
+    both exit 4.
+
+    The message names the label rather than the directory first, because what an operator does next
+    is wait for that run or find the process running it, and the path is there for the case where
+    the holder is a process nobody remembers starting.
+    """
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        raise ConflictError(
+            f"the run {label!r} is already live: something else is holding {directory}, and one "
+            f"run cannot be walked twice at once. AGL takes that lock for the whole of an `agl "
+            f"run` or `agl resume` and lets go of it when that ends, so wait for the invocation "
+            f"that has it or stop it. Nothing here has been changed"
+        ) from None
+    except OSError as error:
+        raise _translated(error, f"the run directory at {directory}") from error
 
 
 async def _held(handle: int, lock: Path) -> None:

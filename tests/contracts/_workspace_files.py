@@ -38,6 +38,12 @@ LABEL: Final = RunLabel("contract")
 CHILD: Final = Namespace("T-01")
 SIBLING: Final = Namespace("T-02")
 
+# A second run, and only `_workspace_holding` needs one: §3.10's claim is per run, so telling that
+# apart from one lock over the whole provider takes two labels and nothing else. Deliberately not
+# used anywhere a checkout is provisioned - every other test in these suites works under `LABEL`,
+# and a second run's directories would be a second thing to tear down for no assertion.
+SECOND_LABEL: Final = RunLabel("contract-two")
+
 # One directory, and a name nobody's repository holds by accident. See the module docstring.
 _UNDER: Final = "agl-contract"
 

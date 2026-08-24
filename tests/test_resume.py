@@ -28,6 +28,7 @@ an operator is about to install the right version for.
 """
 
 from collections.abc import Mapping, Sequence
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, replace
 from datetime import timedelta
 from importlib.metadata import EntryPoint
@@ -515,6 +516,9 @@ class _Watching(WorkspaceProvider):
 
     async def discard(self, label: RunLabel, namespace: Namespace | None) -> None:
         await self._provider.discard(label, namespace)
+
+    def hold(self, label: RunLabel) -> AbstractAsyncContextManager[None]:
+        return self._provider.hold(label)
 
 
 @pytest.mark.asyncio

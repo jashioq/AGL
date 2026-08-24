@@ -16,7 +16,7 @@ of `run_branch`, `worktree_branch`, `base_worktree`, `worktree_dir` and `run_tre
 only thing this module adds is which pair a `namespace` of `None` means. A branch string
 assembled from parts here would be that collision, reintroduced one layer down.
 
-## The one contention point, and where it is
+## The two locks, and where each is
 
 `git worktree add` and `git worktree prune` mutate `.git/worktrees/`, and nothing else this module
 does touches it. So those two calls - and only those two - happen inside `_trees.registry_lock`,
@@ -24,6 +24,13 @@ does touches it. So those two calls - and only those two - happen inside `_trees
 long-running starts: never across a merge, a build, or a person deciding something. Every word of
 why it is that lock rather than a mutex or a PID file is argued in `_trees.py`, beside the code
 that takes it.
+
+`hold` is the other, and it is not taken anywhere in this module: it is handed to the caller, who
+holds it across a whole run. §3.10 asks for exactly that - "a `flock` on the run directory held for
+the life of the process" - so that a `clear` aimed at a run live in another process refuses rather
+than taking its checkouts away underneath it. The two are the same primitive over two different
+things and never contend: one is on a file in the trees root and one is on a run's own directory
+inside it, and a run holding the second takes and releases the first many times inside it.
 
 That module is the other half of this one, and the seam between them is that **nothing there runs
 a process and nothing here mutates the filesystem**. Making a run's directory, deleting a
@@ -77,12 +84,13 @@ says why it belongs here rather than there. One version assumption is worth stat
 for a path holding a newline, which the newline form documents itself as not being.
 """
 
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
 from agl.adapters.git._runner import GitRunner, unreadable
-from agl.adapters.git._trees import deleted, made, registry_lock, tidied
+from agl.adapters.git._trees import deleted, made, registry_lock, run_lock, tidied
 from agl.ports.errors import ConflictError, NotFoundError, UpstreamUnexpected
 from agl.ports.ids import Namespace, RunLabel
 from agl.ports.tree_layout import (
@@ -233,6 +241,21 @@ class GitWorkspaceProvider(WorkspaceProvider):
         except ConflictError:
             if await self._branch_exists(place.branch):
                 raise
+
+    def hold(self, label: RunLabel) -> AbstractAsyncContextManager[None]:
+        """§3.10's run lock: `flock(2)` on `.trees/<label>/`, non-blocking, released on death.
+
+        One line, because everything this member is made of is `_trees.py`'s - the directory comes
+        out of `tree_layout` and the lock out of the module that owns that directory's creation and
+        removal, and the seam between the two files holds: nothing there runs a process and nothing
+        here touches the filesystem.
+
+        Not `async def`, matching the port: this hands back the context manager rather than a
+        coroutine that yields one, so the acquisition happens where a reader sees it, inside the
+        `async with`. `str(label)` because `_trees.py` deals in paths and strings and has no
+        business validating a name it only ever puts in a sentence.
+        """
+        return run_lock(run_trees_dir(self._trees, label), str(label))
 
     def _place(self, label: RunLabel, namespace: Namespace | None) -> _Place:
         """Where this address lives and what it is called - the only place `None` means `_base`.
