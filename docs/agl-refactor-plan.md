@@ -409,11 +409,11 @@ code's spelling is quoted in §1.1 as history; it must not be built.
 Roles carrying `on_question` are closures over `Run`, built inside the workflow body, so `@workflow`
 takes a keyword-only `roles=` declaring them. That makes preflight two halves: `check_ready` per
 distinct model plus capability containment **at second zero**, and containment only, memoised, at
-every `run.step`. The second half is what makes the third check below real — the natural spelling for
-a handler role is `replace(module_role, on_question=h)`, so the role preflight saw is not the role
-that runs.
+every `run.step`. The second half is what makes the folded implications below real — the natural
+spelling for a handler role is `replace(module_role, on_question=h)`, so the role preflight saw is
+not the role that runs.
 
-**Three preflight checks, before the run starts:**
+**Two preflight checks, before the run starts:**
 
 1. **Provider availability.** Collect the providers named by the workflow's roles; for each, verify
    its harness is **installed, on `PATH`, and authenticated** (§3.2.1) via
@@ -431,8 +431,13 @@ then runs for an hour on that answer.
    against `runner.capabilities()`. This is the principled version of *"reviewers are never
    subagents because `AskUserQuestion` isn't available"* — a vendor limitation becomes a checked
    precondition instead of a structural workaround in a docstring.
-3. **Question handling.** A role declaring `on_question` must resolve to a provider with
-   `MID_RUN_QUESTIONS`; the workflow genuinely cannot run on a backend without it (§3.7).
+
+**Capability implications are folded in at declaration**, so they fall out of check 2 rather than
+needing a check each: `on_question` implies `MID_RUN_QUESTIONS` (§3.7 — the workflow genuinely cannot
+run on a backend that cannot ask), and `tools=` implies `TOOL_CALLING`. Folding is one-way and writes
+into `requires`, which is not a fingerprint term, so it moves no digest. Forgetting either would
+otherwise be silent and expensive — a role that cannot ask, with a handler nobody calls, is an agent
+approving itself.
 
 #### 3.2.1 Both adapters wrap an agent harness, not a completion API
 
@@ -556,10 +561,11 @@ moment. One operation, used consistently.
 **Pairing is the author's job, by convention and not enforcement.** A step without `commit=` should
 use a role declaring `Restriction.NO_VCS_WRITES`; otherwise an agent that commits during its own run
 will have that work discarded. The framework does not check the combination and does not inspect
-whether HEAD moved — it does the one predictable thing either way. This is the single place in AGL
-where a mistake destroys work rather than merely costing a re-run (one of three — see §3.4 and
-§3.6), so the SDK docs state it plainly,
-and an IDE lint plugin is the right place to catch it.
+whether HEAD moved — it does the one predictable thing either way. This is one of the three paths in
+AGL where a mistake destroys work rather than merely costing a re-run — the others being a failed
+`integrate()` not advancing the parent's `last_good` (§3.6) and a red gate discarding a hand-resolved
+conflict (§3.4). So the SDK docs state it plainly, and an IDE lint plugin is the right place to catch
+it.
 
 **The message is outside the fingerprint** (§3.6). It is cosmetic, so changing it must not invalidate
 a step and re-run an agent. Consequence: edit the message, replay, and the existing commit keeps the
@@ -744,7 +750,7 @@ One `adapters/git/` package; three narrow consumer-defined ports over a shared i
 |---|---|---|
 | `WorkspaceProvider` | 5 | "give me an isolated place to work from this base; take it back" |
 | `Integrator` | 5 | "land this workspace into the target, or tell me why not" |
-| `History` | 5 | "what changed, and is X already in Y" |
+| `History` | 7 | "what changed, and is X already in Y" |
 
 Git's merge state machine stays inside `adapters/git/integrator.py`. `FileStatus.code` becomes a
 `ChangeKind` enum.
@@ -1673,6 +1679,7 @@ the same shape §3.9 already uses, and not stored status.
 | `Activity(step=…)` / `Live(step=…)` components | Same reason. Re-invocation is the mechanism; components stay plain. |
 | An abstract `Display` port | Forcing a terminal and a websocket into one shape yields a worse terminal and a worse browser, and blocks running both at once. `run.terminal` now, `run.web` later, each with its own concepts. |
 | `--display` flag / display selection | Nothing to select: a workflow uses whichever surfaces it wants, and they coexist. |
+| A type-checked `show(**params)` | Measured at stage 19: `ParamSpec` cannot coexist with `show`'s `priority=` keyword (mypy refuses arguments after `ParamSpec.args`), and every workable variant moves `priority` — which the plan spells three ways in three places, across 92 call sites. `TypeIs` cannot narrow `outcome.conflict` either, since it needs a narrowable positional and §3.4 mandates that `retry()` moves the outcome in place. The two are one finding: the unnarrowed `Optional` costs nothing precisely *because* `**params` is unchecked. If it is ever worth closing, the shape is **priority moving onto `Screen[T]`** — where §3.7 already says it is the only place it means anything — which makes `show` `ParamSpec`-typeable and keeps the choice workflow-owned. |
 | Named priority levels | `MEDIUM`/`HIGH` would encode "agent question" and "merge conflict" — tickets' concepts. A plain int keeps the terminal comparing numbers. |
 | Change-detection for re-rendering | Would need observable wrappers or dirty flags inside workflow-owned data. Per-frame call-and-diff needs none, and the diff makes it cheap. |
 | Screen input preservation across preemption, and question timeouts | Known and accepted for v1.1. |
@@ -1789,9 +1796,9 @@ Two rules that matter more than the stage list:
    its container entry — nothing else breaks.
 7. **Every port has a contract suite** its real adapter and its fake both pass — *every* port,
    including ones that promise little. `Clock`'s suite is two assertions; the value is the parity,
-   not the coverage. **One honest exception:** six of the agent suite's eight clauses read a model's
-   conduct, so under the no-paid-tests rule they run against fakes only and the real adapters are
-   checked once in the manual QA pass. Everything a free instrument can reach — hermeticity, tool
+   not the coverage. **One honest exception:** seven of the agent suite's ten clauses read a
+   model's conduct and an eighth is deferred for its own reason, so eight run against fakes only and
+   the real adapters are checked once in the manual QA pass. Everything a free instrument can reach — hermeticity, tool
    registration, deny-rule enforcement, the composed request — is covered for real adapters too.
 8. **Every command runs end-to-end on fakes alone** — no network, no git.
 9. **Three runs, one repo, concurrently** — two `split` and one `fix`, different base refs —

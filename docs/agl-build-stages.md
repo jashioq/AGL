@@ -16,8 +16,8 @@ Each stage is one Claude Code session.
 - The **main agent never writes code.** It spawns one subagent per deliverable, in series, and
   verifies each before starting the next.
 - **Verification is mechanical, not by reading source**: run `scripts/check`, which gates on
-  `pytest`, `mypy --strict`, `ruff`, `lint-imports`, Codex-binary containment, module size, and an
-  import-free package root. The main agent reads *output*. Reading code is expensive in context and
+  `pytest`, `mypy --strict`, `ruff`, `lint-imports`, Codex-binary containment, module size (**code
+  lines, not docstrings**), an import-free package root, and a paid-endpoint guard — eight in all. The main agent reads *output*. Reading code is expensive in context and
   misses precisely the layer violations a linter catches.
 - Failures spawn a **fixer subagent** with the failing output and the relevant deliverable only.
 - **Stop rule: if a fixer fails twice on the same deliverable, halt and report.** Do not spiral.
@@ -482,13 +482,39 @@ means an abstraction was missing and should be reported, not patched around.
 
 ## Stage 19 — Hardening and target verification
 
+Two sessions. **19A works the backlog; 19B measures the targets against its result** — verifying
+against a state you are about to change measures the wrong thing.
+
+### 19A — Hardening *(complete)*
+
 | # | Deliverable |
 |---|---|
-| 19.0 | **The exit-code gap stage 18 found.** A `TaskGroup` whose child raises hands `api` a `BaseExceptionGroup`, which is not an `AglError`, so `exit_status` resolves it to 70 — an `UpstreamError` in a chunk exits 70 where the same failure in `fix` exits 6, and a `Stop` exits 70 rather than 7. Exit codes are public API (§3.1), and this is CLI-only: the harness splits the group, so no workflow test can see it. Implement §3.1's rule — unwrap a single-leaf group; agreeing leaves use their code; disagreeing leaves are 70, naming all of them — and test it **through the console script**, since that is the only place the divergence exists |
-| 19.1 | Three concurrent runs on one repo — two `split`, one `fix`, different base refs. **Fake agents, real git**: the claim is about worktree and ref concurrency, not model behaviour, so this spends nothing |
-| 19.2 | Assemble `docs/manual-qa.md` into a single ordered checklist — every harness assumption accumulated since stage 7, each with what was assumed, the command to check it, and what to do if it is wrong. **Not an automated suite**: this is the one pass a human runs against real models, at the end, once |
-| 19.3 | Verify all twelve measurable targets from plan Part 5, one assertion each |
-| 19.4 | Enforcement audit — plus stage 18's four R1 gaps, none of which forced a framework change but all of which cost the workflow author: **`testing.Agent` is synchronous** (`Callable[[AgentTask], Reply]`), so it cannot await a barrier and every concurrency test falls back to the raw per-provider `Script` — the one property `split` exists to demonstrate is untestable through the front door; **`agl.sdk` is short by `Namespace`, `Conflict` and `VerifierOutcome`**, the same tripwire firing a third and fourth time; **`FakeServices` has `with_terminal` and `with_store` but no `with_verifier`**, and the merge gate is the only hook a test has inside a landing; and **`show`'s `**params: object` type-checks nothing** at either call site, so a real wiring error surfaces inside the redraw loop. Also: `Run.integrate`'s and `Integration`'s own docstrings both model the `if outcome.conflicted:` bug §3.4 warns against. Plus stage 17's smaller R1 friction: a derived schema has no per-field `description`, so a fixed-value vocabulary must be written three times and §3.6 rule 6 makes the `__post_init__` copy invisible to the digest; `requires` is never cross-checked against a role's own `tools=`, closable free the way `MID_RUN_QUESTIONS` folds in behind `on_question`; `prompts/` needs an `__init__.py` to satisfy `test_tree.py`, which every future workflow hits identically; and no port reads a commit message back, so a message assertion spends the git package's internal vocabulary. `api.py` is now 877 lines and the largest module in `src/`, almost all docstring, which is further evidence the ceiling should count code lines. Add `pytest-timeout`: stage 15 found `test_leases.py:249` holds the suite's only unbounded await, and under any mutation making the lease coarser than per-target it **hangs rather than fails**, next to a neighbour promising "nothing here can hang and pass". `sdk/tools.py` is 584 lines, nearly 2× the convention; the split exists (schema derivation and payload conversion into a private module) but needs a new row in `ARCHITECTURE.md` §6, so it is a decision rather than a refactor. `sdk/_engine/journal.py` is now the largest module in `src/` at 828 lines and 12.1 adds to it; `ARCHITECTURE.md` names it as one module, so splitting it is a documented decision rather than a refactor. Plus three stage-10 items: two tests read the real entry-point group, so a stale editable install fails them and `scripts/check` does not refresh it; `[dependency-groups] dev` names neither `rich` nor `claude-agent-sdk` though `container.real()` builds `RichTerminal` eagerly, so a clean environment exits 6 at composition for a reason unrelated to the code; and **the 300-line ceiling should count code lines, not docstrings** — `sdk/params.py` landed at exactly 300 after five compression passes, which is the convention costing time rather than catching a module doing too much. Plus four stage-8.5 leftovers: `ports/store.py` says a suite is written against a port's docstring "and against nothing else," but `StoreContract` now carries three clauses sourced from §3.6 — the port needs the sentence; the OpenAI runner's `cwd=` AST sibling asserts presence only; `settings=None` sits outside the hermeticity set; and `Conversation.report` propagates a raising activity reporter on both fakes with the port silent. Every contract in place and firing; delete `workflows/noop/`. Three stage-5 items: import-linter's `exhaustive = True` would close contract 1's hole natively (needs a `containers` rewrite); `src/agl/ports/__init__.py` is guarded by nothing; and module size is drifting badly — 14 over 300 at stage 3, 47 by stage 7 — so this is an audit of a backlog, not a check. Two debts carried from stage 0: flip `unmatched_ignore_imports_alerting` back to the default on the vendor-containment and composition-root contracts, now that the permitted vendor imports actually exist (it was set to `none` because the expressions matched nothing in an empty tree, which means a stale ignore is currently never reported); and confirm the adapter-independence list covers every package, including `adapters/_process.py` if stage 8 sanctioned it |
+| 19.0 | The `BaseExceptionGroup` exit-code gap (§3.1), tested through the console script — the harness splits the group, so no workflow test can see the divergence |
+| 19.1 | Enforcement audit: every contract probed and firing; `unmatched_ignore_imports_alerting` back to default; adapter-independence list complete; `workflows/noop/` deleted |
+| 19.2 | The eight SDK surface gaps — the R1 record. Seven closed; `show`'s `**params` left open and moved to §3.11 with the measurement |
+| 19.3 | Prose that models the bug it warns about, and the wider sweep for docstrings asserting facts about other modules |
+| 19.4 | Test infrastructure: `pytest-timeout`, the entry-point staleness, the dev extras, the AST asymmetries |
+| 19.5 | The module-size ceiling counts **code lines, not docstrings** — 118 over by `wc -l` became 31 over, and all three proposed splits dissolved |
+
+**Found by the audit and recorded nowhere before it:** `ports/` importing anything at all was
+unenforced — `import pydantic` in `ports/clock.py` left all six contracts kept, because §2's most
+load-bearing rule is an allow list no import-linter contract type can express. It now lives in
+`tests/test_ports_stdlib_only.py`. Three stale ignore expressions had been hidden since stage 0.
+`rich` is present in a clean environment only as import-linter's transitive dependency — a genuine
+clean install gives three collection errors and zero tests, worse than the "exits 6" predicted.
+
+**Left open, reported:** the size counter is verifiable by nothing. Making it count docstrings again
+moved the claim from 31-of-222 to 118-of-222 and `scripts/check` still printed "All 8 gates passed" —
+both error directions invisible, and the under-counting one fail-open. Closing it means extracting
+the counter from a bash heredoc into an importable module.
+
+### 19B — Target verification
+
+| # | Deliverable |
+|---|---|
+| 19.6 | Three concurrent runs on one repo — two `split`, one `fix`, different base refs. **Fake agents, real git**: the claim is about worktree and ref concurrency, not model behaviour, so this spends nothing |
+| 19.7 | Assemble `docs/manual-qa.md` into a single ordered checklist — every harness assumption accumulated since stage 7, each with what was assumed, the command to check it, and what to do if it is wrong. **Not an automated suite**: this is the one pass a human runs against real models, at the end, once |
+| 19.8 | Verify all twelve measurable targets from plan Part 5, one assertion each |
 
 **Accept:** all twelve targets pass in CI.
 
@@ -509,5 +535,5 @@ everything after runs end to end.
 **Stage 18 is the R1 checkpoint.** `split` should be pure workflow code. A framework diff means the
 abstraction is wrong.
 
-**`workflows/noop/` is scaffolding** and is deleted at 19.4. It exists so stage 10 can prove wiring
+**`workflows/noop/` is scaffolding** and is deleted at 19.1. It exists so stage 10 can prove wiring
 before `Run.step` exists.
