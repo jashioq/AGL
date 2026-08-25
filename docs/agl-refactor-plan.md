@@ -335,6 +335,16 @@ AglError
 swallows a deliberate stop and reports exit 6 or 70 where the contract promises 7. That ordering is
 a stage-10 acceptance criterion, not a convention.
 
+**A `BaseExceptionGroup` needs its own clause, because structured concurrency is the shape this plan
+gives `split` and tickets.** A `TaskGroup` whose first child raises hands back a group, which is not
+an `AglError` — so without a rule an `UpstreamError` in a chunk exits 70 where the same failure in a
+sequential workflow exits 6, and a `Stop` exits 70 rather than 7. The rule: **unwrap a
+single-exception group and map its leaf; for several leaves that agree, use that code; for leaves
+that disagree, 70, naming all of them.** A run that failed several different ways is genuinely not
+attributable to one code, and `InternalError` is the honest answer rather than a guess. Found at
+stage 18, where the harness splits the group so no workflow test can see the divergence — it is
+CLI-only.
+
 `Stop` is the framework's terminal-end mechanism and carries no domain vocabulary. Workflows raise
 their own subclasses (`ReviewNotConverging`, `BacklogStalled`). Exit 7 lets a script tell "needs
 you" from "broken."
@@ -787,12 +797,12 @@ outcome = await run.integrate()
 while outcome.conflicted:                        # while, not if
     if await run.terminal.show(views.conflict,   # the view takes what it renders:
                                conflict=outcome.conflict,   # the port's type
-                               build=outcome.verified,      # None unless the gate went red
+                               build=outcome.verdict,       # None unless the gate went red
                                priority=10):
-        outcome = await outcome.retry()
+        await outcome.retry()                    # moves the outcome in place; returns None
     else:
         await outcome.abort()
-        break
+        break                                    # load-bearing — see below
 ```
 
 **Two things the obvious spelling gets wrong**, both found at stage 15 by running this for the first
@@ -801,6 +811,10 @@ anything gets a conflicted outcome back, the branch falls through, and the run h
 the target's step lock until it exits. And passing `outcome` itself forces the view's parameter to be
 annotated with the engine's own private type — so the view takes what it *renders*, which is the
 port's `Conflict` plus the verifier's output when the gate is what went red.
+
+**The `break` is load-bearing, not stylistic.** An aborted outcome deliberately keeps its `Conflict`,
+so a loop relying on the condition alone spins forever. `while` is what stops the lease leaking on a
+retry that fixed nothing; `break` is what stops an abort from never terminating.
 
 `retry()` with nothing pending is `InternalError`.
 
