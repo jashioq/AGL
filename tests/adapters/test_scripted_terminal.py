@@ -1,7 +1,7 @@
 """`ScriptedTerminal` against the input-capable `Terminal` contract, plus what a script adds to it.
 
 The first class is the port in full for a terminal that can take input: `TerminalContract` with its
-two fixtures overridden and nothing else touched - the same twelve tests `RichTerminal` runs, over
+two fixtures overridden and nothing else touched - the same eighteen tests `RichTerminal` runs, over
 the same slot and the same two queues, because this terminal reuses `queues.Screens` rather than
 reimplementing it. That is the price this deliverable set itself and it is the reason it is a
 surface change rather than a fixture: `headless.py` argues that a terminal outside that suite agrees

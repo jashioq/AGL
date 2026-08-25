@@ -88,9 +88,10 @@ class WorkspaceProvider(ABC):
     directory held for the life of the process", and the run directory is the one a provider makes
     when it provisions the run's own place and takes away when the last checkout in it is gone - so
     the only object in AGL that knows where it is, or that there is one, is this one. `Store` is
-    the other candidate and is refused explicitly: `ports/store.py` argues at length that "there is
-    no lock in this file, and its absence is the requirement", and
-    `tests/adapters/test_filesystem_no_lock.py` is a structural gate holding it to that.
+    the other candidate and is refused explicitly: `store.py` makes the absence of a lock that
+    port's own requirement - "no lock, no read-modify-write, nothing serialised that has no reason
+    to be serial" - `adapters/filesystem/store.py` carries the heading that says so in as many
+    words, and `tests/adapters/test_filesystem_no_lock.py` is a structural gate holding it to that.
     """
 
     @abstractmethod
@@ -282,9 +283,9 @@ class Workspace(ABC):
         missing "clean". §3.3 is explicit that moving the head alone is not enough, because
         untracked files survive it - and untracked leavings are the exact case this exists for: a
         reviewer's scratch file, an agent's cache directory, a half-written patch. Two methods would
-        make "restored but not cleaned" a state a caller could reach by forgetting one line, and the
-        one place in AGL where a mistake destroys work rather than costing a re-run is close enough
-        already.
+        make "restored but not cleaned" a state a caller could reach by forgetting one line, and
+        AGL already has three places where a mistake destroys work rather than costing a re-run,
+        which is enough.
 
         It is also the more portable shape. A snapshot-based implementation restores a snapshot,
         which is one operation that is already both halves; splitting it here would make that

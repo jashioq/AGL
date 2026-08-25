@@ -20,8 +20,9 @@ into it*. Nothing about digits, lines, or the order a renderer draws them in.
 
 ## It is not a mock, and the price of that is the whole of this module's design
 
-`headless.py` argues that "a terminal outside `tests/contracts/terminal.py` agrees with nothing",
-and that argument applies twice as hard to a terminal handed to strangers: an answering fake that
+A terminal outside `tests/contracts/terminal.py` is under no contract and so free to agree with
+nothing - `tests/instruments/keyboard.py` refuses a hand-rolled one in those words - and that
+argument applies twice as hard to a terminal handed to strangers: an answering fake that
 resolved `show` calls in its own order would let a workflow pass here and deadlock in front of a
 person. So this class runs `TerminalContract` - the input-capable half, the one `RichTerminal` runs
 - as a third subclass, in `tests/adapters/test_scripted_terminal.py`. That is why the queueing below

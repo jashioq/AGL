@@ -402,7 +402,10 @@ Async because answering may mean waiting on a person. One parameter because the 
 is a closure over its own `Run` and needs nothing else from the framework (§3.7)."""
 
 type ActivityReporter = Callable[[str], None]
-"""What an adapter calls to say what is happening right now. A string, passed through untouched."""
+"""What an adapter calls to say what is happening right now. A string, passed through untouched.
+
+It may raise, and if it does the run ends with that exception - see `AgentRunner.run`, which is
+where the rule is argued. An adapter neither catches it nor guards the call."""
 
 
 class AgentRunner(ABC):
@@ -490,4 +493,35 @@ class AgentRunner(ABC):
         property could not say which one it was speaking for. It is sync, it must not block, and it
         must not be relied on: an adapter with nothing to report calls it never, and activity is
         live-only and never persisted, so a step replayed from cache correctly has none at all.
+
+        **An `on_activity` that raises ends the run with its own exception.** The adapter does not
+        catch it, does not guard the call, and does not report the rest of the run without it: the
+        exception comes out of `run` in place of an `AgentOutcome`, exactly as a question handler's
+        does. Four arguments, and the counter-argument is real enough to state first.
+
+        Against: activity is decoration. It is live-only, it is never persisted, and a run that
+        dies because a progress line could not be drawn has thrown away real work for a cosmetic
+        reason. That is true, and it is why the rule is written down rather than assumed.
+
+        For, first: **nothing in AGL has a correct reporter that raises.** The framework's own is
+        one assignment - it holds the line and does nothing else - so a reporter that raises here is
+        a *broken* one, and the choice is not between losing a step and losing a progress line. It
+        is between a broken callback that says so and a broken callback that does not, for the
+        length of a run, on every step, in somebody else's code.
+
+        Second: **the port already answers this question once.** A `QuestionHandler` that raises
+        ends the run. Two caller-supplied callbacks with two different rules is a port that has to
+        be memorised rather than read.
+
+        Third: **§3.7's other live-only surface answers it the same way.** A `Terminal` view is
+        re-invoked every frame and is decoration by the same definition; what a view raises comes
+        straight out, and the reason given there is the reason here - swallowing it would be
+        deciding, quietly, in the direction of a screen that silently stops updating.
+
+        Fourth: **what is lost is bounded and recoverable.** A step that dies is a step the journal
+        never recorded, and everything before it replays on resume (§3.6). The run is not the work.
+
+        An adapter therefore writes no `try` around this call. That is not an omission a later
+        reader should tidy up, and it is asserted rather than promised: `tests/contracts/agent.py`
+        holds every implementation to it.
         """

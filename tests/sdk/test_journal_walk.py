@@ -422,7 +422,7 @@ async def test_advance_moves_the_chain_to_a_landed_head_and_the_next_restore_kee
     assert calls[0] == ("restore", landed), (
         f"the pre-run restore targeted {calls[0][1]!r}, a commit from before the landing: that is "
         f"`reset --hard` and `clean -fd` over every child that had landed, which §3.6 calls one of "
-        f"the two paths in this design that destroy work rather than costing a re-run"
+        f"the three paths in this design that destroy work rather than costing a re-run"
     )
     assert (raw.path / "src" / "landed.txt").read_bytes() == b"from T-01\n"
 

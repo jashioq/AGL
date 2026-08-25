@@ -30,6 +30,7 @@ import: a bundle with the Claude connector disabled builds while that module is 
 is only true if nothing on that path imports it.
 """
 
+import asyncio
 import sys
 from collections.abc import Callable, Mapping
 from dataclasses import fields, replace
@@ -42,6 +43,7 @@ import pytest
 from agl.adapters.claude_code import fake as claude_fake
 from agl.adapters.filesystem.memory_store import MemoryStore
 from agl.adapters.openai import fake as openai_fake
+from agl.adapters.shell.fake import FakeVerifier
 from agl.config import container
 from agl.config.schema import AgentSettings, ClaudeSettings, OpenAiSettings, Project, Settings
 from agl.ports.agent import (
@@ -66,7 +68,7 @@ from agl.ports.run import JsonValue
 from agl.ports.store import Store
 from agl.ports.terminal import Screen, Terminal
 from agl.ports.tree_layout import TreesRoot
-from agl.ports.verifier import Verifier
+from agl.ports.verifier import Verifier, VerifierOutcome
 from agl.ports.workspace import WorkspaceProvider
 from agl.sdk.testing import Call, Reply
 
@@ -100,6 +102,13 @@ _CONFIGURED: Final = {"build": str}
 # not be reachable from a path that has not been told to construct them.
 _CLAUDE_RUNNER: Final = "agl.adapters.claude_code.runner"
 _RICH_TERMINAL: Final = "agl.adapters.rich_terminal.terminal"
+
+_MEETS: Final = 5.0
+"""How long the one rendezvous in this file waits before calling a widening that did not land.
+
+Spent only on a failure: a barrier two coroutines can reach is reached in microseconds. Bounded
+because of what the failure looks like - an agent whose coroutine nothing ever runs never arrives,
+so this side of the rendezvous waits alone and the test hangs instead of failing."""
 
 LABEL: Final = RunLabel("acceptance")
 CHILD: Final = Namespace("T-01")
@@ -462,6 +471,24 @@ class _Recording(Terminal):
         raise AssertionError("nothing in this file enters a terminal")
 
 
+class _Watching(FakeVerifier):
+    """A gate that records the checkout it was pointed at, and otherwise is the fake it extends.
+
+    What `with_verifier` is for, in its smallest honest form: something distinguishable from what
+    `fakes()` built, which is `_Recording`'s reason one field over. `super().verify` rather than an
+    invented outcome, because that is the whole argument for the verb taking a `FakeVerifier` - an
+    instrument that replaced the fake outright could not be told what to answer.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.asked: list[Path] = []
+
+    async def verify(self, command: str, workdir: Path) -> VerifierOutcome:
+        self.asked.append(workdir)
+        return await super().verify(command, workdir)
+
+
 def test_with_terminal_moves_both_views_of_the_bundle_at_once(tmp_path: Path) -> None:
     """16.5's first carried finding, as the regression test for it.
 
@@ -502,6 +529,53 @@ def test_with_store_moves_both_views_of_the_bundle_at_once(tmp_path: Path) -> No
 
     assert substituted.services.store is wrapper
     assert substituted.store is wrapper
+
+
+def test_with_verifier_moves_both_views_of_the_bundle_at_once(tmp_path: Path) -> None:
+    """18.3's carried finding, and the third verb 19.2 added because of it.
+
+    The merge gate is the only hook a workflow's own test has *inside* a landing - the lease and the
+    target's step lock are held from `integrate()` to settlement, and `Verifier.verify` is the one
+    framework call in that window - so a test that wants to see two landings serialised, or to drive
+    §3.4's conflict loop off a red gate, substitutes a verifier. Until this verb existed the only
+    way was `replace(fakes, services=replace(fakes.services, verifier=...))`, which is exactly the
+    two-views defect the two tests above are about, written out by hand at every call site that
+    needed it. The second assertion is the one that spelling failed.
+
+    A `FakeVerifier` subclass rather than a bare `Verifier`, because that is the parameter's type
+    and the field's: `answers` is what the field is for, so an instrument extends the fake instead
+    of replacing it and stays scriptable while it is at it.
+    """
+    harness = container.fakes(TreesRoot(tmp_path / "trees"))
+    instrumented = _Watching()
+
+    substituted = harness.with_verifier(instrumented)
+
+    assert substituted.services.verifier is instrumented
+    assert substituted.verifier is instrumented
+    assert substituted.verifier is substituted.services.verifier
+
+
+@pytest.mark.asyncio
+async def test_a_substituted_verifier_is_the_one_a_landing_asks(tmp_path: Path) -> None:
+    """And the verb is not only two assignments: what the bundle runs on is the substitute.
+
+    `with_terminal`'s own claim, one field over - a substitution nothing downstream honoured would
+    satisfy the identity test above and change no behaviour at all. Asked through `services`, which
+    is what a `Run` receives, and answered by the subclass, which is what proves the instrument is
+    in the path a landing takes rather than merely in a field beside it.
+    """
+    harness = container.fakes(TreesRoot(tmp_path / "trees")).with_verifier(_Watching())
+    harness.verifier.answers(container.FAKE_BUILD, passed=False, status=3, output="2 failing")
+
+    outcome = await harness.services.verifier.verify(container.FAKE_BUILD, tmp_path)
+
+    assert isinstance(harness.verifier, _Watching) and harness.verifier.asked == [tmp_path]
+    assert (outcome.passed, outcome.status) == (False, 3), (
+        "a substituted gate that extends `FakeVerifier` still answers what the test scripted - "
+        "which is what taking the fake's own type rather than the port buys, and why an instrument "
+        "here does not have to invent a verdict of its own"
+    )
 
 
 def test_a_substitution_carries_every_other_object_across_by_identity(tmp_path: Path) -> None:
@@ -610,6 +684,40 @@ async def test_a_reply_is_performed_as_activity_then_questions_then_calls(tmp_pa
 
     assert seen == ["first", "second", "asked: anything to add?", "called: the payload"]
     assert (outcome.text, outcome.stop_reason) == ("done", StopReason.LIMIT)
+
+
+@pytest.mark.asyncio
+async def test_an_async_agent_is_awaited_and_a_sync_one_is_not(tmp_path: Path) -> None:
+    """19.2's widening: `Agent` is `(AgentTask) -> Reply | Awaitable[Reply]`, and both arms work.
+
+    **The awaitable arm is not a convenience.** A rendezvous - two agents that each wait until the
+    other has arrived - is the only arrangement that can distinguish real concurrency from a
+    framework that ran everything in order, and it is the property `split` exists to demonstrate. A
+    synchronous callable cannot await a barrier, and a threading primitive on one event loop
+    deadlocks rather than waits, so every concurrency test in stage 18 fell out of `agent=` and into
+    the raw per-provider escape hatch. The barrier below is the smallest form of that: two parties,
+    one of them the test, so the agent cannot return until this function has arrived.
+
+    **The synchronous arm has to survive it**, which is the second assertion and the reason the type
+    is a union rather than a coroutine: `sdk/testing.py` argues that `lambda task: Reply(...)` being
+    writable on one line is the whole point of a value-returning agent, and a widening that quietly
+    required an `async def` would have taken that back.
+    """
+    barrier = asyncio.Barrier(2)
+
+    async def waiting(task: AgentTask) -> Reply:
+        await barrier.wait()
+        return Reply(says="met the other one")
+
+    harness = container.fakes(TreesRoot(tmp_path / "trees"), agent=waiting)
+    dispatched = asyncio.create_task(harness.services.agents.run(_task(tmp_path, Claude.OPUS)))
+    async with asyncio.timeout(_MEETS):
+        await barrier.wait()
+        assert (await dispatched).text == "met the other one"
+
+    immediate = container.fakes(TreesRoot(tmp_path / "sync"), agent=lambda task: Reply(says="done"))
+
+    assert (await immediate.services.agents.run(_task(tmp_path, Claude.OPUS))).text == "done"
 
 
 @pytest.mark.asyncio

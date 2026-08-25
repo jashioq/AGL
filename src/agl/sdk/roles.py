@@ -69,20 +69,56 @@ avoid.
 **This is not `plan_only`'s case, though it looks like it.** `AgentTask.plan_only` refuses to be
 derived from `restrictions` because deriving would mean "deciding which restrictions *mean*
 planning, a policy this port has no standing to invent". Here there is no policy to invent: the plan
-states one implication, in one direction, naming one member. And it costs nothing downstream -
-`base_of` fingerprints instructions, model, restrictions and tools, and neither `requires` nor
-`on_question` is a term, so a derived member cannot move a digest.
+states this implication itself, in one direction, naming one member. And it costs nothing downstream
+- `base_of` fingerprints instructions, model, restrictions and tools, and neither `requires` nor
+`on_question` is a term, so a derived member cannot move a digest. (The section below folds a second
+member in on the same three arguments, and checks that last one again from scratch, because its
+trigger *is* a fingerprint term where `on_question` is not.)
 
 **The implication runs one way only.** `requires={MID_RUN_QUESTIONS}` with no handler is left
 exactly as written: it says the prompt may invite the agent to ask and the author wants a backend
 that can, which is over-declaring and is the author's business. Refusing it would be inventing the
 policy the paragraph above declines to invent.
 
+## `tools=` implies `TOOL_CALLING`, on the same three arguments and by the same three lines
+
+Stage 17 reported the second half of the paragraph above as missing: a role declaring `tools=` and
+forgetting `Capability.TOOL_CALLING` in `requires=` was accepted at the line that wrote it and died
+at preflight, which is nowhere near the line that needs fixing. 19.2 folded it in here, and the
+argument is the one above checked term by term rather than a new one.
+
+**A second declaration carries no information.** There is no role that offers a model a tool and
+does not need a backend able to call one - a `Tool` crosses the port on `AgentTask.tools`, an
+adapter renders it into whatever its backend calls tools, and a backend without the capability has
+nowhere to put it. So `tools=[report_findings], requires={Capability.TOOL_CALLING}` says the same
+thing twice and the second copy can only be forgotten. **What forgetting it costs** is the same
+shape as the other implication's, one step less silent: the reporting step's agent is never offered
+its tool, so it cannot fire it, so `Run.step` raises `RoleIncompleteError` at exit 6 - a real
+failure, forty minutes and several agents into a run, naming a prompt that was never the problem.
+Preflight exists to turn exactly that into a refusal at second zero.
+
+**The implication runs one way only**, identically: `requires={TOOL_CALLING}` with a role that
+declares no tools is left exactly as written. It says the author wants a backend that can call
+tools - perhaps the prompt tells the agent to use the harness's own - which is over-declaring and
+is the author's business, and refusing it would be inventing a policy this module has already twice
+declined to invent.
+
+**And it moves no digest, which had to be checked here rather than inherited.** The other
+implication is trivially free because neither `on_question` nor `requires` is a `base_of` term.
+Here the *trigger* is a term: `base_of` fingerprints instructions, model, restrictions and tools, so
+`tools` is hashed. That changes nothing about the conclusion and is worth stating rather than
+waving at. Adding a tool already moved the digest, before this fold existed and for its own reason
+(§3.6 rule 4: name, description and payload schema). What the fold writes is a member of `requires`,
+and `requires` is not a term - so the derived member contributes nothing on top of what the tool
+already contributed, and no role's digest is different today from what it was yesterday.
+`tests/sdk/test_roles.py` measures that against `base_of` rather than restating it.
+
 **What stage 16 is therefore written against.** One containment and no special case:
 `role.requires <= await runner.capabilities(role.model)`, per role, over the providers the
-workflow's roles name. One thing worth building into the message: when the missing member is
-`MID_RUN_QUESTIONS` and the author never typed it, say that `on_question` put it there - otherwise
-the reader goes looking for a line that is not in their file.
+workflow's roles name. One thing worth building into the message, now in two versions of itself:
+when the missing member is `MID_RUN_QUESTIONS` and the author never typed it, say that
+`on_question` put it there, and when it is `TOOL_CALLING`, say that `tools=` did - otherwise the
+reader goes looking for a line that is not in their file.
 
 ## `Role[P]`, and why the default is `None` rather than `object`
 
@@ -142,6 +178,13 @@ port either: no provider is asked what it can do and no capability is compared a
 Preflight is stage 16, and it needs a runner. (`prompt_file` is the one piece of I/O in this module
 and it is not an exception to that sentence: it reads the author's own source tree, at import, and
 `ports/` has no ABC for "open a file the author committed beside their workflow" - see below.)
+
+**The two implications above are not exceptions to it either**, and the distinction is worth
+keeping straight now that there are two of them: each *adds* a member to a set the author declared,
+and neither refuses anything, asks any provider anything, or compares a capability against
+anything. A fold is a declaration completing itself. A refusal would be a judgement about how a
+role is being used, which is what the `commit=` pairing would need and is what this module still
+makes none of.
 
 ## The enums a role is declared out of are re-exported here, and this is not a facade
 
@@ -262,6 +305,9 @@ class Role[P = None]:
     one reporting tool, refused below - two would make "the step's result" ambiguous where §3.3
     defines it as *that tool's payload*, singular.
 
+    Declaring any tool at all adds `Capability.TOOL_CALLING` to `requires`; the module docstring
+    argues that at length, including why a member derived from a fingerprint term is still not one.
+
     Declaration order is kept, and normalised to a tuple to match `AgentTask.tools`. The order is a
     fingerprint term - `base_of` reads the sequence as given and does not sort it, unlike a payload
     schema's `required` - so moving a tool up a line re-runs the step. That is §3.6 rule 4 as
@@ -276,8 +322,11 @@ class Role[P = None]:
     cannot work dies at second zero rather than forty minutes in at the review step. Nothing here
     checks it - this module reaches no port and asks no provider anything.
 
-    Declaring `on_question` adds `MID_RUN_QUESTIONS` to it; the module docstring argues that at
-    length. An `AbstractSet` for `restrictions`' reason, normalised to a `frozenset`."""
+    Two members are folded in rather than restated: declaring `on_question` adds
+    `MID_RUN_QUESTIONS`, and declaring any `tools` adds `TOOL_CALLING`. The module docstring argues
+    both at length, and both run one way only - naming either member without the thing that implies
+    it is left exactly as written. An `AbstractSet` for `restrictions`' reason, normalised to a
+    `frozenset`."""
 
     on_question: QuestionHandler | None = None
     """What answers the agent when it stops mid-run to ask something. `None` when it never asks.
@@ -322,6 +371,8 @@ class Role[P = None]:
         requires = frozenset(self.requires)
         if self.on_question is not None:
             requires |= {Capability.MID_RUN_QUESTIONS}
+        if tools:
+            requires |= {Capability.TOOL_CALLING}
         object.__setattr__(self, "restrictions", frozenset(self.restrictions))
         object.__setattr__(self, "tools", tools)
         object.__setattr__(self, "requires", requires)

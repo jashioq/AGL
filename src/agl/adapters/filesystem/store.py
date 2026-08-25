@@ -6,8 +6,9 @@ scope and the step that produced it. Where exactly those sit is not this module'
 deliberately does not know: **every path below comes out of `home_layout`**, which is §1.10's rule
 - the charge against the previous implementation being that a filesystem-shaped helper decided
 where the `Store` port kept its things - and the practical form of it here is that not one segment
-of the layout is spelled in this file. Not one string literal below is a segment of it - `steps`,
-`worktrees`, `run.json` and `.json` appear in this codebase in `home_layout` and, as prose, here.
+of the layout is spelled in this file. Not one string literal below is a segment of it - across
+`src/`, `steps`, `worktrees`, `run.json` and `.json` are spelled in `home_layout` and nowhere else,
+and the one occurrence in this file is prose naming the literal it refuses to write.
 That is what leaves the layout changeable in the one module that owns it.
 
 ## The whole of the atomicity guarantee is three lines

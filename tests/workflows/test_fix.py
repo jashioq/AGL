@@ -14,10 +14,13 @@ them:
 * **`Findings.high()`**, because §3.3's `if findings.high():` is the workflow's only branch and this
   is the comparison behind it. A filter that answered `()` for a review that found something high
   would skip the repair pass, report success, and raise nothing.
-* **The severity vocabulary reaching the model as a rejection**, because a derived schema has no
-  per-field `description` and `Finding.__post_init__` is the only thing that can enforce a fixed set
-  of strings. The mechanism - `__post_init__` raising, `sdk/tools.py` catching it, the text going
-  back into the same conversation - is the one this package leans on and does not own.
+* **The severity vocabulary, in both directions.** Forwards: it reaches the model as `severity`'s
+  own `description` in the derived schema, interpolated from `SEVERITIES`, which is 19.2's
+  `describe()` and is what stopped this package paying §3.6 rule 6's price for checking a fixed set
+  of strings - a description is schema, and schema is fingerprint. Backwards: a severity outside the
+  set reaches the model as a *rejection*, because `Finding.__post_init__` is still the only thing
+  that can refuse one. That mechanism - `__post_init__` raising, `sdk/tools.py` catching it, the
+  text going back into the same conversation - is the one this package leans on and does not own.
 * **The pairing between `reviewer` and the step that runs it**, which §3.3 calls the author's job
   and which nothing in the framework checks. Half of it is a role declaration; the other half is the
   missing `commit=` on the `review` call, and that half is asserted in the second half of this file,
@@ -222,10 +225,10 @@ def test_the_reviewer_is_declared_read_only_beside_a_step_that_will_wipe_its_wor
     the checkout and deletes everything not in it when the step ends - whatever the agent did. The
     role that gets run there has to be one that was never going to commit.
 
-    Nothing in the framework checks this combination, and §3.3 names it as the one place in AGL
-    where a mistake destroys work rather than costing a re-run. The other half - that the call in
-    `__init__.py` really does omit `commit=` - is 17.3's, because seeing it means running the
-    workflow.
+    Nothing in the framework checks this combination, and §3.3 names it as one of three places in
+    AGL where a mistake destroys work rather than merely costing a re-run. The other half - that the
+    call in `__init__.py` really does omit `commit=` - is 17.3's, because seeing it means running
+    the workflow.
     """
     assert Restriction.NO_VCS_WRITES in reviewer.restrictions
     assert Restriction.NO_FILE_WRITES in reviewer.restrictions
@@ -331,11 +334,62 @@ def test_the_workflow_declares_its_params_its_version_and_both_roles() -> None:
 
 
 def test_the_severity_the_workflow_branches_on_is_one_of_the_ones_it_asks_for() -> None:
-    """A one-line consistency check between the constant `high()` compares against and the list the
-    tool's description hands the model. They are two spellings of one decision and they are on one
-    screen, but the failure if they part is a review that can never produce a repair."""
+    """A consistency check between the constant `high()` compares against and what the model is
+    actually told, which since 19.2 is `severity`'s own `description` in the derived schema rather
+    than a sentence inside the tool's. They are two spellings of one decision and they are on one
+    screen, but the failure if they part is a review that can never produce a repair.
+
+    Read out of `payload_schema` and not off the source, because the schema is what crosses to the
+    vendor and what `base_of` hashes: a `describe()` that never reached the derivation would leave
+    this module's vocabulary where it was before, named nowhere the model or the digest can see it.
+    """
     assert HIGH in SEVERITIES
-    assert HIGH in report_findings.description
+    said = _severity_description()
+    for severity in SEVERITIES:
+        assert severity in said, (
+            f"the model is never told about the severity {severity!r}, which `Finding."
+            f"__post_init__` will refuse it for not using. The vocabulary is one tuple read twice "
+            f"- once into this description and once into the check - so a member missing here is "
+            f"the interpolation having come apart"
+        )
+
+
+def test_the_vocabulary_reaching_the_model_is_a_term_in_the_reviewers_fingerprint() -> None:
+    """Stage 17's finding, closed, measured against this workflow rather than against the SDK.
+
+    §3.6 rule 6 says a `__post_init__` is invisible to a derived schema, so `fix` used to record
+    that editing `SEVERITIES` changed what converts while moving no digest - an entry written under
+    the old vocabulary could stop converting with its fingerprint still matching, surfacing as
+    `InternalError` out of `ReportingTool.read` on a resume. Interpolating the tuple into
+    `severity`'s `describe()` puts it in the schema, and the schema is a term of `base_of`, so the
+    stale entry is discarded instead. `tests/sdk/test_tools.py` measures the mechanism; this
+    measures that `fix`'s own reviewer is wired into it - that the words are in the schema this
+    role's tool carries, which is the object the fingerprint is computed over.
+    """
+    assert ", ".join(SEVERITIES) in _severity_description(), (
+        "the severity vocabulary is not in `fix`'s derived schema verbatim, so editing "
+        "`SEVERITIES` would move no digest and this workflow would be paying rule 6's price again"
+    )
+    declared = next(tool for tool in reviewer.tools if tool.name == report_findings.name)
+    assert dict(declared.payload_schema) == dict(report_findings.payload_schema), (
+        "the reviewer role does not carry this module's declaration, so the schema asserted above "
+        "is not the one `base_of` would hash for the review step"
+    )
+
+
+def _severity_description() -> str:
+    """What the model is told about `Finding.severity`, read out of the derived schema.
+
+    Three lookups deep because the payload is `Findings(findings=tuple[Finding, ...])`, and each
+    step is asserted rather than assumed: a schema that stopped nesting would otherwise make the
+    two tests above pass by finding nothing to disagree with.
+    """
+    schema: object = dict(report_findings.payload_schema)
+    for key in ("properties", "findings", "items", "properties", "severity", "description"):
+        assert isinstance(schema, dict), f"the derived schema has no {key!r} to read"
+        schema = schema[key]
+    assert isinstance(schema, str)
+    return schema
 
 
 # --- the board -------------------------------------------------------------------------------
@@ -562,10 +616,9 @@ AT_IMPLEMENT: Final = {**SEED, CHANGED: IMPLEMENTED}
 AT_REPAIR: Final = {**SEED, CHANGED: REPAIRED}
 """The tree at each of the run's two commits, written out rather than read back off the run.
 
-They are what `_chain` recomputes the commit ids from, and writing them here is what makes that
-recomputation an assertion rather than a tautology: a run that committed something else produces a
-different id from these, and a run that committed the same thing under a different message does
-too."""
+Writing them here is what makes an assertion about a checkout an assertion rather than a tautology:
+a run that left something else on disk fails against these, and comparing what the run produced
+against what the run produced would fail against nothing."""
 
 HIGH_RUN: Final = ("implement", "review", "repair")
 CLEAN_RUN: Final = ("implement", "review")
@@ -632,9 +685,10 @@ def _agent(seen: list[testing.AgentTask], *, found: Sequence[Finding]) -> testin
     `test_the_implementers_question_reaches_this_workflows_own_screen` drives on purpose with an
     agent of its own. An agent used to assert anything else has to be explicit and has to not ask.
 
-    `seen` is the instrument, and `config/container.py` says outright that this is where a test's
-    knowledge belongs: there is no recorder on any agent fake, because "what a test wants to know is
-    already held by the tool handlers and question handler it supplied itself". Every claim below
+    `seen` is the instrument, and the agent fakes say outright that this is where a test's
+    knowledge belongs: there is no recorder on either of them, because "what a test wants to know is
+    already held by the tool handlers and question handler it supplied itself"
+    (`adapters/claude_code/fake.py`, and `adapters/openai/fake.py` word for word). Every claim below
     about *what an agent was asked* - the composed prompt, the model, the provider, how many times
     it was paid for - is read out of this list.
     """
@@ -683,26 +737,52 @@ def _files(where: Path) -> dict[str, bytes]:
     }
 
 
-def _chain(harness: testing.Harness, base: str, *commits: tuple[Mapping[str, bytes], str]) -> str:
-    """The head `commits` compose, one after another from `base` - trees and messages included.
+async def _committed(harness: testing.Harness) -> tuple[str, frozenset[str]]:
+    """What this run's branch is called at its tip, and every file that differs from its base.
 
-    **This is how a commit message is asserted, and it is a recomputation because nothing reads one
-    back.** `FakeRepository` records a state under an id that is the digest of its tree, its parents
-    and its message, and `record` is idempotent - "recording one twice is recording it once" - so
-    building the chain this run was supposed to have made and comparing it against `tip` asserts
-    every term of every commit at once: what was in it, what it was made on top of, and what it was
-    called. Neither git port reads a message back (`tests/contracts/workspace.py` records that as
-    something its suite deliberately cannot assert), so the alternative to this was asserting that
-    *some* commit happened, which is what a missing `commit=` would also produce.
+    **This is how a commit message is asserted, and since 19.2 it is a read rather than a
+    recomputation.** Stage 17 recorded the finding here: a workflow author's whole step-ending
+    decision is `commit=` (§3.3), §3.11 keeps the message the workflow's own domain vocabulary
+    rather than something AGL generates, and no port would say a word about it - so this file
+    built the chain the run was *supposed* to have made, out of `FakeRepository.record`'s
+    content-addressed ids, and compared that against the tip. It worked, and it was a fake's
+    internal vocabulary being spent on a question the ports did not answer.
 
-    Reported as a finding: a workflow author whose whole step-ending decision is a commit message
-    has no way to read one, and this recomputation is a fake's internal vocabulary being spent on a
-    question the ports do not answer.
+    `History.message` answers it now, and both halves below go through the port: the message the
+    tip carries, and `changed_files` between the base and the tip, which is what the run committed
+    net of everything it wiped. Two `fix` runs read these - one that repaired and one that did not
+    - and between them they pin all three `commit=` decisions: each ending step's own message on a
+    tip, and `review`'s absent one as a reviewer's scratch file that is in no commit at all.
+
+    **What the recomputation asserted and this does not** is the *number* of links, which the old
+    chain got for free because a fake addresses a state by the digest of its parents. No port
+    counts commits or walks parents - §3.10 forbids the listing that would be the general form of
+    it - and nothing is lost here, because the only extra link `fix` could grow is a `review` that
+    committed, and a `review` that committed puts `SCRATCH` in the tree that `changed_files`
+    reports. The claim is made on content instead of on shape, through a port, for both runs.
+
+    **`harness.fakes.services.history` is the reach, and it is a smaller one than what it
+    replaces.** `FakeServices` exposes the repository and not the three fakes over it - "all three
+    are views of `repository`, and asserting through the repository is asserting about all of them
+    at once" - so a git question asked from a workflow's own test either goes through that fake's
+    internal vocabulary, which is what the finding above was about, or through the port on the
+    bundle. This is the second, and every member it calls is one `ports/history.py` declares.
+
+    Paths and not `ChangeKind`, because naming the kind would mean a workflow's test importing from
+    `agl.ports.history` - the tripwire `sdk/__init__.py` records, and one this test has no need to
+    fire: which files differ is the whole of the claim, and whether the implementer *added* a file
+    or *modified* one is a fact about `SEED` rather than about a `commit=`.
     """
-    head = base
-    for tree, message in commits:
-        head = harness.fakes.repository.record(tree, (head,), message)
-    return head
+    record = await _record(harness)
+    branch = _text(record, "branch")
+    history = harness.fakes.services.history
+    return (
+        await history.message(branch),
+        frozenset(
+            change.path
+            for change in await history.changed_files(_text(record, "base_sha"), branch)
+        ),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -824,16 +904,19 @@ async def test_the_run_commits_twice_under_its_own_messages_and_wipes_the_review
 ) -> None:
     """The three `commit=` decisions, which are the only difference between the three step calls.
 
-    §3.3's table, asserted as one chain: `implement` commits what it left dirty under `implement
+    §3.3's table, read back off the branch: `implement` commits what it left dirty under `implement
     fix`, `review` commits nothing and has its checkout restored, and `repair` commits on top under
-    `address review findings`. `_chain` recomputes the two ids from the trees and the messages the
-    workflow was supposed to have used, so every term is in the comparison - a missing `commit=`
-    breaks the chain by leaving a link out, an extra one on `review` breaks it by putting the
-    reviewer's scratch file into a tree and a third link into the parentage, and a reworded message
-    breaks it while the trees still match.
+    `address review findings`. What is asserted is the message the tip carries and every file that
+    differs from the base - a reworded `commit=` moves the first, a `review` that gained one puts
+    the reviewer's scratch file into the second, and a step that lost one shows up in both.
 
-    The second assertion is the wipe seen from the other side, and it is the half §3.3 calls "the
-    single place in AGL where a mistake destroys work rather than costing a re-run". The reviewer
+    The `implement fix` half is the sibling test below, on a run whose review found nothing high:
+    there the implement commit *is* the tip, so its message is readable through the same member.
+    Between the two, every message this workflow writes is asserted as a message rather than as a
+    consequence of one.
+
+    The second assertion is the wipe seen from the other side, and it is the half where "a mistake
+    destroys work rather than merely costing a re-run" (§3.3, one of three). The reviewer
     really did write into the checkout; what is on disk afterwards is the repaired tree and nothing
     else, because the ending of a step that passed no `commit=` restores the head *and* removes
     everything that was not in it.
@@ -843,22 +926,53 @@ async def test_the_run_commits_twice_under_its_own_messages_and_wipes_the_review
 
     await harness.run(fix, "-r", REQUEST)
 
-    record = await _record(harness)
-    expected = _chain(
-        harness,
-        _text(record, "base_sha"),
-        (AT_IMPLEMENT, "implement fix"),
-        (AT_REPAIR, "address review findings"),
+    called, changed = await _committed(harness)
+    assert called == "address review findings", (
+        f"the tip of this run's branch is called {called!r}. The last step to end with a `commit=` "
+        f"is `repair`, and what it passes is the sentence this workflow calls that work - a "
+        f"different one here means a step lost its `commit=` or the wording moved"
     )
-    assert harness.fakes.repository.tip(_text(record, "branch")) == expected, (
-        "the branch this run left is not base + `implement fix` + `address review findings`. A "
-        "step that lost its `commit=` leaves a link out of that chain; a `review` that gained one "
-        "puts a third link in and the reviewer's scratch file into a tree"
+    assert changed == frozenset({CHANGED}), (
+        f"the run's branch differs from its base in {sorted(changed)}. It should be the one file "
+        f"the implementer added and the repairer rewrote, and nothing else: {SCRATCH!r} appearing "
+        f"here is a `review` step that committed, which is the `commit=` §3.3 says it must not have"
     )
     assert _files(seen[0].workspace) == AT_REPAIR, (
         f"the checkout holds {sorted(_files(seen[0].workspace))}. The reviewer wrote {SCRATCH!r} "
         f"into it, and the `review` step passes no `commit=` - so the framework restores the "
         f"checkout and removes everything that was not in it when that step ends"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_clean_review_leaves_the_implement_commit_as_the_branch(tmp_path: Path) -> None:
+    """The other side of `if findings.high():`, and where `implement fix` is readable as a message.
+
+    A review that found nothing high runs no repair step, so the last thing to have ended with a
+    `commit=` is `implement` and the tip is its commit. That makes this the run where the first of
+    the three `commit=` decisions is a message somebody can read back rather than a link in a chain
+    somebody recomputed - and it is the same member reading it, one step earlier in the workflow.
+
+    The reviewer still wrote its scratch file and the review step still passed no `commit=`, so the
+    same absence is asserted here as in the repaired run: whatever the branch differs from its base
+    in, it is not the reviewer's leavings.
+    """
+    seen: list[testing.AgentTask] = []
+    harness = testing.harness(tmp_path, agent=_agent(seen, found=(WORTH_KNOWING,)), files=SEED)
+
+    await harness.run(fix, "-r", REQUEST)
+
+    called, changed = await _committed(harness)
+    assert called == "implement fix", (
+        f"the tip of this run's branch is called {called!r}. Nothing was high, so no repair step "
+        f"ran, so the branch is where `implement` left it - under the sentence `fix` calls that "
+        f"work"
+    )
+    assert changed == frozenset({CHANGED})
+    assert _files(seen[0].workspace) == AT_IMPLEMENT, (
+        f"the checkout holds {sorted(_files(seen[0].workspace))}. The reviewer wrote {SCRATCH!r} "
+        f"into it and the `review` step passes no `commit=`, so the framework restores the "
+        f"checkout to the implement commit and removes everything that was not in it"
     )
 
 

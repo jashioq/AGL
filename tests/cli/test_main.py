@@ -25,6 +25,20 @@ cannot fail on a swap: `exit_status` reads 7 out of the one table whichever clau
 differs is the rendering - a deliberate end goes to stdout with no prefix, a failure to stderr with
 one - so the behavioural pin is built on that, and the structural pin walks `main`'s own `except`
 clauses in source order.
+
+**§3.1's group clause is tested here because here is the only place it is visible.** A `TaskGroup`
+whose child raises hands `api` back an `ExceptionGroup`, which is not an `AglError` - and
+`agl.testing`'s harness splits that group before a workflow-level test can see it, so the rule is
+CLI-only and the divergence it repairs went unnoticed for eighteen stages. The workflows below that
+open a `TaskGroup` are the smallest thing that reaches `main`'s handler holding a real one, and
+every assertion about them is made through `main.main`: the real parser, the real dispatch, the real
+arms. `tests/cli/test_exit_codes.py` asserts the same rule on constructed groups, where the leaves
+are the same objects and nothing has to be run to make one.
+
+**The group tests assert parity rather than numbers wherever there is a parity to assert.** The
+whole of §3.1's first clause is that a failure inside a chunk costs what the identical failure costs
+in a sequential workflow, so the test that says so runs both and compares them - a pair of tests
+each pinning 6 would go on passing in a world where one of the two had quietly become 70.
 """
 
 import ast
@@ -39,7 +53,12 @@ import pytest
 
 from agl.cli import main
 from agl.config import container, registry, sources
-from agl.ports.errors import NotFoundError
+from agl.ports.errors import (
+    ConflictError,
+    NotFoundError,
+    UpstreamUnavailable,
+    UpstreamUnexpected,
+)
 from agl.ports.home_layout import RunScope
 from agl.ports.ids import ProjectName, RunLabel
 from agl.ports.tree_layout import TreesRoot
@@ -67,6 +86,16 @@ class ReviewNotConverging(Stop):
     """§3.1's own example of a workflow's reason to stop, subclassed as a workflow would."""
 
 
+# What the workflows below raise, so that the same failure can be raised sequentially and inside a
+# `TaskGroup` and the two outcomes compared word for word. Each is a sentence an adapter would have
+# written where the facts were, because half of what these tests read is the message beside a code.
+NO_CONVERGENCE: Final = "two rounds and no convergence"
+UNREACHABLE: Final = "the agent backend could not be reached"
+UNPARSEABLE: Final = "the agent finished with no reporting-tool payload"
+TAKEN: Final = "another run holds the integration lease on agl/auth"
+UNTRANSLATED: Final = "a chunk's adapter forgot to translate this"
+
+
 # What each workflow was handed, at module level because the workflows have to be: `EntryPoint.load`
 # imports a module and reads an attribute in it, and sees no local of this module's functions.
 handed: Final[list[Run[NoParams]]] = []
@@ -90,6 +119,81 @@ async def exploding(run: Run[NoParams]) -> None:
     raise ValueError("an adapter forgot to translate this")
 
 
+async def _chunk(error: Exception) -> None:
+    """One `TaskGroup` child, which raises before it awaits anything. **The absence is the point.**
+
+    A child that awaits first is a child the group can cancel once a sibling has failed, and a
+    cancelled task contributes no leaf - so a workflow written that way would hand back a group of
+    one however many of its chunks were doomed, and every test below about several leaves would be
+    testing a single-leaf group instead. Raising on the first step puts both failures in the ready
+    queue before either task's done-callback runs, which is what makes the group hold both.
+    """
+    raise error
+
+
+@workflow(name="failing", version="0.1", params=NoParams)
+async def failing(run: Run[NoParams]) -> None:
+    """`fix`'s shape: one failure, raised sequentially. The half of the parity with no group."""
+    raise UpstreamUnavailable(UNREACHABLE)
+
+
+@workflow(name="chunked", version="0.1", params=NoParams)
+async def chunked(run: Run[NoParams]) -> None:
+    """`split`'s shape: the same failure as `failing`, raised inside one child of a `TaskGroup`."""
+    async with asyncio.TaskGroup() as chunks:
+        chunks.create_task(_chunk(UpstreamUnavailable(UNREACHABLE)))
+
+
+@workflow(name="nested", version="0.1", params=NoParams)
+async def nested(run: Run[NoParams]) -> None:
+    """A chunk that opens a `TaskGroup` of its own, so the same leaf arrives one group deeper."""
+
+    async def deeper() -> None:
+        async with asyncio.TaskGroup() as inner:
+            inner.create_task(_chunk(UpstreamUnavailable(UNREACHABLE)))
+
+    async with asyncio.TaskGroup() as chunks:
+        chunks.create_task(deeper())
+
+
+@workflow(name="agreeing", version="0.1", params=NoParams)
+async def agreeing(run: Run[NoParams]) -> None:
+    """Two chunks, two classes, one code: "agree" as §3.1 means it rather than class equality."""
+    async with asyncio.TaskGroup() as chunks:
+        chunks.create_task(_chunk(UpstreamUnavailable(UNREACHABLE)))
+        chunks.create_task(_chunk(UpstreamUnexpected(UNPARSEABLE)))
+
+
+@workflow(name="disagreeing", version="0.1", params=NoParams)
+async def disagreeing(run: Run[NoParams]) -> None:
+    """Two chunks that say to do two different things - 6 and 4, and no honest way to choose."""
+    async with asyncio.TaskGroup() as chunks:
+        chunks.create_task(_chunk(UpstreamUnavailable(UNREACHABLE)))
+        chunks.create_task(_chunk(ConflictError(TAKEN)))
+
+
+@workflow(name="halting_together", version="0.1", params=NoParams)
+async def halting_together(run: Run[NoParams]) -> None:
+    """`halting`'s deliberate end, raised inside a chunk instead. The same words, on purpose."""
+    async with asyncio.TaskGroup() as chunks:
+        chunks.create_task(_chunk(ReviewNotConverging(NO_CONVERGENCE)))
+
+
+@workflow(name="halting_and_failing", version="0.1", params=NoParams)
+async def halting_and_failing(run: Run[NoParams]) -> None:
+    """One chunk that ended deliberately and one that broke - 7 and 6, which do not agree."""
+    async with asyncio.TaskGroup() as chunks:
+        chunks.create_task(_chunk(ReviewNotConverging(NO_CONVERGENCE)))
+        chunks.create_task(_chunk(UpstreamUnavailable(UNREACHABLE)))
+
+
+@workflow(name="chunked_bug", version="0.1", params=NoParams)
+async def chunked_bug(run: Run[NoParams]) -> None:
+    """`exploding` inside a chunk: the leaf nobody translated, and the one a traceback is for."""
+    async with asyncio.TaskGroup() as chunks:
+        chunks.create_task(_chunk(ValueError(UNTRANSLATED)))
+
+
 def _point(name: str, attribute: str) -> EntryPoint:
     """§3.3's `probe = "agl.workflows.probe:probe"`, pointed at this module instead."""
     return EntryPoint(name=name, value=f"{__name__}:{attribute}", group=registry.GROUP)
@@ -99,6 +203,14 @@ POINTS: Final = (
     _point("probe", "probe"),
     _point("halting", "halting"),
     _point("exploding", "exploding"),
+    _point("failing", "failing"),
+    _point("chunked", "chunked"),
+    _point("nested", "nested"),
+    _point("agreeing", "agreeing"),
+    _point("disagreeing", "disagreeing"),
+    _point("halting_together", "halting_together"),
+    _point("halting_and_failing", "halting_and_failing"),
+    _point("chunked_bug", "chunked_bug"),
 )
 
 
@@ -299,6 +411,154 @@ def test_the_handler_catches_stop_before_agl_error(tmp_path: Path) -> None:
 
     assert caught.index("Stop") < caught.index("AglError") < caught.index("Exception")
     assert "BaseException" not in caught
+
+
+# --- §3.1's group clause, which nothing below the CLI can observe --------------------------------
+
+
+def test_a_failure_in_one_chunk_costs_what_the_same_failure_costs_sequentially(
+    tmp_path: Path,
+) -> None:
+    """§3.1's first clause, asserted as the parity it exists to restore rather than as a number.
+
+    "Unwrap a single-exception group and map its leaf." `split` runs its chunks under a `TaskGroup`,
+    so the same `UpstreamUnavailable` an adapter raises in `fix` arrives here wrapped - and before
+    19.0 the wrapper cost 64 points of exit status, which is the difference between a script
+    retrying an unreachable backend and a script filing a bug against AGL.
+
+    Both invocations are run and compared, and the number is pinned after them. Two tests each
+    asserting 6 would both go on passing on the day one of the two quietly became something else.
+
+    A bundle and a trees root each, here and in the two comparisons below: the label is the same on
+    both sides on purpose, and two runs under one label in one tree meet the second one's `_base`
+    checkout already on disk - which is a fact about `clear` and has nothing to say about a group.
+    """
+    concurrently = _main(_fakes(tmp_path / "concurrently"), "run", "chunked", "-n", "auth")
+    sequentially = _main(_fakes(tmp_path / "sequentially"), "run", "failing", "-n", "auth")
+
+    assert concurrently == sequentially
+    assert sequentially == 6
+
+
+def test_a_leaf_costs_the_same_however_deeply_its_group_is_nested(tmp_path: Path) -> None:
+    """Groups nest because `TaskGroup`s do, and a leaf is the same leaf at any depth.
+
+    §3.3's `split` opens one and each chunk may open its own, so "a single-exception group" has to
+    be a fact about what the run did rather than about how the workflow spelled its concurrency. The
+    two workflows below differ in exactly one thing - one wrapper - and a rule that read a group's
+    immediate children would answer 70 for the deeper of them.
+    """
+    deeper = _main(_fakes(tmp_path / "deeper"), "run", "nested", "-n", "auth")
+    shallower = _main(_fakes(tmp_path / "shallower"), "run", "chunked", "-n", "auth")
+
+    assert deeper == shallower
+    assert shallower == 6
+
+
+def test_chunks_that_fail_the_same_way_exit_that_way_whatever_their_classes(
+    tmp_path: Path,
+) -> None:
+    """"For several leaves that agree, use that code" - and agreement is about the code.
+
+    `UpstreamUnavailable` and `UpstreamUnexpected` are two classes and one published answer:
+    `ports/errors.py` leaves both out of the table so that both inherit `UpstreamError`'s 6, "so a
+    caller that does not care which it was catches this and a script still sees one code". A run
+    that hit one of each therefore failed one way twice, and 70 would be this handler inventing a
+    distinction the hierarchy exists to remove.
+    """
+    assert _main(_fakes(tmp_path), "run", "agreeing", "-n", "auth") == 6
+
+
+def test_chunks_that_fail_differently_exit_seventy_naming_every_one_of_them(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """"For leaves that disagree, 70, naming all of them" - the naming being the half asserted here.
+
+    §3.1 argues the number: "a run that failed several different ways is genuinely not attributable
+    to one code, and `InternalError` is the honest answer rather than a guess." What that argument
+    costs the operator is a 70 whose usual meaning is "file a bug" for a run in which nothing was
+    AGL's fault, so the naming is not decoration - it is the only thing that tells them which
+    failures produced the number and that neither of them was ours.
+
+    Each leaf is asserted beside the status it resolves to on its own, because that is what makes
+    the sentence actionable: 6 says retry the backend and 4 says the label or the lease is taken,
+    and an operator who is shown two class names and no codes has to go and read §3.1 to act.
+    """
+    harness = _fakes(tmp_path)
+
+    assert _main(harness, "run", "disagreeing", "-n", "auth") == 70
+
+    captured = capsys.readouterr()
+    assert f"6  UpstreamUnavailable: {UNREACHABLE}" in captured.err
+    assert f"4  ConflictError: {TAKEN}" in captured.err
+    assert "do not resolve to one exit status" in captured.err
+    assert captured.out == ""
+
+
+def test_a_deliberate_stop_in_a_chunk_reads_exactly_like_one_raised_on_its_own(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The second half of the defect §3.1 names, and the second half of it is the rendering.
+
+    A `Stop` inside a `TaskGroup` exited 70 before 19.0, and it was also printed as a traceback
+    under a sentence saying AGL had a bug - so a workflow that ended deliberately in a chunk told
+    the operator both of the two things `Stop` exists to say it is not. The exit code is
+    `cli/exit_codes.py`'s to answer and the message is `main`'s, and both are asserted here against
+    the identical stop raised sequentially, which is the only comparison that fails in a world where
+    one of the two arms drifts.
+    """
+    together = _main(_fakes(tmp_path / "together"), "run", "halting_together", "-n", "auth")
+    concurrent = capsys.readouterr()
+    alone = _main(_fakes(tmp_path / "alone"), "run", "halting", "-n", "auth")
+    sequential = capsys.readouterr()
+
+    assert together == alone
+    assert alone == 7
+    assert concurrent.out == sequential.out == f"stopped: {NO_CONVERGENCE}\n"
+    assert concurrent.err == sequential.err == ""
+
+
+def test_a_chunk_that_stopped_beside_a_chunk_that_broke_is_named_with_both(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """"All of them" includes the deliberate end, because it is half of why the run exits 70.
+
+    A run in which one chunk finished the work it had and another could not reach its backend is
+    exactly the run §3.1 refuses to attribute to one code: 7 says "needs you" and 6 says "broken",
+    and there is no answer that is both. What the operator has to be able to see is that pair, so
+    the stop is named on stderr beside the failure - and it is still reported as a stop on stdout,
+    because nothing about the disagreement makes it one.
+    """
+    harness = _fakes(tmp_path)
+
+    assert _main(harness, "run", "halting_and_failing", "-n", "auth") == 70
+
+    captured = capsys.readouterr()
+    assert captured.out == f"stopped: {NO_CONVERGENCE}\n"
+    assert f"7  ReviewNotConverging: {NO_CONVERGENCE}" in captured.err
+    assert f"6  UpstreamUnavailable: {UNREACHABLE}" in captured.err
+    assert "Traceback" not in captured.err, "a translated refusal was rendered as a bug"
+
+
+def test_an_untranslated_exception_in_a_chunk_keeps_the_traceback_it_would_have_kept(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """§1.5's charge holds inside a group: the fix is not to stop catching but to stop hiding.
+
+    A leaf nobody translated is our bug wherever it was raised, so it resolves to 70 and it keeps
+    the one part of a bug worth having. The traceback is printed for that leaf and for no other -
+    a well-worded refusal beside it is the message, and a stack under a sentence a person can act on
+    is how `_cmd_run` used to make every failure look the same.
+    """
+    harness = _fakes(tmp_path)
+
+    assert _main(harness, "run", "chunked_bug", "-n", "auth") == 70
+
+    captured = capsys.readouterr()
+    assert "Traceback" in captured.err
+    assert UNTRANSLATED in captured.err
+    assert "AGL's own bug" in captured.err
+    assert captured.out == ""
 
 
 # --- refusals a user can provoke, and the one that is ours ---------------------------------------

@@ -34,9 +34,9 @@ what the count is counted from.
   * **The replay assertion counts agent dispatches**, not entries, and it counts them across both
     invocations. §3.6's replay has no observable difference from a re-run that happens to produce
     the same answer other than that the worker was not called - so `seen` below is the instrument,
-    and it lives in the author's own `Agent` function, which is exactly where `config/container.py`
-    says a test's knowledge belongs ("what a test wants to know is already held by the tool handlers
-    and question handler it supplied itself").
+    and it lives in the author's own `Agent` function, which is exactly where the agent fakes say a
+    test's knowledge belongs ("what a test wants to know is already held by the tool handlers and
+    question handler it supplied itself" - `adapters/claude_code/fake.py` and its OpenAI twin).
   * **The payload assertion reads the ledger** through `harness.recorded`, and the value it compares
     is one nothing in the framework could have invented: it is the mapping this file's own agent
     handed to the reporting tool.
@@ -73,7 +73,7 @@ being nobody to wait for.
 """
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Awaitable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Final
@@ -278,8 +278,8 @@ def _building() -> Agent:
 
     Writing into `task.workspace` is the author's own code and not AGL's: a `Reply` says what the
     agent *reported*, and what it did is whatever it left in the directory it was pointed at -
-    which is the same seam `ports/agent.py` promises a real harness, "a workspace genuinely is a
-    directory". Nothing else in this file needs one, the steps elsewhere being about the ledger.
+    which is the same seam `ports/workspace.py` promises a real harness, "a workspace genuinely is
+    a directory". Nothing else in this file needs one, the steps elsewhere being about the ledger.
     """
 
     def agent(task: AgentTask) -> Reply:
@@ -818,10 +818,16 @@ def _writing(seen: list[str]) -> Agent:
     Keyed on whether the task declares any tool, which is `sdk/testing.py`'s own sharpest handle
     and here picks out the effect step: the reviewer runs under `NO_VCS_WRITES` and its step passes
     no `commit=`, so anything written there is wiped on the way out by design.
+
+    **The return type is the alias's own and not `Reply`**, which is what composing two agents
+    costs now that `Agent` is `(AgentTask) -> Reply | Awaitable[Reply]`: `replies(task)` is typed at
+    the union whatever the function behind it does, so a wrapper narrowing it back would have to
+    await or assert something it has no reason to. One line, at the one site in this repository that
+    wraps an agent rather than writing one, and worth knowing before writing the second.
     """
     replies = _agent(seen)
 
-    def agent(task: AgentTask) -> Reply:
+    def agent(task: AgentTask) -> Reply | Awaitable[Reply]:
         if not task.tools:
             (task.workspace / WRITTEN).write_bytes(b"what the implementer wrote\n")
         return replies(task)

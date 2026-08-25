@@ -325,7 +325,7 @@ class _Programme:
     namespace and in memory, so a second `Journal` over one scope would be a second chain starting
     at the base again - and a `Fingerprints` shared with it would then be the only thing keeping
     the counts straight. One `Fingerprints` for the whole run and one `Journal` per namespace is the
-    composition `sdk/_engine/worktrees.py` will have at stage 13.
+    composition `sdk/_engine/worktrees.py` has.
     """
 
     def __init__(

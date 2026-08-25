@@ -71,7 +71,7 @@ it. `sdk/_engine/steps.py` argues the rest, including why a replayed step has no
 
 `config/registry.py` names this module in as many words: `EntryPoint.load()` returns `Any`, nominal
 narrowing needs a class to narrow *to*, and "the only such class is the object `@workflow` produces
-in `sdk/workflow.py`, which does not exist until stage 10.2". `Workflow` is that class.
+in `sdk/workflow.py`, which did not exist when this module was written". `Workflow` is that class.
 `registry.load(points, name, Workflow)` runs `isinstance(loaded, Workflow)` and refuses anything
 else with its own `InputError`, which is the hole a `runtime_checkable` `Protocol` could not have
 closed - an object carrying the right attribute *names* would have passed.
@@ -141,11 +141,11 @@ takes the default, and `_child` below passes on the objects this `Run` holds.
 
 **`leases` is the one of the three the composition root does pass**, and that is not an
 inconsistency in the defaulting. `api.run` releases it in a `finally` around the workflow's function
-- §3.4's "the lease is released when the run exits" - so something above the workflow has to be
-holding the handle, and the only way to hold what a defaulted field built is to have built it. The
-default stays because `_child` and `agl/testing.py` and every test that constructs a `Run` directly
-still want one, and a required argument would make each of them say `Leases()` to get the thing they
-would have got anyway.
+- §3.4 makes run exit "the sweeper, not the lifetime" for a lease no verb settled - so something
+above the workflow has to be holding the handle, and the only way to hold what a defaulted field
+built is to have built it. The default stays because `_child` and `agl/testing.py` and every test
+that constructs a `Run` directly still want one, and a required argument would make each of them say
+`Leases()` to get the thing they would have got anyway.
 
 They are public for one reason and it is not that a workflow author needs them - none does. Every
 field on this class is what the run was assembled with, and hiding some of the seven behind
@@ -225,6 +225,33 @@ is that the object is an `async def` rather than a plain callable returning an a
 `inspect.iscoroutinefunction` is the only honest form of that question - which is worth asking,
 because such a function type-checks perfectly and then never yields to the event loop.
 
+## Three port names this module carries, for `sdk/roles.py`'s reason
+
+`Namespace`, `Conflict` and `VerifierOutcome` are re-exported below and are `ports/ids.py`'s,
+`ports/integration.py`'s and `ports/verifier.py`'s. They are here because **they are the vocabulary
+a `Run`'s own members speak**, which is exactly why `sdk/roles.py` carries `Claude` and
+`Restriction`: `worktree(name)` refuses a malformed name through `Namespace` and no copy of that
+rule, and `integrate()` hands back an outcome whose `conflict` is a `Conflict` and whose `verdict`
+is a `VerifierOutcome` - the two things §3.4's own snippet passes to a workflow's conflict view,
+which therefore has to annotate its parameters with them. `ARCHITECTURE.md` §5 requires that the
+front door take every name from a module in this package, so a name a `Run` speaks and this module
+did not carry would be a name imported from `agl.ports` instead.
+
+This is a module with logic that also carries port vocabulary, and not a fourth pure facade.
+`sdk/terminal.py`, `sdk/questions.py` and `sdk/errors.py` are the pure ones, each over one port
+module; three more of those would be three files holding one import each, and each of the three
+names would then live a package away from the member that produces it. What decides it is which
+question a reader is answering - "where does the thing `run.integrate()` gave me come from" is
+answered here, beside `integrate`, and `Conflict` in a `sdk/integration.py` would be a second place
+to look for a type this module already has to import to annotate `Integration`'s neighbours.
+
+**19.2's tripwire, fired twice in one workflow.** `sdk/errors.py` exists because `fix`'s test file
+had to write `from agl.ports.errors import ...` to say how a run refused; the same tripwire fired
+again at 18.2 and 18.3, when `split/chunks.py` reached for `Namespace` and `split/views/conflict.py`
+for both of the others, each reporting it rather than paying for it. `Restriction` and `Capability`
+are not on this list and are `sdk/roles.py`'s, because a `Role` is declared out of them and a `Run`
+only passes them through.
+
 ## Deliberately not built
 
 No `Workflow.__call__`. It would keep `await tickets(run)` working now that the decorated name is a
@@ -251,7 +278,10 @@ from typing import cast
 
 from agl.ports.errors import InputError, Stop
 from agl.ports.home_layout import RunScope
+from agl.ports.ids import Namespace
+from agl.ports.integration import Conflict
 from agl.ports.terminal import Terminal
+from agl.ports.verifier import VerifierOutcome
 from agl.sdk._engine.integration import Integration, Leases
 from agl.sdk._engine.integration import integrate as _integrate
 from agl.sdk._engine.journal import Fingerprints
@@ -261,7 +291,7 @@ from agl.sdk._engine.steps import Steps
 from agl.sdk._engine.worktrees import Worktrees
 from agl.sdk.roles import Role
 
-__all__ = ["Run", "Stop", "Workflow", "workflow"]
+__all__ = ["Conflict", "Namespace", "Run", "Stop", "VerifierOutcome", "Workflow", "workflow"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -345,10 +375,11 @@ class Run[P = object]:
     target's `RunScope` and holds a lock rather than a `Run`, so there is nothing in it for this
     class to be invariant in.
 
-    Defaulted like the other two and passed by exactly one caller: `api.run` constructs it so that
-    it can call `release_all` in a `finally` around the workflow's function, which is §3.4's "the
-    lease
-    is released when the run exits"."""
+    Defaulted like the other two and passed by the two callers that drive a workflow: `api.run` and
+    `api.resume` each construct one so that they can call `release_all` in a `finally` around the
+    workflow's function, which is §3.4's sweeper: "run exit is the sweeper, not the lifetime", and
+    what it catches is a lease no `retry()` or `abort()` reached. `resume` is
+    "`run`'s last paragraph, line for line" in its own words, and this is one of the lines."""
 
     capabilities: Capabilities = field(default_factory=Capabilities)
     """§3.2's second preflight check, at step time: what each model's backend reported, asked once.
@@ -477,7 +508,7 @@ class Run[P = object]:
         the slot and answers `None` immediately; a `Screen[T]` joins a queue at its `priority` and
         blocks until a person answers, yielding the `T` their response produced. Both are awaited,
         because from here both are "put this in front of someone". `ports/terminal.py` holds the
-        whole contract and both implementations satisfy it identically.
+        whole contract and every implementation satisfies it identically.
 
         **`show` registers the view and its arguments, not a value** - the redraw loop invokes the
         view again every frame - which is why `Text(run.activity)` is live with no component of its
@@ -514,7 +545,9 @@ class Run[P = object]:
         the last good head, builds an `AgentTask` from the `Role`, dispatches it to that model's
         provider, commits or wipes per `commit=`, and records what came back.
 
-        **`commit=` is the one place in AGL where a mistake destroys work.** Given, the framework
+        **`commit=` is one of the three places in AGL where a mistake destroys work** rather than
+        costing a re-run - §3.6's landing left out of the parent's chain and §3.4's red gate
+        reverting a hand-resolved conflict are the others. Given, the framework
         commits whatever is dirty under that message and records the resulting head. Omitted, it
         restores the checkout to the last good head and removes everything that was not in it -
         `reset --hard` *and* `clean -fd` - so a read-only step is genuinely read-only and cannot
@@ -607,9 +640,10 @@ class Run[P = object]:
         chained logically, not read from disk"). It is this namespace's `base` before any entry and
         its last recorded entry's `head` after - not `Workspace.head()` and not the branch tip, both
         of which can be ahead of the chain with nothing journalled: a step that raised after
-        `commit=` moved the branch and wrote no entry, and stage 14's `integrate()` will move it
-        again. Cutting a child from either would hand it work this run has not recorded, which is
-        the mirror of the failure §3.6 spends a paragraph on and is why this reads `_steps`.
+        `commit=` moved the branch and wrote no entry, and `integrate()` below moves it again on
+        every landing. Cutting a child from either would hand it work this run has not recorded,
+        which is the mirror of the failure §3.6 spends a paragraph on and is why this reads
+        `_steps`.
         """
         # The one `cast` in this module, and the field docstring argues it: the table is invariant
         # in what it holds, so holding `Run[P]` would cost `Run` the covariance §3.3's bare-`Run`
@@ -626,11 +660,13 @@ class Run[P = object]:
         """Land this Run's work into its **parent's** worktree. §3.3's `run.integrate`.
 
             outcome = await run.integrate()
-            if outcome.conflicted:
-                if await run.terminal.show(views.conflict, outcome=outcome, priority=10):
+            while outcome.conflicted:                    # while, not if - §3.4
+                if await run.terminal.show(views.conflict, conflict=outcome.conflict,
+                                           build=outcome.verdict, priority=10):
                     await outcome.retry()
                 else:
                     await outcome.abort()
+                    break                                # load-bearing - §3.4
 
         **No argument, and there is nothing to point it elsewhere with** (§3.3). A landing has two
         ends and both of them are decided: the source is this Run's line of work and the target is
@@ -653,6 +689,20 @@ class Run[P = object]:
         and `abort()` gives up, releases the hold and puts the target back. **One of the two, on
         every path out**, including the paths where something raised: an unsettled outcome holds a
         lease that stops every later landing into that parent until the run exits.
+
+        **The `while` and the `break` above are both §3.4's, and neither is stylistic.** `if` in
+        place of `while` leaks the lease: a person who presses retry without having fixed anything
+        gets a conflicted outcome back, the branch falls through, and the run holds the lease *and*
+        the target's step lock until it exits. `break` closes the other end - `retry()` moves this
+        outcome in place and an aborted one deliberately keeps its `Conflict`, so `conflicted` stays
+        true after the verb that settled it and a loop trusting the condition alone spins forever.
+        The loop ends by leaving it, never by the condition going false.
+
+        **The view is handed `conflict=` and `build=`, never the outcome itself** (§3.4). Passing
+        `outcome` would annotate a workflow author's view with `sdk/_engine`'s own private type and
+        put both verbs in reach of a function whose whole job is to build a value. What a conflict
+        screen renders is the port's `Conflict` plus the verifier's output when a red gate is what
+        went wrong, and those two parameters are exactly that.
 
         **`retry()` on an outcome that has settled is `InternalError`** and `abort()` on one says
         nothing, which is `ports/integration.py`'s asymmetry inherited rather than reinvented: a
@@ -824,11 +874,12 @@ class Workflow[P = object]:
     `Role[None]` widens to this with no cast and no `Any` - checked by `mypy --strict`, which is
     what makes the widening safe to rely on rather than merely convenient.
 
-    **Defaulted to `()`**, so a workflow that runs no agent declares nothing: `workflows/noop/` is
-    the standing instance and preflight over an empty tuple asks nobody anything. That is not a
-    loophole either. A workflow that names roles here and steps with a role it did not declare is
-    still checked, at the step, by the other half of preflight - the declaration buys the *early*
-    refusal, and nothing rests on it being complete."""
+    **Defaulted to `()`**, so a workflow that runs no agent declares nothing and preflight over an
+    empty tuple asks nobody anything. `workflows/noop/` was the standing instance of that until 19.1
+    deleted it, and the default outlives it: it says what a workflow function is allowed to be, not
+    what AGL happens to ship. That is not a loophole either. A workflow that names roles here and
+    steps with a role it did not declare is still checked, at the step, by the other half of
+    preflight - the declaration buys the *early* refusal, and nothing rests on it being complete."""
 
 
 def workflow[P](

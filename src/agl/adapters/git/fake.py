@@ -12,7 +12,7 @@ they deliberately differ.
 
 Nothing below starts a process, and the only files it opens are the ones a checkout is made of -
 `ports/workspace.py` promises that "a workspace genuinely is a directory: an agent is pointed at
-one and a verifier's working directory is one", which is the one thing about the world a fake
+one ... and a verifier's working directory is one", which is the one thing about the world a fake
 cannot hold in a dict. Everything else - the recorded states, the lines of work, which checkout
 holds which, and a landing left pending - is `_snapshots.py`'s, and the merge that decides whether
 work goes in is `_merging.py`'s.
@@ -37,7 +37,8 @@ around them. The one difference is what `repository` is: the real three are each
 and each build their own `GitRunner` from it, which works because the repository underneath is one
 shared object reached through the filesystem. There is no such object for a fake to be handed, so
 the container builds one - `FakeRepository()` - and hands the same instance to all three, exactly
-as it hands one path to the other three. Stage 9 is where that lands; it is the only difference.
+as it hands one path to the other three. `container.fakes()` is where that lands; it is the only
+difference.
 
 ## No registry lock, and §3.9 is why there is none rather than why there is
 
@@ -95,13 +96,27 @@ against git 2.50.1 rather than reasoned about:
     `'   recorded by a step\\n'` - trailing whitespace off each line, empty lines off both ends,
     runs of blank lines collapsed to one, and a final newline added.
 
-**Only the refusal is reproduced, and the rewriting deliberately is not.** No member of these three
-ports reads a message back - `_snapshots.py` says so where it stores one - so the cleaned form is
-unobservable from outside, and rewriting here would change nothing but this implementation's own
-content-addressed ids, which divergence 5 in `test_git_parity.py` already covers. What is
-observable is which messages are refused, and that is what is held to git exactly: not one message
-more, because a fake stricter than the thing it stands in for is the same fiction facing the other
-way.
+**Only the refusal is reproduced, and the rewriting deliberately is not.** What is observable is
+which messages are refused, and that is what is held to git exactly: not one message more, because
+a fake stricter than the thing it stands in for is the same fiction facing the other way.
+
+**That used to rest on the cleaned form being unobservable, and since 19.2 it does not.**
+`History.message` reads a message back, so the sentence "no member of these three ports reads one"
+that this paragraph was built on is gone and the decision has to stand on its own feet. It does,
+and on the port rather than on this file: `History.message` promises that **trailing whitespace is
+not part of a message** - which both implementations keep with one `rstrip`, and which is the whole
+of the ordinary case, since a `commit=` template renders one line - and deliberately promises
+nothing about the interior of a multi-line one. So what git's cleanup does past that point is a
+thing the port declines to require of any implementation, and reproducing it here would be a fake
+reproducing one program's text formatting for a promise nobody made.
+
+**It is also not as small a thing to reproduce as it reads.** The measurement above already shows
+the naive version of git's rule to be wrong - a bare `'\\x0b'` is a message git records, where a
+C-locale `isspace` would have cleaned it away to nothing - so "strip each line and collapse the
+blank runs" would be a guess wearing the clothes of a measurement, in the module whose whole claim
+is that there is no git in it. `ChangeKind` is the same refusal one port over. What is left is a
+place the two answer differently, and it is neither hidden nor on `test_git_parity.py`'s list of
+six: that list is where the *port is silent* and the two disagree anyway, and here the port speaks.
 """
 
 from collections.abc import AsyncIterator
@@ -383,7 +398,7 @@ class _FakeWorkspace(Workspace):
 
 
 class FakeHistory(History):
-    """`History` over one in-memory repository: six questions, none of which changes anything.
+    """`History` over one in-memory repository: seven questions, none of which changes anything.
 
     Bound to the repository by construction, which is the port's own design - no method takes one
     - and holding nothing past it. Every answer is derived from the recorded states themselves,
@@ -461,6 +476,20 @@ class FakeHistory(History):
         the two agree about a move without either of them knowing what the other asked.
         """
         return patch(*self._between(base, head))
+
+    async def message(self, commit: str) -> str:
+        """What this one commit is called - the other half of `Workspace.commit_all(message)`.
+
+        Resolved first, so a made-up id is refused rather than answered with an empty string: the
+        port's own reason, which is `changed_files`' reason one member over - "no message" is a
+        plausible-looking answer to a state that does not exist and it is a lie.
+
+        The message is kept exactly as it was handed over and the trailing whitespace comes off at
+        the read, which is the port's rule rather than this implementation's; `_snapshots.py` says
+        so where it does it. What git's cleanup would additionally have done to a multi-line
+        message is deliberately not reproduced - see the module docstring.
+        """
+        return self._repository.message_of(self._repository.resolve(commit))
 
     def _between(self, base: str, head: str) -> tuple[Tree, Tree]:
         """The two states, resolved and read. `NotFoundError` for either one this repository lacks.

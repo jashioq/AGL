@@ -7,7 +7,8 @@ signature at 11.0: `init` takes settings alone, `list_workflows` takes neither. 
 are declared in this module and reached through hand-constructed `EntryPoint` values, exactly as
 `tests/config/test_registry.py` and `tests/sdk/test_workflow.py` do: an entry point is a name, a
 `module:attr` string and a group, so §3.3's registration line resolves without installing a package.
-`workflows/noop/` is deliberately not used - it is deliverable 10.5 and does not exist yet.
+`workflows/noop/` was deliberately not used - it did not exist yet when this file was written at
+10.0, and 19.1 deleted it, so the workflows here have outlived it twice over.
 
 **The `Stop` criterion is pinned by identity, not by class.** An `assert isinstance(...)` would pass
 against an `api.run` that caught the workflow's `ReviewNotConverging`, threw it away and raised a
@@ -483,7 +484,7 @@ class _MovingHistory(GitHistory):
     assertion would pass against either.
 
     Subclassed rather than written out, because the difference from the real adapter is exactly one
-    method and a hand-rolled `History` here would be four members of boilerplate agreeing with it.
+    method and a hand-rolled `History` here would be six members of boilerplate agreeing with it.
     """
 
     def __init__(self, repository: Path) -> None:

@@ -237,9 +237,10 @@ def _frame(
     A blank line is nothing; a line that is not a JSON object is `unreadable`; anything else is
     matched on its own `type` and ignored when that is a type this adapter has never met.
 
-    The activity callback is called and not guarded. The port puts the obligations on the caller -
-    it must not block, and it may be called never - and says nothing about an exception out of one;
-    swallowing it here would hide a broken reporter for the length of a run.
+    The activity callback is called and not guarded, which is the port's rule as of 19.4 rather
+    than this module's taste: "an `on_activity` that raises ends the run with its own exception",
+    and the obligations on the caller are that it must not block and that it may be called never.
+    Swallowing it here would hide a broken reporter for the length of a run.
     """
     text = line.decode("utf-8", errors="replace").strip()
     if not text:
@@ -278,6 +279,13 @@ def _item(
 
     The agent's text is taken from any frame that carries it, latest wins. An item is updated and
     then completed, so the last one seen is the whole message rather than a prefix of it.
+
+    The callback is called and not guarded, which is the port's rule as of 19.4 rather than this
+    module's reading of a silence: an `on_activity` that raises ends the run with its own exception,
+    and an adapter writes no `try` around the call. `ports/agent.py` argues it and the contract
+    suite holds all four implementations to it. The short form is that the framework's own reporter
+    is one assignment, so a reporter that raises here is a broken one, and swallowing it would hide
+    a bug in somebody's callback for the length of a run.
     """
     if not isinstance(item, dict):
         return

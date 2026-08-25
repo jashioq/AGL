@@ -9,23 +9,26 @@ lease:
     open both namespaces -> read the target's head -> land -> is the source in? -> gate
     -> advance the parent's chain -> release
 
-The last arrow but one is the one that destroys work rather than costing a re-run. §3.6:
+The last arrow but one is the one in this sequence that destroys work rather than costing a
+re-run. §3.6:
 "**`integrate()` advances the parent's `last_good`** ... the parent's next step to miss its
-fingerprint would `restore()` to a commit *before* every landed child and delete all of it." That
-and a mispaired `commit=` are the only two paths in AGL with that property, and `_concluded` below
+fingerprint would `restore()` to a commit *before* every landed child and delete all of it." That,
+a mispaired `commit=` (§3.3) and the red gate below reverting a conflict somebody resolved by hand
+(§3.4) are the three paths in AGL with that property, and `_concluded` below
 carries the comment that says so at the line it happens on.
 
 ## The lease is the framework's, and this is the other end of the port's argument
 
-§3.4: "the framework a lease per integration target - landings into one target are serialised, and
-the lease is released when the run exits". `ports/integration.py` spends a section on why that is
-not a member of `Integrator`, and the argument reads the same from this side: a lease is a rule
-about **AGL's own concurrency** - how many of AGL's runs may be asking at once, and what becomes of
-the answer when one of them dies - and not a fact about landing work. An integrator whose far side
-already serialises would have to maintain a lease nothing consults; every other implementation would
-be carrying enforcement of a framework rule inside whichever adapter happened to be configured,
-where the framework could no longer see it. So it is here, in the module `run.integrate()` is, and
-an `Integrator` gets to be three methods about work.
+§3.4 gives the framework a lease per integration target - landings into one target are serialised,
+and it is "released when the outcome settles", run exit being "the sweeper, not the lifetime".
+`ports/integration.py` spends a section on why that is not a member of `Integrator`, and the
+argument reads the same from this side: a lease is a rule about **AGL's own concurrency** - how many
+of AGL's runs may be asking at once, and what becomes of the answer when one of them dies - and not
+a fact about landing work. An integrator whose far side already serialises would have to maintain a
+lease nothing consults; every other implementation would be carrying enforcement of a framework rule
+inside whichever adapter happened to be configured, where the framework could no longer see it. So
+it is here, in the module `run.integrate()` is, and an `Integrator` gets to be three methods about
+work.
 
 What is on the port and only looks like the same word is the **hold**: a conflicted `land` leaves
 the target mid-landing, which is a state of the target that only the implementation can create and
@@ -128,33 +131,35 @@ defined here, with the port type's three meanings kept exactly and two methods a
 
 There is precedent and it is one field over: `Run.fingerprints` is `_engine.journal.Fingerprints`.
 What a workflow author does with this type is read three properties and call one of two methods -
-§3.3's own example is the whole of the surface - and none of that requires importing the name.
+§3.4's own example is the whole of the surface - and none of that requires importing the name.
 
-**Mutable, where the port's outcome is frozen, and the plan's snippet is why.** §3.3 writes
+**Mutable, where the port's outcome is frozen, and the plan's snippet is why.** §3.4 writes
 `await outcome.retry()` and looks at nothing it returns, so a `retry` that handed back a second
 outcome would leave the workflow holding a stale first one; the loop a person clicking "try again"
 twice produces has to be `while outcome.conflicted`. So `retry()` moves *this* outcome and returns
 nothing, which also keeps one answer to `conflicted` where two could disagree.
 
-## The framework emits; it never asks - and nothing here can run §3.3's example yet
+## The framework emits; it never asks - and the middle line of §3.4's snippet is somebody else's
 
 §3.4: "On conflict the framework does not ask. It returns a `Conflict` outcome and holds the lease;
 the workflow shows its own screen and decides." Nothing in this module shows a screen, reads an
-answer, or knows that a terminal exists. `run.terminal` is stage 15, so §3.3's snippet cannot be
-executed end to end by anything in this repository today: what is built is both halves it touches -
-the outcome it branches on, and the two verbs it calls - and the middle line is 15's.
+answer, or knows that a terminal exists. What is built here is both halves the snippet touches -
+the outcome it branches on, and the two verbs it calls - and the middle line was stage 15's:
+`run.terminal` arrived there, and `workflows/split/` is the workflow that runs the whole loop,
+screen included.
 
-**The dependency that creates, stated here because stage 15 will otherwise meet it as a surprise.**
-The lease is held while the workflow's conflict screen is up. A conflict screen queued behind two
-agent questions would therefore stall the merge queue on something unrelated - which is §3.7 word
-for word, and "that is the entire justification for one level of preemption". Preemption is not
-cosmetic because of this module.
+**The dependency that creates, and it is this module's rather than the terminal's.** The lease is
+held while the workflow's conflict screen is up. A conflict screen queued behind two agent
+questions would therefore stall the merge queue on something unrelated - which is §3.7 word for
+word, and "that is the entire justification for one level of preemption". Preemption is not
+cosmetic because of this module, and `split/views/conflict.py` shows at `priority=10` for no other
+reason.
 
 ## The one build AGL runs, and the fact a reader should be able to check in one grep
 
 §3.4: "**The framework runs exactly one build: the merge gate**, inside `integrate()`." That is not
 a summary of a policy, it is the whole of AGL's relationship with building anything - and `_gated`
-below holds the only call to `Verifier.verify` in this repository. The port's own docstring says
+below holds the only call to `Verifier.verify` in `src/`. The port's own docstring says
 "there is exactly one call site in the framework, inside `integrate()`", and the two halves of that
 sentence are meant to be checkable against each other rather than believed.
 
@@ -187,9 +192,9 @@ previous deliverable declined it; `retry()` below asks by trying, which is
 `adapters/git/_runner.py`'s own lesson about probing after a failure rather than before every call.
 
 No journalling of an integration. Nothing under `steps/` records that a child went in - "no
-fingerprint over a landing, no file for one" (`Journal.advance`) - which is exactly why §3.4 has a
-resumed run finding a hold it did not take, and why the advance below lives only as long as the
-process.
+fingerprint over a landing, no file under `steps/` for one" (`Journal.advance`) - which is exactly
+why §3.4 has a resumed run finding a hold it did not take, and why the advance below lives only as
+long as the process.
 """
 
 import asyncio
@@ -273,9 +278,10 @@ class Leases:
 
     def release_all(self) -> None:
         """Give back everything this run is still holding. `api.run`'s `finally`, and nothing else.
-
-        §3.4: "the lease is released when the run exits". A workflow that ended with a conflict
-        unresolved - returned without deciding, raised, or was stopped - leaves a live `Integration`
+         §3.4's sweeper: "Run exit is the sweeper, not the lifetime" - `retry()` and `abort()` are
+        what release a lease, and this catches the ones no verb reached. A workflow that ended with
+        a conflict unresolved - returned without deciding, raised, or was stopped - leaves a live
+        `Integration`
         with a lease in it, and the object it is reachable from is going away with the workflow.
 
         **This does not abort the adapter's hold**, and the module docstring argues it at length:
@@ -340,8 +346,10 @@ class Lease:
         **The `_released` guard is unreachable through the public surface today, and the eviction
         below is why.** This method calls `_returned`, which takes the lease out of `Leases._live`,
         and `release_all` iterates exactly that table - so a lease sits in it for precisely as long
-        as it is unreleased, and the only two callers there are (`Integration._settle` and
-        `release_all`) cannot between them reach a released one. A reader who deletes the eviction
+        as it is unreleased, and the three callers there are (`Integration._settle`, `release_all`,
+        and `integrate`'s own `except BaseException` below) cannot between them reach a released
+        one: the third releases a lease whose `Integration` never reached a workflow, so no `retry`
+        or `abort` can arrive after it. A reader who deletes the eviction
         deletes that property along with it, and the guard is what they would be relying on
         afterwards without knowing it. It is kept as belt-and-braces for the caller that would meet
         the failure: `release_all` runs from `api.run`'s `finally`, over whatever exception is
@@ -361,13 +369,15 @@ class Integration:
     """What `run.integrate()` hands back: §3.3's outcome, and the two verbs the port cannot carry.
 
         outcome = await run.integrate()
-        if outcome.conflicted:
-            if await run.terminal.show(views.conflict, outcome=outcome, priority=10):
+        while outcome.conflicted:                    # while, not if - §3.4
+            if await run.terminal.show(views.conflict, conflict=outcome.conflict,
+                                       build=outcome.verdict, priority=10):
                 await outcome.retry()
             else:
                 await outcome.abort()
+                break                                # load-bearing - §3.4
 
-    §3.3's own example is the specification, and every member below exists because that example
+    §3.4's own example is the specification, and every member below exists because that example
     reads it. `head`, `conflict` and `conflicted` are `ports.IntegrationOutcome`'s three, with its
     meanings unchanged; `retry` and `abort` are the two the port cannot have, because they release a
     lease `ports/integration.py` argues at length is not the port's to model. `verdict` is the
@@ -383,8 +393,19 @@ class Integration:
 
     **A live conflict has two causes and one shape**, deliberately: the work would not combine, or
     it combined and then failed the build gate (§3.4). Both hold the lease, both are ended by the
-    same two verbs, and §3.3's snippet is written once because of it. `verdict` is what tells them
+    same two verbs, and §3.4's snippet is written once because of it. `verdict` is what tells them
     apart for a workflow that wants to show a different screen for each.
+
+    **Both the `while` and the `break` above are §3.4's, and copying either wrong is a defect §3.4
+    names.** `if` in place of `while` leaks the lease: a person who retries without having fixed
+    anything gets a conflicted outcome back, the branch falls through, and the run holds the lease
+    *and* the target's step lock until it exits. `break` is the other end of it - `retry()` moves
+    this outcome in place, and an aborted one keeps its `Conflict` by the paragraph below, so
+    `conflicted` stays true after the verb that settled it and a loop trusting the condition alone
+    never terminates. The loop ends by leaving it. `conflict=` and `build=` rather than
+    `outcome=` for the same reason §3.4 gives: this class is `sdk/_engine`'s, so a view annotated
+    against it would carry a private engine type in a workflow author's signature and hold both
+    verbs, where what a screen renders is a `Conflict` and a build's output.
 
     An aborted outcome deliberately keeps its `Conflict` rather than clearing it: the port's
     invariant is that exactly one of `head` and `conflict` is set, "work either landed, and the
@@ -461,6 +482,24 @@ class Integration:
 
         Set means the work is not in the target. It stays set after `abort()`, which is the record
         of why the landing was given up rather than a claim that the hold is still there.
+
+        **`conflicted` does not narrow this, and 19.2 found that it cannot.** §3.4's sanctioned loop
+        is `while outcome.conflicted:` and then `conflict=outcome.conflict`, so an author who has
+        just tested one member hands a view an `Optional` read off another - true, and unfixable in
+        a type system that narrows expressions. `typing.TypeIs` needs a positional argument to
+        narrow, so it is available to neither a property nor a no-argument method (mypy: "`TypeIs`
+        functions must have a positional argument"), and a free `conflicted(outcome)` or a
+        `conflicted()` would change §3.4's spelling. Nor can the class split in two: a tagged
+        union would narrow, but `retry()` **moves this outcome in place** - §3.4 requires exactly
+        that, and an object cannot change which member of a union it is. So the two decisions §3.4
+        makes about this loop are jointly what closes the door.
+
+        It costs nothing today, which is why it is recorded here rather than repaired:
+        `Terminal.show` is `Callable[..., Screen[T]]` with `**params: object`, so nothing at that
+        call site is checked at all and the `Optional` never reaches a checked position. The two
+        are one finding. If `show` ever becomes `ParamSpec`-checked, this is where the cost lands,
+        and the repair then is a decision about §3.4's spelling rather than a change to this
+        class.
         """
         return self._conflict
 
@@ -487,7 +526,7 @@ class Integration:
 
         **It is also how a workflow tells the two kinds of conflict apart.** Both come back
         `conflicted`, both hold the lease, and both are ended by `retry()` or `abort()` - which is
-        deliberate, because it is what lets §3.3's snippet be written once. A workflow that wants to
+        deliberate, because it is what lets §3.4's snippet be written once. A workflow that wants to
         route them differently - a diff view for a textual collision, a build log for a red gate -
         reads this: `None` means the work would not combine, and set means it combined and then did
         not build. Nothing in the framework branches on it.
@@ -501,7 +540,7 @@ class Integration:
         return self._verdict
 
     async def retry(self) -> None:
-        """Try this integration again, from wherever it now stands. §3.3's "retry" button.
+        """Try this integration again, from wherever it now stands. §3.4's "retry" button.
 
         **What "again" means is the whole of this method's design.** A person at the conflict
         screen went and did something to the target - resolved the collision by hand, resolved it
@@ -517,7 +556,7 @@ class Integration:
         choice for the same reason: probe after a failure rather than before every call.
 
         **Both answers then continue down the path a first landing takes**, which is what makes
-        §3.3's snippet correct on every conflict a workflow can be handed rather than on most of
+        §3.4's snippet correct on every conflict a workflow can be handed rather than on most of
         them. A collision resolved by hand concludes, is checked for containing the source, goes
         through the gate and advances the parent's chain, exactly as if it had never conflicted; a
         collision still unresolved is a `Conflict` again and the workflow decides again. The
@@ -562,7 +601,7 @@ class Integration:
         two-case outcome has no honest spelling for "there was nothing to do", where `abort` meets
         this state on every ordinary path and says nothing.
 
-        Returns nothing. The class docstring argues it: §3.3 looks at no return value, so a second
+        Returns nothing. The class docstring argues it: §3.4 looks at no return value, so a second
         outcome handed back here would be a second answer to `conflicted`, free to disagree with the
         one the workflow is already holding.
         """
@@ -670,8 +709,8 @@ class Integration:
         # `restore()` to a commit *before* every landed child and delete all of it." Leaving this
         # call out does not raise, does not re-run anything and does not show up until the parent's
         # next miss, at which point `reset --hard` and `clean -fd` take away every child that has
-        # landed in this run. It and a mispaired `commit=` are the only two paths in AGL that
-        # destroy work rather than costing a re-run.
+        # landed in this run. It, a mispaired `commit=` and `_gated`'s revert over a hand-resolved
+        # conflict are the three paths in AGL that destroy work rather than costing a re-run.
         #
         # It is safe as a plain synchronous call because of the lock this integration is holding:
         # `advance` takes no lock of its own (it could not - it is not async, and taking the
@@ -719,7 +758,7 @@ class Integration:
         would put "your tests are red on the combination" on the workflow's exception path, where a
         person's decision would have to be made inside an `except`, and `ports/verifier.py` already
         refuses that reading for the port ("a failing build is neither of those - it is the
-        answer"). A third case on this object would cost §3.3's snippet a second branch to write and
+        answer"). A third case on this object would cost §3.4's snippet a second branch to write and
         every workflow a second screen to route, for two states that want the identical two verbs.
 
         **§3.11's refusal of a third `IntegrationOutcome` case is about something else and does not
@@ -798,12 +837,15 @@ class Integration:
         return False
 
     def _settle(self) -> None:
-        """This integration is over, whichever way it ended. The one place the lease goes back.
+        """This integration is over, whichever way it ended - and where a settled lease goes back.
 
         Both endings come through here - the landing that advanced the chain, and the abort that
         gave up - so "the lease is held until the outcome is settled" is one line rather than two
-        that could drift. Marked before the release rather than after, so that a `release` which
-        somehow raised still leaves a settled outcome rather than one `retry` would act on again.
+        that could drift. The other two `release` calls in this module are not endings of an
+        outcome: `integrate`'s `except BaseException` gives back a lease whose `Integration` never
+        reached a workflow, and `release_all` is `api.run`'s sweeper over whatever a run left.
+        Marked before the release rather than after, so that a `release` which somehow raised still
+        leaves a settled outcome rather than one `retry` would act on again.
         """
         self._settled = True
         self._lease.release()

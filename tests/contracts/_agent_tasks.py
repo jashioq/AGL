@@ -116,7 +116,7 @@ async def outcome_of(
     reader needs to be told which clause was broken and not which primitive noticed.
 
     Every test that does not name `on_activity` leaves it at its default, so the port's "may be
-    omitted" is exercised by five of the six runs this suite starts without a test for it.
+    omitted" is exercised by six of the nine runs this suite starts without a test for it.
     """
     try:
         async with asyncio.timeout(RUN_DEADLINE):
@@ -224,19 +224,42 @@ class Answers:
         return Answer(text=ANSWER_TOKENS[min(len(self.asked), len(ANSWER_TOKENS)) - 1])
 
 
-class Activity:
-    """An activity reporter that records and asserts nothing, because it runs inside the adapter.
+class ReporterFailed(Exception):
+    """What an activity reporter raises when a test asks it to fail. `ToolFailed`'s sibling.
 
-    A callback that raised would be raising in whatever the adapter was doing at the time, and
-    what an adapter does with an exception from this is not something the port settles. So it
-    takes everything and the test reads the list afterwards, where a failure is the suite's.
+    Its own class, and deliberately not one of `errors.py`'s, for that class's reason: a reporter
+    is the *caller's* code, and an exception borrowed from the framework's own hierarchy would let
+    an implementation recognise it and treat it specially. Not a `BaseException` either - the port
+    asks an adapter to write no `try` at all here, so the distinction never arises inside one, but
+    a suite raising a `BaseException` would still be asking every implementation to survive
+    something that means the task around the run is being torn down.
     """
 
-    def __init__(self) -> None:
+
+class Activity:
+    """An activity reporter that records, and on request fails. It runs inside the adapter.
+
+    Recording and asserting nothing is the default because a callback that raised would be raising
+    in whatever the adapter was doing at the time: the list is read afterwards, out here, where a
+    failure is the suite's own.
+
+    `raise_first` is how the port's rule about that is provoked, and it is `Notes(raise_first=...)`
+    in another callback's clothes: the reporter records the line, then raises `ReporterFailed` for
+    that many calls. The port settles what happens next - the exception ends the run and comes out
+    of `run` - so what the clause using this asserts is that it *arrived*, rather than that the
+    adapter did something particular with it. Until 19.4 the port said nothing here and this class
+    said so; two implementations agreeing is not a contract, and both fakes and both real adapters
+    had been agreeing for a whole stage with nothing written down.
+    """
+
+    def __init__(self, *, raise_first: int = 0) -> None:
         self.lines: list[object] = []
+        self._raise_first = raise_first
 
     def __call__(self, line: str) -> None:
         self.lines.append(line)
+        if len(self.lines) <= self._raise_first:
+            raise ReporterFailed(f"the dashboard this reporter writes to is not there: {line!r}")
 
 
 SAY_WHAT_THIS_IS: Final = (

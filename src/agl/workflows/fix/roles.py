@@ -120,7 +120,10 @@ reviewer: Final = Role(
 """OpenAI, reading what Claude wrote - and **the role whose step must never pass `commit=`.**
 
 **This is the pairing §3.3 calls "the author's job, by convention and not enforcement", and it is
-the single place in AGL where a mistake destroys work rather than costing a re-run.** The `review`
+one of the three places in AGL where a mistake destroys work rather than merely costing a re-run.**
+§3.3 writes "the single place" and then "(one of three - see §3.4 and §3.6)" in the same sentence;
+the other two are a landing left out of the parent's chain and a red merge gate reverting a
+conflict somebody resolved by hand, and neither is reachable from `fix`. The `review`
 step in `__init__.py` passes no `commit=`, so when it ends - whether it returned or raised - the
 framework restores this worktree to the last good head and removes everything that was not in it:
 `reset --hard` *and* `clean -fd`. That is what makes a read-only step genuinely read-only, and it is

@@ -2,19 +2,19 @@
 
 16.5 made `from agl.sdk import Screen` true - `ARCHITECTURE.md` §5 and `ports/terminal.py` had both
 written that line since stage 3, and until then it raised `ImportError`. What a package-level
-re-export costs is a second list to keep in step with six others, and this file is what notices when
-they stop agreeing. `tests/test_contract_listings.py` is the precedent and the argument is its own:
-"the silence is the defect, not the gap" - a name missing from `sdk/__init__.py` is not an error, it
-is a name an author imports from `agl.ports` instead, which is the thing the facades exist to
-prevent.
+re-export costs is a second list to keep in step with seven others, and this file is what notices
+when they stop agreeing. `tests/test_contract_listings.py` is the precedent and the argument is its
+own: "the silence is the defect, not the gap" - a name missing from `sdk/__init__.py` is not an
+error, it is a name an author imports from `agl.ports` instead, which is the thing the facades exist
+to prevent.
 
 ## Four claims about the door, and none of them hardcodes the surface
 
 **Nothing below carries a copy of what is on the door.** `_DOOR` maps each submodule to *how much*
 of it the door takes - all of it, or a named few - and every comparison is between `agl.sdk.__all__`
-and the submodules' own `__all__`. A test holding its own list of twenty-nine names would be a
-second hand-maintained list, free to drift from the first, and its agreement would mean only that
-one person updated both at once.
+and the submodules' own `__all__`. A test holding its own list of the door's forty-two names would
+be a second hand-maintained list, free to drift from the first, and its agreement would mean only
+that one person updated both at once.
 
   1. **Every name on the door is the submodule's own object**, compared with `is` and not with `==`.
      `sdk/terminal.py` states the property for its own nine - "every name below **is** the object
@@ -172,7 +172,7 @@ def test_every_name_on_the_door_is_the_submodules_own_object(name: str) -> None:
 def test_every_authoring_name_a_submodule_exports_is_on_the_door() -> None:
     """The drift check, in the direction that fails open: a name added and never re-exported.
 
-    Five of the six submodules put their whole surface on the door, so this is what notices a tenth
+    Six of the seven submodules put their whole surface on the door, so this is what notices a tenth
     terminal component or a second declaration helper. `sdk/params.py` is the partial one and its
     five framework names are in `_ABSENT` with a reason each, so it is checked here too - just from
     the other side.

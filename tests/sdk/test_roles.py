@@ -572,6 +572,90 @@ def test_nothing_here_is_checked_against_a_provider() -> None:
     assert impossible.requires == frozenset(Capability)
 
 
+# --- rule three: tools implies TOOL_CALLING -------------------------------------------------------
+#
+# Stage 17's finding, closed at 19.2 on the three arguments the section above is written on: a
+# second declaration carries no information and can only be forgotten, the implication runs one way
+# only, and a derived member cannot move a digest. The third is re-measured here rather than
+# inherited, because this implication's trigger *is* a fingerprint term where `on_question` is not.
+
+
+def test_declaring_a_reporting_tool_requires_tool_calling() -> None:
+    """A role that offers a tool needs a backend able to call one, and there is no role for which
+    that is false. Forgetting to say so used to be accepted here and refused at preflight - far
+    from the line that needs fixing - or, worse, run: an agent never offered its reporting tool
+    cannot fire it, so the step ends with no payload and `RoleIncompleteError` at exit 6."""
+    assert Capability.TOOL_CALLING in REVIEWER.requires
+
+
+def test_a_plain_tool_implies_it_too_and_not_only_a_reporting_one() -> None:
+    """The implication is about `tools`, not about reporting: `AgentTask.tools` holds ordinary
+    `Tool`s either way, and a backend that cannot call one has nowhere to put either kind."""
+    role = Role(instructions=_REVIEW, model=Claude.OPUS, tools=[_plain("read_spec")])
+    assert role.requires == frozenset({Capability.TOOL_CALLING})
+
+
+def test_tool_calling_is_added_beside_the_ones_the_author_declared() -> None:
+    """Folded in, not substituted for. `REVIEWER` typed `requires={SHELL}` and keeps it."""
+    assert REVIEWER.requires == frozenset({Capability.SHELL, Capability.TOOL_CALLING})
+
+
+def test_declaring_tool_calling_as_well_as_the_tool_changes_nothing() -> None:
+    """A set, so saying it twice says it once. An author who prefers to write it stays right."""
+    stated = Role(
+        instructions=_REVIEW,
+        model=Claude.OPUS,
+        tools=[REPORT],
+        requires={Capability.TOOL_CALLING},
+    )
+    implied = Role(instructions=_REVIEW, model=Claude.OPUS, tools=[REPORT])
+    assert stated.requires == implied.requires == frozenset({Capability.TOOL_CALLING})
+
+
+def test_the_tool_calling_implication_runs_one_way_only() -> None:
+    """`requires={TOOL_CALLING}` with no tools is left exactly as written - the prompt may tell the
+    agent to use its harness's own, and over-declaring is the author's business. Refusing it would
+    be this module inventing the third policy in a row it has declined to invent."""
+    role = Role(instructions=_REVIEW, model=Claude.OPUS, requires={Capability.TOOL_CALLING})
+    assert role.tools == ()
+    assert role.requires == frozenset({Capability.TOOL_CALLING})
+
+
+def test_a_role_with_no_tools_requires_nothing_it_was_not_given() -> None:
+    """An effect step's role, which is §3.3's other step kind: no tools, result `null`."""
+    assert IMPLEMENTER.tools == ()
+    assert Capability.TOOL_CALLING not in IMPLEMENTER.requires
+
+
+def test_folding_tool_calling_in_moves_no_digest_although_its_trigger_is_a_term() -> None:
+    """The one argument that had to be checked again rather than inherited from `on_question`.
+
+    `base_of` fingerprints instructions, model, restrictions and tools, so `tools` **is** a term
+    where `on_question` is not - and a fold behind a term looks, at a glance, like it could move a
+    digest. It cannot, because what the fold writes is a member of `requires`, and `requires` is
+    not a term. Both halves are measured: declaring the capability by hand and letting the fold do
+    it are one digest, and the tool itself is what moved the digest all along. So no role's digest
+    is different today from what it was before this implication existed.
+    """
+    typed = Role(
+        instructions=_REVIEW,
+        model=Claude.OPUS,
+        tools=[REPORT],
+        requires={Capability.TOOL_CALLING},
+    )
+    folded = Role(instructions=_REVIEW, model=Claude.OPUS, tools=[REPORT])
+    toolless = Role(instructions=_REVIEW, model=Claude.OPUS)
+
+    assert _base(typed) == _base(folded), (
+        "a role that typed `requires={TOOL_CALLING}` and one that had it folded in fingerprint "
+        "differently, so `requires` has become a term and every existing role's digest has moved"
+    )
+    assert _base(folded) != _base(toolless), (
+        "declaring a tool did not move the digest, so §3.6 rule 4's three tool terms are not "
+        "reaching `base_of` and this test measures nothing about the fold riding behind them"
+    )
+
+
 # --- the type chain §3.3 promises ----------------------------------------------------------------
 
 

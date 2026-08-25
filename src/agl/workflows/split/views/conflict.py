@@ -21,12 +21,14 @@ the obvious spelling gets wrong - `Integration` is `sdk/_engine`'s own type, so 
 against it would put a private engine class in a workflow author's signature, and the two verbs on
 it would be in reach of a function whose whole job is to build a value.
 
-**Neither type is on `agl.sdk`'s front door**, so both are imported from `agl.ports`. Contract 6
-permits it - it forbids `agl.adapters` and `agl.config` - but `ARCHITECTURE.md` §5's convention is
-stronger than the contract, and this is the second time `split` has had to break it: `chunks.py`
-reaches for `ports.ids.Namespace` and reports the same thing. Widening `sdk/__init__.py` would be a
-diff outside `workflows/split/`, which is precisely what stage 18 exists to measure, so it is
-reported as a missing re-export rather than paid for here.
+**Both types are on `agl.sdk`'s front door**, and until 19.2 neither was. This module and
+`chunks.py` were the third and fourth firings of the tripwire `sdk/errors.py` was built out of:
+contract 6 permits `from agl.ports import ...` - it forbids `agl.adapters` and `agl.config` - but
+`ARCHITECTURE.md` §5's convention is stronger than the contract, and a name left off the door is a
+name a workflow author imports from `ports` instead. Both were reported rather than paid for at
+18.3, because widening `sdk/__init__.py` is a diff outside `workflows/split/` and stage 18 existed
+to measure that diff. The names now come through `sdk/workflow.py`, beside the `run.integrate()`
+whose outcome carries them, so this whole file imports from one package.
 
 ## One screen for both kinds of conflict, not two views
 
@@ -71,9 +73,7 @@ differing every frame is one this screen cannot trip over.
 
 from typing import Final
 
-from agl.ports.integration import Conflict
-from agl.ports.verifier import VerifierOutcome
-from agl.sdk import Choice, Row, Rows, Screen
+from agl.sdk import Choice, Conflict, Row, Rows, Screen, VerifierOutcome
 
 __all__ = ["ABORT", "RETRY", "conflict"]
 

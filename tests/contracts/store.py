@@ -85,17 +85,15 @@ level deep; that an overwrite may not be observed as a momentary absence; and th
 under a scope that recorded nothing answers with an empty tuple rather than raising - `clear`
 after a crash is its one caller, which settles it.
 
-There is a fourth, and it is of a different kind, so it is recorded here rather than left to be
-noticed. **The three copy-in clauses are §3.6's, not the port's.** §3.6 says it outright - the
-`Store` "copies any mapping it is handed" and returns copies on read, "otherwise a caller reusing a
-builder dict silently edits an entry already on the ledger" - and both implementations restate it
-in their own docstrings. The port states the read-side half ("a read hands back something the
-caller owns") and, on the way in, says only why a `Mapping` is accepted: "a caller should not have
-to copy what it already has in order to hand it over". That sentence is a courtesy to the caller
-and is silent on what the store then does, so these three assert a clause of the design that the
-port's own docstring does not carry. A suite here is otherwise written against a port's docstring
-and against nothing else; this is the one place that is not true of, and the honest fix is a
-sentence in `ports/store.py` rather than a quieter suite.
+There is a fourth, and it was of a different kind: **the three copy-in clauses were §3.6's and not
+the port's**, asserted here against a design decision `ports/store.py` did not carry. The port
+stated the read-side half ("a read hands back something the caller owns") and, on the way in, said
+only why a `Mapping` is accepted - a courtesy to the caller, silent on what the store then does
+with it. A suite here is otherwise written against a port's docstring and against nothing else, so
+that was the one place the rule bent, and the fix on offer was a sentence in `ports/store.py`
+rather than a quieter suite. 19.3 wrote it: the port now states the copy-in clause and the *when*
+of it in its own words, and names §3.6 as where the clause was decided. These three are written
+against the port again, and the paragraph they answer is the one after "`Mapping` on the way in".
 """
 
 import asyncio

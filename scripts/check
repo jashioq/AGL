@@ -32,7 +32,8 @@ TOTAL_GATES=8
 CODEX_BINARY="codex"
 CODEX_ADAPTER_DIR="src/agl/adapters/openai/"
 
-# Gate 6: the project's own module size convention, in lines.
+# Gate 6: the project's own module size convention, in *code* lines - see the gate for what that
+# counts and what it does not. The value has not moved since stage 0; what it measures has.
 MAX_MODULE_LINES=300
 
 # Gate 7: the package root, and what an import statement looks like at the start of a line.
@@ -191,26 +192,182 @@ fi
 # Nothing is excluded. A file over the ceiling is not a build failure; it is the project asking
 # whether that module is still holding one idea. The count carries onto the summary line either
 # way, so a reader who only reads the summary still sees a 400-line module appear.
+#
+# **A line, here, is a physical line carrying at least one token of code.** A line of code with a
+# trailing comment counts once; a statement spread over five lines counts five; a multi-line string
+# that is a *value* counts every line it spans, because a prompt template a module carries is
+# something the module carries. Docstrings, comments and blank lines count zero. That is a much
+# narrower rule than `wc -l`, and it moved this tree from 116 files over the ceiling to 31 - which
+# is the point, not a side effect. Each exclusion is a separate decision and each is argued below,
+# because a reader who cannot tell what a "line" means without opening the counter cannot tell what
+# the number is claiming.
+#
+# **Docstrings are out, and that is the whole reason this gate was rewritten.** The question above
+# is "is this module still holding one idea" - a question about what the module *does*, which a
+# docstring is not. The measured cost of getting that wrong: `src/agl/sdk/params.py` landed at
+# exactly 300 by `wc -l` after five compression passes, so the convention bought an author's time
+# and caught nothing; it is 181 code lines, and was never near the ceiling in the sense the gate
+# means. Against that, this build's prose has repeatedly been its best artifact - `ports/store.py`
+# predicted its own global-lock hole in its docstring, and stage 17 found a missing `commit=` by
+# reading a docstring's table against the code while all eight gates were green. A ceiling that
+# charges for prose is a ceiling pushing in the wrong direction.
+#
+# Note the *attribute* docstring: a bare string statement after a dataclass field, which this repo
+# uses everywhere and which `ast.get_docstring` cannot see. The counter walks `ast.Expr` whose value
+# is a string constant, which catches both kinds - a rule worth stating because the obvious
+# implementation misses most of the prose in this codebase and still looks right.
+#
+# **Comments are out, for the same reason.** In this repo a comment is usually prose carrying an
+# argument, not a summary of the line below: this block, gate 8's five paragraphs, `.importlinter`'s
+# contracts. If a comment cost a line and a docstring did not, an author near the ceiling would move
+# an argument out of a comment and into a docstring - worse writing, chosen to satisfy a counter,
+# which is precisely the failure the docstring exclusion exists to end.
+#
+# The case against, which is real: a commented-out block is code hiding from the counter, and
+# nothing else in this build closes that hole - `ruff`'s ERA rules are not in `pyproject.toml`'s
+# select list. It is left open knowingly. The cheap fix - count a comment line if it parses as
+# Python - was tried on paper and rejected: `# run.step is the delegate` parses, and a counter that
+# charges for a sentence because it happens to be a valid expression is a worse instrument than one
+# with a known hole. Commented-out code is a review finding; module size is not the tool for it.
+#
+# **Blank lines are out, and this is the decision that set the number.** The case for keeping them
+# is the best one on this list: blank lines are the one thing that honestly tracks how much of a
+# screen a module fills, and unlike prose they cannot be argued away. The case against is a
+# measurement. Under `src/`, 3800 of 5508 blank lines - 68% - sit directly against a docstring line.
+# They are the blank line PEP 8 asks for *because* a block of prose is there, and this repo puts one
+# there every time. So counting blank lines does not measure bulk independently of prose; it
+# re-charges for the prose at about two-thirds rate, through a line the author did not choose. The
+# remaining third tracks how many definitions a module has, which the code count already counts.
+#
+# (PEP 8 and habit, not a gate: `ruff`'s E3 blank-line rules are preview-only and are not in
+# `pyproject.toml`'s select list, so nothing here would stop an author deleting those lines to get
+# under a ceiling that counted them. Which is the argument a second time, from the other end.)
+#
+# **A module that is all prose counts zero, and that is a legal answer.** `src/agl/ports/__init__.py`
+# is one docstring and nothing else. Nothing here divides by the count, so zero is a number like any
+# other; the file simply never appears.
+#
+# **A file that will not parse is counted at its full physical size and named.** Not skipped: a
+# counter that silently drops what it cannot read is a fail-open, and this gate's whole job is to
+# report a module that got big. Falling back to `wc -l` can only over-report, never hide, and the
+# path is printed so nobody reads the number as a real one. Same for the counter failing outright -
+# that records a WARN saying the counter did not run, rather than a clean "0 over", because the two
+# must never look alike on the summary line.
 # ---------------------------------------------------------------------------------------------
 
 gate_header 6 "module size ceiling (warning only)" \
-    "wc -l on every .py under src/ and tests/, ceiling ${MAX_MODULE_LINES}"
+    "code lines in every .py under src/ and tests/, ceiling ${MAX_MODULE_LINES}"
 
-py_files="$(find src tests -type f -name '*.py' 2>/dev/null | wc -l | tr -d ' ')"
-oversized="$(find src tests -type f -name '*.py' -exec wc -l {} + 2>/dev/null |
-    awk -v max="$MAX_MODULE_LINES" '$2 != "total" && $1 > max { printf "  %6d  %s\n", $1, $2 }' |
-    sort -rn || true)"
+size_report="$(
+    AGL_MAX_MODULE_LINES="$MAX_MODULE_LINES" "$VENV_BIN/python" - <<'PY'
+import ast
+import io
+import pathlib
+import tokenize
+from os import environ
 
-if [ -n "$oversized" ]; then
-    over_count="$(printf '%s\n' "$oversized" | wc -l | tr -d ' ')"
-    printf 'Over %s lines (%s of %s files):\n\n' "$MAX_MODULE_LINES" "$over_count" "$py_files"
-    printf '%s\n' "$oversized"
-    printf '\nThis does not fail the build.\n'
-    record "module size" WARN "$over_count over $MAX_MODULE_LINES lines"
+ceiling = int(environ["AGL_MAX_MODULE_LINES"])
+
+# Token types that are not code. COMMENT and NL (the blank-line/continuation newline) do the real
+# work; NEWLINE closes a logical line whose own lines already counted; the rest are layout markers
+# that carry no text of their own.
+NOT_CODE = frozenset(
+    {
+        tokenize.COMMENT,
+        tokenize.NL,
+        tokenize.NEWLINE,
+        tokenize.INDENT,
+        tokenize.DEDENT,
+        tokenize.ENDMARKER,
+        tokenize.ENCODING,
+    }
+)
+
+Span = tuple[tuple[int, int], tuple[int, int]]
+
+
+def prose(tree: ast.Module) -> list[Span]:
+    """Every docstring's (start, end) position - module, class and function docstrings, and the
+    bare-string-after-a-field attribute docstrings this repo is written out of.
+
+    Positions rather than line numbers, so a line holding a docstring *and* a statement after a
+    semicolon is not lost along with the docstring, and so an implicitly concatenated docstring
+    drops all of its pieces rather than only the first.
+    """
+    spans = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
+            if isinstance(node.value.value, str):
+                text = node.value
+                start = (text.lineno, text.col_offset)
+                end = (text.end_lineno or text.lineno, text.end_col_offset or 0)
+                spans.append((start, end))
+    return spans
+
+
+def code_lines(source: str) -> int:
+    spans = prose(ast.parse(source))
+    lines: set[int] = set()
+    for token in tokenize.generate_tokens(io.StringIO(source).readline):
+        if token.type in NOT_CODE:
+            continue
+        if token.type == tokenize.STRING:
+            if any(lo <= token.start and token.end <= hi for lo, hi in spans):
+                continue
+        lines.update(range(token.start[0], token.end[0] + 1))
+    return len(lines)
+
+
+rows: list[tuple[int, int, str]] = []
+unparsed: list[str] = []
+for root in ("src", "tests"):
+    for path in sorted(pathlib.Path(root).rglob("*.py")):
+        raw = path.read_bytes()
+        physical = raw.count(b"\n")  # what `wc -l` would say
+        try:
+            counted = code_lines(raw.decode("utf-8"))
+        except (SyntaxError, UnicodeDecodeError, ValueError, tokenize.TokenError):
+            counted = physical
+            unparsed.append(str(path))
+        rows.append((counted, physical, str(path)))
+
+over = sorted((row for row in rows if row[0] > ceiling), reverse=True)
+print(len(over), len(rows), len(unparsed))
+
+if over:
+    print(f"Over {ceiling} code lines ({len(over)} of {len(rows)} files):\n")
+    print(f"  {'code':>6}  {'total':>6}  file")
+    for counted, physical, path in over:
+        print(f"  {counted:6d}  {physical:6d}  {path}")
+else:
+    print(f"All {len(rows)} .py files under src/ and tests/ hold at most {ceiling} code lines.")
+
+if unparsed:
+    print(f"\n{len(unparsed)} file(s) would not parse. Each is counted at its full physical size")
+    print("instead - the only direction that cannot hide one - and named here:")
+    for path in unparsed:
+        print(f"    {path}")
+PY
+)"
+size_status=$?
+
+if [ "$size_status" -ne 0 ] || [ -z "$size_report" ]; then
+    printf '%s\n' "$size_report"
+    printf 'The code-line counter did not run, so no module size was measured on this run.\n'
+    printf 'That is not the same as nothing being oversized, and does not read the same either.\n'
+    record "module size" WARN "counter did not run - no sizes measured"
 else
-    printf 'All %s .py files under src/ and tests/ are at or under %s lines.\n' \
-        "$py_files" "$MAX_MODULE_LINES"
-    record "module size" PASS "0 over $MAX_MODULE_LINES lines"
+    read -r over_count file_count unparsed_count <<<"$(printf '%s\n' "$size_report" | head -n 1)"
+    printf '%s\n' "$size_report" | tail -n +2
+    if [ "$over_count" -gt 0 ]; then
+        printf '\nThis does not fail the build.\n'
+        record "module size" WARN "$over_count of $file_count over $MAX_MODULE_LINES code lines"
+    else
+        record "module size" PASS "0 of $file_count over $MAX_MODULE_LINES code lines"
+    fi
+    if [ "$unparsed_count" -gt 0 ]; then
+        printf '%s file(s) above are physical counts, not code counts.\n' "$unparsed_count"
+    fi
 fi
 
 # ---------------------------------------------------------------------------------------------

@@ -4,8 +4,8 @@ The first class is the port in full: `AgentContract` with its two fixtures overr
 else touched. That suite was written at stage 3, against the port's docstrings and before any
 adapter existed (§1.9), which is why nothing below re-asserts any of it.
 
-**Six of its eight tests start a real agent, and none of them runs - anywhere, on any machine.**
-Every one of the six reads a *model's* conduct as its evidence: that it called a tool, that it
+**Eight of its ten tests start a real agent, and none of them runs - anywhere, on any machine.**
+Seven of the eight read a *model's* conduct as their evidence: that it called a tool, that it
 answered a question, that it ignored a repository's instructions. No free instrument can supply
 that, so running them means a paid turn, and the build's rule is that no test spends tokens, ever -
 "not gated, not opt-in, not 'only when you set the env var'". They are deferred to the manual QA
@@ -123,30 +123,35 @@ from agl.ports.errors import InputError, InternalError, UpstreamUnavailable
 from agl.ports.questions import Answer, Question
 from agl.ports.run import JsonValue
 from contracts._agent_hermeticity import CONFIGURATIONS, markers_in, plant
-from contracts._agent_tasks import Notes, workspace
+from contracts._agent_tasks import Activity, Notes, ReporterFailed, workspace
 from contracts.agent import AgentContract
 from instruments.loopback import DUMMY_KEY, REPLY, Loopback, wire_text
 
 # The opt-in. It turns on the tests that spawn a real `claude` process against the loopback, and it
-# does not turn on the six contract tests that read a model's conduct - nothing can, because no free
-# instrument produces conduct. Two gates rather than one, because "the operator agreed to have
-# processes started" and "there is a binary to start" are different facts with different fixes.
+# does not turn on the eight contract tests behind `_NeverRuns` - seven of them read a model's
+# conduct, which nothing free can produce, and the eighth needs a session this suite has no way to
+# arrange. Two gates rather than one, because "the operator agreed to have processes started" and
+# "there is a binary to start" are different facts with different fixes.
 LIVE = "AGL_LIVE_AGENT"
 
-# What a person is told when the six live tests do not run, which is always. Long on purpose: the
-# whole point of this suite is that a green run means something, and a skip that reads like a pass
-# is the failure `tests/contracts/agent.py` is written against.
+# What a person is told when the eight deferred contract tests do not run, which is always. Long on
+# purpose: the whole point of this suite is that a green run means something, and a skip that reads
+# like a pass is the failure `tests/contracts/agent.py` is written against.
 _SKIPPED: Final = (
     "UNVERIFIED: this run did not start a real agent, so the ClaudeCodeRunner's entire run-path - "
-    "the outcome, the refused tool call, the activity, both question clauses and the poisoned "
-    "repository - is unverified by this run, and by every run. DEFERRED TO THE MANUAL QA PASS, "
-    "with no switch here that changes it: each of these six reads a model's conduct as its "
-    "evidence - that it called a tool, that it answered a question, that it ignored a poisoned "
-    "repository - which no free instrument can supply, so running one costs a paid turn and no "
-    "test in this build spends tokens. Run them by hand against an authenticated CLI, or do not "
-    "believe them. What did run is everything below the contract subclass: a real CLI composing a "
-    "real session against a loopback endpoint, so the options, the argv discipline, the registered "
-    "tools and the request that left the machine are all asserted for real - plus the tool and "
+    "the outcome, the refused tool call, the tool handler that raised, the activity, the activity "
+    "reporter that raised, both question clauses and the poisoned repository - is unverified by "
+    "this run, and by every run. DEFERRED TO THE MANUAL QA PASS, with no switch here that changes "
+    "it: seven of the eight read a model's conduct as their evidence - that it called a tool, that "
+    "it answered a question, that it ignored a poisoned repository - which no free instrument can "
+    "supply, so running one costs a paid turn and no test in this build spends tokens. The eighth, "
+    "the activity reporter that raised, needs no conduct at all; it is deferred only because the "
+    "contract suite's one knob is the runner and a real ClaudeCodeRunner reports nothing without a "
+    "session, and it is asserted for real offline further down this file, against the same "
+    "adapter. Run the other seven by hand against an authenticated CLI, or do not believe them. "
+    "What did run is everything below the contract subclass: a real CLI composing a real session "
+    "against a loopback endpoint, so the options, the argv discipline, the registered tools and "
+    "the request that left the machine are all asserted for real - plus the tool, activity and "
     "question plumbing driven offline through a scripted transport. None of that covers a model "
     "deciding anything, and this skip is not a pass."
 )
@@ -155,8 +160,8 @@ _SKIPPED: Final = (
 # it is true of one reader's environment and not of the deferral itself.
 _OPTED_IN: Final = (
     f" ({LIVE}=1 is set here and it did turn on the live tests further down, which spawn a real "
-    f"CLI against a loopback endpoint. It does not turn these six on and no variable can: what "
-    f"they read is a model's conduct, and a loopback answers with whatever it was told to say.)"
+    f"CLI against a loopback endpoint. It does not turn these eight on and no variable can: seven "
+    f"read a model's conduct, and a loopback answers with whatever it was told to say.)"
 )
 
 # What a person is told when the CLI itself is missing. A different gate from the one above and kept
@@ -213,7 +218,7 @@ def harness(loopback: Loopback) -> Loopback:
     """*The* loopback - the session-scoped one from `tests/conftest.py` - under this file's name.
 
     An accessor and deliberately nothing more. The redirection this file rests on used to be a
-    module-scoped autouse fixture right here, which protected this file and no other; stage 8 adds
+    module-scoped autouse fixture right here, which protected this file and no other; stage 8 added
     a second adapter test file, so it moved to `tests/conftest.py` where a module that has not been
     written yet is covered too. What did *not* move is the name: `harness` reads correctly in the
     dozen tests below that ask this object what request left the machine.
@@ -285,10 +290,19 @@ class _NeverRuns(ClaudeCodeRunner):
     gate on the *port member that starts an agent* instead of on a list of test names - the suite's
     tests can be renamed, split or added to and this keeps deciding correctly.
 
-    Unconditionally, because there is no condition worth writing: what the six tests behind it
-    assert is a model's conduct, the only instrument that can answer is a paid one, and a test that
+    Unconditionally, because there is no condition worth writing: seven of the eight tests behind
+    it assert a model's conduct, the only instrument that can answer is a paid one, and a test that
     spends money on a flag is still a test that spends money. They are deferred to the manual QA
     pass and the skip reason says so.
+
+    The eighth is `test_an_activity_reporter_that_raises_ends_the_run_with_its_own_exception`, and
+    it is the one clause here a free instrument could reach: it asks the agent for nothing. What
+    stops it is the shape of the contract suite rather than the price of a turn - its one knob is
+    the runner, and a real `ClaudeCodeRunner` handed a scripted transport is not something the
+    suite has a way to build. Marking that one test by name would put a list of test names in this
+    file after all, for a clause this file already asserts against the same adapter, offline, in
+    `test_an_activity_reporter_that_raises_comes_out_of_this_adapters_run`. So it skips with the
+    seven and the skip reason says which of the two reasons applies to it.
     """
 
     async def run(self, *args: object, **kwargs: object) -> NoReturn:
@@ -296,7 +310,7 @@ class _NeverRuns(ClaudeCodeRunner):
 
 
 class TestClaudeCodeRunner(AgentContract):
-    """The port in full, against the real adapter: two of its eight tests today, and six deferred.
+    """The port in full, against the real adapter: two of its ten tests today, and eight deferred.
 
     Two overrides and nothing else, which is what the suite asks for. The gate lives inside the
     `runner` fixture because that is one of the two, and because the alternative - marking
@@ -919,11 +933,25 @@ async def test_a_deny_rule_the_cli_tokenizer_would_ruin_is_refused(
     )
 
 
-# The two §3.5 settings whose SDK default is the leaky one, and the source text each has to be
-# given, as `ast.unparse` normalises it. Values and not merely names, because the name is satisfied
-# by the leak: `setting_sources=["user", "project", "local"]` names the option and is precisely
-# what the empty list exists to displace.
-HERMETIC: Final[Mapping[str, str]] = {"setting_sources": "[]", "strict_mcp_config": "True"}
+# The three §3.5 settings, and the source text each has to be given, as `ast.unparse` normalises it.
+# Values and not merely names, because the name is satisfied by the leak:
+# `setting_sources=["user", "project", "local"]` names the option and is precisely what the empty
+# list exists to displace.
+#
+# Two of the three have a leaky SDK default and the third does not, which is why `settings` was left
+# out of this table until 19.4 and why leaving it out was wrong. `settings` is not a default that
+# reads the repository; it is a **channel that exists only if something opens it**, and
+# `settings="~/.claude/settings.json"` opens it one line after `setting_sources=[]` closed
+# everything else - handing the session the operator's own configuration document, which is the
+# difference between reading no settings file and reading theirs. `runner.py`'s "Why no settings
+# file" section argues the choice, and this is where the choice is held. One list rather than a list
+# plus an exception: the three §3.5 names are all here, so a session added later is measured against
+# all three or against none.
+HERMETIC: Final[Mapping[str, str]] = {
+    "setting_sources": "[]",
+    "strict_mcp_config": "True",
+    "settings": "None",
+}
 
 
 def test_every_session_this_package_opens_is_opened_hermetically() -> None:
@@ -931,9 +959,12 @@ def test_every_session_this_package_opens_is_opened_hermetically() -> None:
 
     Two of the three hermeticity options have a *leaky* SDK default, so omitting them is not a
     session that fails to start - it is a session that reads the target repository and works. The
-    tests above cover the one `ClaudeAgentOptions` that `run` builds; this one covers every
-    `ClaudeAgentOptions` in the package, including `check_ready`'s and whatever a later stage adds,
-    and it does it by parsing the source rather than by running anything.
+    third, `settings`, defaults to the closed value and is held here anyway: what it guards is a
+    channel nothing opens by accident and everything opens by one line, and the only way that line
+    is ever noticed is if its absence is written down. The tests above cover the one
+    `ClaudeAgentOptions` that `run` builds; this one covers every `ClaudeAgentOptions` in the
+    package, including `check_ready`'s and whatever a later stage adds, and it does it by parsing
+    the source rather than by running anything.
 
     **The value each is given, and not only that it was named.** This test began asserting presence
     alone, which reads as a check and is not one: `setting_sources=["user", "project", "local"]`
@@ -945,7 +976,7 @@ def test_every_session_this_package_opens_is_opened_hermetically() -> None:
     in another module is one this test cannot read and a reviewer cannot see at the call site.
 
     **Why this rather than moving the behavioural tests off their gate.**
-    `test_the_options_the_run_actually_built_are_the_hermetic_ones` asserts the same two values
+    `test_the_options_the_run_actually_built_are_the_hermetic_ones` asserts the same three values
     against a session that really started, and where it runs it is the stronger evidence. But it
     spawns a `claude` process, which is exactly what `AGL_LIVE_AGENT=1` is declared to mean, and it
     is *also* behind the binary being on `PATH` - so taking it off the opt-in would still leave the
@@ -957,7 +988,9 @@ def test_every_session_this_package_opens_is_opened_hermetically() -> None:
     `tests/adapters/test_shell_verifier.py` established the shape at stage 6, for the same kind of
     clause: a promise about how a module is written is worth more as a fact about the code than as
     a paragraph in a docstring. `test_openai_runner.py` carries this test's sibling, over the `cwd=`
-    that every child of that package is started with.
+    that every child of that package is started with, and against the same table of permitted source
+    texts - a working directory has no single right value the way a hermeticity setting does, so
+    what it holds is the small set of directories that adapter chooses.
     """
     package = Path(runner_module.__file__).parent
     sessions = 0
@@ -970,10 +1003,12 @@ def test_every_session_this_package_opens_is_opened_hermetically() -> None:
             sessions += 1
             given = {keyword.arg: keyword.value for keyword in node.keywords}
             assert HERMETIC.keys() <= given.keys(), (
-                f"{source.name}:{node.lineno} opens a session without naming both of §3.5's "
-                f"settings: it passes {sorted(name for name in given if name)}. The SDK's defaults "
-                f"for the two missing here are None and False, and both of those read the target "
-                f"repository"
+                f"{source.name}:{node.lineno} opens a session without naming all three of §3.5's "
+                f"settings: {sorted(HERMETIC.keys() - given.keys())} are missing, and it passes "
+                f"{sorted(name for name in given if name)}. `setting_sources` and "
+                f"`strict_mcp_config` default to None and False, both of which read the target "
+                f"repository; `settings` defaults to the closed value and is named anyway, because "
+                f"a channel that is shut because nobody opened it is one nobody can see was decided"
             )
             for setting, required in HERMETIC.items():
                 written = ast.unparse(given[setting])
@@ -982,8 +1017,9 @@ def test_every_session_this_package_opens_is_opened_hermetically() -> None:
                     f"§3.5 wants `{setting}={required}`. Naming the option is not the guarantee: "
                     f"`setting_sources=['user', 'project', 'local']` names it and hands the "
                     f"session the repository's settings, its CLAUDE.md, its subagents and its "
-                    f"commands, and `strict_mcp_config=False` names it and loads the repository's "
-                    f".mcp.json"
+                    f"commands, `strict_mcp_config=False` names it and loads the repository's "
+                    f".mcp.json, and any `settings=` path at all adds a configuration document to "
+                    f"a session that has just been told to read none"
                 )
     assert sessions >= 2, (
         f"only {sessions} ClaudeAgentOptions call(s) were found in {package}, and there are at "
@@ -1375,6 +1411,42 @@ async def test_activity_is_the_tools_own_name_and_one_line_of_its_payload(
     assert lines == ["Read: README.md", "mcp__agl__record_note: one module"], (
         f"the activity lines were {lines}. The tool's own name passes through verbatim, an MCP "
         f"name included, and a value that begins with the workspace is shown relative to it"
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_activity_reporter_that_raises_comes_out_of_this_adapters_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The contract suite's activity-reporter clause, against the real adapter, for free.
+
+    That clause is the one test of a `run` in `AgentContract` that reads no model conduct, which is
+    what makes it reachable here: the reporter fails on whatever the session reports, and a scripted
+    transport reports two tool uses without an agent deciding anything. Against `_NeverRuns` it
+    skips with the other seven, so this is where the real `ClaudeCodeRunner` is actually held to it
+    - the same shape as `test_the_options_the_run_actually_built_are_the_hermetic_ones` having a
+    structural sibling that needs no binary.
+
+    What it forbids is a `try` around `_read`'s `on_activity(...)`. That is one line to add, it
+    would look like defensive good manners, and every other test in this build would stay green
+    while a broken reporter went unmentioned for the length of every run.
+    """
+    repo = workspace(tmp_path)
+    failing = Activity(raise_first=1)
+
+    async def play(cli: Scripted) -> None:
+        await cli.say(init(repo))
+        await cli.say(uses("Read", {"file_path": f"{repo}/README.md"}))
+        await cli.say(uses("Grep", {"pattern": "greet"}))
+        await cli.say(ends(result="done", terminal_reason="completed"))
+
+    with pytest.raises(ReporterFailed):
+        await offline(play, task_in(repo), monkeypatch, on_activity=failing)
+
+    assert len(failing.lines) == 1, (
+        f"the reporter was called {len(failing.lines)} time(s) and it raised on the first, so the "
+        f"session caught the exception and went on reporting. `ports/agent.py` puts no `try` "
+        f"around that call by design"
     )
 
 

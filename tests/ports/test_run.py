@@ -351,9 +351,9 @@ def test_a_record_is_frozen() -> None:
 
 
 def test_there_is_no_run_status() -> None:
-    """`ARCHITECTURE.md` §6 names one; the plan removes stored status twice, and the module
-    docstring argues the absence out. Pinned as a test rather than left to prose because an empty
-    enum is the easy thing for a later stage to add here, and adding it is one field away from
+    """`ARCHITECTURE.md` §6 refuses one by name; the plan removes stored status twice, and the
+    module docstring argues the absence out. Pinned as a test rather than left to prose because an
+    empty enum is the easy thing for a later stage to add here, and adding it is one field away from
     storing it in `run.json` - the second source of truth §3.11 says forces a reconcile pass."""
     assert not hasattr(run, "RunStatus")
     assert run.__all__ == ["JsonValue", "RunSpec"]

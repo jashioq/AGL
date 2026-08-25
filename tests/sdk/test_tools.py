@@ -16,6 +16,13 @@ The fingerprint half is measured against `journal.base_of` rather than restated:
 `tests/sdk/test_journal.py` already pins that a hand-built `Tool`'s handler is not a term, and what
 is new here is that a tool *derived* from a declaration behaves the same way - and that its
 description is a term, which is §3.6's own example of a change that must re-run a step.
+
+**One test in that half carries a claim the others do not.**
+`test_editing_a_fields_description_changes_the_steps_base` is what makes a `describe()` on a payload
+field worth having: §3.6 rule 6's one open hole is that a `__post_init__` is invisible to a derived
+schema, and a rule interpolated into a field's description is not, because a description is schema
+and schema is fingerprint. Everything else about `describe()` is convenience; that one is the hole
+being closed, so it is measured against `base_of` and against two payloads built under one name.
 """
 
 import json
@@ -32,7 +39,7 @@ from agl.ports.agent import Claude, Tool, ToolResult
 from agl.ports.errors import InputError, InternalError
 from agl.ports.run import JsonValue
 from agl.sdk._engine.journal import base_of, canonical_json
-from agl.sdk.tools import ReportingTool, reporting_tool
+from agl.sdk.tools import ReportingTool, describe, reporting_tool
 
 _HEAD: Final = "4a91c07f2b3e8d15c6a0b7f31d92e8054c6a0f13"
 
@@ -208,6 +215,100 @@ def test_a_payload_with_no_fields_is_a_declaration_and_not_a_refusal() -> None:
     declared = reporting_tool("done", "say that you have finished", Done)
     assert dict(declared.payload_schema)["properties"] == {}
     assert declared.read({}) == Done()
+
+
+# --- a field that says what it is: `describe()` ---------------------------------------------------
+#
+# The gap stage 17 reported and 19.2 closed. `sdk/tools.py` refuses an enum field and advises "a
+# `str` field whose description names them"; until this existed there was nowhere in a derived
+# schema to write one, so a payload's vocabulary lived in the tool's description and the prompt and
+# was enforced a third time in a `__post_init__` - which §3.6 rule 6 says the digest cannot see.
+
+
+# A fixed vocabulary, which is the case `sdk/tools.py` refuses an enum in favour of and the one
+# `describe()` exists for. Held as a constant here for the reason `fix/findings.py` holds
+# `SEVERITIES`: the test below that widens it has to widen one thing.
+_VOCABULARY: Final = ("high", "medium", "low")
+
+
+@dataclass(frozen=True)
+class Described:
+    """One described field of each interesting shape: required, optional-with-a-default, and one
+    left undescribed so that the untouched case is measured in the same object."""
+
+    severity: str = describe("one of high, medium, low")
+    line: int | None = describe("where in the file, or null", default=None)
+    file: str = "unknown"
+
+
+DESCRIBED: Final = reporting_tool("report", "report what you found", Described)
+
+
+def test_a_described_field_carries_its_description_in_the_derived_schema() -> None:
+    """The whole object, because it is a stored format: what a description does to the shape is
+    add one key beside the ones that were there, on the field it was declared on and on no other.
+
+    The optional is the interesting one - `describe()` puts the text on whatever the annotation
+    derived, so an `anyOf` carries it as an annotation keyword beside its two arms rather than
+    inside one of them, which is what makes the mechanism orthogonal to every supported field type.
+    """
+    assert dict(DESCRIBED.payload_schema) == {
+        "type": "object",
+        "title": f"{__name__}.Described",
+        "properties": {
+            "severity": {"type": "string", "description": "one of high, medium, low"},
+            "line": {
+                "anyOf": [{"type": "integer"}, {"type": "null"}],
+                "description": "where in the file, or null",
+            },
+            "file": {"type": "string"},
+        },
+        "required": ["severity"],
+        "additionalProperties": False,
+    }
+
+
+def test_describing_a_field_does_not_make_it_optional_and_a_default_still_does() -> None:
+    """Required-ness is `dataclasses`' answer and not this module's, exactly as `arg()` leaves it:
+    `describe(text)` is a `field()` with no default, so the field stays required, and
+    `describe(text, default=…)` is one with a default, so it does not."""
+    assert dict(DESCRIBED.payload_schema)["required"] == ["severity"]
+    assert DESCRIBED.read({"severity": "low"}) == Described(severity="low")
+
+
+def test_a_described_payload_converts_and_rejects_exactly_as_an_undescribed_one_does() -> None:
+    """A description is prose for the model and nothing to the walker. It must not become a rule:
+    `_converted` never reads one, so the field is checked at its declared type and no further."""
+    assert DESCRIBED.rejection({"severity": "not in the list", "line": 3}) is None
+    assert DESCRIBED.read({"severity": "not in the list", "line": 3}) == Described(
+        severity="not in the list", line=3
+    )
+    refusal = DESCRIBED.rejection({"severity": 3})
+    assert refusal is not None and "`report.severity` should be a string" in refusal
+
+
+def test_an_undescribed_payload_derives_exactly_what_it_derived_before() -> None:
+    """Most payload fields need no description, and the mechanism must cost them nothing - not a
+    `"description": null`, not an empty string, not a key at all. Asserted against the suite's own
+    `Findings`, whose full schema is pinned at the top of this file with no `description` in it."""
+    properties = dict(REPORT.payload_schema)["properties"]
+    assert isinstance(properties, dict)
+    for name, schema in properties.items():
+        assert isinstance(schema, dict), f"{name} derived something that is not a schema object"
+        assert "description" not in schema, (
+            f"the undescribed field {name!r} derived a `description` anyway. Every digest ever "
+            f"written over this payload holds the schema, so a key that appears for a field "
+            f"nobody described re-runs every step that reports through it"
+        )
+
+
+def test_a_description_that_says_nothing_is_refused_where_it_is_written() -> None:
+    """`ReportingTool.__post_init__`'s refusal of an empty *tool* description, one level down and
+    for its reason: an empty string is a term in every digest this payload writes and is nothing at
+    all to the model. Declaration time, like every other refusal in this module."""
+    with pytest.raises(InputError) as refused:
+        describe("   \n  ")
+    assert "description" in str(refused.value)
 
 
 # --- every refused field type, each naming the field ---------------------------------------------
@@ -512,6 +613,50 @@ def test_editing_a_derived_tools_description_changes_the_steps_base() -> None:
     not replay what the old wording produced. Measured against `base_of`, not restated."""
     reworded = reporting_tool(REPORT.name, "report every problem you found", Findings)
     assert _base(_tool(REPORT)) != _base(_tool(reworded))
+
+
+def test_editing_a_fields_description_changes_the_steps_base() -> None:
+    """**The whole point of `describe()`, and the measurement stage 17's finding asked for.**
+
+    §3.6 rule 6's one open hole is that a `__post_init__` is invisible to a derived schema, so a
+    payload whose vocabulary is enforced in code and named nowhere else changes what converts while
+    moving no digest - and an entry recorded under the old vocabulary stops converting with its
+    fingerprint still matching, which surfaces as `InternalError` out of `read` on a resume.
+    `fix/findings.py` wrote that down as the accepted price of checking `SEVERITIES`.
+
+    A field description is data, and data is in the schema, and the schema is in `base_of`. So a
+    payload that interpolates its vocabulary into `describe()` moves the digest when the vocabulary
+    moves, the stale entry is never read, and §3.6's "a stale entry is discarded rather than failing
+    to parse" is true of it. This is that sentence measured rather than asserted: the two payloads
+    below differ in one field's description and in nothing else at all.
+
+    Both halves, for `test_two_payload_types_of_one_shape_are_two_schemas_and_two_fingerprints`'
+    reason: the schema because it is the stored format, and the base because that is the sentence
+    anybody cares about - these are two steps, and the first one's result is not the second's.
+
+    **The two payloads are built through `make_dataclass` under one name**, which is
+    `test_reordering_two_fields_costs_no_agent_run`'s arrangement and is load-bearing here for the
+    mirror-image reason. A payload type contributes its qualified name to the schema as `title`, so
+    two `class` statements would already differ before a word of the description changed, and this
+    test would be green while measuring the thing 13.0 closed instead of the thing 19.2 opened.
+    """
+    one = make_dataclass(
+        "Payload", [("severity", str, describe(f"one of {', '.join(_VOCABULARY)}"))], frozen=True
+    )
+    widened = make_dataclass(
+        "Payload",
+        [("severity", str, describe(f"one of {', '.join((*_VOCABULARY, 'critical'))}"))],
+        frozen=True,
+    )
+    assert one.__qualname__ == widened.__qualname__, "the arrangement this test rests on"
+
+    before: ReportingTool[Any] = reporting_tool("report", "report it", one)
+    after: ReportingTool[Any] = reporting_tool("report", "report it", widened)
+    was, now = dict(before.payload_schema), dict(after.payload_schema)
+    assert was["title"] == now["title"], "the two payloads differ in more than one field's wording"
+    assert was["required"] == now["required"]
+    assert was["properties"] != now["properties"]
+    assert _base(_tool(before)) != _base(_tool(after))
 
 
 def test_a_derived_tools_handler_is_not_a_term_in_the_base() -> None:

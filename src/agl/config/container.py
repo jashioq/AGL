@@ -1,9 +1,11 @@
 """The composition root: the only module that says `new`, and the two bundles it says it into.
 
 Everything above this file receives ports and never picks a class. `.importlinter`'s contract 5 is
-that rule made executable - `agl.*` may not import `agl.adapters`, with two ignore expressions
-naming this module and nothing else, expressions that matched nothing until the imports below were
-written. What the rule buys is measurable target #6: deleting a connector means deleting its
+that rule made executable - `agl.*` may not import `agl.adapters`, with one ignore expression
+naming this module and nothing else. There were two until 19.1 held the contract to import-linter's
+default alerting, which reports an ignore expression matching nothing: the second named the
+`agl.adapters` package itself, which a composition root has no use for and this module has never
+imported. What the rule buys is measurable target #6: deleting a connector means deleting its
 adapter package, its config section and its entry here, because there is no fourth place its name
 could be. And it buys target #8 from the other direction - if nothing above names a class, then
 substituting every class at once is something this module can do by itself, which is the all-fakes
@@ -132,13 +134,13 @@ concurrent runs are asserted (#9), and how a workflow author finds out what thei
 before spending a token. Read it as the second supported deployment, because that is what it is.
 
 **The three git fakes share one `FakeRepository`, and the caller cannot get that wrong.** Stage 5
-wrote the requirement into `adapters/git/fake.py` under "Construction, and where it differs from
-the real adapters": the real three are each handed a `Path` and reach one repository through the
+wrote the requirement into `adapters/git/fake.py` under "Construction, and where it differs from the
+real adapters": the real three are each handed a `Path` and reach one repository through the
 filesystem, but a fake has no durable object behind it, so three separately constructed fakes are
-three unrelated repositories that agree about nothing. It said "Stage 9 is where that lands." It
-lands as a local: `fakes()` constructs exactly one `FakeRepository` and hands the same instance to
-all three, and there is no parameter through which a caller could pass a second - the seed for its
-initial state is a parameter, the repository itself is not.
+three unrelated repositories that agree about nothing, and named this function as where that lands.
+It lands as a local: `fakes()` constructs exactly one `FakeRepository` and hands the same instance
+to all three, and there is no parameter through which a caller could pass a second - the seed for
+its initial state is a parameter, the repository itself is not.
 
 **Both providers' fakes are called `FakeAgentRunner`**, as are both `Script` types, deliberately:
 they are two implementations of one idea and contract 4 forbids them sharing a definition. This
@@ -161,33 +163,46 @@ the terminal. That keeps the direction honest - scripting is a thing done before
 is no recorder on any fake for a test to read afterwards, which `adapters/shell/fake.py` argues at
 length.
 
-**Two names for one object was a defect, and `with_terminal` and `with_store` are the repair.**
+**Two names for one object was a defect, and `with_terminal`, `with_store` and `with_verifier` are
+the repair.**
 Substituting a port used to be `dataclasses.replace(harness.services, terminal=...)`, which reaches
 one of the two views and leaves the sibling field pointing at the object that was just discarded -
 so `harness.terminal` afterwards named something no run would ever use, silently, and a test reading
-both read the wrong one. The two methods below swap a member in **both** views at once, which is the
-only shape in which the two cannot come apart.
+both read the wrong one. The three methods below swap a member in **both** views at once, which is
+the only shape in which the two cannot come apart.
 
 That is not `Services` growing behaviour, and the distinction is the one that module's own docstring
 draws. `Services` is the *type every layer above receives*, so a `with_store()` there would be a
 second place that knows how a bundle is assembled, and a member a workflow could reach.
 `FakeServices`
 is not a bundle: it is a handle on one, produced by exactly one function, in the composition root,
-reachable only by a caller that already asked for fakes. Its two methods assemble nothing - each
-takes an object the caller built and says "these two names go on meaning it" - so there is no second
-answer here to what a bundle is made of.
+reachable only by a caller that already asked for fakes. Its three methods assemble nothing -
+each takes an object the caller built and says "these two names go on meaning it" - so there is no
+second answer here to what a bundle is made of.
 
-**Only two of the five fields have one**, and which two is not an accident. `MemoryStore` and
-`HeadlessTerminal` add no member to their ports at all, so their fields can be typed at the port
-with nothing lost and a substituted implementation can stand in them honestly. `FakeRepository`,
-`FakeVerifier` and `ManualClock` each carry the observation surface that is the whole reason the
-sibling field exists - `tip`, `answers`, `advance` - so widening one of those to its port would take
-away what it is for. A caller substituting one of those three builds a `Services` for a `Run` and
-leaves this object alone, which is what `tests/sdk/test_run_integrate.py` does and says.
+**Three of the five fields have one, and the rule is a caller rather than a type.** `MemoryStore`
+and `HeadlessTerminal` add no member to their ports at all, so those two fields are typed at the
+port and a substituted implementation stands in them honestly. `FakeRepository`, `FakeVerifier` and
+`ManualClock` each carry the observation surface that is the whole reason the sibling field exists -
+`tip`, `answers`, `advance` - so none of those three is widened to its port and none ever will be:
+widening is what would take the field's purpose away. 16.5 read that as "only the port-typed fields
+get a verb", and 19.2 found the reading was one step too far. **The gate is the only hook a test has
+inside a landing** - a run holds the lease and the target's step lock from `integrate()` to
+settlement, and `Verifier.verify` is the one framework call in that window - so `verifier` had a
+caller and `with_verifier` is that caller's, taking a `FakeVerifier` because that is the field's own
+type and an instrument goes in by subclassing the fake rather than replacing it.
+
+`repository` and `clock` have the same exposure and **no verb, because nothing asks for one**: no
+test in this repository substitutes either, and `with_terminal`'s docstring is explicit that these
+exist for a caller that needs them. A third and fourth verb nothing calls would be the speculative
+generality §3.11 refuses in a dozen rows. A caller wanting an arbitrary `Verifier`, `History` or
+`Integrator` - one that is not a fake of that port at all - builds a `Services` for a `Run` and
+leaves this object alone, which is what `tests/sdk/test_run_integrate.py` does and says, and which
+has no sibling field to strand.
 
 ## The workflow-facing vocabulary, compiled here
 
-Stage 16.5 built `sdk/testing.py` on top of this and already knew it "cannot name the fake's
+Stage 16.5 built `sdk/testing.py` on top of this and already knew it "cannot name the fakes'
 scripting types", `sdk/` and `adapters/` being siblings: the workflow-facing scripting vocabulary
 lives there in ports vocabulary, and **this module compiles it into the callable the fake
 consumes**. That is `agent=` below, keyword-only beside `claude=` and `openai=` exactly as this
@@ -200,6 +215,15 @@ providers and a workflow author never writes the word Claude in a test unless th
 The two raw parameters stay, and a raw script for a provider replaces the compiled one **for that
 provider only** - the more specific wins, which is the one rule here and the escape hatch for a
 negotiation a declarative `Reply` cannot express.
+
+**`_performs` is also the one place an `Agent` is awaited**, which is 19.2's widening and belongs
+here rather than in either script: the vocabulary's return is `Reply | Awaitable[Reply]`, so `def`
+and `async def` are one type with one compilation, and the two spellings meet on `_performs`' first
+line. What it buys is stated in `sdk/testing.py` and measured by 18.3 - a synchronous agent cannot
+await a barrier, so every test that had to prove two agents genuinely overlapped fell out of this
+parameter and into the escape hatch below. What it does **not** buy is also stated there: an
+awaited agent has still finished before its first question is asked, so reading a `ToolResult` is
+still a raw script's.
 
 ## Errors, and one refusal that is deliberately not here
 
@@ -224,6 +248,7 @@ that should write the four lines itself rather than a switch every reader has to
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from functools import partial
+from inspect import isawaitable
 from pathlib import Path
 from typing import Final
 
@@ -292,10 +317,11 @@ class FakeServices:
     The three git fakes are absent by design, not omission: all three are views of `repository`,
     and asserting through the repository is asserting about all of them at once.
 
-    **Substitute through this object and never around it.** `with_terminal` and `with_store` are the
-    two members below, and the module docstring argues both why they exist and why only those two
-    fields have one. A `replace(harness.services, terminal=...)` reaches one of the two views and
-    leaves the other naming the object it just discarded - which nothing anywhere would report.
+    **Substitute through this object and never around it.** `with_terminal`, `with_store` and
+    `with_verifier` are the three members below, and the module docstring argues both why they exist
+    and why the remaining two fields have none. A `replace(harness.services, terminal=...)` reaches
+    one of the two views and leaves the other naming the object it just discarded - which nothing
+    anywhere would report.
     """
 
     services: Services
@@ -315,11 +341,17 @@ class FakeServices:
     on meaning it."""
 
     verifier: FakeVerifier
-    """The same object as `services.verifier`. `answers()` scripts a build command's verdict.
+    """The same object as `services.verifier`, and `with_verifier` is what keeps that true.
 
-    At its own type and with no `with_verifier` beside it, for the module docstring's reason:
-    `answers` is the whole point of the field, and a `Verifier`-typed one would be a name with
-    nothing to ask."""
+    At its own type, for the module docstring's reason: `answers` is the whole point of the field,
+    and a `Verifier`-typed one would be a name with nothing to ask. **The verb below takes that same
+    type and not the port**, which is the one place this trio differs from `store` and `terminal`
+    and is what 19.2 settled: the gate is the only hook a test has inside a landing, so this field
+    needed a verb - but widening it to `Verifier` to accept any implementation would take `answers`
+    away from every bundle that never substituted anything. A test wanting an arbitrary `Verifier`
+    is not left without a route: it builds a `Services` with `replace(harness.services,
+    verifier=...)` and hands that to a `Run`, which is what two files under `tests/sdk/` do and
+    which has no sibling field to leave behind."""
 
     terminal: Terminal
     """The same object as `services.terminal`, and `with_terminal` is what keeps that true.
@@ -362,6 +394,31 @@ class FakeServices:
         this pair was written to close.
         """
         return replace(self, services=replace(self.services, store=store), store=store)
+
+    def with_verifier(self, verifier: FakeVerifier) -> FakeServices:
+        """This bundle with `verifier` in place of the plain one, in both views at once.
+
+            harness = testing.over(container.fakes(trees).with_verifier(_Rendezvous(2)))
+
+        The same two lines as the pair above, and the third member rather than a third exception,
+        because **the merge gate is the only hook a workflow's test has inside a landing**. A run
+        holds the lease and the target's step lock from `integrate()` to settlement, and the one
+        thing the framework calls in that window is `Verifier.verify` - so a test that wants to see
+        two landings serialised, or to make one go red at a chosen moment and drive §3.4's conflict
+        loop, has to put its own verifier in. Until 19.2 the only way in was `replace(fakes,
+        services=replace(fakes.services, verifier=...))` at the call site, which left `fakes
+        .verifier` naming an object the bundle no longer used - the two-views defect `with_terminal`
+        was written to close, reproduced by hand wherever it was wanted.
+
+        **A `FakeVerifier` and not a `Verifier`**, which is the whole of what is different here and
+        the field's docstring argues it: this parameter is the field's own type, exactly as
+        `with_store`'s is, and the field is at the fake because `answers` is what it is for. An
+        instrument goes in by subclassing - `verify` overridden to rendezvous, to count, or to
+        block, and `super().verify(...)` for the verdict - which leaves it scriptable as well as
+        instrumented and keeps the bundle what its name says it is. An arbitrary `Verifier` belongs
+        one layer down, in a `Services` a test builds for a `Run` it constructed itself.
+        """
+        return replace(self, services=replace(self.services, verifier=verifier), verifier=verifier)
 
 
 def real(settings: Settings, project: Project) -> Services:
@@ -425,10 +482,12 @@ def fakes(
     build that is a dict lookup cannot run past one".
 
     `agent` is **the workflow-facing way in** and the one most callers want: a
-    `sdk.testing.Agent` is `(AgentTask) -> Reply`, named in ports vocabulary and in no vendor's, and
-    it is compiled below into one script per provider. One parameter for both providers, because the
-    vocabulary has no provider in it - an agent that cares which model it is serving reads
-    `task.model` and says so itself.
+    `sdk.testing.Agent` is `(AgentTask) -> Reply | Awaitable[Reply]`, named in ports vocabulary and
+    in no vendor's, and it is compiled below into one script per provider. One parameter for both
+    providers, because the vocabulary has no provider in it - an agent that cares which model it is
+    serving reads `task.model` and says so itself. `def` or `async def`, either way: `_performs`
+    awaits what the call produced when there is something to await, so an agent that has to meet
+    another agent at a barrier is written here rather than through the escape hatch below.
 
     `claude` and `openai` are one raw script per provider - an agent's conduct, in the only
     vocabulary the port has - and are the escape hatch for what a `Reply` cannot express, a
@@ -561,13 +620,13 @@ def _openai_script(agent: Agent | None) -> openai_fake.Script | None:
 
 
 async def _performs(
-    reply: Reply,
+    produced: Reply | Awaitable[Reply],
     *,
     ask: Callable[[Question], Awaitable[Answer | None]],
     call: Callable[[str, Mapping[str, JsonValue]], Awaitable[ToolResult]],
     report: Callable[[str], None],
 ) -> AgentOutcome:
-    """Do what `reply` describes, through the three things a `Conversation` offers, and answer.
+    """Do what the agent described, through the three things a `Conversation` offers, and answer.
 
     **The whole of what a `Reply` means, in one place and in the order `sdk/testing.py` documents**:
     every activity line, then every question, then every call, then the outcome. Written once and
@@ -575,13 +634,26 @@ async def _performs(
     shape both vendors' `Conversation` can be passed to - see `_claude_script` for why there is no
     type either of them shares.
 
+    **And the one place an `Agent` is awaited, which is why it takes what the call returned rather
+    than a `Reply`.** `sdk/testing.Agent` is `(AgentTask) -> Reply | Awaitable[Reply]`, so an author
+    may write `def agent(task)` or `async def agent(task)` and neither is a second kind of agent to
+    declare: `inspect.isawaitable` decides here, once, and the two spellings meet again on the next
+    line. That widening is 19.2's, and `sdk/testing.py` argues what it is for - an agent that cannot
+    await cannot take part in a rendezvous, which is the only arrangement that can prove N chunks
+    genuinely ran at once. `isawaitable` rather than `iscoroutinefunction` on the agent itself,
+    because what has to be awaited is the *value*: a synchronous function returning a coroutine, or
+    a callable object, is an agent either way and neither is a coroutine function.
+
     **What comes back from `ask` and from `call` is deliberately dropped here.** A `Reply` is a
     value the author computed before the run and it has nowhere to put an answer, which is the
     limitation `sdk/testing.py` states plainly rather than works around: an agent whose next move
     depends on what it was told is a raw `claude=` or `openai=` script. Neither result is thrown
     away in any sense that matters, either - the answer went to the workflow's own handler and the
-    refusal to the workflow's own tool, and both of those are the author's code.
+    refusal to the workflow's own tool, and both of those are the author's code. **An `async def`
+    agent does not change that**: it is awaited on the first line below, before any of the three is
+    called, so it has finished by the time there is anything for it to read.
     """
+    reply = await produced if isawaitable(produced) else produced
     for line in reply.activity:
         report(line)
     for question in reply.asks:

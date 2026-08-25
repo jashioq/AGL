@@ -11,15 +11,21 @@ takes over them all belong here, in `fix/`, beside the prompt that asks for them
 
 `sdk/tools.py` refuses an enum field outright, and says why: "an enum member is not a JSON value;
 it is a Python object whose `value` happens to be one", so `StrEnum` round-trips by an accident of
-inheritance that every other `Enum` does not share. Its advice is "a field whose values are a fixed
-set is a `str` field whose description names them".
+inheritance that every other `Enum` does not share. Its advice is that a field whose values are a
+fixed set is a `str` field whose description names them - which it now points at `describe()` for,
+having spent one deliverable with nowhere to write one.
 
-**That advice has no spelling.** `_object_schema` derives `type`, `title`, `properties`, `required`
-and `additionalProperties`, and `_schema_for` renders a `str` field as `{"type": "string"}` and
-nothing else - there is no per-field `description` anywhere in a derived schema. So the only place
-this payload can name its own vocabulary to the model is the *tool's* description and the reviewer's
-prompt, and both do, below and in `prompts/review.md`. This is reported as a gap in the SDK rather
-than worked around here; what is written here is what the SDK as it stands makes writable.
+**That advice had no spelling until 19.2, and this module is why it has one.** `_object_schema`
+derived `type`, `title`, `properties`, `required` and `additionalProperties` and nothing else, so a
+`str` field reached the model as `{"type": "string"}` and the only places this payload could name
+its own vocabulary were the *tool's* description and the reviewer's prompt. That was reported here
+as a gap in the SDK rather than worked around, and 19.2 closed it: `sdk/tools.py::describe()` puts a
+`description` on one field's schema, and `severity` below carries `SEVERITIES` interpolated into it.
+
+**So the constant is written once and read three ways.** The field description the model is shown,
+`Findings.high()`'s comparison against `HIGH`, and `Finding.__post_init__`'s check are all the one
+tuple; editing it edits all three on one screen. `prompts/review.md` says the three words a second
+time and stays prose, deliberately - see below.
 
 **So the vocabulary is enforced by `Finding.__post_init__`, and that is not belt-and-braces.**
 `Findings.high()` is a string comparison, and the workflow branches on its result: a reviewer that
@@ -30,22 +36,44 @@ silently taking the wrong branch, which is the one failure mode a check is worth
 
 The check costs almost nothing to reach the model, either. `sdk/tools.py::_instance` constructs the
 payload inside a `try` and turns whatever it raises into a rejection carried back into the same
-conversation, so a reviewer that invents a severity is told the four words it may use and sends
+conversation, so a reviewer that invents a severity is told the three words it may use and sends
 another call. A plain `ValueError` is the right class for it: this is a value that is wrong, the
 text is read by a model rather than by an operator, and reaching into `agl.ports` for `InputError`
 would put a framework exception hierarchy inside a workflow's payload type.
 
-**The cost, stated rather than discovered.** §3.6 rule 6 names this exact case as the one the
-fingerprint cannot see: a `__post_init__` "is invisible to a derived schema", so adding a severity
-to `SEVERITIES` - or removing one - changes what converts while changing no digest, and an entry
-recorded under the old vocabulary can stop converting with its fingerprint still matching. That
-surfaces as `InternalError` out of `ReportingTool.read` on a resume, naming this type. It is the
-accepted price of the check, and the way to avoid paying it is to not edit `SEVERITIES` under a run
-that is still resumable.
+**The cost this module used to pay, and no longer does.** §3.6 rule 6 names this exact case as the
+one the fingerprint cannot see: a `__post_init__` "is invisible to a derived schema", so adding a
+severity to `SEVERITIES` - or removing one - changed what converts while changing no digest, and an
+entry recorded under the old vocabulary could stop converting with its fingerprint still matching.
+That surfaced as `InternalError` out of `ReportingTool.read` on a resume, naming this type. It was
+written down here as the accepted price of the check, with "do not edit `SEVERITIES` under a run
+that is still resumable" as the whole of the mitigation.
+
+**It is paid off, and by the same edit that removed the duplication.** `SEVERITIES` is interpolated
+into `severity`'s `describe()` text, a field description is a term of the derived schema, and the
+schema is a term of `base_of` - so editing the tuple now moves every digest that reports through
+this payload and the stale entry is discarded, which is what §3.6 said would happen all along.
+`tests/sdk/test_tools.py::test_editing_a_fields_description_changes_the_steps_base` is the
+measurement, and `tests/workflows/test_fix.py` pins it against this workflow's own reviewer. The
+general hole rule 6 names is still open in `sdk/tools.py` - a `__post_init__` rule that is *not*
+stated where the model can read it is still invisible - and this module simply has no such rule
+left.
 
 `file` and `summary` are deliberately not checked. A wrong-but-present string in either is a review
 comment a human reads and judges; it changes no branch, and refusing it would be this module having
-opinions about prose.
+opinions about prose. They are *described*, which is the other half: a description tells the model
+what to write and a check refuses what it wrote, and only one of those two is worth having here.
+
+**`prompts/review.md`'s copy stays prose, and is not the duplication that was worth removing.**
+Two reasons, and the second is the one that decides it. `prompt_file()` reads a file and hands back
+its text unchanged - that is the whole mechanism by which §3.6 fingerprints the prompt rather than a
+filename - so deriving the markdown from `SEVERITIES` would mean a `Role` holding a string composed
+at import out of a Python constant, which is a second way for a prompt to exist and one that no
+longer round-trips to a file a person can read and edit. And what the markdown actually says is not
+the list: it says what `high` *means* - "this must be fixed before the change can ship... every
+finding you mark `high` is another agent run" - which is guidance about how to choose among the
+three, written for a reader, and no substitution produces it. The three words appear inside it
+because the sentence needs them, not because the vocabulary is stored there.
 
 ## Tuples, not lists
 
@@ -72,7 +100,7 @@ the same call.
 from dataclasses import dataclass
 from typing import Final
 
-from agl.sdk import reporting_tool
+from agl.sdk import describe, reporting_tool
 
 __all__ = ["HIGH", "SEVERITIES", "Finding", "Findings", "report_findings"]
 
@@ -99,19 +127,32 @@ class Finding:
     editable by whoever holds it.
     """
 
-    severity: str
-    """One of `SEVERITIES`. Refused below when it is not - the module docstring argues why this is
-    the field worth checking and the other two are not."""
+    severity: str = describe(
+        # The one place `SEVERITIES` is spelled out for the model, and the reason this module no
+        # longer pays §3.6 rule 6's price: the text lands in the derived schema, the schema is a
+        # term of `base_of`, so editing the tuple moves the digest that `__post_init__` alone could
+        # not. `HIGH` is named separately because the *consequence* is what makes the choice, and a
+        # bare list of three words would leave the model to guess which one costs another agent.
+        f"One of {', '.join(SEVERITIES)}. Use {HIGH!r} only for something that must be fixed "
+        f"before this change can ship: that is the one value that sends the change back to be "
+        f"repaired, and every finding marked with it is another agent run."
+    )
+    """One of `SEVERITIES`. Described to the model and refused below when it is not - the module
+    docstring argues why this is the field worth checking, why the other two are not, and why
+    describing it and checking it out of one constant is what closes rule 6's hole here."""
 
-    file: str
+    file: str = describe("Where it is, as a path relative to the root of the repository.")
     """Where it is, as a path relative to the root of the worktree. Unchecked prose as far as this
     module is concerned: it is read by the repair agent and by a human, and neither needs it to
     have been validated by the type."""
 
-    summary: str
+    summary: str = describe(
+        "One or two sentences naming what is wrong and why it matters, written so that somebody "
+        "repairing it without the diff in front of them knows what to do."
+    )
     """What is wrong and why it matters, in the reviewer's own words. This is what the repair agent
-    is given to act on, so the prompt asks for a sentence a reader could act on without the diff in
-    front of them."""
+    is given to act on, so the description above asks for a sentence a reader could act on without
+    the diff in front of them."""
 
     def __post_init__(self) -> None:
         if self.severity not in SEVERITIES:
@@ -135,7 +176,10 @@ class Findings:
     the step returns.
     """
 
-    findings: tuple[Finding, ...]
+    findings: tuple[Finding, ...] = describe(
+        "Every problem this review found, one entry per defect. Report an empty list when the "
+        "change is sound: that is a result, not a failure to find anything."
+    )
     """Every finding, in the order the reviewer reported them. Required, and empty is the correct
     report for a clean change - see the module docstring."""
 
@@ -158,23 +202,19 @@ class Findings:
 
 report_findings: Final = reporting_tool(
     "report_findings",
-    # This description is the *only* place the schema can carry the severity vocabulary: a derived
-    # schema has no per-field `description`, so `{"type": "string"}` is all the model is otherwise
-    # told about `severity`. `prompts/review.md` says it a second time, on purpose - the prompt and
-    # the tool are read at different moments and a model that skims one should still meet the list.
+    # What the *tool* is, and nothing about a field. Each field says what it is where it is
+    # declared, through `describe()`, which is why this sentence no longer enumerates `SEVERITIES`
+    # or explains what a `file` is: `ReportingTool.description` is documented as "what the model
+    # reads to decide whether to call it", and a paragraph of per-field rules in it was that
+    # sentence being untrue for want of anywhere else to put them.
     "Report everything this review found, and end the review. Call this exactly once, when you "
     "have finished reading the change: it is the only way to record a result, and a review that "
-    "ends without calling it has produced nothing and will be run again. Each finding's `severity` "
-    f"is one of {', '.join(SEVERITIES)!r} - use {HIGH!r} only for something that must be fixed "
-    "before this change can ship, because that is the one value that sends the change back to be "
-    "repaired. `file` is a path relative to the root of the repository. `summary` is one or two "
-    "sentences naming what is wrong and why it matters. Report an empty list when the change is "
-    "sound: that is a result, not a failure to find anything.",
+    "ends without calling it has produced nothing and will be run again.",
     Findings,
 )
 """The reviewer's one tool, and what makes `review` a reporting step.
 
 Declared here rather than in `roles.py` because §3.3 lists tools and their payload schemas as one
-of the four things an author writes, and the payload is above: a declaration whose description
-enumerates `SEVERITIES` and a type whose `__post_init__` enforces it should be able to disagree
-only by being edited on one screen."""
+of the four things an author writes, and the payload is above: a payload whose field description
+enumerates `SEVERITIES` and a `__post_init__` that enforces it should be able to disagree only by
+being edited on one screen - and since 19.2 they cannot disagree at all, both being that tuple."""

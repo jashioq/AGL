@@ -39,8 +39,9 @@ which errors an author "really" needs would be the one kind of logic a facade mu
 
 **`EXIT_CODES` and `exit_code_for` are the other two names on `ports/errors.py`, and they are not
 here.** This is not the curation that rule forbids, because the cut is not one this module invented:
-`ports/errors.py` says in its own first lines that it holds two things - "the `AglError` hierarchy,
-organised by meaning, **and** the one exception -> exit-code table in the codebase" - and
+`ports/errors.py` opens by saying it holds two things - "the `AglError` hierarchy, organised by
+meaning, with the exit-code mapping as data" - and `ARCHITECTURE.md` §6 gives that module the same
+row from the outside, "**and** the one exception -> exit-code table in the codebase". And
 `cli/exit_codes.py` already takes exactly the other half of it, re-exporting those two names and
 holding no table of its own. An exit code is what a *process* answers with and what a shell script
 branches on; a workflow function has no process to exit and `api.py` never returns one. Putting the

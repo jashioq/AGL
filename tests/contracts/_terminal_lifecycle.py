@@ -14,7 +14,7 @@ than the same paragraph written twice and drifting.
 **The lifecycle is `ports/terminal.py`'s own addition and goes beyond §3.7's stated surface**, which
 is exactly why it is asserted here. §3.7 says a terminal is an async context manager and says why;
 the ABC then spells out what `__aexit__` owes, and a clause written down in one implementation and
-not the other is a clause the other one is free to get wrong.
+not the others is a clause the others are free to get wrong.
 """
 
 from collections.abc import Iterator

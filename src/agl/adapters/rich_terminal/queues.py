@@ -95,7 +95,9 @@ __all__ = ["Entry", "Registration", "Screens", "View"]
 type View[T] = Callable[..., Screen[T]]
 """What `show` is handed: a function returning a screen, with its arguments passed separately.
 
-The port's own `Callable[..., Screen[T]]`, named once so the three places that spell it agree. Its
+The port's own `Callable[..., Screen[T]]`, named once so the four places that spell it agree -
+this module, `terminal.py`, `scripted.py`, and the port itself, which spells the type out because
+`ports/` may not import an adapter's alias. Its
 parameters are unchecked for the reason `Terminal.show` states - a `ParamSpec` cannot coexist with a
 keyword-only parameter of `show`'s own, and §3.7's surface chose `priority`.
 """

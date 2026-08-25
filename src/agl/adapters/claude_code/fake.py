@@ -389,10 +389,14 @@ class Conversation:
         Passed through untouched (§3.7): the port refuses an `Activity` type and any shape imposed
         on what an adapter may say, so a script's own words arrive as a script's own words.
 
-        Not guarded, deliberately, and for `_session.py`'s reason: the port puts the obligations on
-        the caller - it must not block, and it may be called never - and says nothing about an
-        exception out of one. Swallowing it here would hide a broken reporter for the length of a
-        run, and would hide it only on fakes.
+        Not guarded, deliberately, and no longer for want of the port having said so. Until 19.4
+        this and `_session.py` both let a reporter's exception out because neither had a rule to
+        follow - two implementations agreeing, which is not a contract - and `ports/agent.py` now
+        settles it: an `on_activity` that raises ends the run with its own exception, an adapter
+        writes no `try` around the call, and `tests/contracts/agent.py` holds every implementation
+        to it. The argument is there and the short form of it is here: the framework's own reporter
+        is one assignment, so a reporter that raises is a broken one, and swallowing it would hide
+        a bug in somebody's callback for the length of a run.
         """
         if self._on_activity is not None:
             self._on_activity(line)

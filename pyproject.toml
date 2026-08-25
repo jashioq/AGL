@@ -21,17 +21,47 @@ all = ["agl[claude,terminal]"]
 agl = "agl.cli.main:main"
 
 # Workflows register themselves here: one line per workflow, and no central table to edit.
-# `noop` is stage 10's wiring probe and stage 19.4 deletes it, this line with it; `split`
-# registers itself here when stage 18 makes it runnable.
+# Both lines are shipped workflows. A third stood here from stage 10 to 19.1 - `noop`, the wiring
+# probe that did nothing, whose only job was to prove that argv reached a workflow function through
+# the installed group; stage 12 gave `run.step` to workflows that do work, and 19.1 deleted the
+# probe, its package and this line together.
+# An edit here is not seen until the distribution is rebuilt: `entry_points.txt` is a build
+# artifact, and tests/config/test_registry.py reads the real installed group. Refresh with
+# `uv pip install -e . --no-deps` after touching this table - that test compares this table against
+# the installed one first and names that command, so a stale install reports itself as a stale
+# install rather than as a workflow that failed to register.
 [project.entry-points."agl.workflows"]
-noop = "agl.workflows.noop:noop"
 fix = "agl.workflows.fix:fix"
 split = "agl.workflows.split:split"
 
+# What it takes to *work on* AGL, which is not what it takes to install it. A dependency group is
+# never part of the distribution: nothing here reaches a `pip install agl`, no resolver sees it, and
+# adding a line below adds nothing to what an operator gets.
+#
+# `agl[all]` is the second half of that sentence, and it is not §4's asymmetry being walked back.
+# The extras table above is still the only place a vendor SDK is declared, still the only thing a
+# user installs one through, and `container.py` still imports both vendors inside the function that
+# constructs them so a bare install works without either. What this line says is that a *developer*
+# runs the whole suite, and the whole suite includes the Claude adapter's three test modules, which
+# import `claude_agent_sdk` at module level - so on a clean `uv sync` without it, `pytest` exits 2
+# with three collection errors and zero tests run at all, `mypy --strict` reports 14 errors in 6
+# files, and forcing collection past those three modules leaves four more failing where
+# `container.real()` raises `UpstreamUnavailable` (exit 6). None of that is a fact about the code
+# being tested. `rich` is in the same position and is only accidentally present today: it
+# arrives transitively as `import-linter`'s own dependency, so the composition root builds a
+# `RichTerminal` on a clean environment purely because a lint tool happens to ship the library.
+#
+# Spelled `agl[all]` rather than as the two distributions, so that a vendor's name and its version
+# bound stay written in exactly one place. Two bounds for one SDK drift silently and in the worst
+# direction - a dev environment resolving a version the shipped extra does not admit is a suite that
+# passes against a package no user can get - and a third extra added later arrives here for free,
+# the way a workflow added to the entry-point table above arrives without a central list to edit.
 [dependency-groups]
 dev = [
+    "agl[all]",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
+    "pytest-timeout>=2.4.0",
     "mypy>=2.3.1",
     "ruff>=0.16.3",
     "import-linter>=2.13",
@@ -60,3 +90,41 @@ select = ["E", "F", "I", "UP", "B"]
 testpaths = ["tests"]
 asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"
+
+# A ceiling on how long any single test may take, and it is a *backstop* rather than a bound.
+#
+# What it is for: a test that hangs is worse than one that fails. A failure names a clause; a hang
+# stalls the run, and a mutation that survived is then indistinguishable from a machine that wedged.
+# `tests/sdk/test_leases.py:249` is the case that bought this - two `await leases.claim(...)` calls
+# on two different targets, neither of them under a bound, so a lease made coarser than per-target
+# suspends the second one forever - and the very next test in that file is the one whose docstring
+# promises "nothing here can hang and pass". Whatever else that pair is, it is not the last one
+# anybody will write, which is the argument for a **global default** over a marker on whichever
+# tests somebody already thought about: the same argument `scripts/check`'s paid-endpoint probe
+# makes when it writes a file that did not exist when the guard did. A default protects the test
+# written next year; a marker protects the test whose author already knew.
+#
+# Why 60: measured, not guessed. `pytest --durations=20` puts the slowest single test in this suite
+# at 2.48s (`tests/ports/test_ids.py`'s property run over real `git check-ref-format`) and the whole
+# suite at ~172s. 60s is 24x the slowest test and about a third of the entire run, so a test that
+# reaches it is not slow - it is not coming back. The one declared bound above it is
+# `tests/contracts/_agent_tasks.py`'s `RUN_DEADLINE = 300.0`, which is reachable only against a live
+# paid agent that no run in this build starts; a manual QA pass that does start one raises the
+# ceiling on the command line - `--timeout=600`, or `--timeout=0` for none.
+#
+# Why `signal` and not `thread`, spelled out because the default is platform-dependent and the two
+# fail differently. `signal` raises inside the test, so the hang is reported as a normal failure
+# with a traceback and the rest of the suite still runs. `thread` cannot interrupt a blocked
+# `await` at all: its watchdog dumps every thread's stack and hard-exits the process, so there is no
+# failure line, no summary, and no result for any test after it. Both were run against a real
+# `await asyncio.Event().wait()` before this line was written - `signal` reported three timeouts as
+# three failures in 11s, `thread` killed pytest with no counts at all.
+#
+# What it does not replace: a test bounding its own awaits. `test_leases.py`'s neighbouring claims
+# are awaited under `asyncio.wait_for(..., _LIVENESS)` and fail with a paragraph naming the lease
+# that was not given back and what a coarser one would cost; this fails with "Timeout (>60.0s)" and
+# a traceback into the event loop's selector. That is the difference between a test that says what
+# broke and a test that says only that something did. This is the floor under the awaits nobody
+# bounded, not permission to stop bounding them.
+timeout = 60
+timeout_method = "signal"

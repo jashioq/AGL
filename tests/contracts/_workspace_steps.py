@@ -212,9 +212,12 @@ class WorkspaceStepContract:
         something that later grows a shell. Names got narrower; messages did not, so this is where
         an implementation that pastes one into a command line comes apart.
 
-        What is *not* asserted is that the message was stored, or that a reader later sees it.
-        Neither port reads a message back - `History` has no member for one, deliberately - so the
-        clause this suite can see is that the message is accepted as written and the commit happens.
+        What is *not* asserted here is that the message was stored, or that a reader later sees
+        it: this suite holds a `WorkspaceProvider` and nothing that reads a past, so the clause it
+        can see is that the message is accepted as written and the commit happens. The other half
+        is `HistoryContract`'s since 19.2, where `History.message` puts this same string through a
+        round trip - which is why it is a module-level constant in `_workspace_files.py` and not a
+        literal here.
         """
         workspace = await provider.open(LABEL, CHILD, base)
         start = await workspace.head()

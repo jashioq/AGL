@@ -1,9 +1,9 @@
 """`run.terminal`, the context `api.run` opens around a workflow, and the two re-export facades.
 
 15.1 is wiring and this suite is written as wiring: `tests/contracts/terminal.py` already pins the
-port against both implementations, `tests/adapters/test_rich_terminal*.py` pin the redraw loop, the
-diff, the slot, the queues and preemption, and none of that is re-proved here. What is left is the
-four seams that only exist above the adapter, and each of them is a place where a plausible
+port against all three implementations, `tests/adapters/test_rich_terminal*.py` pin the redraw loop,
+the diff, the slot, the queues and preemption, and none of that is re-proved here. What is left is
+the four seams that only exist above the adapter, and each of them is a place where a plausible
 implementation would pass every existing test.
 
 **`run.terminal` is the bundle's own object.** Asserted by identity, because that is the only form
@@ -321,7 +321,7 @@ async def test_the_terminal_is_shut_again_when_api_run_returns(tmp_path: Path) -
     §3.7 makes the terminal an async context manager precisely so there is a way to stop a redraw
     loop and hand a display back; a run that left one open would leave a person's terminal owned by
     a process that has finished with it. What is observable from here is the port's own rule - a
-    `show` after the context is `InternalError` on both implementations - so that is what is asked.
+    `show` after the context is `InternalError` on every implementation - so that is what is asked.
 
     Deliberately not asserted through a flag on `HeadlessTerminal`: `_open` is that adapter's own
     state, and a test reading it would pass against a `RichTerminal` that never restored anything.
@@ -337,7 +337,7 @@ async def test_the_terminal_is_shut_again_when_api_run_returns(tmp_path: Path) -
 
 @pytest.mark.asyncio
 async def test_the_terminal_is_entered_once_around_the_workflow(tmp_path: Path) -> None:
-    """Once, which both implementations require - a second `__aenter__` is refused by each.
+    """Once, which every implementation requires - a second `__aenter__` is refused by each.
 
     A `HeadlessTerminal` would have said so by raising, and a raise is a weaker assertion than a
     count: it cannot tell "entered once" from "entered zero times", which is the state this whole

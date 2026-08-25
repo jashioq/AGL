@@ -1,10 +1,11 @@
 """The working directory: the one place in the fake that reads or writes a file.
 
 `ports/workspace.py` promises one thing about the world that a fake cannot hold in memory - "a
-workspace genuinely is a directory: an agent is pointed at one and a verifier's working directory
-is one" - so the fake's checkouts are real directories with real files in them, and everything
-else it knows is a dict. This module is that boundary, and the seam is `_trees.py`'s, restated:
-**nothing here knows what a recorded state is, and nothing in `_snapshots.py` opens a file.**
+workspace genuinely is a directory: an agent is pointed at one ... and a verifier's working
+directory is one" - so the fake's checkouts are real directories with real files in them, and
+everything else it knows is a dict. This module is that boundary, and the seam is `_trees.py`'s,
+restated: **nothing here knows what a recorded state is, and nothing in `_snapshots.py` opens a
+file.**
 
 `_trees.py` next door already makes and unmakes the directories a run's checkouts sit in, and the
 fake uses it unchanged - `made`, `deleted` and `tidied` are `mkdir`, `rmtree` and `rmdir` with no

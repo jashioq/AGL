@@ -64,17 +64,17 @@ from typing import Final
 
 import pytest
 
-from agl.adapters.claude_code.fake import Conversation, Script
 from agl.adapters.filesystem.store import FilesystemStore
 from agl.adapters.git.history import GitHistory
 from agl.adapters.git.workspace import GitWorkspaceProvider
 from agl.config import container
-from agl.ports.agent import AgentOutcome, Claude, Restriction, StopReason
+from agl.ports.agent import AgentTask, Claude, Restriction
 from agl.ports.home_layout import AglHome, RunScope
 from agl.ports.ids import ProjectName, RunLabel
 from agl.ports.run import JsonValue
 from agl.ports.tree_layout import TreesRoot
 from agl.sdk.roles import Role
+from agl.sdk.testing import Agent, Call, Reply
 from agl.sdk.tools import reporting_tool
 from agl.sdk.workflow import Run
 
@@ -180,15 +180,21 @@ def base(repository: Path) -> str:
     return _git(repository, "rev-parse", "HEAD").strip()
 
 
-def _run(repository: Path, tmp_path: Path, base: str, script: Script) -> Run[None]:
+def _run(repository: Path, tmp_path: Path, base: str, agent: Agent) -> Run[None]:
     """A `Run` over one real repository, one real ledger, one real history and one scripted agent.
 
     `test_run_worktree.py::_run`, and called twice with the same arguments it is a resume: the same
     ledger on disk, the same worktrees reopened, and a fresh counter and a fresh namespace table,
     which is what §3.6 means by "`n` is never persisted".
+
+    `agent=` and not `claude=`: every agent below is an `async def` in `sdk/testing.py`'s own
+    vocabulary, which 19.2 made possible and which this file is one of the reasons for. Before that
+    an `Agent` could not await, so a barrier - the only instrument that can tell two children
+    overlapping from a framework that ran them in order - had to be reached from a raw per-provider
+    `Script`, and every arrangement in this file was written on one.
     """
     trees = TreesRoot(tmp_path / "trees")
-    harness = container.fakes(trees, claude=script)
+    harness = container.fakes(trees, agent=agent)
     services = replace(
         harness.services,
         store=FilesystemStore(AglHome(tmp_path / "home")),
@@ -265,7 +271,7 @@ class _Dispatches:
         self.left: list[str] = []
 
 
-def _rendezvous(record: _Dispatches, barrier: asyncio.Barrier) -> Script:
+def _rendezvous(record: _Dispatches, barrier: asyncio.Barrier) -> Agent:
     """An agent that cannot finish until another agent has started.
 
     The whole of the arrangement, and the only shape that can tell overlap from a well-behaved
@@ -280,21 +286,20 @@ def _rendezvous(record: _Dispatches, barrier: asyncio.Barrier) -> Script:
     would each see both.
     """
 
-    async def _script(conversation: Conversation) -> AgentOutcome:
-        where = conversation.task.workspace.name
+    async def _agent(task: AgentTask) -> Reply:
+        where = task.workspace.name
         record.entered.append(where)
         await barrier.wait()
-        written = conversation.task.workspace / "src" / f"{where}.py"
+        written = task.workspace / "src" / f"{where}.py"
         written.parent.mkdir(parents=True, exist_ok=True)
         written.write_text(f"by {where}\n", encoding="utf-8")
-        await conversation.call(REPORT.name, {"text": where})
         record.left.append(where)
-        return AgentOutcome(stop_reason=StopReason.COMPLETED, text="")
+        return Reply(calls=[Call(REPORT.name, {"text": where})])
 
-    return _script
+    return _agent
 
 
-def _alone(record: _Dispatches) -> Script:
+def _alone(record: _Dispatches) -> Agent:
     """The same agent with nobody to meet: a barrier of one party is passed by whoever reaches it.
 
     One script in this file rather than two, so that the chain test below records its dispatches
@@ -341,22 +346,21 @@ class _Relay:
         self._gates = {name: asyncio.Event() for name in order}
         self._gates[order[0]].set()
 
-    def script(self) -> Script:
+    def script(self) -> Agent:
         """One agent's conduct for both siblings, dispatching on the checkout it was handed."""
 
-        async def _script(conversation: Conversation) -> AgentOutcome:
-            where = conversation.task.workspace.name
+        async def _agent(task: AgentTask) -> Reply:
+            where = task.workspace.name
             self.dispatched.append(where)
-            if conversation.task.instructions == IMPLEMENT.instructions:
+            if task.instructions == IMPLEMENT.instructions:
                 self.implemented.append(where)
                 await self._gates[where].wait()
-                written = conversation.task.workspace / "src" / f"{where}.py"
+                written = task.workspace / "src" / f"{where}.py"
                 written.parent.mkdir(parents=True, exist_ok=True)
                 written.write_text(f"by {where}\n", encoding="utf-8")
-            await conversation.call(REPORT.name, {"text": where})
-            return AgentOutcome(stop_reason=StopReason.COMPLETED, text="")
+            return Reply(calls=[Call(REPORT.name, {"text": where})])
 
-        return _script
+        return _agent
 
     def released(self, name: str) -> None:
         """`name`'s step has returned, so let the next sibling's worker go. The last is a no-op."""
@@ -613,9 +617,9 @@ async def test_a_head_advanced_behind_the_frameworks_back_does_not_move_the_chai
     which nothing here can discharge - "`IntegrationOutcome.head` carries the value; the engine must
     write it into the parent's chain" - because `integrate()` is not a step, and a parent whose
     chain still points before its landed children would `restore()` past all of them on its next
-    fingerprint miss, which §3.6 calls "the one path in the design that destroys work rather than
-    costing a re-run". The commit made below with `_git` is that state, arranged by hand at the one
-    stage that has no `integrate()` to make it for real.
+    fingerprint miss, which §3.6 calls "one of the three paths in the design that destroy work
+    rather than costing a re-run". The commit made below with `_git` is that state, arranged by hand
+    at the one stage that has no `integrate()` to make it for real.
 
     **The child is the second half and the sharper one.** A run's own step replaying is a claim
     about `Journal._last_good`; a child cut on the *second* walk landing at the same base is a claim

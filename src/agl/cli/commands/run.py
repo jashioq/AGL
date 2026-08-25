@@ -91,10 +91,11 @@ whole layer exists not to do.
 ## Flag collisions: documented, and deliberately neither reserved nor refused
 
 The generic spellings are `-n`, `--name`, `--from`, `-h` and `--help`, and this module holds the
-first three. A workflow may declare any of them, and `sdk/params.py` says why it is not stopped
-where it is written: encoding the CLI's flag list into the SDK is "a copy kept in agreement by
-nobody". The decision here is that it is not stopped at the composition either, and the argument is
-that the only way to catch it is to become the thing this module refuses to be.
+first three. A workflow may declare any of them, and it is not stopped where it is written for the
+reason `api.py` and `config/toml_file.py` both give about a list written down twice: encoding the
+CLI's flag list into the SDK would be "a copy kept in agreement by nobody". The decision here is
+that it is not stopped at the composition either, and the argument is that the only way to catch it
+is to become the thing this module refuses to be.
 
 Refusing a collision means comparing the workflow's declared flags against the generic list, and the
 workflow's declared flags are on its params class, which is reached by loading it from the registry
@@ -106,8 +107,9 @@ and `api.run` cannot do the check for us either, because the generic list is not
 is not one registry load but one on *every* `agl run`: importing a third-party package before every
 run, in order to answer a question the user already gets a loud answer to. The generic parser runs
 first and wins, and the workflow's flag is then simply never given a value - so if it is required,
-which is what `arg()` with no `default` means, `sdk/params.py` refuses the run with "the following
-arguments are required", naming the flag the user thought they had passed, at exit 2 and before
+which is what `arg()` with no `default` means, the parser `sdk/params.py` builds refuses the run
+with argparse's own "the following arguments are required", naming the flag the user thought they
+had passed, at exit 2 and before
 anything runs. The silent case is a colliding flag that has a default, which quietly keeps it; that
 is the cost, it is this small, and `tests/cli/test_run_command.py` pins both halves so a later stage
 that decides to spend a registry load per run has to come here first.

@@ -78,9 +78,11 @@ made to reveal, not a test somebody forgot.
 5. **What an existing `Workspace` object does after its place has been removed.** The port says
    nothing about it, so nothing here touches one afterwards.
 
-6. **That a commit message was recorded.** Neither port reads a message back - `History` has no
-   member for one, deliberately - so what is asserted is that an awkward message is *taken*, never
-   that it was stored or that it is what a person later reads.
+6. **That a commit message was recorded.** Not from here: this suite holds a `WorkspaceProvider`
+   and nothing else, so what it can see is that an awkward message is *taken* and the commit
+   happens. Since 19.2 the other half is visible one port over - `History.message` reads one back,
+   and `HistoryContract` puts the same `AWKWARD_MESSAGE` through a round trip - so the gap is now
+   about which suite can see it rather than about nothing being able to.
 
 7. **That a workspace is isolated from the user's own checkout.** §3.9's "AGL never touches the
    user's working directory" is a promise about a directory this suite has no handle on. Isolation

@@ -38,9 +38,8 @@ from typing import Final
 
 import pytest
 
-from agl.adapters.claude_code.fake import Conversation, Script
 from agl.config import container
-from agl.ports.agent import AgentOutcome, Claude, Restriction, StopReason
+from agl.ports.agent import AgentTask, Claude, Restriction
 from agl.ports.home_layout import RunScope
 from agl.ports.ids import Namespace, ProjectName, RunLabel
 from agl.ports.tree_layout import TreesRoot
@@ -48,6 +47,7 @@ from agl.ports.workspace import Workspace
 from agl.sdk._engine.integration import Integration, Leases
 from agl.sdk._engine.journal import Fingerprints, Journal
 from agl.sdk.roles import Role
+from agl.sdk.testing import Agent, Reply
 from agl.sdk.workflow import Run
 
 # `asyncio_mode = "strict"`, so every async test below carries its own marker.
@@ -231,7 +231,7 @@ async def test_a_released_lease_leaves_the_live_table_and_run_exit_then_says_not
 
 @pytest.mark.asyncio
 async def test_release_all_gives_back_every_live_lease_and_not_merely_one(tmp_path: Path) -> None:
-    """§3.4: "the lease is released when the run exits" - every one of them, in one call.
+    """§3.4's sweeper - run exit gives back every live lease - all of them, in one call.
 
     A run holds one lease per target it is mid-landing into, and a workflow that walked away from
     two conflicts at once leaves two. `api.run`'s `finally` is the only caller, it takes no
@@ -326,25 +326,29 @@ _WRITES: Final[Mapping[str, Mapping[str, bytes]]] = {
 }
 
 
-def _agent(pause: _Pause) -> Script:
+def _agent(pause: _Pause) -> Agent:
     """Write what this prompt is meant to write, and park if this is the holding role.
 
-    Keyed on the prompt because that is the only thing the port hands a script that says which step
+    Keyed on the prompt because that is the only thing the port hands an agent that says which step
     this is - `AgentTask` carries no namespace and no step name, deliberately (§3.3).
+
+    An `async def` in `sdk/testing.py`'s own vocabulary, which is what `container.fakes(agent=...)`
+    takes as of 19.2. Before that a `testing.Agent` could not await, so parking on an event - which
+    is the whole of the arrangement below - had to be written on a raw per-provider `Script`.
     """
 
-    async def _script(conversation: Conversation) -> AgentOutcome:
-        said = conversation.task.instructions
+    async def _one(task: AgentTask) -> Reply:
+        said = task.instructions
         if said == HOLDING.instructions:
             pause.started.set()
             await pause.release.wait()
         for name, content in _WRITES.get(said, {}).items():
-            where = conversation.task.workspace / name
+            where = task.workspace / name
             where.parent.mkdir(parents=True, exist_ok=True)
             where.write_bytes(content)
-        return AgentOutcome(stop_reason=StopReason.COMPLETED, text="")
+        return Reply()
 
-    return _script
+    return _one
 
 
 @pytest.mark.asyncio
@@ -381,7 +385,7 @@ async def test_a_landing_cancelled_waiting_for_the_step_lock_gives_the_targets_l
     """
     pause = _Pause()
     harness = container.fakes(
-        TreesRoot(tmp_path / "trees"), files={SEEDED: SEED}, claude=_agent(pause)
+        TreesRoot(tmp_path / "trees"), files={SEEDED: SEED}, agent=_agent(pause)
     )
     history = harness.services.history
     run: Run[None] = Run(

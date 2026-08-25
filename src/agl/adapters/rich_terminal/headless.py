@@ -3,8 +3,8 @@
 The `Terminal` port with no display and no way to take input. A passive `Screen` is a no-op that
 still answers `None`; a `Screen[T]` raises `UpstreamUnavailable` at the first question rather than
 blocking forever on nobody. Both clauses are §3.7's and both are stated on the ABC rather than in
-one implementation, "because a behaviour written down in only one implementation is a behaviour the
-other one is free to get wrong" - so what this module implements is the port, and never
+one implementation, "because a behaviour written down in only one implementation is a behaviour
+every other one is free to get wrong" - so what this module implements is the port, and never
 `RichTerminal`.
 
 ## The rule is about input, not about a TTY

@@ -22,7 +22,7 @@ the move a move.
 
 ## Why not `ports/`
 
-`ARCHITECTURE.md` §6 gives that layer one admission rule - "it's an ABC, or a type an ABC speaks" -
+`ARCHITECTURE.md` §1 gives that layer one admission rule - "it's an ABC, or a type an ABC speaks" -
 and a bundle of ABCs is neither. No port method takes or returns a `Services`; nothing implements
 it; it is not vocabulary any capability speaks. It describes AGL's own wiring, which is a fact
 about this framework rather than about anything it asks the outside world to do.

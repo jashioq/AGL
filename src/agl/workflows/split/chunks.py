@@ -50,23 +50,35 @@ spelling `[A-Za-z0-9._-]` a second time, and that is a copy of a rule this workf
 second rule set would be a second thing to get wrong", and a fifth copy living in a workflow could
 drift from the framework that is actually going to refuse the name.
 
-The cost is that this is **the first module under `agl/workflows/` to import from `agl.ports`**.
-Contract 6 permits it - it forbids `agl.adapters` and `agl.config`, and contract 1 puts `ports`
-below `workflows` - but `ARCHITECTURE.md` §5 sets a stronger convention than the contract does: a
-workflow author writes `from agl.sdk import ...` and never reaches into `ports`. That convention is
-why `sdk/errors.py` exists at all; deliverable 18.0 added it the moment a workflow's own test file
-had to reach for `agl.ports.errors`. **`Namespace` is the same tripwire firing a second time**, and
-it is reported as a missing re-export on the SDK's front door rather than paid for with a copy of
-the allowlist here. Widening `sdk/__init__.py` is a diff outside `workflows/split/`, which is
-precisely the measurement stage 18 exists to take, so this module does not make one.
+The cost was that this became **the first module under `agl/workflows/` to import from
+`agl.ports`**. Contract 6 permits it - it forbids `agl.adapters` and `agl.config`, and contract 1
+puts `ports` below `workflows` - but `ARCHITECTURE.md` §5 sets a stronger convention than the
+contract does: a workflow author writes `from agl.sdk import ...` and never reaches into `ports`.
+That convention is why `sdk/errors.py` exists at all; deliverable 18.0 added it the moment a
+workflow's own test file had to reach for `agl.ports.errors`. `Namespace` was the same tripwire
+firing a second time, reported here rather than paid for with a copy of the allowlist, on the
+ground that widening `sdk/__init__.py` is a diff outside `workflows/split/` and taking that
+measurement was what stage 18 was for.
+
+**19.2 made the repair the tripwire named**, so the import below is `from agl.sdk import Namespace,
+describe, reporting_tool` and this module reaches into no other package. `sdk/workflow.py` carries
+the name, beside the `run.worktree(id)` whose refusal it is - that module argues why there, and why
+not a fourth pure facade. Nothing about the design above changed: the rule is still imported rather
+than restated, and what moved is which package a workflow spells it out of.
 
 ## What §3.6 rule 6 charges for a `__post_init__`, and why it is cheaper here than in `fix`
 
 Rule 6: a `__post_init__` is invisible to the derived schema, so tightening or loosening it changes
 what converts while moving no digest, and an entry recorded under the old rules can stop converting
 with its fingerprint still matching - `InternalError` out of `ReportingTool.read`, on a resume.
-`fix/findings.py` pays that in full, because `SEVERITIES` is a tuple in that module that an author
-may edit under a live run.
+`fix/findings.py` used to pay that in full, because `SEVERITIES` is a tuple in that module that an
+author may edit under a live run; 19.2 paid it off by interpolating the tuple into a field
+`describe()`, which puts it in the schema and therefore in the digest.
+
+Nothing here needed that repair, and the reason is the paragraph below rather than any virtue of
+this module's - but the fields are described anyway, because a rule the model is told beside the
+field it applies to is a rule the model can follow, and the alternative was a paragraph of them in
+the *tool's* description, which is documented as being about the tool.
 
 Two of the three rules here are not this module's to edit: they are `ports/ids.py`'s, and the
 framework applies the *identical* rule downstream on every walk, replay included -
@@ -90,8 +102,7 @@ walks this whole value and tags each dataclass with its qualified name.
 from dataclasses import dataclass
 from typing import Final
 
-from agl.ports.ids import Namespace
-from agl.sdk import reporting_tool
+from agl.sdk import Namespace, describe, reporting_tool
 
 __all__ = ["Chunk", "Chunks", "report_chunks"]
 
@@ -105,7 +116,12 @@ class Chunk:
     replay, and the one thing it must not be is editable by whoever is holding it.
     """
 
-    id: str
+    id: str = describe(
+        "This chunk's name. It becomes a git branch and a directory, so it may hold only letters "
+        "A-Z a-z, digits, '.', '_' and '-' - no spaces, no slashes, no leading or trailing '.' or "
+        "'-' - it may not be '_base', and no two chunks may share one, compared without regard to "
+        "case. Keep it short and descriptive: a person reads these as branch names afterwards."
+    )
     """This chunk's name, and **the namespace its worktree, its branch and its ledger are filed
     under**. `run.worktree(chunk.id)` is where it lands, so it is `[A-Za-z0-9._-]`, non-empty,
     without a leading or trailing `.` or `-`, and not `_base` - §3.3's allowlist, refused below by
@@ -115,7 +131,10 @@ class Chunk:
     What it buys a person is that `agl/_work/<label>/<id>` and `.trees/<label>/<id>/` are readable
     afterwards, which is why the prompt asks for a short slug of the work rather than a number."""
 
-    work: str
+    work: str = describe(
+        "The whole assignment for this chunk, written for an agent that will never see the rest of "
+        "this plan and has no memory of the reasoning behind it."
+    )
     """What to do, in enough detail that an agent which has never seen the rest of the plan can do
     it. This is the whole of the assignment: each chunk runs in its own session, in its own
     checkout, with no view of its siblings and no memory of the planner's reasoning, so anything
@@ -124,7 +143,10 @@ class Chunk:
     Unchecked prose. A vague one is a worse plan and not a broken run - the module docstring draws
     that line and says where it comes from."""
 
-    files: tuple[str, ...]
+    files: tuple[str, ...] = describe(
+        "The paths this chunk should touch, relative to the repository root, including ones it "
+        "will create. Two chunks naming one file will collide when their work is merged back."
+    )
     """The paths this chunk is expected to touch, relative to the root of the repository, including
     ones it will create.
 
@@ -159,7 +181,10 @@ class Chunks:
     returns.
     """
 
-    items: tuple[Chunk, ...]
+    items: tuple[Chunk, ...] = describe(
+        "Every chunk this job divides into. Report at least one: a job too small to divide is a "
+        "plan with one chunk in it."
+    )
     """Every chunk, in the order the planner reported them.
 
     The order is kept and means nothing: `split` opens every worktree from the same base and runs
@@ -194,26 +219,20 @@ class Chunks:
 
 report_chunks: Final = reporting_tool(
     "report_chunks",
-    # The description is the only place the derived schema can carry a rule: `_schema_for` renders
-    # a `str` field as `{"type": "string"}` and nothing else, with no per-field `description`
-    # anywhere. `prompts/plan.md` says all of this a second time on purpose - the prompt and the
-    # tool are read at different moments, and a model that skims one should still meet the rules.
+    # What the *tool* is, and nothing about a field. Every per-field rule moved onto the field it
+    # is about when 19.2 gave a derived schema per-field descriptions - `sdk/tools.py::describe()`
+    # - which is what `ReportingTool.description` says this string is for: what the model reads to
+    # decide whether to call it. `prompts/plan.md` says the rules a second time on purpose: the
+    # prompt and the tool are read at different moments, and it stays prose for the reason
+    # `fix/findings.py` argues about its own - a prompt is a file read verbatim, not a template.
     "Report the chunks this job divides into, and end the planning step. Call this exactly once, "
     "when the plan is complete: it is the only way to record a result, and a planning step that "
-    "ends without calling it has produced nothing and will be run again. Each chunk's `id` names "
-    "a git branch and a directory, so it may hold only letters A-Z a-z, digits, '.', '_' and '-' "
-    "- no spaces, no slashes, no leading or trailing '.' or '-' - it may not be '_base', and no "
-    "two chunks may share one, compared without regard to case. Keep ids short and descriptive: a "
-    "person reads them as branch names afterwards. `work` is the whole assignment for that chunk, "
-    "written for an agent that will never see the rest of this plan. `files` are the paths that "
-    "chunk should touch, relative to the repository root, including ones it will create - two "
-    "chunks naming one file will collide when their work is merged back. Report at least one "
-    "chunk: a job too small to divide is a plan with one chunk in it.",
+    "ends without calling it has produced nothing and will be run again.",
     Chunks,
 )
 """The planner's one tool, and what makes `plan` a reporting step.
 
 Declared here rather than in `roles.py` because §3.3 lists tools and their payload schemas as one
-of the four things an author writes, and the payload is above: a description that enumerates the
-id rules and a type that enforces them should be able to disagree only by being edited on one
-screen."""
+of the four things an author writes, and the payload is above: a field description that states the
+id rules and a `__post_init__` that enforces them should be able to disagree only by being edited
+on one screen."""

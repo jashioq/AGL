@@ -14,7 +14,7 @@ vendor's product names. All three now stop at this file. Somebody asking "does a
 `agl.adapters.claude_code` know what Claude Code calls things?" has one file to read, and
 `.importlinter`'s contract 3 keeps the SDK import in the same package.
 
-## Why this is over the project's 300-line convention
+## Why this file is long and still holds one idea
 
 `scripts/check`'s size gate is a warning that asks whether a module still holds one idea. This one
 does - it is the translation table between two vocabularies, and the four entries are four
@@ -25,7 +25,9 @@ what does it make of what comes back" would have to find both halves and hope th
 Most of the length is argument, not code. Three of the four translations are a *decision* no type
 can check - a deny pattern Claude Code does not honour compiles perfectly and silently enforces
 nothing - so what a reader needs from this file is the reasoning and the evidence that produced
-the strings, which is what the next four sections are.
+the strings, which is what the next four sections are. That claim used to be an assertion against
+a gate counting every line; since 19.5 the gate counts code lines and agrees with it, putting this
+file at 210 of its 650 - comfortably inside the ceiling it used to need an excuse for.
 
 ## (a) `Restriction` -> deny patterns: how the syntax was verified
 

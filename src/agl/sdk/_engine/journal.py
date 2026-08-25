@@ -183,8 +183,8 @@ the failure mode every rule in this module shares.
 **Where the integration write lands, and what it costs to leave out.** A child landing moves the
 parent's physical head, and `integrate()` is not a step, so nothing journals it - the parent's
 `last_good` still names a commit from before the landing. §3.6: "`IntegrationOutcome.head` carries
-the value; the engine must write it into the parent's chain", and this is "the one path in the
-design that destroys work rather than costing a re-run". The write lands on `Journal._last_good`
+the value; the engine must write it into the parent's chain", and this is "one of the three paths in
+the design that destroy work rather than costing a re-run". The write lands on `Journal._last_good`
 and `advance` below is the door it comes through. 14.0 opened it ahead of its caller and 14.1 is
 that caller: `sdk/_engine/integration.py` makes the call after the landing has been checked for
 containing the child's work and before the target's lease goes back. Forgetting it does not cost a
@@ -287,8 +287,11 @@ def canonical_json(value: object) -> str:
     """`value` as canonical JSON text: sorted keys, compact separators, sets sorted, pure ASCII.
 
     Raises `InputError` naming the type and the path to anything it cannot canonicalise. The text
-    exists to be hashed and is never stored, never read back and never parsed - `base_of` is its
-    only caller in this module, and the suite is the only other one.
+    exists to be hashed and is never stored, never read back and never parsed. Nothing in this
+    module calls it - `base_of` reaches `_canonical` and `_dumps` directly, because it hashes a
+    structure it assembled rather than one it was handed. Its callers are `sdk/_engine/steps.py`,
+    which appends the canonical form of a step's inputs to the prompt under `## Inputs`, and the
+    suite.
     """
     return _dumps(_canonical(value, "value"))
 
@@ -304,8 +307,9 @@ def base_of(
 ) -> str:
     """§3.6's `base`: the sha256 hexdigest of the canonical JSON of role, inputs and head.
 
-    The role arrives as its constituents rather than as a `Role`, because `sdk/roles.py` is empty
-    until stage 12; the fields it will hold are these, and stage 12 passes them in.
+    The role arrives as its constituents rather than as a `Role`, because `sdk/roles.py` was empty
+    when this was written; those are exactly the fields it holds now, and `Run.step` passes them in.
+    `Journal.step` carries the argument for why the signature stayed that way.
 
     **Why each term is in it.** The role, so that halting to edit the implement prompt and resuming
     does not replay results the old prompt produced - which is exactly when you are iterating and
@@ -627,11 +631,15 @@ class Journal:
     design and by its own docstring, so the guard cannot be widened into a correct one; restoring
     unconditionally is both right and cheaper than asking.
 
-    **The role arrives as its constituents, not as a `Role`.** `sdk/roles.py` does not exist until
-    12.2, and a bundle declared here to carry `instructions`, `model`, `restrictions` and `tools`
-    would be `Role` under another name, in `_engine/`, where the workflow author cannot see it.
-    Stage 12's `Run.step` spreads a `Role`'s fields into these keywords. The parameter list is long
-    for that reason and is expected to shorten by one stage.
+    **The role arrives as its constituents, not as a `Role`.** `sdk/roles.py` did not exist when
+    this signature was settled, and a bundle declared here to carry `instructions`, `model`,
+    `restrictions` and `tools` would have been `Role` under another name, in `_engine/`, where the
+    workflow author cannot see it. `Role` exists now and `Run.step` spreads its fields into these
+    keywords, which is the arrangement the argument asked for. **The prediction that went with it
+    did not come true and is corrected rather than deleted**: this paragraph used to say the
+    parameter list was "expected to shorten by one stage", and eight stages later it has not. It
+    would shorten only by taking the parameter the paragraph above refuses, so the length is the
+    price of the decision rather than a debt against it.
 
     **A crashed step leaves no entry, and the commit-or-wipe runs anyway.** §3.3: "the wipe runs
     whether the step succeeded or raised", which is one `finally` around the worker and nothing
@@ -742,10 +750,11 @@ class Journal:
         a step, so nothing journals it: the parent goes on believing it is at the commit its last
         step ended at, which is a commit from before every landing. The next step in the parent to
         miss its fingerprint then restores to that commit - `reset --hard` *and* `clean -fd` - and
-        every child that has landed since is gone. **This and a mispaired `commit=` are the only two
-        paths in AGL that destroy work rather than costing a re-run.** Every other rule this module
-        spends a paragraph on fails by re-running a step and paying an agent twice; these two fail
-        by deleting what was already paid for, and neither of them raises on the way.
+        every child that has landed since is gone. **This, a mispaired `commit=` and §3.4's red gate
+        reverting a hand-resolved conflict are the three paths in AGL that destroy work rather than
+        costing a re-run.** Every other rule this module spends a paragraph on fails by re-running a
+        step and paying an agent twice; these three fail by deleting what was already paid for, and
+        none of them raises on the way.
 
         **Synchronous, because it assigns and nothing goes and looks.** The value is the outcome's,
         produced by the integrator that has already landed the work, and `last_good` is chained

@@ -5,7 +5,7 @@ else touched. That suite was written at stage 3, against the port's docstrings a
 adapter existed (§1.9), which is why nothing below re-asserts any of it. It runs **unconditionally
 and in full** here - no opt-in, no `check_ready` gate, no binary to install and nothing to
 authenticate against - which is the difference between a fake and the real adapter one file over,
-where six of the same eight tests skip on every machine because their evidence is a model's conduct
+where eight of the same ten tests skip on every machine because their evidence is a model's conduct
 and the only instrument that produces conduct on this backend is a paid turn. The `model` fixture is
 parametrised over every model this runner serves, which `tests/contracts/agent.py` names as "the
 honest way to cover them all", so the whole suite runs three times.
@@ -87,7 +87,7 @@ class TestOpenAiFake(AgentContract):
 
     Two overrides and nothing else, which is what the suite asks for. There is no gate on either
     of them: nothing here starts a process, binds a socket or spends a token, so a skip would be
-    hiding something rather than declining to do it. All eight tests run and all eight pass, which
+    hiding something rather than declining to do it. All ten tests run and all ten pass, which
     is §1.9's whole claim about a fake - the same suite, unweakened, over both implementations.
     """
 

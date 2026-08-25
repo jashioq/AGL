@@ -1,9 +1,9 @@
 """Paths under AGL_HOME - the one module that composes them.
 
-`AGL_HOME` is where AGL keeps its own state: which runs exist, what each one has already done,
-the per-project settings files, and the operator's own settings file at the top. It is not where
-code is checked out. That is the trees root, `tree_layout.py` is the only module that computes
-under it, and the plan's rule is that the two are never conflated - so this module speaks
+`AGL_HOME` is where AGL keeps its own state: which runs exist, what each one has already done, the
+per-project settings files, and the operator's own settings file at the top. It is not where code is
+checked out. That is the trees root, `tree_layout.py` is the only module that composes a checkout's
+path under it, and the plan's rule is that the two are never conflated - so this module speaks
 `AglHome`, that one speaks `TreesRoot`, and neither imports the other. Nothing here can be handed
 the other root: `mypy --strict` refuses the call, and `_root` below refuses it again at runtime,
 because the two wrappers are structurally identical and nothing but the class itself tells them
@@ -87,7 +87,9 @@ __all__ = [
 ]
 
 
-# The layout's own words. Every one of them appears exactly once below.
+# The layout's own words. Each appears exactly once below, bar `_PROJECT_SUFFIX`: `project_config`
+# composes with it and `_checked_project` spends it twice more, once to measure a name against
+# NAME_MAX with the suffix on and once to show the reader the filename that was too long.
 _SETTINGS_FILE: Final = "config.toml"
 _PROJECTS: Final = "projects"
 _RUNS: Final = "runs"

@@ -71,6 +71,26 @@ what it already has in order to hand it over - `MappingProxyType` is a `Mapping`
 implementation holding its documents in memory would otherwise be handing out its own state, and
 the first caller to edit what it read would edit the store.
 
+**A write copies what it is handed, and takes that copy before it could hand control anywhere
+else.** Accepting a `Mapping` is a courtesy to the caller and says nothing about what the store
+then does with it, so the obligation is stated separately: after a write, the caller may go on
+editing the mapping it passed - at any depth, its nested objects and lists included - and what is
+on the ledger does not follow. *Before it could hand control anywhere else* is the sharp half. An
+implementation that stashes the caller's mapping, awaits something and encodes afterwards has a
+window in which the document belongs to the caller and to the ledger at once, and a caller filling
+in its builder dict inside that window has edited a record already written. The copy is taken on
+the caller's own line of execution. How it is taken is nobody's business - serialise, deep-copy, or
+keep nothing of it at all.
+
+**That clause is §3.6's, and it is restated here because three of `StoreContract`'s tests assert
+it.** §3.6 says it outright: the `Store` "copies any mapping it is handed" and returns copies on
+read, "otherwise a caller reusing a builder dict silently edits an entry already on the ledger."
+`tests/contracts/` is written against a port's docstring and against nothing else, and until this
+paragraph existed those three were the exception - a design decision reaching an implementation
+only through a suite, which is the "requirement invented in a suite" the atomic-write section above
+refuses in its last paragraph. Sourced from the plan is what made them defensible rather than
+freelance; it is not what made them findable. An implementer reads this file.
+
 ## Concurrency
 
 **Distinct addresses are independent.** Two child runs recording a step at the same moment need no

@@ -271,7 +271,7 @@ class Terminal(ABC):
 
     ## One slot, two queues
 
-    This is the whole contract, and both implementations satisfy it identically:
+    This is the whole contract, and every implementation satisfies it identically:
 
     * A passive `Screen` goes to **the slot**: size one, replaced on write, no ordering. Ordering
       dashboards is meaningless, which is why `priority` means nothing for one.
@@ -302,7 +302,7 @@ class Terminal(ABC):
     and saying so at the first question beats blocking forever on nobody. That contract is what
     lets the headless implementation double as the fake, so every command runs end to end with no
     display of any kind - and it is stated here, on the ABC, because a behaviour written down in
-    only one implementation is a behaviour the other one is free to get wrong.
+    only one implementation is a behaviour every other one is free to get wrong.
 
     ## The lifecycle, which goes beyond §3.7's stated surface
 
@@ -378,7 +378,7 @@ class Terminal(ABC):
 
         §3.7's example is `{5: 2, 10: 0}`, and the zero is the specification: the map reports every
         priority this terminal has been asked for, not only the ones with something waiting. Said
-        here because two implementations would otherwise disagree about the empty entries, and a
+        here because three implementations would otherwise disagree about the empty entries, and a
         workflow reading `pending.get(10, 0)` would see the same run differently on each.
 
         Why it exists at all: without it, three simultaneous questions mean two of them wait

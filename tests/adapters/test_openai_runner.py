@@ -4,14 +4,18 @@ The first class is the port in full: `AgentContract` with its two fixtures overr
 else touched. That suite was written at stage 3, against the port's docstrings and before any
 adapter existed (§1.9), which is why nothing below re-asserts any of it.
 
-**Six of its eight tests start a real agent, and none of them runs - anywhere, on any machine.**
-Every one of the six reads a *model's* conduct as its evidence: that it called a tool, that it
+**Eight of its ten tests start a real agent, and none of them runs - anywhere, on any machine.**
+Seven of the eight read a *model's* conduct as their evidence: that it called a tool, that it
 answered a question, that it ignored a repository's instructions. No free instrument can supply
 that, and on this backend the only instrument that could is a paid turn, so they are deferred to
-the manual QA pass. The gate is delivered by the `runner` fixture handing back a runner whose `run`
-skips: the criterion is "does this test start an agent", which is a fact about the *port member*
-rather than about a test's name, so no list here goes stale when a test in that suite is renamed.
-`capabilities` and `check_ready` are the real thing in both cases and run unconditionally.
+the manual QA pass. The eighth - what a run does when its activity reporter raises - reads no
+conduct at all and is deferred for a different reason: the contract suite's one knob is the runner,
+so it has no way to hand a real `OpenAiRunner` a stub to report from. That clause is asserted for
+real further down this file, against the same adapter, driven by the stub CLI. The gate is
+delivered by the `runner` fixture handing back a runner whose `run` skips: the criterion is "does
+this test start an agent", which is a fact about the *port member* rather than about a test's name,
+so no list here goes stale when a test in that suite is renamed. `capabilities` and `check_ready`
+are the real thing in both cases and run unconditionally.
 
 **No test in this file runs the harness's agent command.** That is the stage's rule and it is
 structural here rather than promised: the two things this module starts are a *stub* CLI it writes
@@ -95,26 +99,30 @@ from agl.ports.errors import InputError, UpstreamUnavailable, UpstreamUnexpected
 from agl.ports.questions import Answer, Question
 from agl.ports.run import JsonValue
 from contracts._agent_hermeticity import CONFIGURATIONS, markers_in, plant
-from contracts._agent_tasks import Notes, workspace
+from contracts._agent_tasks import Activity, Notes, ReporterFailed, workspace
 from contracts.agent import AgentContract
 
-# What a person is told when the six live tests do not run, which is always. Long on purpose: the
-# whole point of this suite is that a green run means something, and a skip that reads like a pass
-# is the failure `tests/contracts/agent.py` is written against.
+# What a person is told when the eight deferred contract tests do not run, which is always. Long on
+# purpose: the whole point of this suite is that a green run means something, and a skip that reads
+# like a pass is the failure `tests/contracts/agent.py` is written against.
 _SKIPPED: Final = (
     "UNVERIFIED: this run did not start a real agent, so the OpenAiRunner's entire run-path - the "
-    "outcome, the refused tool call, the activity, both question clauses and the poisoned "
-    "repository - is unverified by this run, and by every run. DEFERRED TO THE MANUAL QA PASS, "
-    "with no switch here that changes it: each of these six reads a model's conduct as its "
-    "evidence - that it called a tool, that it answered a question, that it ignored a poisoned "
-    "repository - and on this backend the only instrument that produces conduct is a paid turn. "
-    "No test in this build spends tokens. Run them by hand against an authenticated CLI (see "
-    "docs/manual-qa.md entries 8 and 9), or do not believe them. What did run is everything below "
-    "the contract subclass: the composed command line, the composed prompt, the whole stream "
-    "reading, and every tool and question round trip driven against this adapter's own MCP server "
-    "over real HTTP - plus, where the binary is installed, the hermeticity overrides checked "
-    "against a poisoned repository with the harness's own free prompt renderer. None of that "
-    "covers a model deciding anything, and this skip is not a pass."
+    "outcome, the refused tool call, the tool handler that raised, the activity, the activity "
+    "reporter that raised, both question clauses and the poisoned repository - is unverified by "
+    "this run, and by every run. DEFERRED TO THE MANUAL QA PASS, with no switch here that changes "
+    "it: seven of the eight read a model's conduct as their evidence - that it called a tool, that "
+    "it answered a question, that it ignored a poisoned repository - and on this backend the only "
+    "instrument that produces conduct is a paid turn. The eighth, the activity reporter that "
+    "raised, needs no conduct; it is deferred only because the contract suite's one knob is the "
+    "runner and a real OpenAiRunner reports nothing without a harness to read, and it is asserted "
+    "for real against the stub CLI further down this file. No test in this build spends tokens. "
+    "Run the other seven by hand against an authenticated CLI (see docs/manual-qa.md entries 8 and "
+    "9), or do not believe them. What did run is everything below the contract subclass: the "
+    "composed command line, the composed prompt, the whole stream reading, and every tool and "
+    "question round trip driven against this adapter's own MCP server over real HTTP - plus, where "
+    "the binary is installed, the hermeticity overrides checked against a poisoned repository with "
+    "the harness's own free prompt renderer. None of that covers a model deciding anything, and "
+    "this skip is not a pass."
 )
 
 # What a person is told when the binary is missing. A different gate and kept separate: these need
@@ -342,9 +350,17 @@ class _NeverRuns(OpenAiRunner):
     gate on the *port member that starts an agent* instead of on a list of test names - the suite's
     tests can be renamed, split or added to and this keeps deciding correctly.
 
-    Unconditionally, because there is no condition worth writing: what the six tests behind it
-    assert is a model's conduct, the only instrument that can answer is a paid one, and a test that
+    Unconditionally, because there is no condition worth writing: seven of the eight tests behind
+    it assert a model's conduct, the only instrument that can answer is a paid one, and a test that
     spends money on a flag is still a test that spends money.
+
+    The eighth is `test_an_activity_reporter_that_raises_ends_the_run_with_its_own_exception`, and
+    it is the one clause here a free instrument could reach: it asks the agent for nothing. What
+    stops it is the shape of the contract suite rather than the price of a turn - its one knob is
+    the runner, and an `OpenAiRunner` pointed at this file's stub CLI is not something the suite
+    has a way to build. Marking that one test by name would put a list of test names in this file
+    after all, for a clause this file already asserts against the same adapter in
+    `test_an_activity_reporter_that_raises_comes_out_of_this_adapters_run`.
     """
 
     async def run(self, *args: object, **kwargs: object) -> NoReturn:
@@ -352,7 +368,7 @@ class _NeverRuns(OpenAiRunner):
 
 
 class TestOpenAiRunner(AgentContract):
-    """The port in full, against the real adapter: two of its eight tests today, and six deferred.
+    """The port in full, against the real adapter: two of its ten tests today, and eight deferred.
 
     Two overrides and nothing else, which is what the suite asks for. The gate lives inside the
     `runner` fixture because that is one of the two, and because the alternative - marking
@@ -718,6 +734,26 @@ def _rendered(repo: Path, overrides: Sequence[str]) -> str:
     return done.stdout
 
 
+# Every directory this package may stand a child in, spelled as the source text `ast.unparse`
+# produces, with what each one is. The **value** and not merely the keyword's presence, for
+# `test_claude_code_runner.py`'s reason on its own siblings: the name is satisfied by the leak.
+# `cwd=None` names the option and is exactly the inheritance an explicit directory exists to
+# displace - `create_subprocess_exec` reads it as "wherever the parent happens to be standing" - so
+# a test that asked only whether the keyword appeared would pass against the bug it is written for.
+#
+# A literal path would fail here too, and should: a directory written into the source is one chosen
+# when the file was written rather than one chosen per call, and a run's workspace is not knowable
+# then. So what is permitted is a small table of *names bound in the calling function*, and a fourth
+# child spelling its directory some other way fails until somebody comes here and says which
+# directory it is. That line is the point. It is weaker evidence than the Claude sibling's `[]` and
+# `True`, and unavoidably so - hermeticity has one right value and a working directory has one right
+# *property* - but it is the strongest thing readable at the call site, which is the same standard.
+CHOSEN: Final[Mapping[str, str]] = {
+    "workspace": "the run's own workspace, provisioned by WorkspaceProvider (§3.9)",
+    "elsewhere": "a temporary directory of the readiness probe's own",
+}
+
+
 def test_every_child_this_package_starts_is_started_somewhere_this_adapter_chose() -> None:
     """A structural assertion, so that a process added later cannot inherit AGL's own directory.
 
@@ -727,9 +763,19 @@ def test_every_child_this_package_starts_is_started_somewhere_this_adapter_chose
     started `agl`, which for this harness means resolving a project root, and every `AGENTS.md`
     above it, out of somebody else's repository.
 
+    **The directory each child is given, and not only that the keyword was there.** This test began
+    asserting presence alone, which reads as a check and is not one: `cwd=None` is what
+    `create_subprocess_exec` means by "inherit", so the one spelling that reproduces the bug in full
+    satisfied it. What is compared now is the source text of the argument against `CHOSEN` above -
+    the same instrument its Claude sibling uses on `setting_sources` and `strict_mcp_config`, and
+    the same deliberate strictness: a value assembled elsewhere, a literal path, or `None` all fail,
+    because a working directory a reviewer cannot see at the call site is one nobody checked.
+
     Asserted by parsing the package rather than by running it, so that a third child added at a
     later stage is covered the moment it exists. `tests/adapters/test_shell_verifier.py`
-    established the shape at stage 6, for the same kind of clause.
+    established the shape at stage 6, for the same kind of clause;
+    `test_claude_code_runner.py::test_every_session_this_package_opens_is_opened_hermetically` is
+    this test's sibling over the hermeticity options that package's sessions carry.
     """
     package = Path(runner_module.__file__).parent
     spawns = 0
@@ -740,12 +786,24 @@ def test_every_child_this_package_starts_is_started_somewhere_this_adapter_chose
             if getattr(node.func, "attr", None) != "create_subprocess_exec":
                 continue
             spawns += 1
-            given = {keyword.arg for keyword in node.keywords}
+            given = {keyword.arg: keyword.value for keyword in node.keywords}
             assert "cwd" in given, (
                 f"{source.name}:{node.lineno} starts a child without saying where: it passes "
                 f"{sorted(name for name in given if name)}. A child with no working directory of "
                 f"its own inherits AGL's, and this harness reads instructions out of the directory "
                 f"it is standing in"
+            )
+            written = ast.unparse(given["cwd"])
+            assert written in CHOSEN, (
+                f"{source.name}:{node.lineno} starts a child with `cwd={written}`, which is not "
+                f"one of the directories this adapter chooses: "
+                f"{', '.join(f'{name} ({what})' for name, what in sorted(CHOSEN.items()))}. "
+                f"`cwd=None` is the spelling this catches and it is the whole failure - the child "
+                f"then runs wherever the operator started `agl`, and this harness resolves a "
+                f"project root and every AGENTS.md above it out of the directory it is standing "
+                f"in. If this child genuinely stands somewhere new, say where in CHOSEN above; a "
+                f"directory that lives in another module is one this test cannot read and a "
+                f"reviewer cannot see here"
             )
     assert spawns >= 2, (
         f"only {spawns} child process start(s) were found in {package}, and there are at least "
@@ -1120,6 +1178,42 @@ async def test_activity_is_the_frames_own_kind_and_the_field_that_kind_is_about(
         "Changing: src/g.py",
         "Calling: agl/record_note",
     ], f"the activity lines were {lines}"
+
+
+@pytest.mark.asyncio
+async def test_an_activity_reporter_that_raises_comes_out_of_this_adapters_run(
+    tmp_path: Path,
+) -> None:
+    """The contract suite's activity-reporter clause, against the real adapter, for free.
+
+    That clause is the one test of a `run` in `AgentContract` that reads no model conduct, which is
+    what makes it reachable here: the reporter fails on whatever the stream reports, and the stub
+    emits two started items without an agent deciding anything. Against `_NeverRuns` it skips with
+    the other seven, so this is where the real `OpenAiRunner` is actually held to it.
+
+    What it forbids is a `try` around `_item`'s `on_activity(line)`. That is one line to add, it
+    would look like defensive good manners, and every other test in this build would stay green
+    while a broken reporter went unmentioned for the length of every run.
+    """
+    repo = workspace(tmp_path)
+    failing = Activity(raise_first=1)
+    stub = Stub(
+        tmp_path,
+        steps=[
+            {"say": item("item.started", "command_execution", command="./gradlew build")},
+            {"say": item("item.started", "mcp_tool_call", server="agl", tool="record_note")},
+            {"say": started()},
+        ],
+    )
+
+    with pytest.raises(ReporterFailed):
+        await drive(stub, task_in(repo), on_activity=failing)
+
+    assert len(failing.lines) == 1, (
+        f"the reporter was called {len(failing.lines)} time(s) and it raised on the first, so the "
+        f"stream reader caught the exception and went on reporting. `ports/agent.py` puts no `try` "
+        f"around that call by design"
+    )
 
 
 # --- Tools and questions, against the adapter's own server, with no harness anywhere -------------

@@ -33,9 +33,11 @@ nothing is merged into anything.
 
 The omission on `review` is the guarantee, not an oversight: a reviewer cannot leave a scratch file,
 a cache directory or a half-made edit behind, because the wipe runs whether the step returned or
-raised. It is also §3.3's "single place in AGL where a mistake destroys work rather than costing a
-re-run", and the framework checks nothing about it - `roles.py`'s `reviewer` docstring is where that
-argument lives, next to the `Restriction.NO_VCS_WRITES` that is its other half.
+raised. It is also §3.3's place where "a mistake destroys work rather than merely costing a
+re-run" - one of three, the other two being §3.6's unrecorded landing and §3.4's red gate, and the
+only one `fix` can reach - and the framework checks nothing about it. `roles.py`'s `reviewer`
+docstring is where that argument lives, next to the `Restriction.NO_VCS_WRITES` that is its other
+half.
 
 **One coupling worth knowing about, because nothing enforces it.** `prompts/review.md` names the
 string `implement fix` - it tells the reviewer which commit is the change under review. A commit

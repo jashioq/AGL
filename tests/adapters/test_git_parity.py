@@ -976,10 +976,17 @@ async def test_a_commit_message_git_cleans_away_to_nothing_is_refused_by_both(
     trimmed off. A fake reaching for `str.strip()` here would refuse three of those four, and a
     workflow's ordinary commit line would stop on fakes and land in anger.
 
-    What the two record it *as* is deliberately not compared: git rewrites a message on the way in
-    and the fake keeps it verbatim, which no member of these three ports can see - nothing here
-    reads a message back - so there is nothing to compare that is not one implementation's private
-    business. The refusal is the observable half, and it is the half held to git.
+    What the two record it *as* is deliberately not compared, and since 19.2 that is a statement
+    about the port rather than about visibility. `History.message` reads a message back, so the
+    cleaned form is no longer private business - but what that member promises is that **trailing
+    whitespace is not part of a message**, which both implementations keep with one `rstrip` and
+    which covers every message AGL writes, a `commit=` template rendering one line. Past that the
+    port promises nothing: git strips the trailing whitespace off each line of a multi-line message
+    and collapses its runs of blank lines, and the fake keeps what it was handed. That is not a
+    seventh divergence, because a divergence on this list is where **the port is silent and the two
+    disagree anyway** - here the port speaks, and declines to require one program's text formatting
+    of everybody, which is `ChangeKind`'s refusal one port over. `HistoryContract` asserts the round
+    trip on both implementations, using a message of the shape the port does promise.
     """
     def recording(message: str, at: str) -> Callable[[_Bundle], Awaitable[str]]:
         """One step's worth of work in a namespace of its own, recorded under `message`.

@@ -98,8 +98,9 @@ the workflow still wraps it in a group, so both shapes are unwrapped below.
 
 ## What it hands back, and why there is no recorder on any agent
 
-`config/container.py` argues that there is deliberately no recorder on any agent fake, because "what
-a test wants to know is already held by the tool handlers and question handler it supplied itself" -
+The agent fakes argue that there is deliberately no recorder on any of them, because "what a test
+wants to know is already held by the tool handlers and question handler it supplied itself"
+(`adapters/claude_code/fake.py`, and `adapters/openai/fake.py` word for word) -
 and here the `Agent` is the author's own function, so counting dispatches or keeping the tasks it
 was handed is one line in their own file rather than a surface here.
 
@@ -609,6 +610,9 @@ def harness(
     `agl.sdk.testing`. `None` means each provider's own unscripted default, which asks a question,
     calls every tool the task declares and says what it did: enough to run a whole workflow through
     without writing an agent first, and never a substitute for one when the payload matters.
+    **`def` or `async def`**, whichever the test needs: a workflow whose point is that N things run
+    at once is tested by having its agents meet at an `asyncio.Barrier`, and an agent that could not
+    await one would put that whole class of test outside this parameter.
 
     **An agent that returns only a `Reply` leaves an empty branch, and this is the trap to know
     about before writing one.** No field on a `Reply` touches the worktree and `commit_all` is a

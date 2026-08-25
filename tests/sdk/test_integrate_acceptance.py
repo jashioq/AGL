@@ -27,8 +27,8 @@ The five criteria, and what discharges each:
      `test_a_landed_child_survives_the_parents_next_fingerprint_miss` lands a child, then makes the
      parent miss, and asserts the landed *contents* and the landed *ancestry* are both still there
      after the pre-run `reset --hard` + `clean -fd`. Real git, because that is the primitive whose
-     effect is being survived. §3.6 calls forgetting the advance one of the two paths in AGL that
-     destroy work rather than costing a re-run.
+     effect is being survived. §3.6 calls forgetting the advance one of the three paths in AGL
+     that destroy work rather than costing a re-run.
   4. **A resumed run finds a hold it did not take, and does not exit 70.**
      `test_a_second_process_meets_the_hold_the_first_one_died_holding` and its `abort` twin, through
      `instruments/landing.py`. Two real processes, the first killed with `os._exit` while holding a
@@ -1252,7 +1252,7 @@ async def raises_mid_conflict(run: Run[NoParams]) -> None:
 async def test_a_workflow_that_raises_mid_conflict_gives_back_the_lease_and_the_step_lock(
     tmp_path: Path,
 ) -> None:
-    """§3.4's "the lease is released when the run exits", on the exit nobody arranges for.
+    """§3.4's sweeper - run exit gives the lease back - on the exit nobody arranges for.
 
     The implementer's suite covers a workflow that *returns* with a conflict undecided. The raise is
     a different line of code reaching the same `finally`, and it is the ordinary one: a conflict

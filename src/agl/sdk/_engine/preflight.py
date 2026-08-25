@@ -45,6 +45,13 @@ separately. What this module owes is one clause in the message: when the missing
 because otherwise the reader goes looking for a line that is not in their file. `roles.py` asks for
 that sentence by name.
 
+**And so does tool calling, on the same terms, since 19.2.** A role declaring `tools=` folds
+`TOOL_CALLING` in the same way, so containment covers it with no second check here either - the
+whole of the difference is a second clause below, owed for the same reason. Both clauses are
+conditioned on the thing that *implies* the member rather than on the member itself, since whether
+the author typed it is not observable from here and the sentence is only worth saying to somebody
+who did not.
+
 ## Half two, at every `run.step`, over the role actually handed in: `Capabilities.require()`
 
 Containment only, memoised per run, and **it is what makes the third check real**.
@@ -123,18 +130,31 @@ __all__ = ["Capabilities", "check"]
 # more useful of the two and is why the wording is composed here rather than fixed.
 _DECLARED: Final = "a role this workflow declares"
 
-# The one clause `sdk/roles.py` asks stage 16 to build into a message by name: "when the missing
-# member is `MID_RUN_QUESTIONS` and the author never typed it, say that `on_question` put it there
-# - otherwise the reader goes looking for a line that is not in their file." Whether they typed it
-# is not observable from here, `Role.__post_init__` having folded the two together; a declared
-# handler is what makes the sentence true either way, since a role carrying one needs that member
-# whether or not it also names it.
+# The two clauses `sdk/roles.py` asks stage 16 to build into a message by name: "when the missing
+# member is `MID_RUN_QUESTIONS` and the author never typed it, say that `on_question` put it there,
+# and when it is `TOOL_CALLING`, say that `tools=` did - otherwise the reader goes looking for a
+# line that is not in their file." Whether they typed it is not observable from here,
+# `Role.__post_init__` having folded each pair together; the *trigger* being declared is what makes
+# each sentence true either way, since a role carrying one needs its member whether or not it also
+# names it.
 _FROM_ON_QUESTION: Final = (
     f". {str(Capability.MID_RUN_QUESTIONS)!r} is in this role's `requires` because it declares "
     f"`on_question`: `sdk/roles.py` folds it in at declaration time, so there is no line in the "
     f"workflow to go looking for. A backend that cannot ask would not block on the question - it "
     f"would tell the agent no answer is available, leaving the approval gate silently absent and "
     f"the step reporting a result anyway (§3.7)"
+)
+
+# The same courtesy for the second implication, and the failure it names is the louder of the two -
+# a role whose tools never reach the model cannot fire the reporting one, so the step ends with no
+# payload and 12.1 raises `RoleIncompleteError`. That is a real failure rather than a silent one,
+# which is why this clause explains where the member came from rather than what would go wrong: the
+# reader's problem is finding the declaration, and it is `tools=` and not a line of `requires=`.
+_FROM_TOOLS: Final = (
+    f". {str(Capability.TOOL_CALLING)!r} is in this role's `requires` because it declares `tools`: "
+    f"`sdk/roles.py` folds it in at declaration time, so there is no line in the workflow to go "
+    f"looking for. Either this role names a model whose backend can call a tool, or it offers none "
+    f"- and a role with no tools is an effect step, whose result is `null` (§3.3)"
 )
 
 
@@ -202,7 +222,8 @@ async def check(runner: AgentRunner, roles: Sequence[Role[object]]) -> None:
     right now, untouched from the adapter that said so - the harness is not there. `DeniedError`
     (exit 5) when it is there and cannot do what a role requires - something reachable said no, and
     the workflow is what changes. A workflow declaring no roles - `roles=()`, the default - passes
-    without asking anything, which is what keeps `workflows/noop/` working unchanged.
+    without asking anything, which is what kept `workflows/noop/` working unchanged until 19.1
+    deleted it, and what keeps any workflow that runs no agent working now.
     """
     # Availability first, over distinct models: the module docstring argues both halves of that
     # sentence - the ordering, and why this is not once per role.
@@ -240,6 +261,12 @@ def _unmet(
     Both sets are named, because "it requires more than this backend offers" leaves the reader to
     work out which member, and the two fixes differ per member: drop the requirement, or name a
     model whose backend has it.
+
+    Then a clause for each member `Role.__post_init__` could have put there rather than the author,
+    because "stop requiring it" is unactionable advice about a line that is not in their file. Both
+    are conditioned on the *trigger* rather than on the member, which is what keeps them honest: a
+    role that typed `requires={SHELL}` gets no explanation, and one that typed `TOOL_CALLING`
+    itself and declares no tools gets none either.
     """
     wanted = sorted(str(member) for member in missing)
     offered = sorted(str(member) for member in held)
@@ -251,4 +278,6 @@ def _unmet(
     )
     if Capability.MID_RUN_QUESTIONS in missing and role.on_question is not None:
         message += _FROM_ON_QUESTION
+    if Capability.TOOL_CALLING in missing and role.tools:
+        message += _FROM_TOOLS
     return message

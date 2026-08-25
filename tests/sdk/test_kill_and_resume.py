@@ -712,11 +712,11 @@ def test_a_base_that_advanced_behind_the_journals_back_does_not_invalidate_earli
     recorded `head` in that namespace, never from the physical worktree. Otherwise: root runs `spec`
     at H0, children integrate and advance `_base` to H5, and on resume `spec` recomputes against H5,
     mismatches, and re-runs." The advance here is a commit made directly on the run's own checkout,
-    which is what a landed child produces and what `integrate()` will do at stage 14.
+    which is what a landed child produces and what `integrate()` does on every landing.
 
     The second half is the expensive one and is asserted separately: because every step hits, no
     step restores, and the advanced commit is still the run branch's tip afterwards. §3.6 calls a
-    parent restoring past its landed children "the one path in the design that destroys work".
+    parent restoring past its landed children one of three paths in the design that destroy work.
     """
     _spawn(world, programme="core", tag="first", seed=KILLED_SEED)
     before = _snapshot(world)

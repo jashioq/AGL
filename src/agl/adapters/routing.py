@@ -14,7 +14,7 @@ one and adding it would be §1.1's leak arriving through the one module with a r
 `tests/test_contract_listings.py` exempts it in the same words: dispatching to the vendor runners is
 its whole job, so it may name them. **The permission is not used, and that is the design rather than
 an omission.** The adapters arrive as a `Mapping[Provider, AgentRunner]` built by
-`config/container.py`, the only module that may construct one (ARCHITECTURE.md §2) - so nothing here
+`config/container.py`, the only module that may construct one (ARCHITECTURE.md §3) - so nothing here
 holds a vendor's name, an import of one, or a table of which providers have adapters written for
 them. A provider that arrives in a later stage is one more entry the container puts in the mapping,
 and not a line in this file.

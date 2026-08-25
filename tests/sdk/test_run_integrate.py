@@ -62,15 +62,15 @@ from typing import Final
 import pytest
 
 from agl import api
-from agl.adapters.claude_code.fake import Conversation, Script
 from agl.config import container, registry
-from agl.ports.agent import AgentOutcome, Claude, Restriction, StopReason
+from agl.ports.agent import AgentTask, Claude, Restriction
 from agl.ports.errors import InputError, InternalError
 from agl.ports.home_layout import RunScope
 from agl.ports.ids import Namespace, ProjectName, RunLabel
 from agl.ports.tree_layout import TreesRoot
 from agl.ports.verifier import Verifier, VerifierOutcome
 from agl.sdk.roles import Role
+from agl.sdk.testing import Agent, Call, Reply
 from agl.sdk.tools import reporting_tool
 from agl.sdk.workflow import Run, workflow
 
@@ -182,28 +182,30 @@ _WRITES: Final[Mapping[str, Mapping[str, bytes]]] = {
 }
 
 
-def _agent(pause: _Pause | None = None) -> Script:
+def _agent(pause: _Pause | None = None) -> Agent:
     """One agent for every role here: write what this prompt is meant to write, then report.
 
-    Writing to `task.workspace` with the stdlib is the script's own code and not the adapter's,
+    Writing to `task.workspace` with the stdlib is the agent's own code and not the adapter's,
     which is what lets a fake agent leave real files in a real directory for `commit=` to record.
 
     `pause` parks the `HOLDING` role inside its worker until a test lets it go, which is how one
-    test below holds the target namespace's step lock open while a landing asks for it.
+    test below holds the target namespace's step lock open while a landing asks for it. An `async
+    def` in `sdk/testing.py`'s own vocabulary, which is what `container.fakes(agent=...)` takes as
+    of 19.2 - before that an `Agent` could not await, and parking on an event had to be written as
+    a raw per-provider `Script`.
     """
 
-    async def _script(conversation: Conversation) -> AgentOutcome:
-        if pause is not None and conversation.task.instructions == HOLDING.instructions:
+    async def _one(task: AgentTask) -> Reply:
+        if pause is not None and task.instructions == HOLDING.instructions:
             pause.started.set()
             await pause.release.wait()
-        for name, content in _WRITES.get(conversation.task.instructions, {}).items():
-            where = conversation.task.workspace / name
+        for name, content in _WRITES.get(task.instructions, {}).items():
+            where = task.workspace / name
             where.parent.mkdir(parents=True, exist_ok=True)
             where.write_bytes(content)
-        await conversation.call(REPORT.name, {"text": conversation.task.instructions})
-        return AgentOutcome(stop_reason=StopReason.COMPLETED, text="")
+        return Reply(calls=[Call(REPORT.name, {"text": task.instructions})])
 
-    return _script
+    return _one
 
 
 # --- the bundle, the run, and the two places on disk ---------------------------------------------
@@ -249,7 +251,7 @@ def _harness(
     Named only by the one test that asks whether the *project's* command is what reaches the port.
     """
     return container.fakes(
-        TreesRoot(tmp_path / "trees"), files={SEEDED: SEED}, build=build, claude=_agent(pause)
+        TreesRoot(tmp_path / "trees"), files={SEEDED: SEED}, build=build, agent=_agent(pause)
     )
 
 
@@ -411,8 +413,8 @@ async def test_the_parents_last_good_advances_to_the_landing_head(tmp_path: Path
     assert run._steps.last_good == outcome.head, (
         f"the parent's chain is at {run._steps.last_good!r} and the landing produced "
         f"{outcome.head!r}. `integrate()` is not a step, so nothing journals it and nothing else "
-        f"will ever move this value - §3.6 calls forgetting it the one path in the design that "
-        f"destroys work rather than costing a re-run"
+        f"will ever move this value - §3.6 calls forgetting it one of three paths in the design "
+        f"that destroy work rather than costing a re-run"
     )
 
 
@@ -444,7 +446,7 @@ async def test_the_parents_next_step_does_not_delete_the_child_that_landed(tmp_p
     assert (_target_dir(tmp_path) / FIRST).is_file(), (
         "the landed child's file is gone from the target's checkout after a read-only step in the "
         "parent. That step restored to `last_good`, which means the landing never reached the "
-        "parent's chain - §3.6's one path that destroys work rather than costing a re-run"
+        "parent's chain - one of §3.6's three paths that destroy work rather than costing a re-run"
     )
     assert (_target_dir(tmp_path) / CONTESTED).read_bytes() == PARENT_BODY, (
         "the parent's own work is gone too, so the restore went back further than the landing"
@@ -799,7 +801,7 @@ def _point() -> EntryPoint:
 async def test_run_exit_gives_the_lease_back_and_leaves_the_adapters_hold_alone(
     tmp_path: Path,
 ) -> None:
-    """§3.4: "the lease is released when the run exits" - and only the lease.
+    """§3.4's sweeper - "run exit is the sweeper, not the lifetime" - and only the lease.
 
     **The release is asserted by asking for it again.** A lease is not observable: `Leases` has no
     predicate, deliberately, because one would be answerable only in the instant between two
@@ -851,8 +853,8 @@ async def test_resume_exit_gives_the_lease_back_the_way_run_exit_does(tmp_path: 
     deliberately so: a resumed run is the same run", and the `finally: leases.release_all()` under
     it is a copy of the one this file already measures. A copy carrying a claim and no test is what
     drifts: deleting the clause from `run` fails the test above and deleting it from `resume` used
-    to fail nothing at all, which made half of "the lease is released when the run exits" an
-    unverified sentence in a docstring.
+    to fail nothing at all, which made half of "run exit gives every live lease back" an unverified
+    sentence in a docstring.
 
     **The arrangement is the same workflow twice**, which is what makes this a resume rather than a
     second run. The first invocation walks away holding a conflict, and §3.4's hold is durable - it

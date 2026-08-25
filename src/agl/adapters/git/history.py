@@ -1,8 +1,8 @@
-"""`GitHistory` - the real `History`: six questions about one repository's past, asked of git.
+"""`GitHistory` - the real `History`: seven questions about one repository's past, asked of git.
 
 Where a run starts, what that resolved to, whether a name is held at all, whether one state is
-already inside another, which files differ between two states, and the same difference as a patch a
-person reads. Nothing here changes
+already inside another, which files differ between two states, the same difference as a patch a
+person reads, and what one commit is called. Nothing here changes
 anything, which is the port's design and is also why every invocation below is a read: no ref is
 written, no index is touched, and the repository this is pointed at is the user's own checkout.
 
@@ -13,7 +13,8 @@ each of the three git adapters over one repository builds the same runner from i
 ## Plumbing, because the porcelain is somebody else's to configure
 
 Both `changed_files` and `diff` ask `git diff-tree`, which is the interface git writes for programs,
-and not `git diff`, which is the one it writes for people. The difference is not stylistic. A user
+and not `git diff`, which is the one it writes for people, and `message` asks `git rev-list` and not
+`git log` on the same rule. The difference is not stylistic. A user
 with `diff.external` set - a perfectly ordinary way to prefer a side-by-side viewer - turns `git
 diff` into a program AGL has never heard of, and what comes back is not a unified patch at all but
 whatever that program prints. `diff.renames = false` turns every move into a deletion and an
@@ -58,7 +59,7 @@ workflow committed nothing sits exactly at its base, has nothing to lose and not
 must still be tidied up - which happens only if a state is already inside itself. An implementation
 answering `False` there would keep a stale branch for every run that did nothing, forever.
 
-## `NotFoundError` from five of the six, for a name this repository does not hold
+## `NotFoundError` from six of the seven, for a name this repository does not hold
 
 `refusal=NotFoundError` on every call, which is `_runner.py`'s way of saying that a deliberate "no"
 from *this* question means the thing was not there. `changed_files` is the sharp one: "nothing
@@ -71,7 +72,7 @@ they are the two a person's typing reaches - `agl run --from nosuchbranch` is ex
 and "fatal: Needed a single revision" is not that sentence. The three that take ids take them out of
 AGL's own records, where git's own reason is the more useful half of the message.
 
-**`exists` is the sixth and it refuses nothing**, which is what it is for: the port defines it as
+**`exists` is the one that refuses nothing**, which is what it is for: the port defines it as
 `resolve` with the refusal turned into a `False`, so a name this repository does not hold is one of
 its two answers rather than an error. It is still `refusal=NotFoundError` underneath, because
 `--quiet` is what makes `rev-parse` one of git's exit-status questions and everything that is not a
@@ -115,11 +116,11 @@ from agl.ports.history import FileChange, History
 __all__ = ["GitHistory"]
 
 
-# A backstop for the four calls that read the repository's own data rather than walking a tree: a
-# symbolic ref, two ref lookups and an ancestry question. The runner's default is sized for a
-# checkout of a large repository, which makes it no guard at all on anything this small, and
-# `_runner.py` says a call site that knows its operation's shape passes its own. The two that scale
-# with how much changed keep the runner's default.
+# A backstop for the five calls that read the repository's own data rather than walking a tree: a
+# symbolic ref, two ref lookups, an ancestry question and one commit's message. The runner's default
+# is sized for a checkout of a large repository, which makes it no guard at all on anything this
+# small, and `_runner.py` says a call site that knows its operation's shape passes its own. The two
+# that scale with how much changed keep the runner's default.
 _ASKING: Final = 30.0
 
 # The peel that makes `resolve` answer about a commit and not merely about a ref. An annotated tag
@@ -303,6 +304,44 @@ class GitHistory(History):
         return await self._git.run(
             *_COMPARING, "--patch", "--end-of-options", base, head, refusal=NotFoundError
         )
+
+    async def message(self, commit: str) -> str:
+        """What this one commit is called - the other half of `Workspace.commit_all(message)`.
+
+        `rev-list` and not `log`, which is this module's plumbing rule applied to the one member
+        where the porcelain would have been shorter. `git log` reads a person's display settings -
+        `format.pretty`, `log.showSignature`, the notes refs - and while an explicit `--format`
+        overrides the first, the value of asking a plumbing command is that no answer here depends
+        on a setting the user was not wrong to have. `rev-list` walks the same graph and prints the
+        same `%B`; `--max-count=1` makes the walk stop at the commit that was named, and
+        `--no-commit-header` is what leaves the body on its own.
+
+        **`%B` is the raw body, and the trailing newline is not the message.** git cleans a message
+        before it records one - trailing whitespace off every line, a single newline at the end -
+        and `--format` puts one more after the entry, so what arrives is the message plus one or
+        two line feeds that nobody wrote. The port takes trailing whitespace out of the answer for
+        exactly this reason, so `strip` here is keeping a promise rather than tidying output: a
+        workflow comparing this against its own `commit=` template gets equality.
+
+        `.strip()` and not `_one`, which is the module's other one-line answer and is the wrong
+        shape for this: a message may be several lines, and `unreadable` on an empty one would be
+        the adapter reporting a state git cannot hold - `commit_all` refuses a message that cleans
+        away to nothing, so an empty body here is not a case this member has to have an answer for.
+        Leading whitespace is left alone, because git leaves it alone: only the trailing side is
+        the port's rule.
+        """
+        return (
+            await self._git.run(
+                "rev-list",
+                "--max-count=1",
+                "--no-commit-header",
+                "--format=%B",
+                "--end-of-options",
+                commit,
+                refusal=NotFoundError,
+                timeout=_ASKING,
+            )
+        ).rstrip()
 
 
 def _one(answer: str, what: str) -> str:

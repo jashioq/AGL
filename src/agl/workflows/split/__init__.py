@@ -115,10 +115,11 @@ Two `show` calls, and `views/` is where both screens live and are argued:
    screen the run puts up.
 2. **The conflict screen**, inside the `while` in `_implement`, at `priority=10`.
 
-The one thing `views/conflict.py` needs that this package cannot get from `agl.sdk`: `Conflict` and
-`VerifierOutcome` are not on the SDK's front door, so it imports them from `agl.ports`. That is
-`chunks.py`'s `Namespace` tripwire firing a second time, and it is reported as a missing re-export
-for the same reason - widening `sdk/__init__.py` is a diff outside this package.
+`views/conflict.py` needs `Conflict` and `VerifierOutcome`, and until 19.2 neither was on the
+SDK's front door, so it reached into `agl.ports` for them - `chunks.py`'s `Namespace` tripwire
+firing a second time, reported rather than paid for because widening `sdk/__init__.py` is a diff
+outside this package. 19.2 paid it. Both names come through `agl.sdk` now, and **no module in this
+package imports from anywhere but `agl.sdk` and itself**.
 
 ## What a resume gets for free, and the one rule it places on this file
 
@@ -142,8 +143,11 @@ One line in `pyproject.toml`:
     [project.entry-points."agl.workflows"]
     split = "agl.workflows.split:split"
 
-That line and this package are the whole of what stage 18 adds. No edit to `cli/`, to `api.py`, to
-`sdk/` or to `config/` - which is target #1.
+That line and this package were the whole of what stage 18 added: no edit to `cli/`, to `api.py`,
+to `sdk/` or to `config/`, which is target #1 and was the measurement stage 18 existed to take.
+`sdk/__init__.py` was widened afterwards, at 19.2, to carry the three names this package had had to
+import from `agl.ports` - a diff stage 18 deliberately reported instead of making, so that the
+measurement said what it measured.
 """
 
 from asyncio import TaskGroup

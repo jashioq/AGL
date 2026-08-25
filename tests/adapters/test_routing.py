@@ -11,13 +11,13 @@ trip through this class, or one of the constructor's refusals.
 holds, since `config/container.py` puts this in the services bundle and the vendor runners behind
 it. Declining the suite on the grounds that this class is "only a dispatcher" would leave the one
 runner every step addresses as the one implementation nobody held to the port. A dispatcher is
-precisely where a promise gets dropped in transit: five of the suite's eight tests pass through
+precisely where a promise gets dropped in transit: seven of the suite's ten tests pass through
 `run` holding a callback, a tool or a question, and each of them is a thing this class could
 silently fail to carry.
 
 So `TestRoutingOverBothFakes` is `AgentContract` with the two fixtures overridden and nothing else
 touched, and the `model` fixture is parametrised over **every model both providers serve**, which
-the suite blesses as "the honest way to cover them all". Eight tests, six models: the whole port,
+the suite blesses as "the honest way to cover them all". Ten tests, six models: the whole port,
 end to end through the dispatch path, once per member of both enums.
 
 **Over fakes, and never over the vendor runners.** Forty-eight harness sessions is a bill and a
@@ -107,13 +107,13 @@ class TestRoutingOverBothFakes(AgentContract):
 
     Two overrides and nothing else, which is what the suite asks for. Neither is gated: nothing
     here starts a process, binds a socket or spends a token, so a skip would be hiding something
-    rather than declining to do it. All eight tests run against every model, and each one of them
+    rather than declining to do it. All ten tests run against every model, and each one of them
     reaches its fake through `RoutingAgentRunner._serving` and back.
     """
 
     @pytest.fixture
     def runner(self) -> AgentRunner:
-        """A router over both fakes, unscripted, which is the bundle stage 9 will assemble.
+        """A router over both fakes, unscripted, which is the bundle `container.fakes()` assembles.
 
         Deliberately unscripted, for the reason `test_openai_fake.py` gives: a fake handed a script
         written by the author of its own tests answers an exam it set itself, and the suite's five
@@ -132,7 +132,7 @@ class TestRoutingOverBothFakes(AgentContract):
 
         The one runner in the repository for which this parametrisation is not a thoroughness
         decision: a router answers for several providers, so a suite that named one model would be
-        eight tests about one arm of a dispatch and silence about the other.
+        ten tests about one arm of a dispatch and silence about the other.
         """
         return cast(ModelId, request.param)
 

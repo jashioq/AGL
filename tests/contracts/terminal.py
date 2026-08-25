@@ -350,7 +350,7 @@ class TerminalContract(
         person is looking at it. And **every priority the terminal has been asked for is reported,
         including the ones with nothing waiting**, which is what the zero at 10 is.
 
-        The port says the second one in as many words and gives the reason: two implementations
+        The port says the second one in as many words and gives the reason: three implementations
         would otherwise disagree about the empty entries, and a workflow reading `pending.get(10,
         0)` would see the same run differently on each. That is a workflow rendering "2 waiting" in
         a corner and getting a different corner from a different terminal - `pending` exists because

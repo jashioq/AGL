@@ -157,11 +157,11 @@ answers 7 for it without either module having learned what `ReviewNotConverging`
 stronger than catching `Stop` first, and it is pinned by identity in the suite rather than by class.
 
 **14.1 put a `try` here and the rule is unchanged, because the rule was about catching.** §3.4 gives
-the framework a lease per integration target and has it "released when the run exits", so the last
-two lines of `run` are a `finally` around the workflow's function. A `finally` sees no exception,
-names no class and cannot decide anything: control leaves it carrying whatever arrived, `Stop`
-subclass and all. What would break the criterion is an `except` of any width, which is why the
-sentence above is written about that word rather than about `try`.
+the framework a lease per integration target and makes run exit "the sweeper, not the lifetime" for
+one no verb settled, so the last two lines of `run` are a `finally` around the workflow's function.
+A `finally` sees no exception, names no class and cannot decide anything: control leaves it carrying
+whatever arrived, `Stop` subclass and all. What would break the criterion is an `except` of any
+width, which is why the sentence above is written about that word rather than about `try`.
 
 **15.1 put an `async with` here and the rule survives it mechanically.** `Terminal.__aexit__` is
 annotated `-> None` on the port; suppressing an exception from a context manager means returning
@@ -188,7 +188,7 @@ to draw nothing across the refusals a person has to read - a name nothing regist
 params refuse, a label already taken. It is also a real resource and not a flag: `RichTerminal`
 starts a redraw loop and takes the console, so entering before `write_record` would make a failure
 there unwind through a display teardown for a run that does not exist. It is entered exactly once,
-which both implementations require - a second `__aenter__` is refused.
+which every implementation requires - a second `__aenter__` is refused.
 
 **It closes inside the lease `finally`, and neither ordering is load-bearing.** The two teardowns
 are independent: `release_all()` releases in-process locks and shows nobody anything, and handing
@@ -318,8 +318,9 @@ calls that window "a crash between a *child's* `open()` and its first entry writ
 how long it is; the honest answer is the length of that first step, which is an agent turn.
 
 **Why it cannot be closed within the ports.** No port can enumerate `agl/_work/<label>/*`, by
-design. `History` is six questions about the past and none of them is a listing - `exists` answers
-about one name the caller already composed, which is why it is not one; `ports/workspace
+design. `History` is seven questions about the past and none of them is a listing - `exists` and
+`message` both answer about one name the caller already composed, which is why neither is one;
+`ports/workspace
 .py` argues at length that a provider offers no enumeration, "because an enumeration method would
 buy tidiness by requiring that every implementation be able to list, which a service handing out
 checkouts to many clients may not honestly be able to do". Nor can this module go and look: a
@@ -624,9 +625,9 @@ async def run(
         await services.workspaces.open(label, None, spec.base_sha)
 
         # §3.4's lease per integration target, constructed here and not left to `Run`'s own default,
-        # because "the lease is released when the run exits" needs something above the workflow to
-        # be holding the handle - and a defaulted field is built where nothing can reach it. This is
-        # the one of `Run`'s three shared tables the composition root passes.
+        # because being the sweeper for a lease no verb settled needs something above the workflow
+        # to be holding the handle - and a defaulted field is built where nothing can reach it. This
+        # is the one of `Run`'s three shared tables the composition root passes.
         leases = Leases()
         # The `Run` is built from what this function already computed and nothing else: `scope` is
         # the address the record above went to, and `base` is the same resolved commit the record

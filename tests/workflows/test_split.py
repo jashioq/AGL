@@ -57,6 +57,16 @@ when a test wants to watch the board *move*.
 it is one, and then `run.worktree(id)` per chunk, which is the workflow's own line and is on the
 SDK's front door. `_runs` below is the whole of what that costs, and the argument for building the
 fixture that way rather than out of siblings is there.
+
+## One name still comes from `agl.ports`, and it is reported rather than repaired
+
+`Conflict` and `VerifierOutcome` were reaches into `agl.ports` at 18.3 and are on `agl.sdk`'s front
+door as of 19.2. `JsonValue` below is not, and the argument for leaving it is that it is not a
+*workflow's* name: no module under `src/agl/workflows/` mentions it, and what wants it here is a
+test building the payload a scripted agent reports and reading a record back afterwards. That is
+`agl.testing`'s vocabulary rather than `agl.sdk`'s - `Call.payload` is a `Mapping[str,
+JsonValue]` and `agl.testing` re-exports `Call` without it - so the door it is missing from is the
+test harness's and not the authoring surface's. Recorded here, unpaid, as the other two were.
 """
 
 from collections.abc import Mapping
@@ -66,10 +76,17 @@ from typing import Final
 import pytest
 
 from agl import testing
-from agl.ports.integration import Conflict
 from agl.ports.run import JsonValue
-from agl.ports.verifier import VerifierOutcome
-from agl.sdk import Choice, InputError, Row, Rows, Run, Screen
+from agl.sdk import (
+    Choice,
+    Conflict,
+    InputError,
+    Row,
+    Rows,
+    Run,
+    Screen,
+    VerifierOutcome,
+)
 from agl.workflows.split import SplitParams, views
 from agl.workflows.split.chunks import Chunk, Chunks, report_chunks
 from agl.workflows.split.views.conflict import ABORT, RETRY

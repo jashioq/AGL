@@ -23,19 +23,19 @@ down and read back, and it is the whole of what this module knows about a param:
 
 ## There is no `RunStatus`
 
-`ARCHITECTURE.md` §6 gives this module's row as "`RunSpec` and `RunStatus`". `RunStatus` is
-deliberately absent, and this is the record of why.
+`ARCHITECTURE.md` §6 gives this module's row as "`RunSpec` ... and `JsonValue`", with "**No
+`RunStatus`, deliberately**" beside it and a pointer back here. This is the record of why, and the
+row is short because the argument is long.
 
 The plan removes stored status twice: from §3.6's list of what `run.json` does *not* carry
 ("stored status (derived from which entries exist)"), and from §3.11's table of what is not built
 at all ("Stored status - derivable from which entries exist. Two sources of truth is what forces
 `reconcile_on_resume.py` to exist"). The existence of a step's entries **is** the status, so a
 `RunStatus` could only ever be a *computed view* over them - and three facts leave nothing here to
-compute it from: the entry type does not exist yet, arriving with the journal many stages from
-here (`sdk/_engine/journal.py`) and living in `sdk/`, not `ports/`; this module may not reach the
-entries even once it does, contract 2 forbidding a pure type in `agl.ports` from importing
-`agl.ports.store`, the port that reads them; and nothing asks, the plan having removed the
-`status` command outright.
+compute it from: the entry type lives in `sdk/`, not `ports/`, having arrived with the journal at
+stage 11 (`sdk/_engine/journal.py`); this module may not reach the entries in any case, contract 2
+forbidding a pure type in `agl.ports` from importing `agl.ports.store`, the port that reads them;
+and nothing asks, the plan having removed the `status` command outright.
 
 A `RunStatus` written today would therefore be an enum - `RUNNING`, `COMPLETE`, `FAILED` - with
 no honest way to populate it, sitting in the one module that serializes `run.json`, one field

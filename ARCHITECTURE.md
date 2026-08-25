@@ -41,6 +41,13 @@ rule, one composition root.
 
 This is enforced by `.importlinter`, not by convention. A violation is a failing build.
 
+One clause of it is not, and cannot be. **"`ports` imports nothing but stdlib" is an allow list**,
+and every contract type import-linter has names what is *forbidden* or how modules are ordered — so
+saying it there means enumerating the complement, which is every distribution there is. It is
+enforced by `tests/test_ports_stdlib_only.py`, an AST scan asserting that the root of every import
+under `ports/` is in `sys.stdlib_module_names` or is `agl.ports` itself. Until 19.1 nothing enforced
+it at all: `import pydantic` in `ports/clock.py` left all six contracts kept.
+
 ## 3. The composition root
 
 **The only place that says `new` is `config/container.py`.** Nothing else constructs an
@@ -73,6 +80,11 @@ adapter. No module outside it may import from `agl.adapters.*`. Enforced by cont
   door takes every name from a module in its own package. `sdk/errors.py` is the third pure
   re-export facade and joined at 18.0, when a workflow's own test file had to reach into
   `agl.ports.errors` to say how a run refused — the tripwire `sdk/__init__.py` set at 16.5, fired.
+  **`sdk/workflow.py` carries `Namespace`, `Conflict` and `VerifierOutcome`** on the same rule and
+  not as a fourth facade: they are the vocabulary a `Run`'s own members speak — `worktree(name)`
+  refuses through `Namespace`, and `integrate()`'s outcome carries the other two, which is what
+  §3.4's snippet hands a workflow's conflict view. Added at 19.2, after `split` reached into
+  `agl.ports` for all three and reported it twice rather than paying for it.
 - **There is no `presentation/` layer.** Components live in `ports/terminal.py`, re-exported
   through `sdk/terminal.py`; rendering lives in `adapters/rich_terminal/`. A neutral layer
   between them was considered and rejected: forcing a terminal and a websocket into one shape
@@ -86,14 +98,14 @@ adapter. No module outside it may import from `agl.adapters.*`. Enforced by cont
 |---|---|
 | `errors.py` | The `AglError` hierarchy, organised by meaning, **and the one exception → exit-code table in the codebase**: `EXIT_CODES` as the data, plus `exit_code_for()`, which walks the MRO so a workflow's own `Stop` subclass resolves without being listed |
 | `ids.py` | `RunLabel`, `Namespace`, `ProjectName`, `StepName` — validated filesystem- and git-ref-safe names |
-| `run.py` | `RunSpec` — what `run.json` holds — and `JsonValue`, the shape a stored value keeps. **No `RunStatus`, deliberately**: status is derivable from which entries exist, so the only honest one is a computed view over entries that will live in `sdk/_engine/journal.py`, not here — and contract 2 forbids `ports.run` from importing `ports.store`. The module docstring makes the argument; do not add a placeholder enum |
+| `run.py` | `RunSpec` — what `run.json` holds — and `JsonValue`, the shape a stored value keeps. **No `RunStatus`, deliberately**: status is derivable from which entries exist, so the only honest one is a computed view over entries that live in `sdk/_engine/journal.py`, not here — and contract 2 forbids `ports.run` from importing `ports.store`. The module docstring makes the argument; do not add a placeholder enum |
 | `home_layout.py` | Paths under `AGL_HOME` — what `Store` addresses |
 | `tree_layout.py` | Paths under the trees root — what `Workspace` addresses. Never conflated with `home_layout` |
 | `questions.py` | `Question` and `Answer` — the lowest-common-denominator shape of a mid-run agent question, across vendors |
 | `agent.py` | The `AgentRunner` ABC plus the vocabulary it speaks: `Provider`, `ModelId` (`Claude.*`, `OpenAI.*`), `Restriction`, `Capability`, `AgentTask`, `AgentOutcome`, `Tool` |
 | `workspace.py` | `WorkspaceProvider` and `Workspace` — "give me an isolated place to work from this base; take it back", plus `hold`: §3.10's claim that this process is walking this run, so a `clear` aimed at a live run refuses instead of taking its checkouts away. The claim is here and **never** on `Store`, whose own docstring argues that the absence of a lock is that port's requirement |
 | `integration.py` | `Integrator`, `IntegrationOutcome`, `Conflict` — "land this workspace into the target, or tell me why not" |
-| `history.py` | `History` — "what changed, and is X already in Y". Diffs, changed files, ancestry over the target repo, plus `exists`, which is `resolve` with the refusal turned into a `False` — a predicate over one name the caller composed, and so **not** the ref *listing* §3.10 forbids. **Not a run log** |
+| `history.py` | `History` — "what changed, and is X already in Y". Diffs, changed files, ancestry over the target repo, plus `exists`, which is `resolve` with the refusal turned into a `False`, and `message`, which is what one named commit is called. Both are facts about one name the caller composed, and so **not** the ref *listing* §3.10 forbids. `message` joined at 19.2: `commit=` is the workflow author's one step-ending decision (§3.3) and §3.11 keeps the message the workflow's own vocabulary rather than something AGL generates, so it is precisely what a workflow's test should be able to assert — the port takes trailing whitespace out of the answer so the two implementations agree, and promises nothing about the interior of a multi-line message. **Not a run log** |
 | `verifier.py` | `Verifier` — runs the build gate. One call site: inside integration |
 | `store.py` | `Store` — persists run records and step entries. The contract states atomic writes |
 | `terminal.py` | The `Terminal` ABC plus its component types (see §5) |
@@ -115,14 +127,14 @@ adapter. No module outside it may import from `agl.adapters.*`. Enforced by cont
 
 | Module | Holds |
 |---|---|
-| `workflow.py` | The `@workflow` decorator, the `Run` object a workflow is handed, and `Stop`. A workflow is a decorated async function, never a subclass. `roles=` is the one thing the decorator takes that is not a fact about the function: roles are module-level declarations inside the workflow's own package, so preflight has no other way to find them |
+| `workflow.py` | The `@workflow` decorator, the `Run` object a workflow is handed, and `Stop`. A workflow is a decorated async function, never a subclass. `roles=` is the one thing the decorator takes that is not a fact about the function: roles are module-level declarations inside the workflow's own package, so preflight has no other way to find them. Also re-exports the three port names a `Run`'s members speak — `Namespace` (what `worktree()` refuses through), `Conflict` and `VerifierOutcome` (what `integrate()`'s outcome carries to a conflict view) — for the reason `roles.py` carries `Claude`; see §5 |
 | `roles.py` | `Role(instructions, model, restrictions, tools, requires, on_question)`. The author names the model per role; there is no config-level model override |
-| `tools.py` | `Tool` and reporting-tool declaration. A reporting tool's payload becomes the step result |
+| `tools.py` | `Tool` and reporting-tool declaration. A reporting tool's payload becomes the step result. Also `describe()` — what a payload field says about itself in the derived schema, `dataclasses.field(metadata=…)` under a namespaced key exactly as `arg()` declares a flag. A field description is a schema term and therefore a fingerprint term, which is what lets a payload state a rule §3.6 rule 6 would otherwise leave invisible |
 | `params.py` | `arg()` — a workflow's params dataclass becomes named CLI flags. No positionals |
 | `terminal.py` | Re-export facade over `ports.terminal` — no logic |
 | `questions.py` | Re-export facade over `ports.questions` — no logic |
 | `errors.py` | Re-export facade over `ports.errors` — no logic. The `AglError` hierarchy an author asserts a refusal with, and **only** the hierarchy: `EXIT_CODES` and `exit_code_for` are the CLI's (`cli/exit_codes.py` takes exactly that other half), and `Stop` reaches the door through `workflow.py`, beside the `Run` it is raised out of, so that one name has one import path in |
-| `testing.py` | The **scripting vocabulary** a workflow author writes an agent in: `Reply` (what an agent does for one task), `Call`, and `Agent = (AgentTask) -> Reply`. Port-typed, and it names no vendor and no fake — `sdk/` and `adapters/` are siblings, so `Script` and `Conversation` are not names it may write, and `config/container.py` compiles a `Reply` into the callable each fake consumes. The *builder* is `agl/testing.py`: contract 1 puts `sdk` below `config`, so nothing here can build a bundle |
+| `testing.py` | The **scripting vocabulary** a workflow author writes an agent in: `Reply` (what an agent does for one task), `Call`, and `Agent = (AgentTask) -> Reply \| Awaitable[Reply]` — `def` or `async def`, the second arm added at 19.2 so an agent can await a barrier, which is the only arrangement that proves N children genuinely overlapped. Port-typed, and it names no vendor and no fake — `sdk/` and `adapters/` are siblings, so `Script` and `Conversation` are not names it may write, and `config/container.py` compiles a `Reply` into the callable each fake consumes and awaits the agent when there is something to await. The *builder* is `agl/testing.py`: contract 1 puts `sdk` below `config`, so nothing here can build a bundle. **What awaiting does not buy**: a `Reply` is still computed before the run, so an agent that must read a `ToolResult` or an `Answer` is still a raw per-provider `Script` |
 | `_engine/journal.py` | Internal: fingerprints, entries and replay — the ledger under `steps/` that makes a run resumable |
 | `_engine/steps.py` | Internal: what `run.step` is a delegate to — the journal lookup, the `AgentTask` a `Role` becomes, the dispatch, the commit-or-wipe and the entry write, in that order. It lives here and not in `workflow.py` because `sdk/` keeps its plumbing under `_engine/`, and because the one member that persists anything should not be read past on the way to the decorator. Also holds the cell behind `run.activity`: the last string the serving adapter reported, live-only and never persisted, which a frozen `Run` has nowhere to keep. And the one place a namespace's base is resolved — `WorkspaceProvider.open` takes a ref expression or a commit id, `Journal` takes only the second, so one `History.resolve` feeds both and the cut and the chain cannot disagree |
 | `_engine/worktrees.py` | Internal: what `run.worktree` is a delegate to — the run's table of taken namespaces and the child `Run` each one carries. **Unique run-wide, not sibling-wide** (§3.9: `AGL_HOME` nests and the trees root is flat, so `T-01`'s child `sub-b` and a top-level `sub-b` are two scopes and one checkout), compared by `Namespace.collision_key`. It computes no path and holds no head: the nested `worktrees/<name>/` storage is `home_layout.scope_dir`'s one loop, and the head a child starts at is the chain in `_engine/journal.py`, read synchronously through `Steps.last_good` |
@@ -143,7 +155,7 @@ adapter. No module outside it may import from `agl.adapters.*`. Enforced by cont
 | `config/schema.py` | Typed settings, with a nested section per connector |
 | `config/sources.py` | Precedence: flags > env > file > defaults, resolved once into an immutable object |
 | `config/toml_file.py` | The only module that knows TOML — reading both file shapes and **writing** the project file `agl init` produces, so the two round-trip. Resolves the project by walking up to the git root. Also the one refusal that compares two settings against each other rather than checking one: a `trees_root` resolving to somewhere inside `repo` would put AGL's checkouts in the user's working tree (§3.5), and it is here rather than in `schema.py` because seeing it needs `Path.resolve()` and those types are pure |
-| `config/container.py` | The composition root, the only module that constructs adapters. Builds the typed services bundle and assembles the routing runner. Also the one module that may name both `sdk/testing.py`'s vocabulary and an adapter's `Conversation`, so **it compiles a `Reply` into the callable each agent fake consumes** — `fakes(agent=…)`, one provider-blind agent, one raw `claude=`/`openai=` script per provider as the escape hatch. `FakeServices.with_terminal` / `with_store` swap a fake in both of that class's views at once |
+| `config/container.py` | The composition root, the only module that constructs adapters. Builds the typed services bundle and assembles the routing runner. Also the one module that may name both `sdk/testing.py`'s vocabulary and an adapter's `Conversation`, so **it compiles a `Reply` into the callable each agent fake consumes** — `fakes(agent=…)`, one provider-blind agent, one raw `claude=`/`openai=` script per provider as the escape hatch. `FakeServices.with_terminal` / `with_store` / `with_verifier` swap a fake in both of that class's views at once — the third joined at 19.2, because the merge gate is the only hook a test has inside a landing, and it takes a `FakeVerifier` rather than the port because that field is at the fake's own type so `answers` stays reachable |
 | `config/registry.py` | Workflow discovery through the `agl.workflows` entry points. No `importlib`, no `getattr` |
 | `cli/main.py` | Parse argv, resolve settings, dispatch. **Composition is per-command** (§3.10): the project and the container are deferred into a callable the dispatch hands on, and only a command addressed to a repository calls it — `init` writes the project file a container needs, and `workflows` needs neither. Also **the one place `Path.cwd()` is read** in AGL: `_compose` reads it, the `Invocation` carries it, and both readers — `_registered` and `agl init` — receive it |
 | `cli/exit_codes.py` | Re-exports `EXIT_CODES` and `exit_code_for` from `ports/errors.py` and holds no table of its own — the table is there, in exactly one place. What to do with an exception that is **not** an `AglError` is this module's only decision |
@@ -157,11 +169,33 @@ adapter. No module outside it may import from `agl.adapters.*`. Enforced by cont
 scripts/check
 ```
 
-It runs `pytest`, `mypy --strict`, `ruff check` and `lint-imports`, plus a grep gate asserting
-the Codex CLI binary name appears only under `agl/adapters/openai/`, plus a gate asserting
-`src/agl/__init__.py` holds no import statements (the one blind spot `.importlinter` cannot
-express — see contract 5), plus a warning for any `.py` over 300 lines (the project's own
-convention). It exits non-zero if any gate fails.
+**There are eight gates**, seven of which can fail the build:
+
+| Gate | What it asserts |
+|---|---|
+| `pytest` | the suite passes |
+| `mypy --strict` | `src` and `tests` both type-check — `tests`, not just `src` |
+| `ruff check` | lint is clean |
+| `lint-imports` | every contract in `.importlinter` is kept |
+| Codex CLI binary containment | a grep asserting the binary name appears in no `.py` under `src/` outside `agl/adapters/openai/` — §4's stand-in for a contract, since a subprocess call has no import to contain |
+| module size ceiling | **warning only** — how many modules are over the project's 300-line convention |
+| package root holds no imports | `src/agl/__init__.py` holds no import statements. The one blind spot `.importlinter` cannot express: import-linter skips any (source, forbidden) pair where one module is a descendant of the other, so an adapter imported here leaves every contract kept — see contract 5 |
+| paid-endpoint guard | no test module can reach a paid endpoint, measured in the two shapes it can fail: an AST scan for a test writing one of the guarded environment variables outside `tests/conftest.py`, and a probe module written into `tests/` and run with the real endpoints poisoned, which passes only if the repo-wide guard reached a file that did not exist when the guard did |
+
+It exits non-zero if any gate fails. The module-size gate is a warning and never fails the build:
+a file over the ceiling is not a defect, it is the project asking whether that module is still
+holding one idea.
+
+**The module-size gate counts code lines, not `wc -l`.** A line is a physical line carrying at
+least one token of code; docstrings, comments and blank lines count zero, a trailing comment does
+not stop its line counting, and a multi-line string that is a *value* counts every line it spans.
+Attribute docstrings — the bare string statement after a dataclass field, which this repo uses
+everywhere — are docstrings for this purpose, so the counter walks `ast.Expr` over a string
+constant rather than using `ast.get_docstring`. The gate's own comment block in `scripts/check`
+argues each exclusion; the short version is that this build's docstrings and comments are its best
+artifact, and a ceiling that charges for prose pushes in the wrong direction. Changing the counter
+at 19.5 moved the tree from 116 files over the ceiling to 31, and from 40 modules under `src/` to
+one. A file that will not parse is counted at its full physical size and named, never skipped.
 
 `ruff check` is a failing gate, not advice: unused imports and undefined names are cheap to
 catch and cheaper to fix early, and a lint that only warns stops being read. Its rules live in

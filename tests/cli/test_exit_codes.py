@@ -18,6 +18,13 @@ literal, because "70 is not written here" is the actual claim and a passing beha
 on passing the moment somebody typed it. `KeyboardInterrupt` is settled the same way: the parameter
 is annotated `Exception`, so `except BaseException` at the call site is a type error rather than a
 convention, and the pair of assertions below is what makes that annotation load-bearing.
+
+**§3.1's group rule is asserted on constructed groups, and that is the honest register for it.** A
+`BaseExceptionGroup` is a value, so a group holding two `UpstreamError`s says everything about the
+rule that a real `TaskGroup` would - the leaves are the same objects either way. What a constructed
+group cannot say is that a group *reaches* the handler at all, which is a fact about `cli/main.py`
+and is asserted there, through the console entry point, on workflows that open a `TaskGroup` for
+real: `tests/cli/test_main.py`. Both halves are needed, and neither is the other's duplicate.
 """
 
 import ast
@@ -25,7 +32,7 @@ import inspect
 from typing import Final, get_type_hints
 
 from agl.cli import exit_codes
-from agl.cli.exit_codes import EXIT_CODES, exit_code_for, exit_status
+from agl.cli.exit_codes import EXIT_CODES, exit_code_for, exit_status, leaves
 from agl.ports import errors
 from agl.ports.errors import (
     AglError,
@@ -149,6 +156,126 @@ def test_an_unmapped_branch_and_an_untranslated_exception_agree() -> None:
         """A branch of the hierarchy nobody remembered to map."""
 
     assert exit_status(_UnmappedBranch("no code")) == exit_status(OSError("not ours to see"))
+
+
+# --- §3.1's group rule --------------------------------------------------------------------------
+
+
+def test_a_single_leaf_group_is_worth_exactly_what_its_leaf_is_worth() -> None:
+    """"Unwrap a single-exception group and map its leaf" - the parity, stated as one.
+
+    The number is the point only in as much as it is the *same* number: a `TaskGroup` is how §3.3
+    writes `split`, so a chunk that could not reach the agent has to cost what `fix` costs when the
+    same adapter raises the same class, or a script cannot tell one workflow's failures from the
+    other's.
+    """
+    alone = UpstreamUnavailable("the agent backend could not be reached")
+
+    assert exit_status(ExceptionGroup("unhandled errors in a TaskGroup", [alone])) == exit_status(
+        alone
+    )
+
+
+def test_leaves_agree_when_their_codes_agree_and_not_when_their_classes_do() -> None:
+    """"Several leaves that agree" is about the resolved code, which is the only thing published.
+
+    `UpstreamUnavailable` and `UpstreamUnexpected` appear in no table - both inherit
+    `UpstreamError`'s 6, deliberately, "so a caller that does not care which it was catches this
+    and a script still sees one code". Two classes and one answer is therefore agreement, and a
+    rule comparing classes would answer 70 for a run that failed one way twice.
+    """
+    unreachable = UpstreamUnavailable("its CLI is not on PATH")
+    unparseable = UpstreamUnexpected("it finished with no reporting-tool payload")
+
+    assert exit_status(ExceptionGroup("two chunks", [unreachable, unparseable])) == 6
+
+
+def test_leaves_that_disagree_are_seventy_because_no_one_of_them_is_the_answer() -> None:
+    """"For leaves that disagree, 70" - and 70 here is a decision, not a fallback.
+
+    §3.1: "a run that failed several different ways is genuinely not attributable to one code, and
+    `InternalError` is the honest answer rather than a guess." The pair below is the smallest
+    version of that: both are refusals a user can act on, they say to do different things, and any
+    rule picking one of them would publish a number that named one failure and hid the other.
+    """
+    group = ExceptionGroup("two chunks", [UpstreamError("no answer"), ConflictError("taken")])
+
+    assert exit_status(group) == 70
+    assert exit_status(group) == exit_code_for(InternalError)
+
+
+def test_a_deliberate_stop_inside_a_group_is_still_seven() -> None:
+    """The second half of the defect §3.1 names, and the half a `Stop` subclass reaches too.
+
+    A workflow that raises `ReviewNotConverging` from inside a chunk has ended deliberately, and 7
+    is how a script tells "needs you" from "broken" wherever the raise happened. Both spellings are
+    asserted because the MRO walk and the group flattening are two separate resolutions and this is
+    the case that needs both of them to hold at once.
+    """
+    assert exit_status(ExceptionGroup("one chunk", [Stop("nothing left to pick up")])) == 7
+    assert exit_status(ExceptionGroup("one chunk", [ReviewNotConverging("no convergence")])) == 7
+
+
+def test_a_leaf_resolves_the_same_however_deeply_its_group_is_nested() -> None:
+    """Groups nest because `TaskGroup`s do, so the rule is about leaves and not about children.
+
+    §3.3's `split` opens a `TaskGroup` and a chunk may open its own, which makes "a single-exception
+    group" a claim that has to survive one wrapper or twenty. A rule reading `group.exceptions` once
+    would answer 70 for the deeper of the two below while answering 6 for the shallower, and the
+    only difference between them is how the workflow spelled its concurrency.
+    """
+    leaf = UpstreamUnavailable("the agent backend could not be reached")
+    shallow = ExceptionGroup("outer", [leaf])
+    deep = ExceptionGroup("outer", [ExceptionGroup("inner", [ExceptionGroup("inmost", [leaf])])])
+
+    assert exit_status(deep) == exit_status(shallow) == exit_status(leaf)
+
+
+def test_a_leaf_nobody_translated_takes_part_in_agreement_like_any_other() -> None:
+    """The module's one decision, reaching inside a group: an untranslated exception is our bug.
+
+    So it resolves to 70 as a leaf exactly as it does on its own, and it agrees with an
+    `InternalError` beside it rather than being excused from the comparison - which is what keeps a
+    group from ever answering with a code no leaf of it actually had.
+    """
+    ours = ExceptionGroup("two chunks", [InternalError("an invariant"), OSError("not ours")])
+
+    assert exit_status(ours) == 70
+    assert exit_status(ExceptionGroup("one chunk", [OSError("not ours")])) == 70
+    assert exit_status(ExceptionGroup("two chunks", [OSError("x"), InputError("y")])) == 70
+
+
+def test_leaves_hands_back_every_exception_a_group_holds_and_nothing_else() -> None:
+    """The walk `cli/main.py` names all of them with, asserted by identity and in order.
+
+    Public for one reason: "naming all of them" is the half of §3.1's clause that is a message, and
+    the messages are written in `cli/main.py`. A second flattening over there would be free to
+    disagree with this one about what a leaf is, so there is one walk and this is it - and the
+    groups themselves are deliberately absent from what it yields, a group being the wrapper rather
+    than something that happened.
+    """
+    first = UpstreamUnavailable("the agent backend could not be reached")
+    second = ConflictError("another run holds the lease")
+    group = ExceptionGroup("outer", [ExceptionGroup("inner", [first]), second])
+
+    assert list(leaves(group)) == [first, second]
+    assert list(leaves(first)) == [first]
+
+
+def test_a_group_carrying_a_keyboard_interrupt_is_not_this_modules_to_answer_for() -> None:
+    """The Ctrl-C decision, inherited whole by the group rule rather than restated in it.
+
+    A `TaskGroup` whose children all raised `Exception`s hands back an `ExceptionGroup`, which is an
+    `Exception`; one whose child took a Ctrl-C hands back a `BaseExceptionGroup`, which is not - so
+    it cannot be passed to `exit_status` under `mypy --strict` and never becomes a number. That is
+    the same mechanical enforcement the bare `KeyboardInterrupt` gets, and it is what makes a Ctrl-C
+    during a `split` end the process the way a Ctrl-C during a `fix` does.
+    """
+    interrupted = BaseExceptionGroup("one chunk", [KeyboardInterrupt()])
+    ordinary = BaseExceptionGroup("one chunk", [UpstreamError("no answer")])
+
+    assert not isinstance(interrupted, Exception)
+    assert isinstance(ordinary, ExceptionGroup)
 
 
 def test_a_keyboard_interrupt_is_not_this_modules_to_answer_for() -> None:

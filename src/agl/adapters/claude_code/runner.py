@@ -8,14 +8,24 @@ the agent is told, and what a readiness probe costs.
 ## Hermeticity (§3.5): the target repo contributes source code and nothing else
 
 Three options carry it, and the SDK's default for two of them is the leaky value - which is why
-they are named and argued rather than left out:
+they are named and argued rather than left out. All three are written at every call site in this
+package, `check_ready`'s included, and
+`test_claude_code_runner.py::test_every_session_this_package_opens_is_opened_hermetically` holds
+them there by parsing the source: the set is one list, and a session added later that omits any of
+them fails before it runs.
 
   * **`setting_sources=[]`** - read no settings file anywhere. `ClaudeAgentOptions`' default is
     `None`, which the SDK forwards by passing no `--setting-sources` flag at all, leaving the CLI
     to discover what it likes.
   * **`strict_mcp_config=True`** - ignore the repository's `.mcp.json`. The dataclass default is
     `False`.
-  * **`settings` left unset** - see "Why no settings file" below.
+  * **`settings=None`** - add no settings document to the session. This one's dataclass default is
+    already `None`, so it is written for the other reason: it is not a leaky default but an
+    *unopened channel*, and a channel that is closed because nobody opened it looks identical, at
+    the call site, to one nobody thought about. It is also the only one of the three whose leaky
+    spelling is a path rather than a flag - `settings="~/.claude/settings.json"` hands the session
+    the operator's own configuration one line after `setting_sources=[]` told it to read none. See
+    "Why no settings file" below.
 
 **Verified rather than assumed, and the claim it was verifying is the old implementation's.** That
 `setting_sources=[]` also keeps a repository's `CLAUDE.md` out of the session is a *consequence*
@@ -312,6 +322,7 @@ class ClaudeCodeRunner(AgentRunner):
                 tools=[],
                 setting_sources=[],
                 strict_mcp_config=True,
+                settings=None,
                 permission_mode="bypassPermissions",
                 max_turns=1,
                 cli_path=self._cli_path,

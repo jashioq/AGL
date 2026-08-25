@@ -233,7 +233,9 @@ class Project:
     """
 
     trees: TreesRoot
-    """Where working checkouts go: `.trees/<label>/...`, computed by `tree_layout.py` alone.
+    """Where working checkouts go: `.trees/<label>/...`, whose layout `tree_layout.py` composes
+    alone - the one other name under this root is `adapters/git/_trees.py`'s registry lock file,
+    which §3.9 puts there and which holds no code.
 
     The file spells this `trees_root`; the field is `trees` because its type says "root" already,
     and mapping one onto the other is 9.3's job, in the module that knows the file format.

@@ -24,9 +24,12 @@ declared tuple would go green against an engine in which a handler-carrying role
 that cannot ask - which raises nothing, logs nothing, and reports a result (`sdk/roles.py`).
 
 **The refusals are pinned on the part of the message the reader acts on**, which for a capability
-miss is the member that is missing and, when a handler put it there, the word `on_question`. That
-clause is the one thing `roles.py` asks stage 16 for by name: "otherwise the reader goes looking for
-a line that is not in their file."
+miss is the member that is missing and, when a declaration put it there rather than the author, the
+word that declaration is spelled with - `on_question` for `MID_RUN_QUESTIONS`, and since 19.2
+`tools` for `TOOL_CALLING`. Those clauses are what `roles.py` asks stage 16 for by name: "otherwise
+the reader goes looking for a line that is not in their file." Each is conditioned on the trigger
+and not on the member, and there is a test for the negative of both: a role that typed its own
+requirement is told nothing about where it came from.
 """
 
 from collections.abc import Sequence
@@ -61,6 +64,7 @@ from agl.ports.tree_layout import TreesRoot
 from agl.ports.workspace import Workspace, WorkspaceProvider
 from agl.sdk._engine import preflight
 from agl.sdk.roles import Role
+from agl.sdk.tools import reporting_tool
 from agl.sdk.workflow import Run, workflow
 
 # `asyncio_mode = "strict"`, so every async test below carries its own marker.
@@ -81,9 +85,22 @@ EVERYTHING: Final = frozenset(Capability)
 CANNOT_ASK: Final = EVERYTHING - {Capability.MID_RUN_QUESTIONS}
 
 
+# Everything except the member 19.2's second implication is about. A backend that cannot call a
+# tool at all is the sharper of the two cases: the role's reporting tool never reaches the model,
+# so the agent cannot fire it, and `Run.step` ends the step with `RoleIncompleteError`.
+CANNOT_CALL: Final = EVERYTHING - {Capability.TOOL_CALLING}
+
+
 @dataclass(frozen=True)
 class NoParams:
     """A workflow that takes nothing, and still has a params class to derive no flags from."""
+
+
+@dataclass(frozen=True)
+class _Found:
+    """The smallest reporting payload there is: one field, so a schema can be derived from it."""
+
+    summary: str
 
 
 async def _answer(question: Question) -> Answer:
@@ -120,6 +137,15 @@ ASKING: Final = Role(instructions="propose, then ask", model=Claude.OPUS, on_que
 """Declares no `requires` at all, and requires `MID_RUN_QUESTIONS` all the same. That folding is
 `Role.__post_init__`'s, and it is why the refusal has to say where the member came from."""
 
+REPORTING: Final = Role(
+    instructions="read the change, then report what you found",
+    model=Claude.OPUS,
+    tools=[reporting_tool("report_findings", "report what the review found", _Found)],
+)
+"""The same shape one implication over: declares no `requires` and needs `TOOL_CALLING` all the
+same, because 19.2 folds it in behind `tools=`. §3.3's reporting step, in the smallest form that
+has a payload at all."""
+
 
 # --- what each workflow did, recorded at module level because the workflows have to be there -----
 
@@ -146,7 +172,7 @@ async def three_roles(run: Run[NoParams]) -> None:
 
 @workflow(name="unstaffed", version="1.1", params=NoParams)
 async def unstaffed(run: Run[NoParams]) -> None:
-    """Declares no roles at all: `workflows/noop/`'s shape, and the reason `roles` defaults."""
+    """Declares no roles at all: the shape `workflows/noop/` had, and why `roles` defaults."""
     entered.append("unstaffed")
 
 
@@ -160,6 +186,12 @@ async def demanding(run: Run[NoParams]) -> None:
 async def asking(run: Run[NoParams]) -> None:
     """Declares a handler-carrying role at module level, so preflight itself sees the fold."""
     entered.append("asking")
+
+
+@workflow(name="reporting", version="1.1", params=NoParams, roles=[REPORTING])
+async def reporting(run: Run[NoParams]) -> None:
+    """Declares a tool-carrying role at module level, so preflight sees the second fold too."""
+    entered.append("reporting")
 
 
 @workflow(name="replacing", version="1.1", params=NoParams, roles=[IMPLEMENTER])
@@ -187,7 +219,15 @@ def _point(name: str, attribute: str) -> EntryPoint:
 
 POINTS: Final = tuple(
     _point(name, name)
-    for name in ("two_providers", "three_roles", "unstaffed", "demanding", "asking", "replacing")
+    for name in (
+        "two_providers",
+        "three_roles",
+        "unstaffed",
+        "demanding",
+        "asking",
+        "reporting",
+        "replacing",
+    )
 )
 
 
@@ -343,12 +383,14 @@ async def test_check_ready_is_asked_once_per_model_and_not_once_per_role(tmp_pat
 
 @pytest.mark.asyncio
 async def test_a_workflow_that_declares_no_roles_asks_no_backend_anything(tmp_path: Path) -> None:
-    """`roles=()` is the default, and this is what it buys: `workflows/noop/` keeps working.
+    """`roles=()` is the default, and this is what it buys: a workflow that runs no agent runs.
 
-    Not merely "it does not fail". A preflight that asked about some default model, or about every
-    provider the bundle was assembled with, would make `agl run noop` depend on a harness that
-    workflow never names - and `noop` exists precisely to prove the wiring with nothing else in the
-    way.
+    Not merely "it does not fail". `workflows/noop/` was the case this was written against, and a
+    preflight that asked about some default model, or about every provider the bundle was assembled
+    with, would have made `agl run noop` depend on a harness that workflow never named - when `noop`
+    existed precisely to prove the wiring with nothing else in the way. 19.1 deleted it and the
+    argument outlived it: a workflow that names no role must reach no backend, and the assertion
+    below is over `unstaffed`, which has the shape `noop` had.
     """
     entered.clear()
     harness = _fakes(tmp_path)
@@ -433,12 +475,38 @@ async def test_a_missing_mid_run_questions_says_that_on_question_put_it_there(
 
 
 @pytest.mark.asyncio
+async def test_a_missing_tool_calling_says_that_tools_put_it_there(tmp_path: Path) -> None:
+    """The same clause one implication over, owed for the same reason and added at 19.2.
+
+    `REPORTING` declares `tools=` and no `requires` at all, so `tool_calling` is in its requirement
+    because `Role.__post_init__` folded it in - and "either the role names a model whose backend
+    has it, or it stops requiring it" is unactionable advice about a line nobody wrote. What the
+    reader needs is which declaration implied it, because that is the line they would edit.
+    """
+    harness = _fakes(tmp_path)
+    stub = _Stub(offers=CANNOT_CALL)
+
+    with pytest.raises(DeniedError) as caught:
+        await _start(harness, "reporting", agents=stub, opens=False)
+
+    said = str(caught.value)
+    assert "tool_calling" in said
+    assert "tools" in said
+    assert "on_question" not in said, "a role with no handler was told about one"
+    assert await _no_record(harness)
+
+
+@pytest.mark.asyncio
 async def test_a_role_that_typed_the_member_itself_gets_no_extra_clause(tmp_path: Path) -> None:
     """The clause above is about a *handler*, not about the member, which is what keeps it honest.
 
     `DEMANDING` requires `SHELL` because its author typed `requires={Capability.SHELL}`, and there
     is nothing to explain: a message telling them the framework put it there would be false, and a
     message mentioning `on_question` at all would send them looking for a handler they never wrote.
+
+    Both clauses are asserted absent, because both are conditioned on the *trigger* rather than on
+    the member - and a clause conditioned on the member would fire here for a role that declares
+    neither a handler nor a tool.
     """
     harness = _fakes(tmp_path)
     stub = _Stub(offers=EVERYTHING - {Capability.SHELL})
@@ -447,6 +515,7 @@ async def test_a_role_that_typed_the_member_itself_gets_no_extra_clause(tmp_path
         await _start(harness, "demanding", agents=stub, opens=False)
 
     assert "on_question" not in str(caught.value)
+    assert "folds it in" not in str(caught.value)
 
 
 @pytest.mark.asyncio

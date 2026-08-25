@@ -1,11 +1,12 @@
 """`Screens` on its own: the slot, the queues, `pending`, and who is owed an answer.
 
-Unit tests for `adapters/rich_terminal/queues.py`, and for now they are the only ones there are.
-`tests/contracts/terminal.py` is what finally grades this behaviour and it cannot run until 6.2
-exists to put a `Terminal` in front of it - so until then every claim §3.7 makes about one slot and
-two queues is checked here or checked nowhere. The suite is written on that assumption: it goes at
-the arithmetic, at the ordering after preemption, and at the two directions identity could be got
-wrong, rather than at the happy path a module's own author already believes in.
+Unit tests for `adapters/rich_terminal/queues.py`, and when they were written they were the only
+ones there were: `tests/contracts/terminal.py` is what finally grades this behaviour and it could
+not run until 6.2 put a `Terminal` in front of it, so until then every claim §3.7 makes about one
+slot and two queues was checked here or checked nowhere. The suite is written on that assumption
+and stays written that way: it goes at the arithmetic, at the ordering after preemption, and at the
+two directions identity could be got wrong, rather than at the happy path a module's own author
+already believes in.
 
 **Nothing here is a `Terminal`.** No context manager, no redraw loop, no `rich`, no input. Which
 half of `show` a view lands in - the dispatch on an empty `responses` tuple - is 6.2's decision and

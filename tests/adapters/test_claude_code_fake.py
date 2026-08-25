@@ -4,7 +4,7 @@ The first class is the port in full: `AgentContract` with its two fixtures overr
 else touched. That suite was written at stage 3, against the port's docstrings and before any
 adapter existed (§1.9), which is why nothing below re-asserts any of it. It runs **unconditionally**
 here - no opt-in, no `check_ready` gate, nothing to authenticate and nothing to install - which is
-the difference between a fake and the real adapter one file over, where six of the same eight tests
+the difference between a fake and the real adapter one file over, where eight of the same ten tests
 skip on a logged-out machine. The `model` fixture is parametrised over every model this runner
 serves, which `tests/contracts/agent.py` names as "the honest way to cover them all", so the whole
 suite runs three times.

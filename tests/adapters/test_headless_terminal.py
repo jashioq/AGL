@@ -489,7 +489,7 @@ async def _refused(
     references `show`'s own frame, which holds the view and the arguments it was called with, so a
     test asking whether anything survived a refusal would otherwise be looking at what its own
     `pytest.raises` is holding. That is a fact about tracebacks rather than about this terminal, and
-    it is written here once instead of at each of the four callers.
+    it is written here once instead of at each of the six call sites.
 
     The signature is `show`'s own, forwarded rather than repackaged: `view` positional-only,
     `priority` a keyword of this function's, and everything else collected. `priority` is named here

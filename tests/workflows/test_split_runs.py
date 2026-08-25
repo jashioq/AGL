@@ -40,27 +40,44 @@ a negative - how long a passing one spends proving it.
 `answering` idles when its script runs out, so an honest mistake in any of these tests is a hang
 rather than a failure. Nothing below is awaited outside a bound.
 
-## Two things this file had to reach past `agl.testing` for, both reported as findings
+## Two findings this file reported at 18.3, both closed at 19.2, and what closing them changed here
 
-**`testing.Agent` is synchronous - `(AgentTask) -> Reply` - so an agent written in the harness's own
-vocabulary cannot take part in a rendezvous.** It cannot await a barrier, an event or anything else,
-and a threading primitive on one event loop is a deadlock rather than a wait. That rules out the one
-arrangement that can distinguish real concurrency from a framework that serialized everything, which
-is precisely the property `split` exists to demonstrate - so every test here that needs two
-agents to meet is written on a raw per-provider `Script` through `container.fakes(claude=...)` and
-`testing.over(...)`. That is a sanctioned escape hatch and `testing.over` names it; what it was
-named for is a negotiation branching on an answer, and this is a second thing it turns out to be
-load bearing for. Both roles in `split` are Claude models, so one script serves the whole run.
-The red gate below needs no rendezvous and is written in the author's own vocabulary, which is the
-honest demonstration that the reach is the arrangement's and not this file's taste.
+**`testing.Agent` was synchronous - `(AgentTask) -> Reply` - so an agent written in the harness's
+own vocabulary could not take part in a rendezvous.** It could not await a barrier, an event or
+anything else, and a threading primitive on one event loop is a deadlock rather than a wait. That
+ruled out the one arrangement that distinguishes real concurrency from a framework that serialized
+everything - which is precisely the property `split` exists to demonstrate - so every test here that
+needs two agents to meet was written on a raw per-provider `Script` through
+`container.fakes(claude=...)`, and the door an author actually uses could not express the claim its
+workflow is for. 19.2 widened the return to `Reply | Awaitable[Reply]`, so `_agent` below is an
+`async def` that awaits a barrier and every one of those tests goes through `agent=`. The
+synchronous spelling is untouched: `testing.Agent` still admits a one-line lambda, which is what
+`sdk/testing.py` argues the type is for.
 
-**`FakeServices` has `with_terminal` and `with_store` and no `with_verifier`.** The gate is the only
-hook inside a landing, and a test that wants one has to substitute a `Verifier` of its own -
-`tests/sdk/test_run_integrate.py::_Recorded` does exactly this and pays the same price. Reaching it
-is `dataclasses.replace(fakes, services=replace(fakes.services, verifier=...))`, which leaves
-`fakes.verifier` naming an object the bundle no longer uses: the two-views-of-one-bundle defect
-`with_terminal`'s own docstring exists to close, reproduced here because the pair stops one field
-short. No test below reads that stale field.
+**One test still uses the escape hatch, and it is the honest one.** `_correcting` reads what came
+back from a tool call it made, which no `Reply` can carry and which awaiting an agent does not
+change - an `async def` agent has returned before `_performs` makes the first call, so it has
+nothing to read. That is the second face of the same finding and it is *not* closed: what would
+close it is an agent handed the conversation rather than the task, which is the `Script` this file
+uses for exactly that arrangement and nothing else.
+
+**`FakeServices` had `with_terminal` and `with_store` and no `with_verifier`.** The gate is the only
+hook inside a landing, and reaching it was `dataclasses.replace(fakes, services=replace(fakes
+.services, verifier=...))` in `_over` below - which left `fakes.verifier` naming an object the
+bundle no longer used, the two-views-of-one-bundle defect `with_terminal`'s own docstring exists to
+close, reproduced by hand at the one call site that wanted it. 19.2 added the third verb and `_over`
+calls it. Its argument is a `FakeVerifier` rather than a `Verifier`, so the two gates below extend
+the fake instead of replacing it - which costs them nothing and leaves them scriptable, `super()
+.verify` being the verdict.
+
+**What that costs, recorded rather than paid**: naming `FakeVerifier` means importing it from
+`agl.adapters.shell.fake`, and no door re-exports it. `agl.testing` re-exports `Press` and
+`ScriptedTerminal` from the composition root for exactly this reason - a workflow author's test
+needs to *name* the fake it is substituting - and a third such name would be the same repair a
+third time. This file already reaches into `agl.adapters.claude_code.fake` for `Script`, which is
+what `container.fakes(claude=...)` takes and is deliberate; `FakeVerifier` is a second reach and a
+narrower one, and it is reported here rather than fixed in a deliverable that owns `agl.sdk`'s door
+and not this one's.
 
 ## What is not observable from here, said rather than worked around
 
@@ -77,7 +94,7 @@ lives, one layer down, and it is not restated here.
 
 import asyncio
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import TracebackType
 from typing import Final, Self, cast
@@ -86,12 +103,13 @@ import pytest
 
 from agl import testing
 from agl.adapters.claude_code.fake import Conversation, Script
+from agl.adapters.shell.fake import FakeVerifier
 from agl.config import container
-from agl.ports.agent import AgentOutcome, AgentTask, StopReason, ToolResult
+from agl.ports.agent import AgentOutcome
 from agl.ports.run import JsonValue
 from agl.ports.tree_layout import TreesRoot
-from agl.ports.verifier import Verifier, VerifierOutcome
-from agl.sdk import Row, Rows, Screen, Terminal
+from agl.sdk import Row, Rows, Screen, Terminal, ToolResult, VerifierOutcome
+from agl.testing import AgentTask, StopReason
 from agl.workflows.split import split
 from agl.workflows.split.chunks import report_chunks
 
@@ -227,19 +245,22 @@ def _whose(task: AgentTask, work: Mapping[str, tuple[str, bytes]]) -> str:
     )
 
 
-def _script(
+def _agent(
     work: Mapping[str, tuple[str, bytes]],
     seen: _Dispatches,
     *,
     barrier: asyncio.Barrier | None = None,
     waits: Mapping[str, asyncio.Event] | None = None,
-    refused: Mapping[str, JsonValue] | None = None,
-) -> Script:
+) -> testing.Agent:
     """One agent's conduct for a whole run of `split`: report the plan, or implement one chunk.
 
-    A raw per-provider `Script` rather than a `testing.Agent`, and the module docstring argues it at
-    length: an `Agent` is synchronous, so it cannot await a barrier or an event, and both of those
-    are what the arrangements below are made of. Everything else is what an author's own agent does.
+    **In the harness's own vocabulary, rendezvous and all**, which is what 19.2 widened `Agent` for
+    and what every test below except one is now driven on. It is an `async def` returning a `Reply`,
+    which `testing.Agent` admits beside the plain `def` and the one-line lambda: `container.fakes`
+    awaits what the call produced when there is something to await, so `await barrier.wait()` is a
+    line an author may write here. Until then it could not be, and the whole of section 2 and 3
+    below sat on `container.fakes(claude=...)` with a raw per-provider `Script` instead - for the
+    property `split` exists to demonstrate, through a door that could not express it.
 
     `barrier` is the rendezvous: reached **before** anything is written, so no child can finish
     until every other has started. `waits` holds one child back until something outside it has
@@ -247,22 +268,16 @@ def _script(
     test's - each event below is set from a place that provably holds the target's lease, so a child
     released there is a child whose landing must queue.
 
-    `refused` is a plan reported **first** and expected to come back refused, which is the one thing
-    a `Reply` cannot express at all: a `Reply` is a value computed before the run, so an agent
-    written in the harness's vocabulary can make a bad call and a good one but can never *read* the
-    answer to the first. Reading it is the whole claim - §3.3's rejection goes back to the model
-    inside the same conversation, and what a script does with it is what a model would do with it.
+    It writes into `task.workspace` for `SEPARATE`'s reason and returns a `Reply` that says so.
     """
 
-    async def script(conversation: Conversation) -> AgentOutcome:
-        task = conversation.task
+    async def agent(task: testing.AgentTask) -> testing.Reply:
         if any(tool.name == report_chunks.name for tool in task.tools):
             seen.entered.append(PLANNING)
-            if refused is not None:
-                seen.refusals.append(await conversation.call(report_chunks.name, refused))
-            await conversation.call(report_chunks.name, _payload(work))
             seen.left.append(PLANNING)
-            return AgentOutcome(stop_reason=StopReason.COMPLETED, text="")
+            return testing.Reply(
+                calls=[testing.Call(report_chunks.name, _payload(work))], says="divided it up"
+            )
         mine = _whose(task, work)
         seen.entered.append(mine)
         seen.where[mine] = task.workspace
@@ -275,26 +290,36 @@ def _script(
         written.parent.mkdir(parents=True, exist_ok=True)
         written.write_bytes(body)
         seen.left.append(mine)
-        return AgentOutcome(stop_reason=StopReason.COMPLETED, text="")
+        return testing.Reply(says=f"implemented {mine}")
 
-    return script
+    return agent
 
 
-def _agent(work: Mapping[str, tuple[str, bytes]], seen: _Dispatches) -> testing.Agent:
-    """The same conduct in the harness's own vocabulary, for the one test that needs no rendezvous.
+def _correcting(
+    work: Mapping[str, tuple[str, bytes]], seen: _Dispatches, refused: Mapping[str, JsonValue]
+) -> Script:
+    """The same conduct as a raw per-provider `Script`, for the arrangement that reads an answer.
 
-    `testing.Agent` is what a workflow author writes and it is what the red gate below is driven on,
-    so that the reach the rest of this file makes is visibly the arrangement's and not the file's.
-    It writes into `task.workspace` for `SEPARATE`'s reason and returns a `Reply` that says so.
+    `refused` is a plan reported **first** and expected to come back refused, which is the one thing
+    a `Reply` cannot express at all and which awaiting an `Agent` does not change: a `Reply` is a
+    value computed before the run, so an agent written in the harness's vocabulary can make a bad
+    call and a good one but can never *read* the answer to the first - an `async def` one has
+    already returned by the time the call is made. Reading it is the whole claim here - §3.3's
+    rejection goes back to the model inside the same conversation, and what a script does with it is
+    what a model would do with it.
+
+    This is the escape hatch `sdk/testing.py` names, used for exactly what it is named for, and the
+    one place in this file that still needs it.
     """
 
-    def agent(task: testing.AgentTask) -> testing.Reply:
+    async def script(conversation: Conversation) -> AgentOutcome:
+        task = conversation.task
         if any(tool.name == report_chunks.name for tool in task.tools):
             seen.entered.append(PLANNING)
+            seen.refusals.append(await conversation.call(report_chunks.name, refused))
+            await conversation.call(report_chunks.name, _payload(work))
             seen.left.append(PLANNING)
-            return testing.Reply(
-                calls=[testing.Call(report_chunks.name, _payload(work))], says="divided it up"
-            )
+            return AgentOutcome(stop_reason=StopReason.COMPLETED, text="")
         mine = _whose(task, work)
         seen.entered.append(mine)
         seen.where[mine] = task.workspace
@@ -303,9 +328,9 @@ def _agent(work: Mapping[str, tuple[str, bytes]], seen: _Dispatches) -> testing.
         written.parent.mkdir(parents=True, exist_ok=True)
         written.write_bytes(body)
         seen.left.append(mine)
-        return testing.Reply(says=f"implemented {mine}")
+        return AgentOutcome(stop_reason=StopReason.COMPLETED, text="")
 
-    return agent
+    return script
 
 
 # --- the bundle, the run, and reading one back ---------------------------------------------------
@@ -313,21 +338,31 @@ def _agent(work: Mapping[str, tuple[str, bytes]], seen: _Dispatches) -> testing.
 
 def _over(
     tmp_path: Path,
-    script: Script,
     *,
-    verifier: Verifier | None = None,
+    agent: testing.Agent | None = None,
+    claude: Script | None = None,
+    verifier: FakeVerifier | None = None,
     terminal: Terminal | None = None,
 ) -> testing.Harness:
-    """A harness over an all-fakes bundle whose agent is a raw script. `testing.over`'s own seam.
+    """A harness over an all-fakes bundle this file has arranged. `testing.over`'s own seam.
 
-    `verifier=` is the substitution the module docstring reports as a finding: `FakeServices` has
-    `with_terminal` and `with_store` and no third member, so the gate - the one hook inside a
-    landing - is reached with `dataclasses.replace` and leaves `fakes.verifier` naming an object
-    this bundle no longer uses. Nothing below reads that field.
+    `agent=` and `claude=` are `container.fakes`' own two parameters and mean what they mean there:
+    one provider-blind agent in the harness's vocabulary, or a raw per-provider script when a test
+    needs to read something back mid-conversation. Both roles in `split` are Claude models, so one
+    of either serves a whole run.
+
+    `verifier=` and `terminal=` both go in through `FakeServices`' own verbs, so each lands in the
+    port-typed bundle and the sibling field at once. `with_verifier` is 19.2's and this file is why
+    it exists: substituting the gate used to be `replace(fakes, services=replace(fakes.services,
+    verifier=...))` here, which left `fakes.verifier` naming an object the bundle no longer used -
+    the two-views defect `with_terminal` was written to close, reproduced by hand at the one call
+    site that wanted a hook inside a landing.
     """
-    fakes = container.fakes(TreesRoot(tmp_path / "trees"), files=SEED, claude=script)
+    fakes = container.fakes(
+        TreesRoot(tmp_path / "trees"), files=SEED, agent=agent, claude=claude
+    )
     if verifier is not None:
-        fakes = replace(fakes, services=replace(fakes.services, verifier=verifier))
+        fakes = fakes.with_verifier(verifier)
     if terminal is not None:
         fakes = fakes.with_terminal(terminal)
     return testing.over(fakes)
@@ -407,10 +442,16 @@ def _committed(
     `FakeRepository` addresses a state by the digest of its tree, its parents and its message, and
     `record` is idempotent - so rebuilding the commit this chunk's step was supposed to produce and
     finding it in the target's line of work asserts every term at once: what the agent wrote, what
-    it was made on top of, and **what the workflow called it**. Neither git port reads a message
-    back, which `tests/contracts/workspace.py` records as something its suite cannot assert, so this
-    is how `commit=f"implement {chunk.id}"` is pinned at all - and without it a workflow that
-    dropped the `commit=` entirely would leave a chain nothing here could tell from the right one.
+    it was made on top of, and **what the workflow called it**. Without it a workflow that dropped
+    the `commit=` entirely would leave a chain nothing here could tell from the right one.
+
+    **19.2 gave `History` a `message` member and this is still a recomputation, which is worth
+    saying rather than leaving to be wondered about.** That member answers about a commit the
+    caller *names*, and the commit this function is about is not one this test can name: it is a
+    chunk's own commit, sitting inside `_base`'s line of work behind however many landings followed
+    it, and no port hands back an id for it - §3.10 forbids the listing that would be the general
+    form of asking. `tests/workflows/test_fix.py` converted its own version of this because there
+    the commit in question is a *tip*, which is a name a test already holds.
     """
     path, body = work[chunk]
     return harness.fakes.repository.record({**SEED, path: body}, (base,), f"implement {chunk}")
@@ -448,7 +489,7 @@ async def test_no_chunk_can_finish_until_every_other_has_started_and_all_of_them
       commit each of them made would carry the other's edits.
     """
     seen = _Dispatches()
-    harness = _over(tmp_path, _script(SEPARATE, seen, barrier=asyncio.Barrier(len(PLAN))))
+    harness = _over(tmp_path, agent=_agent(SEPARATE, seen, barrier=asyncio.Barrier(len(PLAN))))
 
     await _ended(
         _started(harness, len(PLAN)),
@@ -531,7 +572,7 @@ async def test_a_plan_the_payload_type_refuses_is_corrected_inside_the_planners_
             {"id": PARSER.upper(), "work": "and expose it", "files": []},
         ]
     }
-    harness = _over(tmp_path, _script(plan, seen, refused=collides))
+    harness = _over(tmp_path, claude=_correcting(plan, seen, collides))
 
     await _ended(
         _started(harness, len(plan)),
@@ -570,7 +611,7 @@ async def test_a_plan_the_payload_type_refuses_is_corrected_inside_the_planners_
 # --- 2. one target, one landing at a time --------------------------------------------------------
 
 
-class _Rendezvous(Verifier):
+class _Rendezvous(FakeVerifier):
     """A merge gate two landings would meet inside, if two landings could ever be inside one.
 
     The mirror of the barrier above and the reason it has to be one: "landings into one target are
@@ -581,9 +622,16 @@ class _Rendezvous(Verifier):
     landing waits until its bound expires and no gate ever meets another.
 
     The gate is the only hook a workflow's own test has inside a landing, which is what makes this
-    the instrument here rather than something more direct. `Verifier` is a two-method port and this
-    is a `Verifier`, so what the framework does with it is exactly what it does with the real one -
-    `verify(services.build, target.path)`, once per landing, in the target's own checkout.
+    the instrument here rather than something more direct. What the framework does with it is
+    exactly what it does with the real one - `verify(services.build, target.path)`, once per
+    landing, in the target's own checkout.
+
+    **A `FakeVerifier` subclass and not a bare `Verifier`**, which is what `with_verifier` takes and
+    why: `FakeServices.verifier` is at the fake's own type so that `answers` is reachable, so an
+    instrument goes into the bundle by extending the fake rather than replacing it. That costs
+    nothing and buys the verdict - `super().verify` below is the scripted answer or the unscripted
+    default, so this gate rendezvouses *and* stays scriptable, where an independent `Verifier` had
+    to invent a passing outcome of its own and could never be told to go red.
 
     The barrier is **aborted** after the first expiry rather than left to expire again: the evidence
     is one bound spent by one landing that could not find a partner, and every later gate then
@@ -592,6 +640,7 @@ class _Rendezvous(Verifier):
     """
 
     def __init__(self, parties: int) -> None:
+        super().__init__()
         self.entered: list[Path] = []
         """Every gate this run ran, in order, at the directory the framework pointed it at."""
 
@@ -601,7 +650,7 @@ class _Rendezvous(Verifier):
         self._barrier = asyncio.Barrier(parties)
 
     async def verify(self, command: str, workdir: Path) -> VerifierOutcome:
-        """Wait for a second landing's gate, bounded, and then pass whatever this one was."""
+        """Wait for a second landing's gate, bounded, and then answer whatever the fake would."""
         self.entered.append(workdir)
         try:
             async with asyncio.timeout(_SERIALIZED):
@@ -611,7 +660,7 @@ class _Rendezvous(Verifier):
             await self._barrier.abort()
         except asyncio.BrokenBarrierError:
             pass
-        return VerifierOutcome(passed=True, status=0, output="")
+        return await super().verify(command, workdir)
 
 
 @pytest.mark.asyncio
@@ -641,7 +690,9 @@ async def test_a_siblings_landing_waits_rather_than_meeting_another_inside_the_g
     seen = _Dispatches()
     gate = _Rendezvous(2)
     plan = {chunk: SEPARATE[chunk] for chunk in (PARSER, API)}
-    harness = _over(tmp_path, _script(plan, seen, barrier=asyncio.Barrier(2)), verifier=gate)
+    harness = _over(
+        tmp_path, agent=_agent(plan, seen, barrier=asyncio.Barrier(2)), verifier=gate
+    )
 
     await _ended(
         _started(harness, len(plan)),
@@ -681,7 +732,7 @@ async def test_a_siblings_landing_waits_rather_than_meeting_another_inside_the_g
 # --- 3. the conflict path ------------------------------------------------------------------------
 
 
-class _Held(Verifier):
+class _Held(FakeVerifier):
     """A green gate that says when it has been reached - which is a moment the lease is held.
 
     The ordering instrument for everything below. §3.4 holds the target's lease from the start of a
@@ -694,9 +745,13 @@ class _Held(Verifier):
     ordering by hope: both children then race through a commit, an entry and an `integrate()` with
     nothing but a head start between them, and the test that reads "the second one collided" would
     be reading whichever one lost.
+
+    A `FakeVerifier` subclass for `_Rendezvous`' reason, one class up: that is what `with_verifier`
+    takes, and `super().verify` is what keeps a substituted gate scriptable.
     """
 
     def __init__(self) -> None:
+        super().__init__()
         self.reached = asyncio.Event()
         """Set from inside the first gate, and therefore inside the first lease."""
 
@@ -706,7 +761,7 @@ class _Held(Verifier):
     async def verify(self, command: str, workdir: Path) -> VerifierOutcome:
         self.entered.append(workdir)
         self.reached.set()
-        return VerifierOutcome(passed=True, status=0, output="")
+        return await super().verify(command, workdir)
 
 
 class _Watched(Terminal):
@@ -840,7 +895,7 @@ async def test_the_target_is_held_across_the_decision_and_a_sibling_waits_behind
     watched = _Watched(term, queued.set)
     waits = {API: gate.reached, DOCS: queued}
     harness = _over(
-        tmp_path, _script(COLLIDING, seen, waits=waits), verifier=gate, terminal=watched
+        tmp_path, agent=_agent(COLLIDING, seen, waits=waits), verifier=gate, terminal=watched
     )
 
     running = _started(harness, len(PLAN))
@@ -957,7 +1012,7 @@ async def test_giving_up_puts_the_target_back_and_leaves_the_chunks_own_branch_a
     plan = {chunk: COLLIDING[chunk] for chunk in (PARSER, API)}
     term = testing.answering([0, 1])
     harness = _over(
-        tmp_path, _script(plan, seen, waits={API: gate.reached}), verifier=gate, terminal=term
+        tmp_path, agent=_agent(plan, seen, waits={API: gate.reached}), verifier=gate, terminal=term
     )
 
     await _ended(

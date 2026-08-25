@@ -2,11 +2,11 @@
 
 `_runner.py` will not place this flag and says why: "where it goes depends on the subcommand, so
 placing it would mean this module knowing the subcommands, which is the one thing it must not
-know". So it lives at the call sites - twenty-two across three modules as this is written - and a
+know". So it lives at the call sites - twenty-four across three modules as this is written - and a
 call site is the kind of thing the next deliverable adds one more of.
 
 **Nothing behavioural notices when one is missing.** The flag can be deleted from all six sites in
-`workspace.py` and all four in `history.py` and the suite stays green, because every value AGL
+`workspace.py` and all six in `history.py` and the suite stays green, because every value AGL
 passes today is a branch name or a commit id `ids.py` and `tree_layout.py` already made safe. The
 hazard is the value they do not constrain: `--from` is what a person typed, and `history.py` says
 what it costs - `diff-tree` accepts `--output=<file>`, so a ref spelled `--output=/etc/anything` is
@@ -83,10 +83,12 @@ FENCE: Final = "--end-of-options"
 BINDING: Final = frozenset({"-b", "--message"})
 
 # How many call sites carried a value from outside when this was written: one in `integrator.py`,
-# four in `workspace.py` and four in `history.py`. The floor is the hermeticity test's `sessions
-# >= 2` - every assertion below passes silently over an argv that has nothing to fence, so a
-# version of this file that found none of them would be green and checking nothing.
-FENCED_TODAY: Final = 9
+# four in `workspace.py` and six in `history.py`. It is a measurement and it moves: `History` grew
+# `exists` and then `message`, and each brought a fenced site with it, so the number below is raised
+# rather than left as a floor that has stopped meaning anything. The floor is the hermeticity test's
+# `sessions >= 2` - every assertion below passes silently over an argv that has nothing to fence, so
+# a version of this file that found none of them would be green and checking nothing.
+FENCED_TODAY: Final = 11
 
 type _Scopes = tuple[Mapping[str, list[ast.expr]], ...]
 

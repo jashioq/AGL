@@ -4,7 +4,8 @@
 the harness - a sandbox mode, an approval setting, a model slug - and this one holds what AGL
 *makes of what comes back*: an exit status and a stream of frames, turned into `errors.py`'s
 classes and into activity strings. `translate.py` re-exports every name below, so a caller has one
-import and gate 5's promise still reads "one place knows what this harness calls things".
+import and gate 5's own promise still holds - the binary's name appears in no `.py` under `src/`
+outside this package.
 
 **The split is by obligation, not by line count.** The saying half has to be *total*: every subset
 of `Restriction` renders to exactly one mode, every served `ModelId` to exactly one slug, and

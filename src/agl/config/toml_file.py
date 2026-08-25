@@ -258,10 +258,12 @@ class FileProject:
 
     Four fields are optional for the reason the module docstring gives. `name` is not, and the
     exception is the point rather than a slip: a project's identity on disk is its *filename*, this
-    module is the only one that ever sees that filename, and a `None` here would leave 9.2 owing an
-    answer it has no source for. So the name is read off the file's stem, and the `name` key §3.10
-    prints inside the file is held to agreeing with it - two spellings of one fact, reconciled in
-    the one place that can see both, exactly as `trees_root` and `Project.trees` are.
+    module is the only one that ever reads a name back out of one - `sources.py` composes the path
+    through `home_layout.project_config` to say which file it could not find, and reads nothing off
+    it - and a `None` here would leave 9.2 owing an answer it has no source for. So the name is
+    read off the file's stem, and the `name` key §3.10 prints inside the file is held to agreeing
+    with it - two spellings of one fact, reconciled in the one place that can see both, exactly as
+    `trees_root` and `Project.trees` are.
     """
 
     name: ProjectName

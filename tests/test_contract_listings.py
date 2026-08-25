@@ -1,16 +1,17 @@
-"""Structural test: four contracts in `.importlinter` are lists somebody typed, and this is what
+"""Structural test: three contracts in `.importlinter` are lists somebody typed, and this is what
 notices when a list and the thing it is meant to police stop agreeing.
 
-Two of the six contracts are fail-closed by construction. Contract 5's source is `agl.*`, which
-re-expands as packages are added, and contract 6's is `agl.workflows`, which re-expands as
-workflows are - so a module introduced at a later stage is covered the moment it exists, and its
-author need do nothing to be policed. The other four cannot be written that way, and each fails
-open in its own direction:
+Three of the six contracts are fail-closed and need nothing from this file. Contract 5's source is
+`agl.*`, which re-expands as packages are added, and contract 6's is `agl.workflows`, which
+re-expands as workflows are - so a module introduced at a later stage is covered the moment it
+exists, and its author need do nothing to be policed. **Contract 1 was the fourth guard here until
+19.1** and is now the third of those: `containers = agl` plus `exhaustive = True` makes an unlisted
+child of `agl` break that contract natively and by name, which is what a hand-maintained comparison
+in this file used to notice. A rule the linter enforces beats a rule a neighbour asserts, so the
+comparison went; `.importlinter`'s own comment on contract 1 records what the rewrite does and does
+not still reach. The three below cannot be written that way, and each fails open in its own
+direction:
 
-  * **Contract 1** (`layers`) names the top-level members of `agl` in dependency order. A member
-    nobody adds to `layers =` is not at the bottom of the stack, it is *outside* it: the contract
-    has no opinion about a module it does not mention, so the new package may import `agl.ports`
-    and `agl.adapters` directly and be imported by anything, with all six contracts still kept.
   * **Contract 2** (`forbidden`) has *two* hand-maintained lists - `source_modules`, the pure
     types, and `forbidden_modules`, the ABCs - and a new `ports/` module is unpoliced whichever it
     belonged in. Absent from `source_modules` it may import any ABC there is; absent from
@@ -26,41 +27,41 @@ open in its own direction:
 **The silence is the defect, not the gap.** A broken contract fails the build and names the import
 that broke it; a contract that never heard of your module agrees with everything you do. Stage 0
 found this on contract 4 and deferred it to the first stage that adds an adapter; stage 5 found
-that the other three have the same shape, and one guard now covers all four. Without it, later
-stages would be written under rules that were not being applied to them, and the first sign of it
-would have been two vendors quietly sharing a helper.
+that three others had the same shape, and one guard covered all four until 19.1 handed contract 1's
+share back to the linter. Without it, later stages would be written under rules that were not being
+applied to them, and the first sign of it would have been two vendors quietly sharing a helper.
 
 `scripts/check`'s package-root gate is the precedent: a rule `.importlinter` cannot express,
 enforced beside it rather than wished into it. This is a test rather than a shell gate only because
 what it compares - a parsed config against a walked tree - is easier to say in Python than in grep.
+`tests/test_ports_stdlib_only.py` is the other rule of that kind and was written to the same
+criterion; `tests/test_contract_firing.py` is the neighbour that asks the opposite question, which
+is whether a contract that *is* listed correctly refuses anything when a violation appears.
 
 ## The file is the source of truth and the world is the check
 
-Nothing below hardcodes which layers, ports, vendors or adapters exist. Each listing is parsed out
+Nothing below hardcodes which ports, vendors or adapters exist. Each listing is parsed out
 of the real `.importlinter` and compared against the real thing it polices: `src/agl/` for
-contracts 1, 2 and 4, and `pyproject.toml`'s `[project.optional-dependencies]` for contract 3,
-which is where a vendor SDK actually gets added. A test carrying its own copy of any of those four
+contracts 2 and 4, and `pyproject.toml`'s `[project.optional-dependencies]` for contract 3,
+which is where a vendor SDK actually gets added. A test carrying its own copy of any of those three
 lists would be a *second* hand-maintained list, free to drift from the first, and its agreement
 would mean only that one person updated both at once. Here the two things compared are the artefact
 that does the policing and the world it is meant to police, so agreement is the property wanted.
 
-## `__init__.py` is out of two comparisons, for two different reasons
+## `ports/__init__.py` is out of contract 2's comparison, and the exemption is forced
 
-Contract 1 exempts `src/agl/__init__.py` because that file is held to something **stricter**: the
-layer stack orders imports, and `scripts/check`'s package-root gate forbids it every import
-statement there is. Ordering nothing is the right rule for a file that imports nothing.
+import-linter skips any source/forbidden pair where one module is inside the other's package
+(`_modules_overlap`, in its `forbidden` contract), and `agl.ports` contains every module on both of
+contract 2's lists - so the package root in `source_modules` would be skipped against every ABC, and
+in `forbidden_modules` skipped against every pure type. No entry there would police it, and
+requiring one would be requiring a decoration. Stated plainly, because it is a real gap rather than
+a covered one: `ports/__init__.py` could import an ABC and contract 2 could not say so. It is one
+line of docstring today, and what guards it is partial and worth knowing exactly:
+`tests/test_ports_stdlib_only.py` holds it, like every module beside it, to importing stdlib and
+`agl.ports` alone - so the reach is bounded, and an ABC is the one import it can still make
+unremarked. The same blind spot `agl/__init__.py` has one ring out, narrowed rather than closed.
 
-Contract 2 exempts `src/agl/ports/__init__.py`, and that exemption is **forced rather than
-chosen**. import-linter skips any source/forbidden pair where one module is inside the other's
-package (`_modules_overlap`, in its `forbidden` contract), and `agl.ports` contains every module on
-both of contract 2's lists - so the package root in `source_modules` would be skipped against every
-ABC, and in `forbidden_modules` skipped against every pure type. No entry there would police it,
-and requiring one would be requiring a decoration. Stated plainly, because it is a real gap rather
-than a covered one: `ports/__init__.py` could import an ABC and contract 2 could not say so. It is
-one line of docstring today and nothing in this repo guards it - unlike `agl/__init__.py`, which
-has a gate of its own. The same blind spot, one ring further in.
-
-Directories have no exemption route at all, in any of the three tree comparisons: `EXEMPT` mappings
+Directories have no exemption route at all, in either tree comparison: `EXEMPT` mappings
 here are keyed by filename and hold only single-file members. They are mappings and not sets so
 that the reason travels with the name and a later reader can weigh it instead of guessing at it.
 
@@ -77,18 +78,26 @@ that is not a vendor SDK at all. Both start empty, and neither pre-authorises an
 added at a later stage trips this guard first and is argued about here second.
 
 The extras table is the whole of what this reads, and that is the second limit. A vendor SDK put
-into `[project] dependencies` or into a `[dependency-groups]` entry would not be seen here - the
-first is empty by design, AGL's core being stdlib-only, and the second is dev tooling, so an SDK in
-either is already a design change big enough to bring somebody back to this file. What is asserted
-is that the table where vendor SDKs *do* go cannot gain one unnoticed.
+into `[project] dependencies` or spelled out inside a `[dependency-groups]` entry would not be seen
+here. The first is empty by design, AGL's core being stdlib-only, so an SDK there is a design change
+big enough to bring somebody back to this file. The second needs stating more carefully, because
+19.4 put one there: `[dependency-groups] dev` names `agl[all]`, which resolves to both of today's
+vendor SDKs. That is not a hole in this guard and it is not §4's asymmetry being walked back - it is
+a *self-reference to the extras table below*, so the distributions are still declared in exactly one
+place, still gain a third member only by being written there, and this comparison still reads the
+table they are written in. `pyproject.toml`'s own comment argues why the dev group needs them at
+all. What would be invisible here is a vendor distribution spelled out **by name** in a dependency
+group, bypassing the extras; nothing does that today, and doing it would be the design change this
+paragraph used to describe. What is asserted is that the table where vendor SDKs *do* go cannot gain
+one unnoticed.
 
 The asymmetry with OpenAI is deliberate and is not a gap here (ARCHITECTURE.md §4): that adapter
 wraps the Codex CLI binary and has no Python import to contain, so it has no extra to declare and
 is guarded by `scripts/check`'s grep gate instead.
 
-## Why each comparison is a function and not four lines inside a test
+## Why each comparison is a function and not three lines inside a test
 
-`layer_drift`, `port_drift`, `vendor_drift` and `adapter_drift` take sets and return complaints,
+`port_drift`, `vendor_drift` and `adapter_drift` take sets and return complaints,
 touching no disk, so the fabricated tests at the bottom can hand each one a listing and a world
 that disagree in every way that matters and watch it say so. A structural test that reads a
 repository and finds it consistent looks identical whether it is checking anything or not; those
@@ -97,23 +106,27 @@ missing section or a missing list, which is the failure mode of a mistyped path.
 
 ## One module, well past the ceiling
 
-This file is roughly three times `scripts/check`'s 300-line convention, and two ways of splitting
-it were considered and refused rather than overlooked.
+At 448 code lines this file is half again `scripts/check`'s 300-line convention - the largest
+margin over it in the repository outside the big adapter suites - and two ways of splitting it were
+considered and refused rather than overlooked.
 
-Splitting **per contract** would make four guards out of one, and what makes this one guard is
-precisely what the four would then have to share: one parse of `.importlinter`, one way of walking
+Splitting **per contract** would make three guards out of one, and what makes this one guard is
+precisely what the three would then have to share: one parse of `.importlinter`, one way of walking
 a directory, one shape of complaint, and one discipline of proving the comparison non-vacuous. The
-only seam that split could follow is the contract numbers, which are not a seam - they are four
+only seam that split could follow is the contract numbers, which are not a seam - they are three
 instances of one defect.
 
 Splitting **pure from impure** - the comparisons and their complaints in one module, the readers
-and the tests in another - is the seam this file genuinely draws, and it still does not pay. Both
-halves land over the ceiling anyway, since the bulk here is the complaint texts and the fabricated
-cases rather than any one mechanism; and it would put the paragraph a reader is chasing one file
-away from the assertion that printed it. A split that buys no module under the ceiling and costs an
-indirection is a split made for the warning rather than for the reader.
+and the tests in another - is the seam this file genuinely draws, and it still does not pay. It
+would put the paragraph a reader is chasing one file away from the assertion that printed it, which
+is the whole of the reason: the bulk here is complaint texts and fabricated cases rather than any
+one mechanism, so both halves would be readable and neither would be *about* anything the other
+was not. Until 19.5 this paragraph carried a second reason - that both halves landed over the
+ceiling regardless - and that arithmetic no longer holds now the gate counts code lines: halved,
+this file would be two modules of roughly 220 and both would clear it. The reader cost was always
+the load-bearing half, and it is now the only half.
 
-What the length actually is: four rules, each with a paragraph explaining itself to somebody who
+What the length actually is: three rules, each with a paragraph explaining itself to somebody who
 has never seen this file, and each with fabricated cases proving it can still say so.
 """
 
@@ -137,27 +150,20 @@ ADAPTERS_DIR: Final = PACKAGE_DIR / "adapters"
 # Contract numbers are stable - `.importlinter`'s own header says so, and stage briefs cite them -
 # and each section's `type` is what this file reads its list as. The pairing is asserted below, so
 # a renumbering fails here rather than silently pointing a comparison at the wrong contract.
-LAYERS_SECTION: Final = "importlinter:contract:1"
+# Contract 1 is absent because this file no longer reads it; `tests/test_contract_firing.py` pins
+# all six numbers to their types, that being the file that builds a contract object per number.
 PURE_TYPES_SECTION: Final = "importlinter:contract:2"
 VENDOR_SECTION: Final = "importlinter:contract:3"
 ADAPTERS_SECTION: Final = "importlinter:contract:4"
 
 CONTRACTS: Final[Mapping[str, str]] = {
-    LAYERS_SECTION: "layers",
     PURE_TYPES_SECTION: "forbidden",
     VENDOR_SECTION: "forbidden",
     ADAPTERS_SECTION: "independence",
 }
 
-PACKAGE: Final = "agl"
 PORTS_PACKAGE: Final = "agl.ports"
 ADAPTERS_PACKAGE: Final = "agl.adapters"
-
-# The one top-level member contract 1 does not order, because a stricter rule already covers it.
-LAYER_EXEMPT: Final[Mapping[str, str]] = {
-    "__init__.py": "the package root, which scripts/check's package-root gate holds to a stricter "
-    "rule than any layer could state: it may contain no import statement at all",
-}
 
 # The one `ports/` member contract 2 cannot police from either list, whatever it were to say.
 PORT_EXEMPT: Final[Mapping[str, str]] = {
@@ -168,8 +174,11 @@ PORT_EXEMPT: Final[Mapping[str, str]] = {
 # Top-level `.py` files under `adapters/` that are not adapters to be policed, each with the reason
 # it is not. Everything else there belongs in contract 4's `modules =` instead. Do not add an entry
 # to spare yourself an edit to `.importlinter`: an exemption here removes a module from the rule,
-# while a listing there applies it. Nothing is pre-authorised - notably not `_process.py`, which
-# stage 8 may or may not sanction and must decide about in this file if it does.
+# while a listing there applies it. Nothing is pre-authorised, and stage 0 left one hypothetical
+# name here to say so - a shared `_process.py`, which stage 8 was expected to want and did not
+# write: the git package kept `_runner.py`, the shell verifier and the OpenAI runner each spawn
+# their own, and no top-level module arrived. 19.1 confirmed the list against the tree and both
+# entries below are still the whole of it.
 ADAPTER_EXEMPT: Final[Mapping[str, str]] = {
     "__init__.py": "the adapters package's own docstring; no adapter lives in it",
     "routing.py": "contract 4's one sanctioned exception: dispatching on task.model.provider "
@@ -189,7 +198,7 @@ NOT_A_VENDOR: Final[Mapping[str, str]] = {}
 _REQUIREMENT_END: Final = frozenset("[<>=!~;(, \t")
 
 
-# --- The four comparisons -----------------------------------------------------------------------
+# --- The three comparisons ----------------------------------------------------------------------
 
 
 def _present(
@@ -202,35 +211,13 @@ def _present(
 
     `packages` are directory names, `modules` are top-level `.py` filenames (with the suffix,
     because that is how `exempt` is keyed). A directory keeps its trailing slash in the key, so a
-    message reads `src/agl/probe/` rather than leaving a reader to guess which kind it was.
+    message reads `src/agl/ports/probe/` rather than leaving a reader to guess which kind it was.
     """
     present = {f"{name}/": f"{package}.{name}" for name in packages}
     present |= {
         name: f"{package}.{name.removesuffix('.py')}" for name in modules if name not in exempt
     }
     return present
-
-
-def layer_drift(
-    listed: AbstractSet[str],
-    packages: AbstractSet[str],
-    modules: AbstractSet[str],
-    exempt: Mapping[str, str],
-) -> list[str]:
-    """Every disagreement between contract 1's `layers =` and the top level of `src/agl/`.
-
-    The return is a list of complaints, empty when the two agree; each is written to be read by
-    somebody who has never seen this file and says what to do about it rather than only what is
-    wrong. Pure: no disk, no config, no repository. The fabricated tests below depend on that.
-    """
-    present = _present(PACKAGE, packages, modules, exempt)
-    problems = [
-        _unlayered(shown, dotted)
-        for shown, dotted in sorted(present.items())
-        if dotted not in listed
-    ]
-    problems += [_stale_layer(entry) for entry in sorted(listed - set(present.values()))]
-    return problems
 
 
 def port_drift(
@@ -243,7 +230,10 @@ def port_drift(
     """Every disagreement between contract 2's two lists and what is under `src/agl/ports/`.
 
     Two lists, so three kinds of disagreement rather than two: a module on neither list, a module
-    on both, and a listing with nothing behind it. Pure, for `layer_drift`'s reason.
+    on both, and a listing with nothing behind it. The return is a list of complaints, empty when
+    the two agree; each is written to be read by somebody who has never seen this file and says what
+    to do about it rather than only what is wrong. Pure: no disk, no config, no repository. The
+    fabricated tests below depend on that.
     """
     present = _present(PORTS_PACKAGE, packages, modules, exempt)
     listed = set(sources) | set(forbidden)
@@ -265,7 +255,7 @@ def vendor_drift(
     """Every disagreement between contract 3's `forbidden_modules` and the extras AGL declares.
 
     `vendors` maps a distribution name to the import name it is expected to be contained under -
-    the mapping this file guesses and the docstring qualifies. Pure, for `layer_drift`'s reason.
+    the mapping this file guesses and the docstring qualifies. Pure, for `port_drift`'s reason.
     """
     problems = [
         _uncontained_vendor(distribution, imported)
@@ -287,7 +277,7 @@ def adapter_drift(
     Kept whole from the guard that covered contract 4 alone, down to the two complaints a
     single-file member can draw: a directory under `adapters/` is an adapter package and appears in
     contract 4 or this fails, while a top-level `.py` may instead be named in `exempt`, because two
-    of them are not adapters standing behind a port. Pure, for `layer_drift`'s reason.
+    of them are not adapters standing behind a port. Pure, for `port_drift`'s reason.
     """
     problems = [
         _unlisted_package(name)
@@ -308,42 +298,6 @@ def adapter_drift(
 
 
 # --- What each complaint says -------------------------------------------------------------------
-
-
-def _unlayered(shown: str, dotted: str) -> str:
-    return (
-        f"src/agl/{shown} is a top-level member of the agl package that contract 1 of "
-        f".importlinter does not list.\n"
-        f"\n"
-        f"That contract's `layers =` is a hand-maintained list, so it fails open - and it fails "
-        f"open upwards: a member missing from it is not at the bottom of the stack, it is outside "
-        f"the stack. Nothing orders its imports, so it may import agl.ports and agl.adapters "
-        f"directly and be imported by anything, with all six contracts still reported kept.\n"
-        f"\n"
-        f"Resolve it by adding this line to `layers =` under [{LAYERS_SECTION}], at the level "
-        f"ARCHITECTURE.md §2's dependency rule puts it - the list runs high to low, and a level "
-        f"naming two modules with `|` is two siblings that may not import each other:\n"
-        f"    {dotted}\n"
-        f"\n"
-        f"There is one exemption and it is __init__.py, which is out of this comparison because it "
-        f"is held to something stricter: scripts/check's package-root gate forbids it every import "
-        f"statement, which is not a thing an ordering of layers can say."
-    )
-
-
-def _stale_layer(entry: str) -> str:
-    return (
-        f"contract 1 of .importlinter lists {entry}, which is not a top-level member of src/agl/.\n"
-        f"\n"
-        f"A layer naming a module that does not exist orders nothing, and the next reader counts "
-        f"it as one more package held to the dependency rule. import-linter refuses a missing "
-        f"layer outright and would normally say so first - unless the entry is wrapped in "
-        f"parentheses, its spelling for a layer whose absence is tolerated, which is exactly the "
-        f"case where nobody else is going to mention it.\n"
-        f"\n"
-        f"Resolve it by removing that line from `layers =` under [{LAYERS_SECTION}], or by "
-        f"restoring the module it names."
-    )
 
 
 def _unclassified_port(shown: str, dotted: str) -> str:
@@ -412,7 +366,7 @@ def _uncontained_vendor(distribution: str, imported: str) -> str:
         f"\n"
         f"Resolve it by adding the SDK's *import* name to `forbidden_modules` under "
         f"[{VENDOR_SECTION}], plus one `ignore_imports` expression per module permitted to import "
-        f"it, in the shape the four already there use. This test guessed that name to be:\n"
+        f"it, in the shape the two already there use. This test guessed that name to be:\n"
         f"    {imported}\n"
         f"\n"
         f"The guess is the distribution name lowercased with `-` and `.` turned into `_`, and "
@@ -516,29 +470,6 @@ def _listing(section: str, key: str) -> frozenset[str]:
     return frozenset(line.strip() for line in raw.splitlines() if line.strip())
 
 
-def _layer_listing() -> frozenset[str]:
-    """Contract 1's `layers =`, which is not one name per line.
-
-    A line is a *level*, and a level may name more than one module: `agl.sdk | agl.adapters` is two
-    siblings that may not import each other, and `a : b` two that may, so either delimiter splits
-    the line. A name in parentheses is import-linter's spelling for a layer whose absence is
-    tolerated - still a listing, and the one spelling that can go stale without import-linter
-    saying so, since it refuses a missing required layer outright.
-    """
-    raw = _section(LAYERS_SECTION).get("layers")
-    assert raw is not None, (
-        f"[{LAYERS_SECTION}] in {CONFIG_FILE} has no `layers =` key. A layers contract without one "
-        f"orders nothing, and every top-level package is outside the dependency stack until it "
-        f"returns."
-    )
-    names = {
-        part.strip().strip("()").strip()
-        for line in raw.splitlines()
-        for part in line.replace(":", "|").split("|")
-    }
-    return frozenset(name for name in names if name)
-
-
 def _members(directory: Path) -> tuple[frozenset[str], frozenset[str]]:
     """Directory names and top-level `.py` filenames directly under `directory`."""
     children = sorted(directory.iterdir())
@@ -608,17 +539,6 @@ def test_each_contract_is_still_the_kind_of_contract_this_file_reads(
     )
 
 
-def test_every_top_level_member_of_agl_appears_in_contract_1() -> None:
-    """The top level of `src/agl/` and contract 1's `layers =` name the same members."""
-    packages, modules = _members(PACKAGE_DIR)
-    assert packages and modules, (
-        f"{PACKAGE_DIR} holds no packages or modules at all. This test walked the wrong directory "
-        f"and is asserting nothing; check the path at the top of this file."
-    )
-    problems = layer_drift(_layer_listing(), packages, modules, LAYER_EXEMPT)
-    assert not problems, "\n\n".join(problems)
-
-
 def test_every_module_under_ports_appears_on_exactly_one_side_of_contract_2() -> None:
     """Every `ports/` module is a pure type or an ABC, and the contract says which."""
     packages, modules = _members(PORTS_DIR)
@@ -660,49 +580,12 @@ def test_every_adapter_appears_in_contract_4() -> None:
 
 
 # ---------------------------------------------------------------------------------------------
-# Non-vacuity: the four comparisons on fabricated input, so that a refactor which broke one into
+# Non-vacuity: the three comparisons on fabricated input, so that a refactor which broke one into
 # always agreeing fails here instead of passing everywhere. Nothing below reads the repository.
 # ---------------------------------------------------------------------------------------------
 
 _FABRICATED_INIT_EXEMPT: Final[Mapping[str, str]] = {"__init__.py": "the package's own docstring"}
 _FABRICATED_EXEMPT: Final[Mapping[str, str]] = {"routing.py": "the sanctioned exception"}
-
-
-def test_layer_drift_is_silent_when_the_listing_and_the_tree_agree() -> None:
-    """The case that makes the failing cases below mean something."""
-    assert not layer_drift(
-        frozenset({"agl.ports", "agl.api"}),
-        frozenset({"ports"}),
-        frozenset({"api.py", "__init__.py"}),
-        _FABRICATED_INIT_EXEMPT,
-    )
-
-
-def test_layer_drift_reports_a_top_level_member_that_is_in_no_layer() -> None:
-    """The failure this half exists for: a package added and never put in the stack."""
-    problems = layer_drift(
-        frozenset({"agl.ports"}),
-        frozenset({"ports", "probe"}),
-        frozenset({"probe.py"}),
-        _FABRICATED_INIT_EXEMPT,
-    )
-    assert len(problems) == 2
-    assert any("src/agl/probe/" in problem and "agl.probe" in problem for problem in problems)
-    assert any("src/agl/probe.py" in problem for problem in problems)
-    assert all("outside the stack" in problem for problem in problems)
-
-
-def test_layer_drift_reports_a_layer_with_nothing_behind_it() -> None:
-    """A parenthesised optional layer can go stale with import-linter saying nothing."""
-    problems = layer_drift(
-        frozenset({"agl.ports", "agl.gone"}),
-        frozenset({"ports"}),
-        frozenset(),
-        _FABRICATED_INIT_EXEMPT,
-    )
-    assert len(problems) == 1
-    assert "agl.gone" in problems[0]
-    assert "not a top-level member" in problems[0]
 
 
 def test_port_drift_is_silent_when_every_module_is_on_exactly_one_side() -> None:
@@ -862,12 +745,6 @@ def test_every_comparison_reports_every_disagreement_at_once() -> None:
     neither list, a module on both, and a listing with nothing behind it - which is the case that
     would break first if the three ever got written as an `elif`.
     """
-    layers = layer_drift(
-        frozenset({"agl.gone"}),
-        frozenset({"probe"}),
-        frozenset({"probe.py"}),
-        _FABRICATED_INIT_EXEMPT,
-    )
     ports = port_drift(
         frozenset({"agl.ports.ids"}),
         frozenset({"agl.ports.ids", "agl.ports.gone"}),
@@ -883,4 +760,4 @@ def test_every_comparison_reports_every_disagreement_at_once() -> None:
         _FABRICATED_EXEMPT,
     )
 
-    assert [len(layers), len(ports), len(vendors), len(adapters)] == [3, 3, 3, 3]
+    assert [len(ports), len(vendors), len(adapters)] == [3, 3, 3]

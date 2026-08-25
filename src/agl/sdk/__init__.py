@@ -40,10 +40,22 @@ overrides it. Three things carry the decision:
 **On it, by layer of the thing an author writes** (§3.3's four): the params helper `arg`; the role
 vocabulary - `Role`, `prompt_file`, `RoleIncompleteError`, and the enums a role is declared out of,
 `Claude`, `OpenAI`, `ModelId`, `Restriction`, `Capability`, `QuestionHandler`; the tool declarations
-`reporting_tool`, `ReportingTool`, `Tool`, `ToolResult`; the nine terminal components and the
-`Terminal` they are shown on; `Question` and `Answer`, which is what an `on_question` handler is
-written against; `workflow`, `Run`, `Workflow` and `Stop`; and the `AglError` hierarchy, which 18.0
-added after the tripwire two paragraphs below fired.
+`reporting_tool`, `ReportingTool`, `Tool`, `ToolResult` and `describe`, which is to a payload field
+what `arg` is to a params field and is on the door for that reason; the eight terminal components
+and the `Terminal` they are shown on; `Question` and `Answer`, which is what an `on_question`
+handler is written against; `workflow`, `Run`, `Workflow` and `Stop`; the three port names a `Run`'s
+own members speak - `Namespace`, `Conflict` and `VerifierOutcome`, which 19.2 added; and the
+`AglError` hierarchy, which 18.0 added after the tripwire two paragraphs below fired.
+
+**Those three are the same tripwire firing a third and fourth time**, and they arrive by the repair
+it names rather than by a new argument. `split/chunks.py` reached into `agl.ports.ids` for
+`Namespace` - `run.worktree(id)` refuses through it, and a workflow validating an id at declaration
+time constructs one rather than copying the rule - and `split/views/conflict.py` reached into
+`agl.ports.integration` and `agl.ports.verifier` for the two types §3.4's snippet hands a conflict
+view. Both reported it and neither paid for it, on the ground that widening this door is a diff
+outside `workflows/split/` and stage 18 existed to measure that diff. `sdk/workflow.py` carries all
+three, for the reason `sdk/roles.py` carries `Claude`: the module that defines the member is the
+module that carries the vocabulary the member speaks.
 
 `Claude` and `Restriction` are worth a sentence, because they are the names most obviously *not*
 declared in this package. They are `ports/agent.py`'s, for the layering reason `Screen` is
@@ -99,8 +111,8 @@ from a module in this package**, which is what keeps the two import styles one s
 
 Every name below is a real import statement and `__all__` is a literal list, never assembled from
 the submodules' own. `sdk/terminal.py` argues that at length for its nine and the argument is the
-same one at nine times the size: a re-export computed at runtime is invisible to `ruff`, to `mypy`
-and to anyone reading this file to find out what is here, and a lazy `__getattr__` would
+same one at more than four times the size: a re-export computed at runtime is invisible to `ruff`,
+to `mypy` and to anyone reading this file to find out what is here, and a lazy `__getattr__` would
 additionally hide a typo until the line that made it ran. `tests/sdk/test_front_door.py` is what
 asserts that this list and the submodules' have not drifted apart.
 
@@ -149,8 +161,16 @@ from agl.sdk.terminal import (
     Text,
     TextInput,
 )
-from agl.sdk.tools import ReportingTool, Tool, ToolResult, reporting_tool
-from agl.sdk.workflow import Run, Stop, Workflow, workflow
+from agl.sdk.tools import ReportingTool, Tool, ToolResult, describe, reporting_tool
+from agl.sdk.workflow import (
+    Conflict,
+    Namespace,
+    Run,
+    Stop,
+    VerifierOutcome,
+    Workflow,
+    workflow,
+)
 
 # Listed and not computed - see the module docstring. Sorted, so that a name added to it is added
 # where a reader looks for it rather than at the end.
@@ -161,11 +181,13 @@ __all__ = [
     "Choice",
     "Claude",
     "Component",
+    "Conflict",
     "ConflictError",
     "DeniedError",
     "InputError",
     "InternalError",
     "ModelId",
+    "Namespace",
     "NotFoundError",
     "OpenAI",
     "Question",
@@ -188,8 +210,10 @@ __all__ = [
     "UpstreamError",
     "UpstreamUnavailable",
     "UpstreamUnexpected",
+    "VerifierOutcome",
     "Workflow",
     "arg",
+    "describe",
     "prompt_file",
     "reporting_tool",
     "workflow",

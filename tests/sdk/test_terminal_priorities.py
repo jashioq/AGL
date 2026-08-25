@@ -2,7 +2,7 @@
 
 15.1 wired `run.terminal` and 15.2 proved the mid-run question path end to end. What is left is the
 thing those two make possible for the first time - **two priorities live at once**, with a person in
-front of them and the framework's own merge queue behind them - and §3.3's conflict snippet, which
+front of them and the framework's own merge queue behind them - and §3.4's conflict snippet, which
 no deliverable before this one could execute.
 
 Stage 6 built the slot, the two queues, preemption, `pending` and the fallback order.
@@ -136,15 +136,16 @@ LABEL: Final = RunLabel("auth")
 
 AGENT: Final = 5
 CONFLICT: Final = 10
-"""§3.7's own two priorities, written as the plan writes them:
+"""§3.7's own two priorities, quoted as the plan writes them:
 
-    await term.show(views.agent_question, question=q, priority=5)
-    await term.show(views.conflict,       outcome=out, priority=10)
+    await term.show(views.agent_question, question=q,            priority=5)
+    await term.show(views.conflict,       conflict=out.conflict, priority=10)
 
-Named here so that the two numbers a workflow shows at and the two keys `pending` is asserted with
-are one pair. They are plain `int`s and nothing below treats them as anything else - §3.7 refuses
-named levels because `MEDIUM` and `HIGH` would encode "agent question" and "merge conflict", which
-are one workflow's concepts and not the framework's."""
+The numbers are what is being quoted; the parameter is not what this file passes, and `deciding`
+says why. Named here so that the two numbers a workflow shows at and the two keys `pending` is
+asserted with are one pair. They are plain `int`s and nothing below treats them as anything else -
+§3.7 refuses named levels because `MEDIUM` and `HIGH` would encode "agent question" and "merge
+conflict", which are one workflow's concepts and not the framework's."""
 
 # The repository's seed and the files these runs move about. `CONTESTED` is the one two lines of
 # work both create, sharing not a single line, which is the only shape no honest implementation can
@@ -244,7 +245,7 @@ answered: Final[list[str]] = []
 part: "with the two questions still unanswered" is this list being empty."""
 
 decided: Final[list[Integration]] = []
-"""The live `Integration` a workflow is deciding about, published before §3.3's snippet reads it, so
+"""The live `Integration` a workflow is deciding about, published before §3.4's snippet reads it, so
 that a test can read the summary that is on the screen while the screen is still up."""
 
 boards: Final[list[Mapping[str, str]]] = []
@@ -312,7 +313,7 @@ _SETTLED: Final = "this landing has already been decided"
 
 
 def conflict(outcome: Integration) -> Screen[bool]:
-    """§3.3's conflict view, in the workflow's own words and out of the outcome's own summary.
+    """§3.4's conflict view, in the workflow's own words and out of the outcome's own summary.
 
     §3.4: "On conflict the framework does not ask. It returns a `Conflict` outcome and holds the
     lease; the workflow shows its own screen and decides." This is that screen. The framework
@@ -320,9 +321,15 @@ def conflict(outcome: Integration) -> Screen[bool]:
     guaranteed to say anything" - and everything else here is the workflow's: which words the two
     buttons carry, what picking one produces, and that there are two of them at all.
 
-    **The outcome is passed whole**, which is §3.3's own snippet and not a shortcut: the view is
-    re-invoked every frame, so a screen built from the live object keeps saying what the outcome
-    currently says rather than what it said when `show` was called.
+    **The outcome is passed whole, and §3.4 names that as a defect in a workflow's view.** The
+    sanctioned parameters are `conflict=outcome.conflict, build=outcome.verdict` - what a screen
+    renders - because a workflow author's view annotated against `Integration` carries
+    `sdk/_engine`'s private type in its signature and holds both verbs. `workflows/split/views/
+    conflict.py` is that view, written the sanctioned way. **This one is a test's**, and it takes
+    the outcome because it needs a *live* read: the view is re-invoked every frame, so a screen
+    built from the object keeps saying what the outcome currently says rather than what it said
+    when `show` was called, which is what lets a test read a summary off a screen that is still up.
+    Nothing outside this module should copy the signature.
 
     The `_SETTLED` branch is unreachable while this is on screen - an entry is retired before its
     `show` returns, so nothing invokes the view of a question that has been answered - and it is
@@ -446,19 +453,39 @@ def _agent(record: _Agent) -> Script:
 
 @workflow(name="deciding", version="1", params=NoParams)
 async def deciding(run: Run[NoParams]) -> None:
-    """§3.3's conflict snippet, run - and the middle line of it is what 15.3 is.
+    """§3.4's conflict snippet, run - and the middle line of it is what 15.3 is.
 
         outcome = await run.integrate()
-        if outcome.conflicted:
-            if await run.terminal.show(views.conflict, outcome=outcome, priority=10):
+        if outcome.conflicted:                       # NOT §3.4's spelling - see below
+            if await run.terminal.show(conflict, outcome=outcome, priority=CONFLICT):
                 await outcome.retry()
             else:
                 await outcome.abort()
 
-    Copied out of the plan and not paraphrased. `sdk/_engine/integration.py` says of this snippet
-    that "`run.terminal` is stage 15, so §3.3's snippet cannot be executed end to end by anything in
-    this repository today: what is built is both halves it touches ... and the middle line is 15's".
-    This is the workflow that closes that.
+    **This is the plan's snippet with two deliberate departures, and neither is what a workflow
+    should copy.** §3.4 writes `while outcome.conflicted:` with a `break` after the abort, and
+    hands the view `conflict=outcome.conflict, build=outcome.verdict`; `workflows/split/` is where
+    that spelling ships and `sdk/_engine/integration.py` is where it is argued. Both departures are
+    this *file's*, taken for reasons that do not survive outside it:
+
+      * **`outcome` whole, rather than the two members.** This file's own `conflict` view takes an
+        `Integration` so that the screen re-reads a *live* outcome every frame - its docstring
+        argues that, and `test_pending...` and the board test both read what is drawn while the
+        outcome is still unsettled. §3.4's objection is about a **workflow author's** view carrying
+        `sdk/_engine`'s private type in its signature; this view is a test's, in a module that
+        already imports `Integration` to annotate `decided`.
+      * **`if` rather than `while`.** Every scene here scripts exactly one keystroke, and a `while`
+        over a view that reads the live outcome would put the same screen back up in the abort
+        case, where `conflicted` deliberately stays true. §3.4's `break` is what closes that, and
+        the `break` needs the loop - so this file takes neither rather than half of the pair.
+
+    What the `if` costs elsewhere is the lease: a person who retries without having fixed anything
+    gets a conflicted outcome back, the branch falls through, and the run holds the lease *and* the
+    target's step lock until it exits. Nothing here reaches that, because the retry test resolves
+    the collision by hand before pressing the button and the landing concludes.
+
+    `sdk/_engine/integration.py` used to say the middle line could not be executed by anything in
+    this repository. This is the workflow that closed that.
 
     The child is cut **before** the parent's own step, so the two lines of work share a base in
     which `CONTESTED` does not exist and neither has ever seen the other's version. There is no

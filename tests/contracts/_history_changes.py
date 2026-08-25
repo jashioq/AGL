@@ -1,10 +1,12 @@
 """"What changed": `changed_files` and `diff`, the pair the port keeps together on purpose.
 
-Split out of `history.py` along a line the port draws itself. Three of its five members answer where
-a run starts, what that resolved to, and whether one state is already inside another; these two
-answer what actually happened between two states, and the port pairs them explicitly - "one is for
-deciding, the other is for reading. A review step puts this in a prompt; a workflow that wants to
-know whether a step touched anything under `docs/` uses the other and does not parse this."
+Split out of `history.py` along a line the port draws itself. Its seven members go three ways.
+Three answer where a run starts, what that resolved to, and whether one state is already inside
+another; two answer a fact about one name the caller already holds - whether it exists, and what
+its commit says; and these two answer what actually happened between two states. The port pairs
+this last two explicitly - "one is for deciding, the other is for reading. A review step puts this
+in a prompt; a workflow that wants to know whether a step touched anything under `docs/` uses the
+other and does not parse this."
 
 ## No porcelain, and `diff`'s format is not this suite's to pin
 

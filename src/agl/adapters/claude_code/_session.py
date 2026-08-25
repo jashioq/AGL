@@ -204,10 +204,12 @@ def _read(
     the run's answer would report a nested conversation's last line as the outcome of the step.
     `parent_tool_use_id` is what tells them apart, and it is `None` exactly at the top level.
 
-    The activity callback is called and not guarded. The port puts the obligations on the caller -
-    it must not block, and it may be called never - and says nothing about an exception out of one;
-    swallowing it here would hide a broken reporter for the length of a run, and the contract suite
-    makes the same choice for the same reason.
+    The activity callback is called and not guarded, which is the port's rule as of 19.4 rather
+    than this module's reading of a silence: an `on_activity` that raises ends the run with its own
+    exception, and an adapter writes no `try` around the call. `ports/agent.py` argues it and the
+    contract suite holds all four implementations to it. The short form is that the framework's own
+    reporter is one assignment, so a reporter that raises here is a broken one, and swallowing it
+    would hide a bug in somebody's callback for the length of a run.
     """
     for block in message.content:
         if isinstance(block, ToolUseBlock):

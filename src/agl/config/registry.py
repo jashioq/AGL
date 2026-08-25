@@ -14,10 +14,11 @@ What replaces it is one line in the package that owns the workflow:
     [project.entry-points."agl.workflows"]
     tickets = "agl.workflows.tickets:tickets"
 
-`pyproject.toml` declares the group and one line in it today: `noop`, the wiring probe stage 10
-registered and stage 19.4 deletes, package and line together. Adding a workflow is that line and a
-package, and there is no central table here or anywhere else to edit - measurable target #1, and
-§3.3's "no `importlib`, no `getattr`, no central dispatch to edit" in all three of its parts.
+`pyproject.toml` declares the group and holds two lines in it today, `fix` and `split`. Adding a
+workflow is that line and a package, and there is no central table here or anywhere else to edit -
+measurable target #1, and §3.3's "no `importlib`, no `getattr`, no central dispatch to edit" in all
+three of its parts. Removing one is the same edit backwards, which stage 19.1 did to `noop`, the
+wiring probe stage 10 registered: package and line, and nothing else in AGL had to move.
 
 ## The prohibition, read correctly - because this module imports `importlib.metadata`
 
@@ -44,9 +45,9 @@ So this module names `importlib` and keeps the rule. What it does not contain, a
 `mypy --strict` that `Any` may not escape this module, and the obvious ways to stop it are both
 wrong here. Narrowing with `hasattr` would be the duck-typing being repaired, wearing a different
 spelling. Nominal narrowing needs a class to narrow *to*, and the only such class is the object
-`@workflow` produces in `sdk/workflow.py`, which does not exist until stage 10.2 - and which
-`config` may not import from anyway on the day it does, contract 1's layering putting `sdk` below
-`config` but `workflows` in between.
+`@workflow` produces in `sdk/workflow.py`, which did not exist when this module was written - and
+which `config` may not import from in any case, contract 1's layering putting `sdk` below `config`
+but `workflows` in between.
 
 **The resolution is that the registry is generic over the type its caller expects.** `load` takes
 that type as a parameter and narrows with `isinstance`, so the `Any` is converted at the one place

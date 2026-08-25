@@ -1,12 +1,15 @@
 """`History` - what changed, and is X already in Y.
 
-Six questions about one repository's recorded past, and nothing that changes it. A run needs to
+Seven questions about one repository's recorded past, and nothing that changes it. A run needs to
 know where to start from, whether the name it is about to take is free, and what its base resolved
 to; a review step needs to know what an implementation step actually did; `clear` needs to know
 whether a run's work is already contained in the base ref before it deletes the name that work is
-under. Those are the whole of it.
+under; and a workflow's own test needs to be able to read back the one sentence the workflow wrote.
+Those are the whole of it.
 
-**`exists` is the sixth and it is not the ref listing §3.10 forbids.** That section is explicit -
+**`exists` is the sixth and it is not the ref listing §3.10 forbids.** Sixth by order of
+addition, which is the scheme both this ordinal and `message`'s below are counted in: §3.4's port
+table names five, and these two arrived after it. That section is explicit -
 "no port can enumerate `agl/_work/<label>/*`, by design, and **do not add a ref-listing verb to
 `History` to close it**" - and the reason it gives is that a listing "would buy tidiness by
 requiring that every implementation be able to list, which a service handing out checkouts to many
@@ -16,6 +19,27 @@ that can answer `resolve` can answer this, because it is `resolve` with the answ
 the refusal turned into a `False`. Nothing about a name the caller has not already composed can be
 learned from it, so it closes none of the leak §3.10 accepts and buys none of the tidiness §3.10
 priced.
+
+**`message` is the seventh and it is the same shape as `exists`.** A fact about one commit the
+caller already names, answerable by anything that can answer `resolve`, and telling you nothing
+about a name you did not already hold. It was added at 19.2 for a reason §3.11 states about the
+value it reads: an auto-generated commit message was refused because "the message is domain
+vocabulary - `implement T-01` is something only the workflow knows". §3.3 makes `commit=` the
+workflow author's one step-ending decision, so the message is a thing the *workflow* decided and,
+until this member existed, the one such decision no port would say anything about. A test for a
+workflow could assert that some commit happened - which is also what a missing `commit=` produces.
+
+**What it promises, and the one thing it does not.** Trailing whitespace is not part of a message.
+That clause is here rather than left to each implementation because the two AGL has would otherwise
+disagree about the ordinary case: git cleans a message and stores it with a final newline, so an
+adapter handing back what it stored answers `"implement T-01\\n"` where an implementation that kept
+what it was given answers `"implement T-01"` - and a workflow comparing against its own `commit=`
+template would pass on one and fail on the other, which is §1.9's drift in the form that costs the
+most. What is *not* promised is the interior of a multi-line message: git collapses runs of blank
+lines and strips the trailing whitespace off every line, and requiring that of every implementation
+would be this port asking for one program's text formatting - the thing `ChangeKind` exists to keep
+out. So a single-line message comes back exactly as it was written, and a multi-line one comes back
+as this repository holds it.
 
 **This is not a run log.** The name invites the confusion, so it is worth saying once and plainly:
 nothing here reads or writes AGL's own records. Step entries are `Store`'s, the ledger over them is
@@ -138,7 +162,7 @@ class FileChange:
 
 
 class History(ABC):
-    """Read the repository's past. Six methods, none of which changes anything.
+    """Read the repository's past. Seven methods, none of which changes anything.
 
     Every one of them raises from `errors.py` and nothing else - `NotFoundError` for a ref or a
     commit id that names nothing in this repository, `UpstreamUnavailable` when the repository
@@ -146,7 +170,7 @@ class History(ABC):
     `exists` is the one exception to the first half of that and is the whole of what it is for: a
     name this repository does not hold is its `False` rather than its refusal.
 
-    All six are async for one reason: an implementation may have to go out of process, or over a
+    All seven are async for one reason: an implementation may have to go out of process, or over a
     network, to answer. A synchronous signature would make every one of these a blocking call inside
     the event loop that is running several agents at once.
     """
@@ -275,4 +299,34 @@ class History(ABC):
         Paired with `changed_files` rather than replaced by it: one is for deciding, the other is
         for reading. A review step puts this in a prompt; a workflow that wants to know whether a
         step touched anything under `docs/` uses the other and does not parse this.
+        """
+
+    @abstractmethod
+    async def message(self, commit: str) -> str:
+        """What this one commit is called. The other half of `Workspace.commit_all(message)`.
+
+        A fact about one state the caller already names, which is `exists`' shape and not the ref
+        listing §3.10 forbids: it answers about a commit the caller composed or was handed, and
+        nothing about a name they do not already hold can be learned from it. Nothing in AGL's own
+        machinery reads it - no step, no fingerprint (§3.6: "why the commit message is not in it"),
+        no view - and that is deliberate rather than an oversight, because the one consumer is the
+        one this port had no answer for: a workflow, and a test for a workflow, asking whether the
+        step-ending decision §3.3 gives it actually landed.
+
+        **Trailing whitespace is not part of the answer**, and the module docstring argues why the
+        port takes that rule rather than leaving it to each implementation. What lies between the
+        first and last non-whitespace character is the message the caller passed, as this
+        repository holds it: a single-line one comes back exactly as written, and a multi-line one
+        may have been cleaned - git strips the trailing whitespace off each line and collapses runs
+        of blank lines - which this port declines to require of anybody else.
+
+        `commit` is a ref expression or a commit id, exactly as `resolve` takes one, so a branch
+        name answers about the state at its tip. `NotFoundError` when it names nothing here, which
+        is the same refusal `resolve` makes and for the same reason: "no message" is a plausible
+        answer to a state that does not exist and it is a lie.
+
+        A message is never empty. `Workspace.commit_all` refuses one that is nothing but whitespace
+        - the real adapter because git does, the fake because §1.9 makes it agree - so there is no
+        recorded state here whose message strips to nothing, and this member has no empty case of
+        its own to describe.
         """

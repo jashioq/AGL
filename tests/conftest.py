@@ -17,8 +17,8 @@ opposites. A guard that protects by default is exactly the thing that cannot be 
 module it protects. A module-scoped autouse fixture guards the file it is written in and no other,
 so the next test file added inherits it only if somebody remembers - and "somebody remembers" is the
 mechanism this file exists to replace. Stage 7.1 wrote that fixture in
-`tests/adapters/test_claude_code_runner.py`; stage 8 adds a second adapter test file, and the Codex
-CLI has the identical dangerous shape - subscription auth plus a redirectable endpoint.
+`tests/adapters/test_claude_code_runner.py`; stage 8 added a second adapter test file, and the
+Codex CLI has the identical dangerous shape - subscription auth plus a redirectable endpoint.
 
 **What is being guarded against, measured rather than argued.** Point `ANTHROPIC_BASE_URL` at a
 socket and leave `ANTHROPIC_API_KEY` unset, and the `claude` CLI falls back to the operator's own

@@ -17,10 +17,10 @@ harness is the *client*: it connects to a server somebody else is running. There
 option, and a Python closure over the framework's `Run` cannot be serialised into a subprocess.
 
 Hence a real server, in this process, on the loopback interface, for the length of one run. The
-handler runs where it already lives and only the transport changes - which is what
-`ports/agent.py` predicted when it refused to make `Tool.handler` transportable: "the right answer
-is that the adapter bridges". This module is that bridge and it is the largest single thing this
-adapter had to build.
+handler runs where it already lives and only the transport changes. `ports/agent.py` keeps
+`Tool.handler` a plain async callable and says nothing about transporting one, which leaves
+bridging to whichever adapter needs it; this module is that bridge and it is the largest single
+thing this adapter had to build.
 
 ## The asking tool is AGL's own, and the harness's own asker is not available
 

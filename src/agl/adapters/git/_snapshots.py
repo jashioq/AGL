@@ -70,8 +70,9 @@ type Tree = Mapping[str, bytes]
 # name the same line of work, which is what `rev-parse` does in the repository the real one reads.
 _BRANCH_REF: Final = "refs/heads/"
 
-# The message on the state a fresh repository starts at. It is never read back - no port has a
-# member for a message - and exists so that a repository has a state before anything records one.
+# The message on the state a fresh repository starts at. It exists so that a repository has a state
+# before anything records one, and since 19.2 it is readable: `History.message` answers about any
+# recorded state, this one included, so it is written as a sentence rather than as a placeholder.
 _INITIAL: Final = "the state this repository starts at"
 
 # Surrogates survive the encode rather than raising. A message is the workflow author's own prose
@@ -205,6 +206,21 @@ class FakeRepository:
     def tree_of(self, state: str) -> Tree:
         """What was in the tree at this recorded state. The id has already been resolved."""
         return self._states[state].tree
+
+    def message_of(self, state: str) -> str:
+        """What this recorded state was called. The id has already been resolved.
+
+        `tree_of`'s shape and its caller's contract: the state exists, because whoever asked went
+        through `resolve` first, so a `KeyError` here would be this package having lost track of
+        its own repository rather than a caller naming something that is not there.
+
+        Stripped on the way out, which is `History.message`'s promise and not this repository's
+        taste: the port takes trailing whitespace out of a message so that the two implementations
+        answer alike for the ordinary case, git having cleaned and newline-terminated whatever it
+        stored. What is kept is what was recorded, since the id is the digest of it - see the
+        module docstring on why git's *rewriting* is not reproduced here, only its refusal.
+        """
+        return self._states[state].message.rstrip()
 
     def contains(self, ancestor: str, descendant: str) -> bool:
         """Is `ancestor` already part of what `descendant` records? Reflexive, and §3.10 is why.

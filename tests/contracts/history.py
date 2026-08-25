@@ -21,16 +21,18 @@ subagent that writes its own tests writes tests that pass - and stage 5 ends wit
 suite passes", a sentence worth something only when the suite had no stake in the outcome.
 
 `HistoryContract` is one class assembled from two modules, and only this name is public. Its own
-tests are the three members that answer *where*: `default_ref`, `resolve` and `contains`, plus the
-one refusal all five share. `_history_changes` holds `changed_files` and `diff`, the pair the port
-keeps together, and argues there how far a suite may go in asserting what a patch looks like -
-which is not far - and why rename detection is not required.
+tests are the members that answer *where* - `default_ref`, `resolve`, `exists` and `contains` -
+plus `message`, which answers *what one commit was called*, plus the one refusal they all share.
+`_history_changes` holds `changed_files` and `diff`, the pair the port keeps together, and argues
+there how far a suite may go in asserting what a patch looks like - which is not far - and why
+rename detection is not required.
 
 ## Why this suite takes a `WorkspaceProvider`
 
-`History` reads a repository's past and has no member that adds to one, deliberately: six questions
-and nothing that changes anything. So a suite for it has to get its states from somewhere, and
-across both of these ports there is exactly one way to record a state - `Workspace.commit_all`. The
+`History` reads a repository's past and has no member that adds to one, deliberately: seven
+questions and nothing that changes anything. So a suite for it has to get its states from
+somewhere, and across both of these ports there is exactly one way to record a state -
+`Workspace.commit_all`. The
 alternative is an implementation-supplied fixture handing over a prepared history, which is a knob
 whose whole job would be to be shaped by whoever also writes the implementation, and stage 5 would
 end with a suite that passed because the fixture agreed with it.
@@ -89,6 +91,19 @@ not entitle anybody to believe.
 8. **Anything about a second repository.** No method takes one, nothing here asks about one, and the
    port refuses the parameter that would make it possible.
 
+9. **What `message` does to the interior of a multi-line message.** The port promises that trailing
+   whitespace is not part of a message and deliberately promises nothing else about how one is
+   stored, because git cleans one - trailing whitespace off every line, runs of blank lines
+   collapsed to one - and requiring that of every implementation would be this port asking for one
+   program's text formatting. So `AWKWARD_MESSAGE` is asserted through a round trip *because* it is
+   a shape every implementation holds identically: two lines, one blank line between them, no
+   trailing whitespace anywhere. The half the port *does* promise is therefore measured on a
+   message of its own, `PADDED_MESSAGE`, which is one line with padding to lose. That test exists
+   because the clause was stated in prose on both sides of the port and asserted by nothing: the
+   fake's `rstrip` could be deleted with every test in the repository still passing. A message with
+   a run of blank lines in it, or with padding on an interior line, is still asserted against
+   neither implementation, and AGL writes neither - a `commit=` template renders one line.
+
 ## Where the port is silent, and what this suite assumed
 
 **That a state contains itself.** The port asks "is X already in Y", and its one consumer decides
@@ -103,8 +118,8 @@ no hunks in it.
 
 **That `NotFoundError` covers a commit id and not only a ref.** The class docstring says "a ref or a
 commit id that names nothing in this repository" for every member, which is read as binding all of
-them that refuse - which is five of the six, `exists` being the one whose answer to that case is a
-`False`.
+them that refuse - which is six of the seven, `exists` being the one whose answer to that case is
+a `False`.
 """
 
 from collections.abc import Iterator
@@ -117,7 +132,17 @@ from agl.ports.history import History
 from agl.ports.workspace import WorkspaceProvider
 
 from ._history_changes import HistoryChangeContract
-from ._workspace_files import ALPHA, BETA, CHILD, LABEL, SIBLING, body, record, write
+from ._workspace_files import (
+    ALPHA,
+    AWKWARD_MESSAGE,
+    BETA,
+    CHILD,
+    LABEL,
+    SIBLING,
+    body,
+    record,
+    write,
+)
 
 # `run.py`'s `_check_sha`, restated as what `resolve` has to answer with. Forty characters is a
 # sha1 object id and sixty-four a sha256 one, and requiring one of the two says "not abbreviated"
@@ -136,14 +161,31 @@ ABSENT_REF: Final = "agl-contract-suite-names-no-such-thing"
 # would pass against an implementation that never looks.
 ABSENT_ID: Final = "dead" * 10
 
+# One line of ordinary prose with trailing whitespace stuck to it, and the same line without: what
+# `message` promises is that the first goes in and the second comes back, out of every
+# implementation.
+#
+# **Content and not only padding**, because `commit_all` refuses a message that is nothing but
+# whitespace - so a message made entirely of this padding is a refusal on both implementations
+# rather than a round trip, and the clause below would never reach `message` at all.
+#
+# **One line and not several.** Padding at the end of the *message* is what the port speaks about;
+# padding at the end of an interior line is the interior of a multi-line message, which git strips
+# and an implementation that stored what it was handed keeps, and which the port declines to require
+# of anybody. So it is at the end and nowhere else. Both kinds of trailing whitespace an
+# implementation can be wrong about are here at once - a run of spaces and a tab, which is what a
+# caller wrote, and a line feed, which is what git adds.
+PADDED_MESSAGE: Final = "implement fix \t \n"
+TRIMMED_MESSAGE: Final = "implement fix"
+
 
 class HistoryContract(HistoryChangeContract):
-    """The suite. Six questions about one repository's past, and nothing that changes it.
+    """The suite. Seven questions about one repository's past, and nothing that changes it.
 
     Its own tests are where a run starts (`default_ref`), what that resolved to (`resolve`),
-    whether a name is held at all (`exists`), the one ancestry question AGL asks (`contains`), and
-    the refusal five of the six share. The half it inherits is `_history_changes`, named in this
-    module's docstring.
+    whether a name is held at all (`exists`), the one ancestry question AGL asks (`contains`), what
+    one commit was called (`message`), and the refusal six of the seven share. The half it inherits
+    is `_history_changes`, named in this module's docstring.
 
     `pytestmark` is on the class rather than on each method because subclasses inherit it, and
     because `asyncio_mode = "strict"` makes the marker the difference between a test that runs and
@@ -393,21 +435,132 @@ class HistoryContract(HistoryChangeContract):
         )
         assert await history.contains(start, start) is True
 
+    async def test_message_answers_with_what_the_commit_was_called(
+        self, history: History, provider: WorkspaceProvider, base: str
+    ) -> None:
+        """The other half of `Workspace.commit_all(message)`, and the only member of either port
+        that reads one back.
+
+        §3.3 makes `commit=` the workflow author's one step-ending decision and §3.11 keeps the
+        message the *workflow's* domain vocabulary rather than something AGL generates - so this is
+        the one such decision a test for a workflow could not previously see. Before 19.2, a suite
+        that wanted to assert a commit message either asserted that *some* commit happened, which
+        is what a missing `commit=` also produces, or reached into a fake's internal vocabulary and
+        recomputed the id from the tree and the message it expected.
+
+        **`AWKWARD_MESSAGE` and not a plain sentence**, because the message is the one argument
+        neither port may interpret: quotes, an ampersand, a pipe, a semicolon, `$(...)`, a blank
+        line and two non-ASCII scripts, all asserted through a round trip rather than only into a
+        `commit_all` that swallowed them. `WorkspaceContract` records "that a commit message was
+        recorded" as something it cannot see; this is where it becomes visible.
+
+        **Asserted as equality, and the port is what makes that legal.** Trailing whitespace is not
+        part of a message - git stores a cleaned message with a final newline, so an implementation
+        over it that handed back what it stored would answer one line feed longer than the caller
+        passed, and a workflow comparing against its own template would pass on one implementation
+        and fail on another. The interior of a multi-line message is not promised and is not
+        asserted: `AWKWARD_MESSAGE` has no trailing whitespace on any line and no run of blank
+        lines, which is the shape every implementation holds identically and the shape a `commit=`
+        template renders.
+
+        A branch name is asked as well as an id, because the port takes a ref expression here
+        exactly as `resolve` does, and an implementation that resolved only one of the two would
+        make `message(workspace.branch)` a refusal for a line of work that plainly has a tip.
+        """
+        workspace = await provider.open(LABEL, CHILD, base)
+        write(workspace, ALPHA, body("work worth a sentence"))
+        recorded = await workspace.commit_all(AWKWARD_MESSAGE)
+
+        assert await history.message(recorded) == AWKWARD_MESSAGE, (
+            "the message this commit was recorded under did not come back as it was written. It "
+            "is the workflow author's own prose (§3.11) and the one argument neither port may "
+            "interpret, so an implementation that escapes, truncates, re-wraps or re-encodes it is "
+            "handing back a sentence nobody wrote"
+        )
+        assert await history.message(workspace.branch) == AWKWARD_MESSAGE, (
+            "asking by branch name gave a different answer from asking by id. This member takes a "
+            "ref expression exactly as `resolve` does, so a branch answers about the state at its "
+            "tip"
+        )
+
+    async def test_trailing_whitespace_is_not_part_of_a_message(
+        self, history: History, provider: WorkspaceProvider, base: str
+    ) -> None:
+        """The one rule the port takes off the implementations, asked of each of them.
+
+        The port holds this rather than leaving it to whoever writes an implementation, and says
+        why: git cleans a message and stores it with a final newline, so an adapter over git that
+        handed back what it stored answers one line feed longer than an implementation that kept
+        what it was given - and a workflow comparing `message(head)` against its own `commit=`
+        template would pass on one and fail on the other, which is §1.9's drift in the form that
+        costs the most. Both implementations keep the rule with one `rstrip`.
+
+        The test above *argues* that clause and this one is what measures it. `AWKWARD_MESSAGE`
+        carries no trailing whitespace, so an implementation that dropped the rule answers it
+        correctly and the equality above holds anyway; the message here has padding to lose. It has
+        both kinds at once, which is what makes one clause enough for two implementations: the
+        spaces and the tab are what a caller wrote and only an implementation that stores what it
+        was handed still has them, and the line feed is what git adds and only an implementation
+        over git ever sees. Each of the two is answered wrong by exactly one of them.
+
+        **The message is one line, and that is the port's limit rather than this suite's
+        convenience.** Padding at the end of an interior line is the interior of a multi-line
+        message: git strips it off every line, an implementation that stored what it was given
+        keeps it, and the port declines to require either - so nothing here asks. Gap 9 in this
+        module's docstring is the same statement from the other side.
+        """
+        workspace = await provider.open(LABEL, CHILD, base)
+        write(workspace, ALPHA, body("work worth a padded sentence"))
+        recorded = await workspace.commit_all(PADDED_MESSAGE)
+
+        assert await history.message(recorded) == TRIMMED_MESSAGE, (
+            f"a commit recorded under {PADDED_MESSAGE!r} answered with something other than "
+            f"{TRIMMED_MESSAGE!r}. Trailing whitespace is not part of a message, which is the "
+            f"port's clause and not one implementation's habit: an implementation handing back "
+            f"what it stored answers a run of spaces or a line feed longer than the caller wrote, "
+            f"and a workflow comparing this against its own `commit=` template then gets equality "
+            f"on one implementation and an inequality on the other"
+        )
+
+    async def test_two_commits_under_two_messages_are_told_apart(
+        self, history: History, provider: WorkspaceProvider, base: str
+    ) -> None:
+        """One line of work, two states, two sentences - the shape a workflow's own test meets.
+
+        `fix` commits `implement fix` and then `address review findings` onto one branch, and what
+        it needs to know is that the second is what the branch is at and the first is what it was
+        at. An implementation answering with the branch's *first* message, or with whatever it last
+        recorded anywhere, passes a test that only ever asks about one commit.
+        """
+        workspace = await provider.open(LABEL, CHILD, base)
+        write(workspace, ALPHA, body("the first thing"))
+        first = await workspace.commit_all("implement fix")
+        write(workspace, BETA, body("the second thing"))
+        second = await workspace.commit_all("address review findings")
+        assert first != second, "two commits of different trees reported one id"
+
+        assert await history.message(first) == "implement fix"
+        assert await history.message(second) == "address review findings"
+        assert await history.message(workspace.branch) == "address review findings", (
+            "the branch answered with a message from a commit it has moved past. This member is "
+            "about the state a name resolves to *now*, which for a line of work is its tip"
+        )
+
     async def test_every_method_refuses_a_ref_or_an_id_this_repository_does_not_hold(
         self, history: History, provider: WorkspaceProvider, base: str
     ) -> None:
         """One refusal, from `errors.py`, so that a caller never learns what the thing underneath
         threw.
 
-        The port says it of five of the six members at once: `NotFoundError` for a ref or a commit
-        id that names nothing in this repository. `exists` is the sixth and is deliberately not in
-        the list below - answering rather than refusing is the whole of what it is for, and the
-        test above is where that is pinned. It matters most for `resolve`, where the user typed
-        something well-formed that this repository does not have and exit 3 is the answer they get
-        - but the other three take ids too, and an implementation that answered a made-up id with
-        an empty diff, or with every file in the repository, would be answering a question nobody
-        asked. `changed_files` is the sharp one: "nothing differs from a state that does not exist"
-        is a plausible-looking answer and a lie.
+        The port says it of six of the seven members at once: `NotFoundError` for a ref or a
+        commit id that names nothing in this repository. `exists` is the one exception and is
+        deliberately not in the list below - answering rather than refusing is the whole of what
+        it is for, and the test above is where that is pinned. It matters most for `resolve`, where
+        the user typed something well-formed that this repository does not have and exit 3 is the
+        answer they get - but the other four take ids too, and an implementation that answered a
+        made-up id with an empty diff, with every file in the repository, or with no message at
+        all, would be answering a question nobody asked. `changed_files` is the sharp one:
+        "nothing differs from a state that does not exist" is a plausible-looking answer and a lie.
 
         The id below is well-formed on purpose. An implementation refusing it for its shape rather
         than for its absence would pass a test built on a malformed one without ever looking.
@@ -423,3 +576,5 @@ class HistoryContract(HistoryChangeContract):
             await history.changed_files(ABSENT_ID, head)
         with pytest.raises(NotFoundError):
             await history.diff(head, ABSENT_ID)
+        with pytest.raises(NotFoundError):
+            await history.message(ABSENT_ID)

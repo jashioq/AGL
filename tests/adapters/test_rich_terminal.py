@@ -337,8 +337,8 @@ async def test_the_screen_reported_as_displayed_is_the_text_the_console_actually
     """Gap 1, closed: what the driver reports and what the console received are the same screen.
 
     The contract suite's first stated limit is that nothing in it looks at a display, so a terminal
-    whose `displayed()` reported a screen it never wrote passes all twelve of its tests. This is
-    the assertion that makes those twelve mean something: the body of the screen the driver hands
+    whose `displayed()` reported a screen it never wrote passes all eighteen of its tests. This is
+    the assertion that makes those eighteen mean something: the body of the screen the driver hands
     back is found, as text, in the bytes the console was given.
 
     It is written through the driver rather than through `RichTerminal.written` on purpose. The

@@ -17,11 +17,11 @@ subagent that writes its own tests writes tests that pass - and stages 4 to 8 ea
 contract suite passes", a sentence worth something only when the suite had no stake in the outcome.
 
 `AgentContract` is one class assembled from four modules, and only this name is public. Its own
-tests are the four things a `run` answers for that need no machinery: the outcome, a refused tool
-call, a tool call whose handler *failed*, and the activity it may or may not report. The three it
-inherits follow seams the port draws itself. `_agent_preflight` holds the two members that are asked
-*about* an agent rather than running one; `_agent_questions` holds §3.7's negotiation and the two
-edge cases the port settles by hand;
+tests are the five things a `run` answers for that need no machinery: the outcome, a refused tool
+call, a tool call whose handler *failed*, the activity it may or may not report, and what becomes
+of a run whose activity reporter raises. The three it inherits follow seams the port draws itself.
+`_agent_preflight` holds the two members that are asked *about* an agent rather than running one;
+`_agent_questions` holds §3.7's negotiation and the two edge cases the port settles by hand;
 `_agent_hermeticity` holds §3.5's poisoned repository and the table it is built from, and is the
 centrepiece. `_agent_tasks` under all of them holds the workspace, the tasks, the tool and the two
 callbacks every test is made of, and argues there why this suite touches a filesystem when the store
@@ -132,6 +132,7 @@ from ._agent_tasks import (
     SAY_WHAT_THIS_IS,
     Activity,
     Notes,
+    ReporterFailed,
     outcome_of,
     task,
     workspace,
@@ -141,12 +142,21 @@ from ._agent_tasks import (
 class AgentContract(AgentPreflightContract, AgentQuestionContract, AgentHermeticityContract):
     """The suite. Everything an `AgentRunner` promises, and nothing an implementation gets to pick.
 
-    Its own four tests are what a `run` answers for with no machinery around it: an outcome whose
+    Its own five tests are what a `run` answers for with no machinery around it: an outcome whose
     stop reason may be `None`, a refused tool call that goes back to the agent inside the same run,
-    a tool call whose handler raised, which goes back the same way, and activity that may never
-    arrive at all. The three halves it inherits are named in this module's docstring, and
+    a tool call whose handler raised, which goes back the same way, activity that may never arrive
+    at all, and an activity reporter that raised, which - unlike the tool handler - is not carried
+    on from. The three halves it inherits are named in this module's docstring, and
     `_agent_hermeticity` among them is the centrepiece - the one test here whose failure mode is to
     silently prove nothing.
+
+    Ten clauses: two ask *about* an agent and eight run one. Of the eight, seven are evidence about
+    an adapter obtained by watching an agent follow an instruction (gap 12) - a tool called, a
+    question answered, a poisoned repository ignored - and that is what keeps them behind the real
+    adapters' live gate, where they are deferred to the manual QA pass. The activity-reporter
+    clause is the exception and is written to be one: it asks the agent for nothing, so any free
+    instrument that produces a single line of activity reaches it, and the real adapters' own
+    suites run exactly that assertion offline beside their other activity tests.
 
     `pytestmark` is on the class rather than on each method because subclasses inherit it, and
     because `asyncio_mode = "strict"` makes the marker the difference between a test that runs and
@@ -356,3 +366,64 @@ class AgentContract(AgentPreflightContract, AgentQuestionContract, AgentHermetic
             f"object to report formats its own line, which is the whole of what this port asks"
         )
         assert isinstance(outcome.text, str), "and the run itself ended normally"
+
+    async def test_an_activity_reporter_that_raises_ends_the_run_with_its_own_exception(
+        self, runner: AgentRunner, model: ModelId, tmp_path: Path
+    ) -> None:
+        """The port's rule about a broken reporter, which used to be four implementations agreeing.
+
+        `on_activity` is the caller's code and it can hit a bug - a dashboard that has gone away, a
+        `KeyError` in somebody's formatting. The port settles what an adapter does about it, and
+        the answer is nothing: the exception comes out of `run` in place of an `AgentOutcome`, no
+        adapter guards the call, and no adapter carries the rest of the run on without it.
+
+        **Why that and not the swallow.** Activity is decoration - live-only, never persisted, and
+        a run that dies because a progress line could not be drawn has lost real work for a
+        cosmetic reason. Against which: the framework's own reporter is a single assignment, so a
+        reporter that raises is a *broken* one and the trade is not "a step or a progress line" but
+        "a bug that says so or a bug that does not, on every step, for the length of a run"; the
+        port's other caller-supplied callback, `on_question`, already ends the run when it raises;
+        §3.7's terminal views are decoration by the same definition and what a view raises comes
+        straight out; and a step that dies is a step the journal never recorded, so a resume
+        replays everything before it. `ports/agent.py` carries the argument in full.
+
+        **This clause exists because its silence was doing damage**, exactly as the tool-handler
+        one above does. Both fakes and both real adapters let the exception out, and none of them
+        had a rule to be following - so the next adapter, or the next tidy-up of an existing one,
+        would have been free to wrap the call in a `try` and be correct by every test in the build.
+
+        **It needs no model conduct**, which is what separates it from the seven other clauses
+        here that run an agent. Nothing is asked of the agent: whatever the backend happens to
+        report is what the reporter fails on, so a scripted fake, a canned transport or a stub CLI
+        reaches it. The real adapters' own suites run it that way, offline, beside their other
+        activity tests.
+
+        The first run is a probe rather than a duplicate. The port lets an adapter report nothing
+        at all, and a reporter that is never called cannot raise; without asking first, an
+        implementation that reports nothing would fail this for having no activity rather than for
+        breaking a promise. No implementation in this build takes the skip, and it is written
+        because the port permits one that would.
+        """
+        watched = Activity()
+        await outcome_of(
+            runner, task(workspace(tmp_path), model, SAY_WHAT_THIS_IS), on_activity=watched
+        )
+        if not watched.lines:
+            pytest.skip(
+                "this backend reported no activity for this task, which the port explicitly "
+                "allows - 'an adapter with nothing to report calls it never'. A reporter that is "
+                "never called cannot raise, so there is nothing here for a rule about raising"
+            )
+
+        failing = Activity(raise_first=1)
+        with pytest.raises(ReporterFailed):
+            await outcome_of(
+                runner, task(workspace(tmp_path), model, SAY_WHAT_THIS_IS), on_activity=failing
+            )
+
+        assert len(failing.lines) == 1, (
+            f"the reporter was called {len(failing.lines)} time(s) and it raised on the first. An "
+            f"adapter that kept reporting caught the exception somewhere and carried on, which is "
+            f"the swallow this clause exists to forbid - a broken callback then goes unmentioned "
+            f"for the length of the run, on every line, in code the port says is the caller's"
+        )

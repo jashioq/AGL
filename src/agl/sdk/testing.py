@@ -15,7 +15,7 @@ write. What it may write is everything in `ports/` - `AgentTask`, `Question`, `A
 expressible in, because it is the vocabulary the port itself speaks. `config/container.py` compiles
 a `Reply` into the callable each fake consumes, which is the one module allowed to name both sides.
 
-## Why a value and a plain callable, where the adapters' `Script` is a coroutine
+## Why a task and a value, where the adapters' `Script` takes a conversation
 
 Both fakes take `(Conversation) -> Awaitable[AgentOutcome]` and each argues at length that a
 callable is right for *them*: "a negotiation is N rounds inside one run - which means what happens
@@ -28,16 +28,31 @@ question, which is what a **workflow author** should have to write to test their
             return Reply(calls=[Call("report_findings", {"summary": "two", "high": 2})])
         return Reply(says="implemented it")
 
-A plain function from a task to a value. The dispatch is an `if` in the author's own file rather
-than a table this module would have to invent, so branching on the model, the tools, the workspace,
-`context` or `plan_only` costs nothing and needs no vocabulary from here at all - which is the same
-reason both fakes give for taking one script per runner rather than a queue: "the script instead
-reads `conversation.task` ... and dispatches on whatever it likes". And what it returns is a value,
-so it is comparable, printable, and constructible in the body of a `pytest.mark.parametrize`.
+A function from a task to a value, and **that** is the line between the two seams - not whether it
+is awaited, which the next paragraph settles. The dispatch is an `if` in the author's own file
+rather than a table this module would have to invent, so branching on the model, the tools, the
+workspace, `context` or `plan_only` costs nothing and needs no vocabulary from here at all - which
+is the same reason both fakes give for taking one script per runner rather than a queue: "the
+script instead reads `conversation.task` ... and dispatches on whatever it likes". And what it
+returns is a value, so it is comparable, printable, and constructible in the body of a
+`pytest.mark.parametrize`.
 
-**Sync, not async.** Nothing an author computes between reading a task and describing a reply needs
-to await anything, and a coroutine here would make the simplest possible agent - `lambda task:
-Reply(says="done")` - impossible to write on one line.
+**Sync or async, and the union is what makes both writable.** The return is `Reply |
+Awaitable[Reply]`, so `lambda task: Reply(says="done")` is still the simplest possible agent and is
+still one line - which is what a coroutine-only signature would have cost, and the reason 16.5 wrote
+this type synchronous. What the second arm buys is the one arrangement a value cannot express and
+`split` exists to demonstrate: **two agents that meet**. A test proving N chunks genuinely overlap
+needs each of them to reach a rendezvous and wait there until the others arrive - under the design
+the barrier is passed at once, under any lock spanning namespaces the second agent never arrives -
+and a synchronous callable cannot await one. A `threading.Barrier` is not the way out either: one
+event loop, one thread, and the first agent to reach it deadlocks the process.
+
+So 18.3 wrote every such test on a raw per-provider `Script` instead, and reported it: the property
+`split` was built to show was unassertable through `container.fakes(agent=...)`, which is the door
+this vocabulary is. `async def agent(task): await barrier.wait(); return Reply(...)` is now what
+those tests write. `config/container.py::_performs` is the one place that awaits the result, and it
+awaits it only when there is something to await - `inspect.isawaitable` at one call site, rather
+than two spellings of `Agent` for a caller to choose between.
 
 ## There is no step name on `AgentTask`, so this is what an author keys on
 
@@ -75,6 +90,21 @@ one. What stage 17's `fix` needs is
 one question screen and one answer, which is inside what a `Reply` says; a workflow whose prompt
 negotiates until approved is written with a script.
 
+**And an awaitable `Agent` does not close this, which is worth saying because it looks as though it
+should.** 19.2 widened the return to `Reply | Awaitable[Reply]` so an agent could take part in a
+rendezvous, and that is a different limitation: awaiting a barrier is waiting on something *outside*
+the conversation, and what a negotiation needs is the answer to something *inside* it. An `async
+def` agent still computes one `Reply` and hands it back, and `_performs` still performs it
+afterwards - so the agent never sees the `Answer` its question got, and never sees the `ToolResult`
+its call got back. §3.3's correction path is the sharpest case: an agent that calls its reporting
+tool with a payload the tool refuses is told so, inside the same session, and what it does next is
+the whole of what that path is for. From here it cannot read the refusal, so it cannot do anything
+next. **That is unobservable from this vocabulary and remains so**, in either arm of the union, and
+the raw per-provider `Script` is the honest answer rather than a temporary one: a `Reply` is a value
+computed before the run, and no field on a value can hold something the run has not produced yet.
+The shape that would close it is an agent handed the conversation instead of the task - which is the
+`Script` both fakes already take, one layer down and in the adapter's own vocabulary.
+
 ## Refusals
 
 `InputError`, at declaration time, which is `arg()`'s register and `@workflow`'s and
@@ -90,7 +120,7 @@ is the reporting tool itself, inside the run, by rejecting the call - which is t
 about a malformed payload wants to observe anyway.
 """
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Final
@@ -231,7 +261,7 @@ class Reply:
         object.__setattr__(self, "activity", tuple(self.activity))
 
 
-type Agent = Callable[[AgentTask], Reply]
+type Agent = Callable[[AgentTask], Reply | Awaitable[Reply]]
 """What a workflow's agents do, as one function of the task in front of them.
 
 One parameter, because an `AgentTask` is the whole of what a backend is handed and dispatching on
@@ -239,7 +269,12 @@ any part of it is an ordinary `if`. One agent covers a whole workflow, both prov
 there is no vendor's name anywhere in this type - which is what lets `container.fakes(agent=...)`
 take one argument and serve every role a run addresses.
 
-The return is a value rather than an awaitable for the reason the module docstring gives, and
-`Reply` is the only thing it may be: a function returning `None` for "do nothing" would make the
-one case that matters - a reporting step whose agent never reports - unwriteable, since that is
-`Reply()` and not the absence of a reply."""
+**A union and not two types.** `def agent(task) -> Reply` and `async def agent(task) -> Reply` both
+satisfy this, and so does the one-line lambda; there is no second parameter to select between them
+and no second alias to import. The module docstring argues why the awaitable arm had to be here at
+all - a rendezvous is the only arrangement that can tell real concurrency from a framework that
+serialised everything - and why the synchronous arm had to survive it.
+
+`Reply` is the only thing either arm may produce: a function returning `None` for "do nothing" would
+make the one case that matters - a reporting step whose agent never reports - unwriteable, since
+that is `Reply()` and not the absence of a reply."""

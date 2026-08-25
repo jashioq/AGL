@@ -177,8 +177,9 @@ def test_the_decorator_holds_the_function_unwrapped() -> None:
 
 
 def test_a_workflow_that_declares_no_roles_carries_an_empty_tuple() -> None:
-    """The default, and the reason it is one: `workflows/noop/` runs no agent and declares nothing,
-    and §3.2's preflight over an empty tuple asks no port anything.
+    """The default, and the reason it is one: a workflow may run no agent and declare nothing -
+    `workflows/noop/` did, until 19.1 deleted it - and §3.2's preflight over an empty tuple asks no
+    port anything.
 
     A tuple and not `None`, so that every caller iterates rather than narrowing - `preflight.check`
     walks it twice and would otherwise carry a guard for a case that means "no roles" anyway."""

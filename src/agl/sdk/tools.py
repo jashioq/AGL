@@ -70,8 +70,9 @@ Everything else is refused where it is declared, naming the field and its type, 
 * **Enums, including `StrEnum`** - an enum member is not a JSON value; it is a Python object whose
   `value` happens to be one. `StrEnum` and `IntEnum` round-trip by accident of inheritance and
   every other `Enum` does not, so admitting them would make the list a rule a reader has to test
-  rather than read. A field whose values are a fixed set is a `str` field whose description names
-  them, which every backend already puts in front of the model.
+  rather than read. A field whose values are a fixed set is a `str` field declared
+  `severity: str = describe(f"one of {', '.join(SEVERITIES)}")` - see the next section, which is
+  where that advice acquired a spelling.
 * **Fixed-length tuples** (`tuple[int, str]`) - JSON Schema spells one with `prefixItems`, which is
   draft 2020-12, and the schema crosses to two vendors untouched with no promise about which draft
   either reads. A heterogeneous fixed-length array is also a record whose parts have no names, and
@@ -81,6 +82,49 @@ Everything else is refused where it is declared, naming the field and its type, 
   have already made.
 * **A payload dataclass that contains itself** - it has no finite schema, and the refusal is what
   stops the derivation being a `RecursionError` instead.
+
+## A field may say what it is, and what it says is a fingerprint term
+
+`describe()` puts a `description` on one field's schema. Every field without one derives exactly
+what it derived before, which is the ordinary case: most payload fields are named well enough that
+a sentence about them would be the field name again.
+
+**What it is for is the sentence above about enums.** Until 19.2 that advice - *a field whose
+values are a fixed set is a `str` field whose description names them* - had nowhere to be written.
+`_schema_for` rendered a `str` as `{"type": "string"}` and nothing else, so a payload's own
+vocabulary could only be stated in the *tool's* description and in the prompt, and enforced a third
+time in the payload's `__post_init__`. `fix/findings.py` wrote all three and priced the third: §3.6
+rule 6 makes a `__post_init__` invisible to the derived schema, so editing `SEVERITIES` changed
+what converts while moving no digest, and an entry recorded under the old vocabulary could stop
+converting with its fingerprint still matching - `InternalError` out of `read`, on a resume. A
+description is a schema term and a schema term is a `base_of` term, so a vocabulary interpolated
+into one moves every digest that depends on it, and the price is not paid at all.
+
+**Where the text comes from: `dataclasses.field(metadata=...)`, which is `sdk/params.py`'s
+mechanism read twice.** `arg()` already attaches a declaration to a dataclass field this way, under
+one namespaced key, with typeshed's own overload trick keeping `request: str = arg(...)` legal
+under `--strict`; `describe()` is the same three lines against the same `dataclasses` feature, and a
+second mechanism for *attach a declaration to a field* would be one more thing for a reader to hold.
+Two candidates were weighed against it:
+
+* **`typing.Annotated[str, <marker>]`** is the near miss. It is static, needs no I/O, survives
+  `from __future__ import annotations`, and it is orthogonal to defaults where `field(metadata=)`
+  has to keep `default=` reachable through an overload. What it costs is that the marker then rides
+  on the *annotation*, so `_hints` needs `include_extras=True` and all three walkers that dispatch
+  on an annotation - `_schema_for`, `_converted` and `_wording` - have to peel a wrapper that is
+  not a type before they can ask what the type is. That is the type-reading path learning about
+  something that is not a type, in three places, to hold a string that belongs to a field.
+* **The attribute docstring** - the bare string expression after a field, which this repository
+  uses on every field there is - reads best of the three at the call site and is refused for the
+  one reason that outranks that: it would make **every docstring under a payload a stored format**.
+  A schema is hashed into every digest ever written, so tightening the prose on `Finding.summary`
+  would re-run the review step. Docstrings here are load-bearing and edited often, and a mechanism
+  that charges an agent run for improving one is a mechanism that teaches people not to. (It also
+  needs `ast` or `inspect` over the payload's source at import, which a zipimport or a `-OO` build
+  does not have to be able to hand over.)
+
+So the description is opt-in and explicit, and the thing that costs a re-run is the thing the author
+wrote *in order to* be read by the model.
 
 ## The derived schema is a stored format
 
@@ -92,7 +136,9 @@ does not cost an agent run; `properties` is left in declaration order, because i
 and canonical JSON sorts an object's keys anyway, so the order is free to be the one the model reads
 best; and `title` holds the payload type's **qualified name**, at every depth, which is §3.6 rule 6
 reaching the one place a reporting tool can carry it. `_object_schema` argues that one where it is
-written.
+written. A field's `description` is in the format on the same terms and the section above says what
+that buys: editing one re-runs every step that reports through the payload, which is the point of it
+rather than a cost of it.
 
 `additionalProperties: false` is included because the alternative is a schema that permits what the
 handler refuses. An unknown key is a rejection below whatever the schema says, so saying `false` is
@@ -140,13 +186,21 @@ together, because the one that is left is the one nothing can close from here:
    and the wrong type handed back to a run that carries on. `_object_schema` now writes that
    qualified name into the derived schema as `title`, at every depth, which puts it in
    `base_of`'s terms without `Tool` growing a field the port has no use for.
-2. **Open, and unclosable from here: the schema describes shape, and a dataclass validates in
-   `__post_init__`.** That is how every dataclass in this repository states its rules, and adding or
-   tightening one changes what converts while changing nothing in the derived schema - so a recorded
-   value really can stop converting with its fingerprint still matching. That is the case §3.6 says
-   cannot happen. `read` turns it into an `InternalError` naming the payload type, which is the
-   honest report, not a fix. §3.6 rule 6 names this exception itself: a `__post_init__` "is
-   invisible to a derived schema".
+2. **Open in general, and payable per rule since 19.2: the schema describes shape, and a dataclass
+   validates in `__post_init__`.** That is how every dataclass in this repository states its rules,
+   and adding or tightening one changes what converts while changing nothing in the derived schema -
+   so a recorded value really can stop converting with its fingerprint still matching. That is the
+   case §3.6 says cannot happen, and §3.6 rule 6 names this exception itself: a `__post_init__` "is
+   invisible to a derived schema". `read` turns it into an `InternalError` naming the payload type,
+   which is the honest report and not a fix.
+
+   **What `describe()` changes is that a payload can now buy its way out of this one rule at a
+   time.** A `__post_init__` is invisible because it is code and the schema is data; a rule
+   *interpolated into a field's description* is data, so it moves the digest and the stale entry is
+   discarded exactly as §3.6 promises. `fix/findings.py` is the worked example - one `SEVERITIES`,
+   read by the field description and by the check - and the general leak is still open for every
+   rule an author does not state where the model can read it. That is a bearable shape for it: a
+   check the model is never told about is one the model cannot satisfy on purpose anyway.
 
 What *does* fall out free is now every structural change and every change of identity: a field
 added, removed, renamed or retyped moves `properties` or `required`, and renaming or moving the
@@ -155,16 +209,16 @@ holds for the shape of a payload and for which type it is, and not for what a pa
 """
 
 from collections.abc import Callable, Mapping
-from dataclasses import MISSING, dataclass, field, fields, is_dataclass
+from dataclasses import MISSING, Field, dataclass, field, fields, is_dataclass
 from math import isfinite
 from types import MappingProxyType, UnionType
-from typing import Any, Final, get_args, get_origin, get_type_hints
+from typing import Any, Final, get_args, get_origin, get_type_hints, overload
 
 from agl.ports.agent import Tool, ToolResult
 from agl.ports.errors import InputError, InternalError
 from agl.ports.run import JsonValue
 
-__all__ = ["ReportingTool", "Tool", "ToolResult", "reporting_tool"]
+__all__ = ["ReportingTool", "Tool", "ToolResult", "describe", "reporting_tool"]
 
 # The four field types that are a JSON scalar, each with the word JSON Schema uses for it and the
 # words a *model* is told when it sends something else. One table and not two, so that a type
@@ -188,6 +242,14 @@ _SUPPORTED: Final = (
 # How much of an offending value goes into a message the model reads. Long enough to identify what
 # it sent, short enough that a payload holding a whole file does not become the refusal.
 _SHOWN = 80
+
+# Where `describe()` leaves a field's description, and where `_description` looks for it. Namespaced
+# for `sdk/params.py::_METADATA_KEY`'s reason and spelled the same way: `Field.metadata` is one open
+# mapping shared with whatever else an author puts there, so a bare `"description"` would be a name
+# this module has no claim on. A payload dataclass reaching this key by hand rather than through
+# `describe()` is not a case worth a refusal - the key says whose it is - so anything under it that
+# is not a `str` is simply not a description.
+_METADATA_KEY: Final = "agl.sdk.tools"
 
 
 @dataclass(frozen=True, slots=True)
@@ -308,6 +370,55 @@ def reporting_tool[P](name: str, description: str, payload: type[P]) -> Reportin
     return ReportingTool(name=name, description=description, payload=payload)
 
 
+@overload
+def describe[T](text: str, *, default: T) -> T: ...
+@overload
+def describe(text: str) -> Any: ...
+def describe(text: str, *, default: Any = MISSING) -> Any:
+    """Say what one payload field is, in the schema the model is shown. One line, at the field:
+
+        @dataclass(frozen=True, slots=True)
+        class Finding:
+            severity: str = describe(f"one of {', '.join(SEVERITIES)}")
+            file: str
+
+    The text becomes that field's `description` in the derived schema, which every backend puts in
+    front of the model beside the field name. A field declared without one is unchanged and that is
+    the ordinary case; this is for the fields whose *values* have a rule the name cannot carry -
+    the module docstring's fixed vocabulary above all, since `sdk/tools.py` refuses an enum and
+    this is what it refuses one in favour of.
+
+    **It is a fingerprint term, and that is the half worth knowing.** The schema goes into
+    `base_of`, so editing this text re-runs every step that reports through the payload - the same
+    bargain `Role.instructions` makes, and for the same reason: a description is what the agent was
+    asked for, so a replayed result produced under the old wording is not this step's result. It is
+    also what makes a rule stated here immune to §3.6 rule 6's `__post_init__` hole, which the
+    module docstring argues at length.
+
+    `dataclasses.field(metadata=...)` under one namespaced key, exactly as `sdk/params.py::arg()`
+    declares a flag, down to typeshed's overload trick: `severity: str = describe(...)` is a
+    **required** field because a `field()` with no `default` is one `dataclasses` insists on, and
+    `describe(..., default=1.0)` is an optional one for the same reason. Required-ness is not a
+    concept either function has. `_required` reads the same two attributes it always did.
+
+    `InputError` at declaration time for text that is empty or nothing but whitespace, which is
+    `ReportingTool.__post_init__`'s refusal of an empty *tool* description one level down: a field
+    that asked to say something and said nothing puts an empty string in the fingerprint and in
+    front of the model, and neither reader is better off for it.
+    """
+    if not text.strip():
+        raise InputError(
+            f"a field was described with {text!r}, and a description is what the model reads "
+            f"beside the field name to know what belongs in it. Give it a sentence or leave the "
+            f"field undescribed - an empty one is a term in every digest this payload writes and "
+            f"is nothing at all to the model"
+        )
+    described = {_METADATA_KEY: text}
+    if default is MISSING:
+        return field(metadata=described)
+    return field(default=default, metadata=described)
+
+
 def _object_schema(
     kind: type[Any], where: str, inside: tuple[type[Any], ...]
 ) -> dict[str, JsonValue]:
@@ -343,8 +454,11 @@ def _object_schema(
     **`title` and not `$id` or `description`.** `title` is a JSON Schema *annotation*: it has no
     validating behaviour in any draft, so no vendor's validator can reject a payload over it and no
     backend has to be told about it. `$id` would be read as a base URI and change how `$ref` is
-    resolved in a schema that grew one; `description` is the author's own prose about the payload
-    and would put a second voice in it.
+    resolved in a schema that grew one; `description` is the author's own prose and putting a
+    qualified type name there would have put a second voice in it. That last sentence has a
+    consequence now that `describe()` exists: a `description` on this object would be prose about
+    *the payload*, which is what the tool's own `description` already is, so nothing writes one
+    here. The key that is written is one level down, on a field, where the prose is about the field.
 
     **What it costs, stated rather than discovered.** The value reaches the model, which is
     acceptable and arguably useful - the model is told the name of the thing it is filling in, and
@@ -365,7 +479,17 @@ def _object_schema(
     properties: dict[str, JsonValue] = {}
     required: list[JsonValue] = []
     for spec in fields(kind):
-        properties[spec.name] = _schema_for(hints.get(spec.name), _at(where, spec.name), nested)
+        # The description is written onto whatever the annotation derived rather than passed down
+        # into the derivation, which is what keeps `describe()` orthogonal to every field type
+        # there is: an optional derives an `anyOf` and an array derives `items`, and `description`
+        # is an annotation keyword JSON Schema allows beside either. It goes on last so a reader
+        # of the object meets the shape before the prose, and the key order is free - canonical
+        # JSON sorts an object's keys before anything is hashed.
+        schema = _schema_for(hints.get(spec.name), _at(where, spec.name), nested)
+        described = _description(spec)
+        if described is not None:
+            schema["description"] = described
+        properties[spec.name] = schema
         if _required(spec.default, spec.default_factory):
             required.append(spec.name)
     return {
@@ -383,11 +507,15 @@ def _object_schema(
     }
 
 
-def _schema_for(hint: object, where: str, inside: tuple[type[Any], ...]) -> JsonValue:
+def _schema_for(hint: object, where: str, inside: tuple[type[Any], ...]) -> dict[str, JsonValue]:
     """One field's annotation as JSON Schema, or `InputError` naming the field and the type.
 
     `X | None` is spelled `anyOf` rather than a two-member `type` array, because the second cannot
     describe an optional object at all and one spelling for every optional is one thing to read.
+
+    A `dict` and not a `JsonValue`, which every branch below already answered with and which is
+    what lets `_object_schema` write a described field's `description` onto the result without
+    narrowing something it just built.
     """
     optional = _optional(hint)
     if optional is not None:
@@ -613,6 +741,19 @@ def _required(default: object, factory: object) -> bool:
     that *is* the required list. A sentinel of our own would answer a settled question twice, and
     would be free to disagree with the constructor about which fields it applies to."""
     return default is MISSING and factory is MISSING
+
+
+def _description(spec: Field[Any]) -> str | None:
+    """What `describe()` left on this field, or `None` for a field that was not described.
+
+    `Field.metadata` is a mapping over whatever the author passed, so the value under our key is
+    `object` until something narrows it. The `isinstance` is that narrowing and is also the whole
+    of what this module does about a payload that wrote the key by hand: the key is namespaced,
+    `describe()` is the one thing that writes it, and anything under it that is not a string is
+    not a description rather than an error - `_METADATA_KEY` argues that.
+    """
+    held = spec.metadata.get(_METADATA_KEY)
+    return held if isinstance(held, str) else None
 
 
 def _at(where: str, name: object) -> str:

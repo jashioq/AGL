@@ -5,15 +5,16 @@ it - worktrees at 13, integration at 14, the terminal at 15. It does those five 
 
     journal lookup -> `AgentTask` from the `Role` -> dispatch -> commit-or-wipe -> entry write
 
-and the last arrow is the one place in this design where a mistake destroys work rather than merely
-costing a re-run. §3.3 states that failure in full: "a `run.commit()` after the step would run
-*after* the entry was written, so the recorded `head` would predate the commit - and `head` is the
-reset target, so the next step to miss its fingerprint would delete the work." Committing is
-therefore inside the step's atomic unit, which is why `commit=` is a parameter here and not a call
-of its own - and why the ordering is not this module's to keep. `journal.py`'s walk owns it: this
-module hands that walk a worker and a `commit=`, and the walk restores, runs, commits or wipes,
-reads the head and writes the entry, in that order, in one function. Nothing in this file reads a
-head or writes an entry, so there is no second place the order could be wrong.
+and the last arrow is one of the three places in this design where a mistake destroys work rather
+than merely costing a re-run (§3.3, with §3.6's unrecorded landing and §3.4's red gate the others).
+§3.3 states that failure in full: "a `run.commit()` after the step would run *after* the entry was
+written, so the recorded `head` would predate the commit - and `head` is the reset target, so the
+next step to miss its fingerprint would delete the work." Committing is therefore inside the step's
+atomic unit, which is why `commit=` is a parameter here and not a call of its own - and why the
+ordering is not this module's to keep. `journal.py`'s walk owns it: this module hands that walk a
+worker and a `commit=`, and the walk restores, runs, commits or wipes, reads the head and writes the
+entry, in that order, in one function. Nothing in this file reads a head or writes an entry, so
+there is no second place the order could be wrong.
 
 Two things here are ordered all the same, and both are ordered by what §3.6 fingerprints:
 
@@ -45,10 +46,11 @@ It is one `capabilities()` call per model per run - the run's own table is passe
 `sdk/workflow.py` is the surface: a decorator, a frozen `Run`, and `Stop`. This is plumbing - a
 lock, a lazily opened checkout, a capture cell, a walk - and `sdk/_engine/` is where `sdk/` keeps
 plumbing, which `services.py` argues at length for the bundle. Two smaller reasons point the same
-way. `workflow.py` is already at the project's 300-line convention, so the member that costs the
-most to read wrongly would be the one arriving at the bottom of the longest file in the package.
-And a workflow author reading `workflow.py` to find out what a `Run` *is* should not have to read
-past the engine to get there.
+way. `workflow.py` is the longest file `sdk/` puts in front of a workflow author - nine hundred and
+fifty lines, nearly all of them the argument for the authoring surface - so the member that costs
+the most to read wrongly would be the one arriving at the bottom of it. And a workflow author
+reading `workflow.py` to find out what a `Run` *is* should not have to read past the engine to get
+there.
 
 ## The checkout is opened once, lazily, and the lock here is not the journal's
 
@@ -107,7 +109,7 @@ commit id, once, and gives the one value to the checkout and to the `Journal` al
 own docstring carries the argument, and the shared half is §3.6's: the chain is logical, so neither
 of them may reach for `Workspace.head()` or a branch tip - both of which run ahead of the chain the
 moment something moves the branch without journalling it, which a step that raised after `commit=`
-already does today and `integrate()` will do deliberately at stage 14.
+does by accident and `integrate()` does deliberately on every landing.
 
 ## The reporting tool: converted here, captured here, and never named across the port
 

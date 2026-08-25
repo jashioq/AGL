@@ -49,7 +49,8 @@ it, is not handed it, and does not know it exists.
 ## The lease is the framework's, deliberately
 
 §3.4 gives the framework a lease per integration target - landings into one target are serialised,
-and the lease is released when the run exits. It is not modelled here, and the boundary is worth
+and the lease is released when the outcome settles, with run exit "the sweeper, not the lifetime"
+behind that. It is not modelled here, and the boundary is worth
 arguing rather than asserting, because "hold" appears on both sides of it.
 
 The lease is a rule about AGL's own concurrency: how many of its own runs may be asking at once, and

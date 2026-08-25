@@ -70,7 +70,7 @@ should find it here, in the same place the port's own docstring sends them.
 
 **A `Verifier` is not among the fixtures, and that is a decision rather than an omission.** The gate
 contributes exactly one `bool` to this sequence and no observable state: whether the framework takes
-the undo branch is `sdk/_engine/integration.py`'s to decide and stage 9's to test, and the property
+the undo branch is `sdk/_engine/integration.py`'s to decide and stage 14's to test, and the property
 here is true of every path that reaches it. Requiring one would also make the integrator half of
 this suite unrunnable at the stage it is written for - stage 5 ships the git adapters and stage 6
 ships the first `Verifier`, and the build stages split this deliverable's acceptance across exactly

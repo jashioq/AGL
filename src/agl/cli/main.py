@@ -106,7 +106,7 @@ nobody wrote down, which stops working the day a second flag makes it ambiguous"
 ## The handler, and the ordering §3.1 makes a stage-10 acceptance criterion
 
 `Stop` descends from `AglError`, so a bare `except AglError` above it swallows a deliberate end and
-reports 6 or 70 where the contract promises 7. The three clauses below are therefore in one order
+reports 6 or 70 where the contract promises 7. The four clauses below are therefore in one order
 and only one, and each renders differently on purpose:
 
   * `Stop` - **stdout, no prefix, no traceback.** A run that ended deliberately did not fail, and
@@ -115,15 +115,40 @@ and only one, and each renders differently on purpose:
     an outcome-only test cannot fail on a swap, while a test reading stdout can.
   * `AglError` - **stderr, prefixed `agl:`, no traceback.** A refusal is the message, and every one
     a user can provoke carries a sentence written where the facts were.
+  * `ExceptionGroup` - **each leaf rendered as what it is, and one sentence naming all of them
+    beside the status they produced.** §3.1 gives a group its own rule because structured
+    concurrency is the shape the plan gives `split` and tickets, so a group is the normal way a
+    concurrent run fails rather than an edge; `cli/exit_codes.py` answers the number and
+    `_severally` below answers the other half of that clause, "naming all of them", which a
+    function returning an `int` cannot print.
   * `Exception` - **stderr, with the traceback, and a sentence saying it is ours.** §1.5's charge is
     that `_cmd_run` ended in a bare `except Exception` rendering any bug as `error: <str>`; the fix
     is not to stop catching but to stop hiding. `cli/exit_codes.py` argues why this is 70.
+
+**A group could not stay in that last clause, and what was wrong there was the message as much as
+the number.** An `ExceptionGroup` is an `Exception`, so before 19.0 every one of them landed in the
+bottom arm: an `UpstreamError` raised in a chunk was printed under a sentence saying an adapter
+failed to translate something - false of a group whose every leaf was translated exactly as
+intended - and a workflow's `Stop` in a chunk was printed as a traceback with "file a bug" under it.
+Exit codes are public API (§3.1) and the sentence beside one is how an operator reads it, so both
+halves are fixed in the deliverable that found them: the code in `cli/exit_codes.py`, the message
+here.
+
+The arm renders the group **as a group**, by asking §3.1's own questions of it once each, rather
+than by re-deriving the three clauses above as an `if`/`elif` chain over each leaf. That chain would
+be a second copy of the ordering rule inside the one file that exists to hold exactly one - and the
+criterion this section opens with, which is pinned by reading `main`'s clause order off this
+module's source, would stop having any teeth the moment the rendering it pins moved into a helper.
 
 `KeyboardInterrupt` is deliberately unanswered and there is no `BaseException` arm. `exit_status`
 takes `Exception`, so writing one would not typecheck, and `cli/exit_codes.py`'s docstring gives the
 reason at length: a Ctrl-C is the operator taking the process back, and the faithful end is to die
 of the signal rather than to exit with a number that resembles it. `SystemExit` is left alone for
 the same structural reason and one practical one - `-h` exits 0 through it, and must keep doing so.
+**The group arm is spelled `ExceptionGroup` for that same reason**: a `TaskGroup` whose children all
+raised `Exception`s hands back an `ExceptionGroup`, and one whose child took a Ctrl-C hands back a
+`BaseExceptionGroup`, which is not an `Exception` - so it passes every arm here by construction and
+the interpreter's own ending stands, exactly as it does for a sequential run.
 
 **No number is written in this file.** Every arm resolves through `exit_status`, and success is the
 command's to return, because success is not an entry in `ports/errors.py`'s table and must not
@@ -186,7 +211,7 @@ from agl.cli.commands import init as init_command
 from agl.cli.commands import resume as resume_command
 from agl.cli.commands import run as run_command
 from agl.cli.commands import workflows as workflows_command
-from agl.cli.exit_codes import exit_status
+from agl.cli.exit_codes import exit_status, leaves
 from agl.config import container, sources
 from agl.config.schema import Settings
 from agl.ports.errors import AglError, InputError, InternalError, Stop
@@ -283,7 +308,7 @@ def main(argv: Sequence[str] | None = None, *, compose: Compose | None = None) -
     `argv` is `sys.argv[1:]` when it is `None`, which is `argparse`'s own default rather than a
     second statement of it. `compose` is the composition seam and `None` is the real one.
 
-    Returns rather than exits, on every path. The three clauses below are in the one order §3.1
+    Returns rather than exits, on every path. The four clauses below are in the one order §3.1
     permits and each renders differently; `-h` still leaves through `SystemExit`, which is a
     `BaseException` and therefore none of this function's business.
     """
@@ -300,6 +325,11 @@ def main(argv: Sequence[str] | None = None, *, compose: Compose | None = None) -
     except AglError as refusal:
         print(f"{_PROGRAM}: {refusal}", file=sys.stderr)
         return exit_status(refusal)
+    except ExceptionGroup as concurrent:
+        # Several outcomes at once, which is what a `TaskGroup` hands back. Ahead of the clause
+        # below because a group is AGL's own concurrency reporting what its children raised, and
+        # never an exception nobody translated - the one thing that clause's sentence claims.
+        return _concurrent(concurrent)
     except Exception as bug:
         # The traceback first and the sentence last, because the last line is the one that is read.
         print_exception(bug, file=sys.stderr)
@@ -455,3 +485,70 @@ def _no_tail(command: str, tail: Sequence[str]) -> None:
             f"-n <label> [workflow flags]`; `{_PROGRAM} workflows <workflow>` lists the flags one "
             f"takes"
         )
+
+
+def _concurrent(group: ExceptionGroup[Exception]) -> int:
+    """Report what a `TaskGroup`'s children raised, and answer with §3.1's status for the group.
+
+    Two splits and a sentence. The splits ask the questions `main`'s own clauses ask, once of the
+    whole group rather than once per leaf, so the ordering §3.1 makes a stage-10 acceptance
+    criterion keeps exactly one statement in this file instead of gaining an `if`/`elif` copy.
+    `split(Stop)` is that ordering written as data: the deliberate ends print on stdout with no
+    prefix, exactly as one arriving alone does, and only what is left is a failure at all. Splitting
+    the remainder again on `AglError` isolates the leaves nobody translated, which are the only ones
+    a traceback is for - §1.5's fix "is not to stop catching but to stop hiding", and a stack under
+    a refusal somebody wrote in words hides it in the other direction.
+
+    **The order of the two splits is load-bearing**, and for §3.1's own reason: `Stop` descends from
+    `AglError`, so asking about `AglError` first would take every deliberate end into the translated
+    half and lose it there - the same swap the clause order in `main` exists to prevent, one level
+    down and in a different spelling.
+
+    `_severally` prints last because the last line is the one that is read, and it is printed only
+    when something failed: a group holding nothing but deliberate ends is a run that ended
+    deliberately several times over, which says so on stdout and has nothing to say on stderr.
+    """
+    deliberate, failed = group.split(Stop)
+    if deliberate is not None:
+        for stop in leaves(deliberate):
+            print(f"stopped: {stop}")
+    if failed is not None:
+        _, untranslated = failed.split(AglError)
+        if untranslated is not None:
+            print_exception(untranslated, file=sys.stderr)
+            print(f"{_PROGRAM}: {_OUR_BUG}", file=sys.stderr)
+        print(f"{_PROGRAM}: {_severally(group)}", file=sys.stderr)
+    return exit_status(group)
+
+
+def _severally(group: ExceptionGroup[Exception]) -> str:
+    """Every leaf of `group`, named beside the status it resolves to, under what the run exits with.
+
+    §3.1's group rule ends "naming all of them", and this is that half of it: `exit_status` answers
+    with an `int` and cannot print, so the naming is written where the messages are. **All of them,
+    not only the ones that failed** - a `Stop` in one chunk beside an `UpstreamError` in another is
+    precisely why such a run exits 70, and an operator shown only the failure is left to guess what
+    it disagreed with.
+
+    The two sentences differ because the fact does. Agreement is unremarkable and says so: the run
+    exits what any one of these would have exited on its own, which is the parity §3.1 wrote the
+    rule to get. Disagreement is the case the plan argues at length, and the sentence carries that
+    argument rather than the number alone - because 70 read on its own is `InternalError`'s usual
+    meaning, "file a bug", and a run that failed several well-translated ways is not a bug in AGL.
+    """
+    held = tuple(leaves(group))
+    status = exit_status(group)
+    named = "\n".join(f"    {exit_status(one)}  {type(one).__name__}: {one}" for one in held)
+    if {exit_status(one) for one in held} == {status}:
+        return (
+            f"this run's concurrent children raised, and every one of them below is exit {status} "
+            f"- so that is what the run exits with, exactly as any one of them raised on its own "
+            f"would have:\n{named}"
+        )
+    return (
+        f"this run's concurrent children raised, and they do not resolve to one exit status - so "
+        f"the run exits {status}. A run that failed several different ways is not attributable to "
+        f"one code (§3.1), and `InternalError`'s is the honest answer rather than a guess at which "
+        f"of them was the real one, so read this {status} as 'these disagreed' and not as its "
+        f"usual 'file a bug'. All of them, with the status each resolves to on its own:\n{named}"
+    )

@@ -1,11 +1,13 @@
 """Paths under the trees root - what Workspace addresses. Never conflated with home_layout.
 
-The trees root holds working checkouts: real git worktrees with the user's code in them, one
-per namespace, cut from the run's base. `AGL_HOME` holds AGL's own state and `home_layout.py`
-is the only module that computes under it. Nothing here can be handed that root: this module
-speaks `TreesRoot`, that one speaks `AglHome`, neither imports the other, `mypy --strict`
-refuses the call, and `_root` below refuses it again at runtime because the two wrappers are
-structurally identical and nothing but the class itself tells them apart.
+The trees root holds working checkouts: real git worktrees with the user's code in them, one per
+namespace, cut from the run's base. `AGL_HOME` holds AGL's own state and `home_layout.py` is the
+only module that computes under it. This one is the only module that computes a *checkout's* path
+under the trees root - `adapters/git/_trees.py` composes one more name there, the registry lock file
+§3.9 puts at the root, which is a lock and not a place code lives. Nothing here can be handed that
+root: this module speaks `TreesRoot`, that one speaks `AglHome`, neither imports the other,
+`mypy --strict` refuses the call, and `_root` below refuses it again at runtime because the two
+wrappers are structurally identical and nothing but the class itself tells them apart.
 
 The layout, from the plan:
 

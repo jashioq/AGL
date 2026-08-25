@@ -39,14 +39,15 @@ called many times a second for as long as it is on screen, and everything below 
   of conflict - the work would not combine, or it combined and failed the build gate - and
   `conflict.py` argues why that is one view with two bodies rather than two views.
 
-## Where these two are written against, and the one place that is not the SDK
+## Where these two are written against, and it is the SDK throughout
 
-`Screen`, `Rows`, `Row`, `Choice` and `Run` come through the SDK's front door. `Conflict` and
-`VerifierOutcome` do not: they are not on `agl.sdk`, so `conflict.py` imports them from
-`agl.ports`, which contract 6 permits and `ARCHITECTURE.md` §5's stronger convention does not
-like. That is the same tripwire `chunks.py` reports for `Namespace`, firing a second time, and it
-is reported as a missing re-export rather than closed here - widening `sdk/__init__.py` is a diff
-outside this package, which is exactly what stage 18 measures.
+`Screen`, `Rows`, `Row`, `Choice` and `Run` come through the SDK's front door, and so do `Conflict`
+and `VerifierOutcome`. The last two did not, at stage 18: they were absent from `agl.sdk`, so
+`conflict.py` imported them from `agl.ports` - permitted by contract 6, disliked by
+`ARCHITECTURE.md` §5's stronger convention, and the same tripwire `chunks.py` reported for
+`Namespace`, firing a second time. It was reported rather than closed because widening
+`sdk/__init__.py` is a diff outside this package and taking that measurement was what stage 18
+existed for. 19.2 closed it, and there is no longer a name in this package that is not the SDK's.
 
 **No default view.** §3.7: a workflow that shows nothing renders nothing, and duplicated screens
 between workflows are accepted for the same reason as duplicated prompts. Neither function here is
