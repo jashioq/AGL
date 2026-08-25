@@ -26,6 +26,7 @@ agl = "agl.cli.main:main"
 [project.entry-points."agl.workflows"]
 noop = "agl.workflows.noop:noop"
 fix = "agl.workflows.fix:fix"
+split = "agl.workflows.split:split"
 
 [dependency-groups]
 dev = [

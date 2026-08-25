@@ -18,13 +18,17 @@ override its fixtures, and add nothing:
         def terminal(self) -> Terminal:
             return TheHeadlessOneIWrote(...)     # no driver: it displays nothing
 
-The real adapter and the fake both run these classes, which is the whole mechanism keeping a fake
-from drifting into fiction (§1.9) - and here it matters more than anywhere else in the package,
-because §3.7 has the headless behaviour *double* as the fake. The two are not an implementation and
-a stand-in for it; they are two implementations of one port, and this is what keeps them honest. It
-is written at stage 3, before either exists, because a subagent that writes its own tests writes
-tests that pass - and stage 6 ends with "contract suite 3.5 passes", a sentence worth something only
-when the suite had no stake in the outcome.
+Three classes run these, which is the whole mechanism keeping a fake from drifting into fiction
+(§1.9) - and here it matters more than anywhere else in the package, because §3.7 has the headless
+behaviour *double* as the fake. They are not one implementation and two stand-ins for it; they are
+three implementations of one port, and this is what keeps them honest. `RichTerminal` is the one a
+person sits in front of, `HeadlessTerminal` is the one that runs unattended, and `ScriptedTerminal`
+- what `agl.testing.answering([...])` builds - is the one written *for* tests, which is precisely
+why it is graded here rather than trusted: a terminal a test drives that is under no suite's eye is
+a mock, and a mock is where the fiction §1.9 is about gets in. It is written at stage 3, before any
+of them exists, because a subagent that writes its own tests writes tests that pass - and stage 6
+ends with "contract suite 3.5 passes", a sentence worth something only when the suite had no stake
+in the outcome.
 
 `TerminalContract` is one class assembled from four modules and `HeadlessTerminalContract` from two;
 only those two names and `TerminalDriver` are public. `_terminal_lifecycle` holds what both owe -

@@ -8,7 +8,7 @@ they stop agreeing. `tests/test_contract_listings.py` is the precedent and the a
 is a name an author imports from `agl.ports` instead, which is the thing the facades exist to
 prevent.
 
-## Four claims, and none of them hardcodes the surface
+## Four claims about the door, and none of them hardcodes the surface
 
 **Nothing below carries a copy of what is on the door.** `_DOOR` maps each submodule to *how much*
 of it the door takes - all of it, or a named few - and every comparison is between `agl.sdk.__all__`
@@ -35,13 +35,23 @@ one person updated both at once.
 
 ## What `sdk/params.py` costs, and why it is the only partial one
 
-Five of the six submodules put their whole `__all__` on the door. `sdk/params.py` puts one name of
+Six of the seven submodules put their whole `__all__` on the door. `sdk/params.py` puts one name of
 six, and the other five are framework: `parse` is what `api.run` does to argv, `from_json` what
 `api.resume` does to a record, `parser_for` and `RefusingParser` what `agl workflows <name>`
 formats, `to_json` what the record is written with. An author declares fields with `arg()` and reads
 `run.params`. So the door takes `arg` and the drift check for that module is written the other way
 round - the five are named in `_ABSENT`, so adding a seventh name to `sdk/params.py` and leaving it
 unclassified fails here.
+
+## And a fifth claim, about the facade that takes part of its port
+
+`sdk/errors.py` arrived at 18.0 and is whole-on-the-door like the other five, so the four claims
+above cover it - but it is the first facade whose *port* module it takes only part of, `ports/
+errors.py` holding the hierarchy and the exit-code table both. That cut is checked separately and
+in both directions, over `ports.errors.__all__` rather than over a list here, so a tenth class on
+the hierarchy fails on the commit that adds it. `Stop` is the interesting entry: it is in the
+hierarchy, it is on the door, and it gets there through `sdk/workflow.py` instead - which is a
+claim worth pinning rather than a gap, one name having one import path into one front door.
 """
 
 import ast
@@ -54,8 +64,10 @@ from typing import Final
 import pytest
 
 import agl.sdk
+from agl.ports import errors as ports_errors
 from agl.ports import questions as ports_questions
 from agl.ports import terminal as ports_terminal
+from agl.sdk import errors as sdk_errors
 
 PACKAGE: Final = "agl.sdk"
 SDK_DIR: Final = Path(agl.sdk.__file__).resolve().parent
@@ -69,7 +81,23 @@ _DOOR: Final[Mapping[str, frozenset[str] | None]] = {
     "agl.sdk.tools": None,
     "agl.sdk.terminal": None,
     "agl.sdk.questions": None,
+    "agl.sdk.errors": None,
     "agl.sdk.params": frozenset({"arg"}),
+}
+
+# What `ports/errors.py` exports that `sdk/errors.py` deliberately does not, each with the reason.
+# That facade is the one whose port module holds two vocabularies rather than one - "the `AglError`
+# hierarchy ... **and** the one exception -> exit-code table in the codebase" - so it is the one
+# facade that takes a part, and this is the machine-checkable half of the argument it makes for
+# where the cut falls. It is also what makes a *tenth* class on the hierarchy a failure here rather
+# than a name an author quietly imports from `agl.ports` instead.
+_NOT_ON_THE_ERROR_FACADE: Final[Mapping[str, str]] = {
+    "EXIT_CODES": "the CLI's half of `ports/errors.py`: an exit code is what a process answers "
+    "with, and `cli/exit_codes.py` re-exports that table and holds none of its own",
+    "exit_code_for": "the CLI's, for the same reason, and the only supported way to read that "
+    "table",
+    "Stop": "already on the door through `sdk/workflow.py`, beside the `Run` it is raised out of "
+    "(§3.3's 'six members, plus `Stop`') - one name does not get two import paths into one door",
 }
 
 # Names a submodule in `_DOOR` exports that the door deliberately does not, each with the reason.
@@ -193,6 +221,58 @@ def test_nothing_off_the_authoring_surface_reaches_the_door(module: str, reason:
         f"{leaked} appear on `agl.sdk`'s front door and are exported by {module}, which is off the "
         f"authoring surface: {reason}."
     )
+
+
+def test_the_error_facade_takes_the_hierarchy_and_names_everything_it_leaves() -> None:
+    """`sdk/errors.py` is the one facade over a port module that holds two vocabularies.
+
+    Written over `ports.errors.__all__` rather than over a list of nine here, so a class added to
+    the hierarchy and forgotten fails on the commit that adds it. Both directions, for `_ABSENT`'s
+    reason one section up: without the second half this mapping would be a place to silence the
+    first rather than a record of a decision.
+    """
+    facade = _exported(sdk_errors)
+    unclassified = sorted(
+        name
+        for name in _exported(ports_errors)
+        if name not in facade and name not in _NOT_ON_THE_ERROR_FACADE
+    )
+    assert not unclassified, (
+        f"src/agl/ports/errors.py exports {unclassified}, which `sdk/errors.py` does not re-export "
+        f"and `_NOT_ON_THE_ERROR_FACADE` in this test does not explain.\n\n"
+        f"A class in the `AglError` hierarchy that is not on the front door is a class a workflow "
+        f"author imports from `agl.ports` in order to assert how their run refused, which is what "
+        f"that facade exists to prevent. Add it to `sdk/errors.py` and to `sdk/__init__.py`, or "
+        f"name it here with the reason it is out."
+    )
+    claimed_out = sorted(name for name in _NOT_ON_THE_ERROR_FACADE if name in facade)
+    assert not claimed_out, (
+        f"{claimed_out} are re-exported by `sdk/errors.py` and are also named in "
+        f"`_NOT_ON_THE_ERROR_FACADE` in this test as deliberately not. One of the two is wrong."
+    )
+
+
+@pytest.mark.parametrize("name", sorted(_exported(sdk_errors)))
+def test_the_error_facade_re_exports_the_class_ports_defines(name: str) -> None:
+    """`is`-identical, and here that is load-bearing rather than a matter of hygiene.
+
+    `except` and `pytest.raises` compare identity up the MRO, so a facade that wrapped, aliased or
+    re-declared an exception would hand an author a class that never catches what AGL raised - a
+    failure that looks like the framework not refusing at all.
+    """
+    assert getattr(sdk_errors, name) is getattr(ports_errors, name)
+
+
+def test_stop_reaches_the_door_through_the_workflow_module_and_not_through_the_facade() -> None:
+    """The one class in the hierarchy that is on the door from somewhere else, and stays that way.
+
+    `sdk/errors.py` holds what a workflow catches or asserts on; `Stop` is the one class a workflow
+    *raises*, and it is a declaration made beside `@workflow` and `Run`. What this pins is the
+    consequence: one name, one import path into the door, and `agl.sdk.Stop` is still the port's
+    own class either way.
+    """
+    assert agl.sdk.Stop is ports_errors.Stop
+    assert "Stop" not in _exported(sdk_errors)
 
 
 def test_the_two_sentences_the_repository_writes_about_this_are_true() -> None:

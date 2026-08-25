@@ -65,12 +65,14 @@ adapter. No module outside it may import from `agl.adapters.*`. Enforced by cont
   into `ports`. If the components lived in `sdk/`, `ports` would have to import `sdk` and the
   layering would invert.
 - **`sdk/__init__.py` is the SDK's front door and re-exports the whole authoring surface** — every
-  name from `workflow`, `roles`, `tools`, `params`, `terminal` and `questions` that a workflow is
-  written out of, `__all__` typed out and never computed. Per-submodule imports go on working and
-  name the same objects; `_engine` is not on it and does not become so. `sdk/roles.py` carries the
-  port enums a `Role` is declared out of (`Claude`, `OpenAI`, `ModelId`, `Restriction`,
+  name from `workflow`, `roles`, `tools`, `params`, `terminal`, `questions` and `errors` that a
+  workflow is written out of, `__all__` typed out and never computed. Per-submodule imports go on
+  working and name the same objects; `_engine` is not on it and does not become so. `sdk/roles.py`
+  carries the port enums a `Role` is declared out of (`Claude`, `OpenAI`, `ModelId`, `Restriction`,
   `Capability`, `QuestionHandler`) for the same reason `sdk/tools.py` carries `Tool`, so the front
-  door takes every name from a module in its own package.
+  door takes every name from a module in its own package. `sdk/errors.py` is the third pure
+  re-export facade and joined at 18.0, when a workflow's own test file had to reach into
+  `agl.ports.errors` to say how a run refused — the tripwire `sdk/__init__.py` set at 16.5, fired.
 - **There is no `presentation/` layer.** Components live in `ports/terminal.py`, re-exported
   through `sdk/terminal.py`; rendering lives in `adapters/rich_terminal/`. A neutral layer
   between them was considered and rejected: forcing a terminal and a websocket into one shape
@@ -107,7 +109,7 @@ adapter. No module outside it may import from `agl.adapters.*`. Enforced by cont
 | `git/` | `WorkspaceProvider`, `Integrator` **and** `History`, over a shared internal git runner. Real + fake |
 | `shell/` | `Verifier`, running the build command as a subprocess. Real + fake |
 | `filesystem/` | `Store`, atomic via temp file + `os.replace`, plus the in-memory store that is its fake |
-| `rich_terminal/` | `Terminal` rendering — the only place `rich` is imported. The headless terminal doubles as the fake |
+| `rich_terminal/` | `Terminal` rendering — the only place `rich` is imported. **Three implementations of one port**, all three under `tests/contracts/terminal.py`: `terminal.py` draws and reads a keyboard, `headless.py` drops a board and refuses a question and doubles as the fake, and `scripted.py` answers from a list of `Press` gestures — what `agl.testing.answering([…])` builds, so a workflow that asks a person something is testable without the `rich` extra. The last two import no `rich`; `scripted.py` shares `queues.py`'s slot and queues rather than reimplementing them |
 
 ### `sdk/` — what workflow authors build from
 
@@ -119,6 +121,7 @@ adapter. No module outside it may import from `agl.adapters.*`. Enforced by cont
 | `params.py` | `arg()` — a workflow's params dataclass becomes named CLI flags. No positionals |
 | `terminal.py` | Re-export facade over `ports.terminal` — no logic |
 | `questions.py` | Re-export facade over `ports.questions` — no logic |
+| `errors.py` | Re-export facade over `ports.errors` — no logic. The `AglError` hierarchy an author asserts a refusal with, and **only** the hierarchy: `EXIT_CODES` and `exit_code_for` are the CLI's (`cli/exit_codes.py` takes exactly that other half), and `Stop` reaches the door through `workflow.py`, beside the `Run` it is raised out of, so that one name has one import path in |
 | `testing.py` | The **scripting vocabulary** a workflow author writes an agent in: `Reply` (what an agent does for one task), `Call`, and `Agent = (AgentTask) -> Reply`. Port-typed, and it names no vendor and no fake — `sdk/` and `adapters/` are siblings, so `Script` and `Conversation` are not names it may write, and `config/container.py` compiles a `Reply` into the callable each fake consumes. The *builder* is `agl/testing.py`: contract 1 puts `sdk` below `config`, so nothing here can build a bundle |
 | `_engine/journal.py` | Internal: fingerprints, entries and replay — the ledger under `steps/` that makes a run resumable |
 | `_engine/steps.py` | Internal: what `run.step` is a delegate to — the journal lookup, the `AgentTask` a `Role` becomes, the dispatch, the commit-or-wipe and the entry write, in that order. It lives here and not in `workflow.py` because `sdk/` keeps its plumbing under `_engine/`, and because the one member that persists anything should not be read past on the way to the decorator. Also holds the cell behind `run.activity`: the last string the serving adapter reported, live-only and never persisted, which a frozen `Run` has nowhere to keep. And the one place a namespace's base is resolved — `WorkspaceProvider.open` takes a ref expression or a commit id, `Journal` takes only the second, so one `History.resolve` feeds both and the cut and the chain cannot disagree |
@@ -145,7 +148,7 @@ adapter. No module outside it may import from `agl.adapters.*`. Enforced by cont
 | `cli/main.py` | Parse argv, resolve settings, dispatch. **Composition is per-command** (§3.10): the project and the container are deferred into a callable the dispatch hands on, and only a command addressed to a repository calls it — `init` writes the project file a container needs, and `workflows` needs neither. Also **the one place `Path.cwd()` is read** in AGL: `_compose` reads it, the `Invocation` carries it, and both readers — `_registered` and `agl init` — receive it |
 | `cli/exit_codes.py` | Re-exports `EXIT_CODES` and `exit_code_for` from `ports/errors.py` and holds no table of its own — the table is there, in exactly one place. What to do with an exception that is **not** an `AglError` is this module's only decision |
 | `cli/commands/` | One module per subcommand: run, resume, clear, init, workflows |
-| `testing.py` | The harness a workflow author tests against: `harness(tmp_path, agent=…)` builds an all-fakes bundle, `run(workflow, *flags)` and `resume(workflow)` drive `api` over it, `recorded` is every entry the ledger took. A sibling of `cli/` (§2): a second caller of `api`, not a layer above one. Composes the entry point a `Workflow` object *would* be registered as and resolves it through `config/registry.py`, so the harness runs a workflow the way an installed one runs. **`interrupt_after=` is an interruption and not a kill** — in-process, `finally` blocks run — and says so; `tests/instruments/replay.py` is the version that is a kill |
+| `testing.py` | The harness a workflow author tests against: `harness(tmp_path, agent=…)` builds an all-fakes bundle, `run(workflow, *flags)` and `resume(workflow)` drive `api` over it, `recorded` is every entry the ledger took, `answering([…])` is a terminal that can answer a screen, and `a_run(harness, params, activity=…)` builds the live `Run` a board is a view of, with `reports(run, line)` beside it playing the adapter a second time so a board can be watched moving — between them **the one sanctioned write of `Steps._activity`**, here once instead of in every author's test file. A sibling of `cli/` (§2): a second caller of `api`, not a layer above one. Composes the entry point a `Workflow` object *would* be registered as and resolves it through `config/registry.py`, so the harness runs a workflow the way an installed one runs. **`interrupt_after=` is an interruption and not a kill** — in-process, `finally` blocks run — and says so; `tests/instruments/replay.py` is the version that is a kill |
 | `api.py` | run · resume · clear · init · list_workflows, plus `workflow_help` behind `agl workflows <name>`. Each takes what it needs and no more: the first three a `Services` and a project, `init` the settings plus the directory it was invoked in and how to ask one question, the last two neither. **`init` grows a `cwd` where §3.10 says "settings alone"** — that sentence is about needing no *container*, and a library whose one operation could only be driven by `os.chdir` would be worse for keeping it literally |
 
 ## 7. How to run the gates

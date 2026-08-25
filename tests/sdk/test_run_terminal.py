@@ -69,6 +69,7 @@ from agl.ports.ids import Namespace, ProjectName, RunLabel
 from agl.ports.terminal import Rows, Screen, Terminal, Text
 from agl.ports.tree_layout import TreesRoot
 from agl.ports.workspace import Workspace, WorkspaceProvider
+from agl.sdk import errors as sdk_errors
 from agl.sdk import questions as sdk_questions
 from agl.sdk import terminal as sdk_terminal
 from agl.sdk.workflow import Run, workflow
@@ -534,9 +535,24 @@ def test_the_facades_declare_nothing_of_their_own() -> None:
     the module, and the module is the only thing that can be asked.
 
     `sdk/tools.py` is deliberately not held to this - it re-exports `Tool` *and* carries the
-    reporting-tool declaration, and says so in its first paragraph - so this is a test about the two
-    modules `ARCHITECTURE.md` §5 names and no third.
+    reporting-tool declaration, and says so in its first paragraph - so this is a test about the
+    three modules `ARCHITECTURE.md` §5 names as pure facades and no fourth.
+
+    **`sdk/errors.py` is compared against its own `__all__` where the other two are compared
+    against their port's**, and that is the one asymmetry here. It joined at 18.0 and it takes the
+    `AglError` hierarchy out of `ports/errors.py` while leaving that module's exit-code table to
+    `cli/exit_codes.py` - a seam the port itself draws, which is why the test above asserts whole-
+    surface equality for two modules and not for three. Where that cut falls is pinned in
+    `tests/sdk/test_front_door.py`, in both directions and over `ports.errors.__all__`, so a class
+    added to the hierarchy and left off the facade fails there. What is asserted *here* is the
+    claim this test is about and it is the same for all three: the module declares nothing beyond
+    the names it re-exports.
     """
-    for facade, source in ((sdk_terminal, ports_terminal), (sdk_questions, ports_questions)):
+    facades = (
+        (sdk_terminal, ports_terminal.__all__),
+        (sdk_questions, ports_questions.__all__),
+        (sdk_errors, sdk_errors.__all__),
+    )
+    for facade, expected in facades:
         public = {name for name in vars(facade) if not name.startswith("_")}
-        assert public == set(source.__all__)
+        assert public == set(expected)

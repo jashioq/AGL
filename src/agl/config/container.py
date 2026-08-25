@@ -99,6 +99,15 @@ terminal that cannot take input. The install problem would have become a mystery
 moment, on the one path a person is waiting on. A refusal at construction costs one line of output
 and names the fix.
 
+**`answering()` is the third terminal and is not a fourth deployment.** `real()` builds
+`RichTerminal`, `fakes()` builds `HeadlessTerminal`, and neither of those two lines moved: a
+scripted terminal is something a *test* asks for by name and substitutes with `with_terminal`, so it
+is a factory beside the bundles rather than a field in one. There is still no display selection and
+no setting that chooses a terminal - what changed is that the one thing a workflow author could not
+previously do at all, answering §3.7's approval screen without the `agl[terminal]` extra and a
+hand-written `Keys`, is now a list of gestures. `agl/testing.py` re-exports it as the spelling an
+author writes, because `agl.testing` may not name an adapter and this module may.
+
 ## Construction is sync, eager and inert
 
 This module cannot `await`, which is not a limitation to route around but the reason several
@@ -212,7 +221,7 @@ the other, and a caller wanting a real store under fake agents is describing an 
 that should write the four lines itself rather than a switch every reader has to account for.
 """
 
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
@@ -233,6 +242,7 @@ from agl.adapters.git.workspace import GitWorkspaceProvider
 from agl.adapters.openai import fake as openai_fake
 from agl.adapters.openai.runner import OpenAiRunner
 from agl.adapters.rich_terminal.headless import HeadlessTerminal
+from agl.adapters.rich_terminal.scripted import Press, ScriptedTerminal
 from agl.adapters.routing import RoutingAgentRunner
 from agl.adapters.shell.fake import FakeVerifier
 from agl.adapters.shell.verifier import ShellVerifier
@@ -248,7 +258,16 @@ from agl.ports.tree_layout import TreesRoot
 from agl.sdk._engine.services import Services
 from agl.sdk.testing import Agent, Reply
 
-__all__ = ["FAKE_BUILD", "FakeServices", "Services", "fakes", "real"]
+__all__ = [
+    "FAKE_BUILD",
+    "FakeServices",
+    "Press",
+    "ScriptedTerminal",
+    "Services",
+    "answering",
+    "fakes",
+    "real",
+]
 
 # The build command a fakes bundle carries unless a caller names another, and the string a test
 # scripts the gate's verdict against. A constant rather than a literal in two files, because
@@ -465,6 +484,31 @@ def fakes(
         terminal=terminal,
         clock=clock,
     )
+
+
+def answering(responses: Sequence[Press | int] = ()) -> ScriptedTerminal:
+    """The `Terminal` a test answers: `responses`, spent in order on whatever screen is in front.
+
+        fakes = container.fakes(trees).with_terminal(container.answering([0, Press(1, "later")]))
+
+    The third terminal AGL constructs, and the one a workflow author reaches - through
+    `agl.testing.answering`, which is this function under the name an author writes. It is here
+    because it says `new` and contract 5 gives that to no other module: `agl/testing.py` sits two
+    layers above `agl.adapters` and may not name one, so a factory here is what carries the class up
+    to it. One line, and it takes no decision - `adapters/rich_terminal/scripted.py` argues the
+    whole design, including the one trap, which is that a question with no response left waits
+    rather than failing.
+
+    **A bare `int` means `Press(int)`**, coerced by the class itself for `ports/terminal.py`'s
+    reason - one rule, applied on the way in - so `answering([0, 0])` is two approvals.
+
+    The concrete type comes back rather than a `Terminal`, which is the opposite of `_terminal()`
+    below and is deliberate: `remaining`, `displayed()` and `slot()` are the whole reason a test
+    holds this object, and a port-typed return would hand the caller a terminal it could show
+    screens on and ask nothing. It is still a `Terminal` wherever one is wanted, `with_terminal`
+    included.
+    """
+    return ScriptedTerminal(responses)
 
 
 def _claude_script(agent: Agent | None) -> claude_fake.Script | None:

@@ -59,11 +59,16 @@ cannot be answered on that bundle and the terminal is substituted through
 `FakeServices.with_terminal`, as `tests/sdk/test_run_terminal.py` substitutes its own - the two
 views of one bundle moving together, which a `dataclasses.replace` of `services` alone would not
 do. The other three ports here have no sibling field and are still a plain `replace`.
-**A third `Terminal` was not written**, and that is the decision rather than a convenience:
-`adapters/rich_terminal/
-headless.py` argues at length why there are two and only two, a hand-rolled queueing terminal in a
-test would be under `tests/contracts/terminal.py`'s eye nowhere at all, and the input port exists
-precisely so the real adapter can be driven without a tty. The keyboard is `instruments.keyboard`,
+**A third `Terminal` was not written *here***, and that is the decision rather than a convenience:
+a hand-rolled queueing terminal in a test file would be under `tests/contracts/terminal.py`'s eye
+nowhere at all, and the input port exists precisely so the real adapter can be driven without a tty.
+18.0 did add a third implementation - `adapters/rich_terminal/scripted.py`, which
+`agl.testing.answering([...])` builds - and it is a third *adapter* that runs the contract suite
+rather than a mock, which is the whole difference this paragraph was about. **This file stays on
+the real one deliberately**: what it grades is the engine's question path against the terminal a
+person actually sits in front of, so substituting a class written for tests would take the one
+implementation under test out of the test. `tests/test_testing.py` is where a scripted terminal
+belongs, that file being what a workflow author can write. The keyboard is `instruments.keyboard`,
 promoted out of `tests/adapters/test_rich_terminal.py` for this file and unchanged by the move.
 
 The console is a plain `Console(file=StringIO())` and deliberately not `force_terminal=True`: that

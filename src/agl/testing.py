@@ -6,6 +6,7 @@
     def agent(task: AgentTask) -> Reply:
         if any(tool.name == "report_findings" for tool in task.tools):
             return Reply(calls=[Call("report_findings", {"summary": "clean", "high": 0})])
+        (task.workspace / "src/a.py").write_text("def authorise(): ...\n")
         return Reply(says="implemented it")
 
     async def test_it_reviews_what_it_implemented(tmp_path: Path) -> None:
@@ -18,6 +19,31 @@
 Measurable target #8 is that **every command runs end-to-end on fakes alone - no network, no git**,
 and this is that made into something a person outside AGL can use: a workflow, a directory, and
 three lines. Stages 17 and 18 build their end-to-end tests on it.
+
+## The `write_text` in that example is the point of this section, not decoration
+
+A `Reply` says what an agent *reported* - what it called, what it asked, what it said, how it
+stopped - and **no field on it touches the worktree**. What a step commits is whatever is dirty in
+the directory the task pointed at, and `Workspace.commit_all` is "a no-op when nothing is dirty",
+returning the head unchanged. So an agent written as `Reply(says="implemented it")` and nothing
+else runs, reports, and leaves an **empty branch**: the step records the head it started from, and
+`commit="implement fix"`, `commit=f"implement {ticket.id}"` and no `commit=` at all become
+indistinguishable in their effect.
+
+**That is the single biggest trap in testing a `commit=`**, because the test that is written to
+pin those three decisions is exactly the test that cannot see them: `harness.recorded` is
+identical either way, the branch is identical either way, and a workflow that dropped every
+`commit=` it had passes. Nothing warns, because nothing is wrong - §3.3's framework "does not
+inspect whether HEAD moved", deliberately, and a fake that reported an empty commit as an error
+would be inventing a rule the real one does not have.
+
+**The fix is one line and it is the author's own**, which is what an `Agent` being a plain function
+buys: `task.workspace` is an absolute `Path` to this step's checkout, so writing into it before
+returning the `Reply` is the side effect the real agent would have had, and the commit, the
+recorded head, the merge gate and `fakes.repository` then have something to be about. It is not a
+shortage in the vocabulary and `Reply` grows no file-writing member for it: `ports/workspace.py`
+exposes a `Path` because "a workspace genuinely is a directory", the git fake keeps that promise
+with real files on disk, and so the seam is already there and is the one a real backend uses.
 
 ## Two modules, and the split is forced
 
@@ -127,26 +153,62 @@ path no invocation takes and never finding out that two flags of theirs collide 
 wrong. Passing flags tests the params declaration as well as the workflow, and that declaration is
 one of §3.3's four things an author writes.
 
-## The terminal, and the one thing this harness cannot do for you
+## The terminal: a board needs nothing, and a question needs `answering([...])`
 
 `container.fakes()` builds a `HeadlessTerminal`, which drops a passive `Screen` and refuses a
 `Screen[T]` with `UpstreamUnavailable` - correctly, since a workflow needing human input genuinely
 cannot run with nobody there. So a workflow that shows a **board** needs nothing from you, and a
 workflow whose `on_question` handler routes to an interactive screen needs a terminal that can
-answer one, which is what `terminal=` takes.
+answer one, which is what `terminal=` takes and what `answering()` below builds:
 
-AGL ships exactly two `Terminal`s and neither is an answering fake: `adapters/rich_terminal/
-headless.py` argues at length why there are two and only two, and `tests/sdk/test_agent_questions
-.py` records the same decision from the other side - "a hand-rolled queueing terminal in a test
-would be under `tests/contracts/terminal.py`'s eye nowhere at all". So answering a screen today
-means the real `RichTerminal` (the `agl[terminal]` extra) over a `Keys` of your own, which is the
-seam that port exists for: "a terminal whose input can only come from a tty is a terminal no test
-can drive". AGL ships no `Keys` but `StdinKeys`, so an author writes one - roughly the twenty lines
-`tests/instruments/keyboard.py` holds for this repository's own tests.
+    term = testing.answering([Press(1, "widen the scope first"), 0])
+    harness = testing.harness(tmp_path, agent=agent, terminal=term)
+    await harness.run(fix, "-r", "add oauth")
 
-That is a gap in what this harness can offer on a bare `pip install agl`, it is stated here rather
-than discovered, and closing it would be a third `Terminal` and a third class in
-`tests/contracts/terminal.py` - a design change rather than a deliverable.
+    assert not term.remaining          # every gesture was spent
+    assert term.slot() is not None     # and the board was up behind them
+
+A `Press` is one gesture - which of the screen's own responses, and what was typed into it - and a
+bare `int` means `Press(int)`, so a list of approvals is `answering([0, 0])`. The list is spent in
+order on whatever screen is in front of the terminal, which is the highest-priority queued one:
+exactly what a person would have answered, so a conflict screen at priority 10 takes the next
+gesture ahead of an agent question that was already up.
+
+**The one trap, because it will cost you an afternoon otherwise.** A question with no gesture left
+does not fail - it waits, forever, exactly as a real terminal with nobody at it does, because §3.7
+has no timeouts anywhere. A test that hangs on a `run` is a script that ran out before the workflow
+stopped asking. `remaining` catches the other direction, a script longer than the run that spent it.
+
+**This is a third `Terminal` and it earns that by running the contract suite.** Answering a screen
+used to mean the real `RichTerminal` (the `agl[terminal]` extra) over a `Keys` of your own plus an
+import of `agl.adapters.rich_terminal.terminal`, a module contract 6 forbids a workflow to touch -
+so the seam was there and it was tty-shaped, making every author re-derive "type the number, press
+Enter" in order to say "approve". What replaced it is not a mock: `adapters/rich_terminal/
+scripted.py` reuses the same slot and the same two queues `RichTerminal` uses and passes
+`tests/contracts/terminal.py`'s input-capable half as a third class, which is why a workflow that
+passes here queues, preempts and answers the way it will in front of a person.
+
+## A view is tested by calling it, and a board's argument is a live `Run` - so `a_run` builds one
+
+A view is a pure function of its arguments, so every claim about one is a call and a comparison
+against the `Screen` it returned: no display, no redraw loop, nothing that could block. §3.7's
+board is the one that costs something, because it takes the **live** `Run` - `Text(run.activity or
+"")` is live precisely because `show` registers the function and its arguments and invokes them
+again every frame, and a board handed `run.activity` as a value would be frozen at the moment of
+the `show`.
+
+Which leaves an author testing their own board needing a `Run`, and `agl.sdk` cannot give them one:
+`services` is `_engine`'s, `scope` is `ports`', and both are the framework's to compose.
+`a_run(harness, params)` below is that composition, taking the `Harness` because it already holds
+the two.
+
+**And `reports(run, line)` beside it, because the property is about a board that *moves*.** A
+constructor argument can only say what was true when the object was made, so a board that read
+`run.activity` once and cached it against the `Run` would satisfy every assertion an `activity=`
+keyword can express. What says otherwise is the same object read twice with a report in between,
+which is exactly what a step does - so the harness plays the adapter, and these two functions are
+between them the one sanctioned write of the engine's activity cell in this repository, here once
+rather than in every author's test file.
 
 ## The escape hatch is a function here, and not a hole to climb out of
 
@@ -187,6 +249,7 @@ from typing import Final
 
 from agl import api
 from agl.config import container, registry
+from agl.config.container import Press, ScriptedTerminal
 from agl.ports.agent import AgentTask, StopReason
 from agl.ports.errors import InputError
 from agl.ports.home_layout import RunScope
@@ -197,18 +260,23 @@ from agl.ports.terminal import Terminal
 from agl.ports.tree_layout import TreesRoot
 from agl.sdk._engine.journal import Entry
 from agl.sdk.testing import Agent, Call, Reply
-from agl.sdk.workflow import Workflow
+from agl.sdk.workflow import Run, Workflow
 
 __all__ = [
     "Agent",
     "AgentTask",
     "Call",
     "Harness",
+    "Press",
     "Recorded",
     "Reply",
+    "ScriptedTerminal",
     "StopReason",
+    "a_run",
+    "answering",
     "harness",
     "over",
+    "reports",
 ]
 
 # What a harness calls the project and the run when the author does not say. Both are `ids.py`
@@ -223,6 +291,15 @@ _LABEL: Final = "test"
 # so what this buys is only that a caller handing over a `tmp_path` still has somewhere to put the
 # store, a fixture file or an assertion of their own beside it.
 _TREES: Final = "trees"
+
+# Where a `Run` built by `a_run` starts, when the caller does not name a head. A well-formed
+# 40-character sha and deliberately **not** a state the bundle's repository holds: nothing `a_run`
+# builds takes a step, so this value is never resolved, never restored to and never hashed into a
+# fingerprint - it is there because `Run.base` is required and a `Run` with an empty one is a lie
+# about §3.6's chain. A caller whose test does reach a step passes `base=` the head it wants, which
+# is why this is a parameter with a default rather than a value welded in below. Private for
+# `_PROJECT`'s reason: `run.base` reads it back, so nothing needs the constant to compare against.
+_BASE: Final = "4a91c07f2b3e8d15c6a0f31d8e2b47c9a6013f5e"
 
 
 class _Interrupted(BaseException):
@@ -533,6 +610,15 @@ def harness(
     calls every tool the task declares and says what it did: enough to run a whole workflow through
     without writing an agent first, and never a substitute for one when the payload matters.
 
+    **An agent that returns only a `Reply` leaves an empty branch, and this is the trap to know
+    about before writing one.** No field on a `Reply` touches the worktree and `commit_all` is a
+    no-op on a clean one, so every `commit=` the workflow passes records the head it started from
+    and the three ways of writing one - a literal message, a computed message, and no `commit=` at
+    all - are indistinguishable in their effect. Write into `task.workspace`, an absolute `Path` to
+    this step's checkout, before returning the `Reply`; that is the side effect a real agent would
+    have had, and the module docstring argues it in full. The default agent has the same shape and
+    the same silence: it calls tools and says things, and it changes no file.
+
     `files` seeds the fake repository, `{path: bytes}`, and is the only way in: `FakeRepository`'s
     mutators are that adapter package's private vocabulary, so seeding at construction is what
     `container.fakes()` offers and this passes through.
@@ -542,8 +628,8 @@ def harness(
     that never integrates never reaches it.
 
     `terminal` replaces the headless one, and the module docstring says when that is needed and what
-    the options are: a board needs nothing, and an interactive screen needs a terminal that can
-    answer one.
+    the answer is: a board needs nothing, and an interactive screen needs a terminal that can answer
+    one, which is `answering([...])` below.
 
     `project` and `label` name the run. Both are validated by `ids.py` on the way in, so a label
     with a slash in it is refused here rather than becoming a path.
@@ -592,6 +678,176 @@ def over(
         scope=RunScope(ProjectName(project), RunLabel(label)),
         _ledger=ledger,
     )
+
+
+def answering(responses: Sequence[Press | int] = ()) -> ScriptedTerminal:
+    """A `Terminal` that answers `responses` in order. Hand it to `harness(terminal=...)`.
+
+        term = testing.answering([0, Press(1, "not yet - land the other one first")])
+        harness = testing.harness(tmp_path, agent=agent, terminal=term)
+
+    **This is what a workflow that asks a person something is tested on.** The default harness
+    builds a headless terminal, which refuses a `Screen[T]` with `UpstreamUnavailable` because there
+    genuinely is nobody there - so a workflow whose `on_question` handler routes to §3.7's approval
+    screen exits 6 until you pass one of these.
+
+    `Press(response, typed)` is one gesture: which of the screen's own responses, by position in the
+    order the view offered them, and what was typed into it - which matters only for a `TextInput`,
+    exactly as it does for a person. **A bare `int` means `Press(int)`**, which is the port's own
+    coercion rule ("anywhere a component is expected, a bare `str` means `Text`") applied one
+    vocabulary over, so a script of approvals is `answering([0, 0, 0])`.
+
+    Each gesture is spent on **whatever is displayed** when it is reached, which is the
+    highest-priority queued screen - the same one a person would have answered, so a conflict at
+    priority 10 takes the next gesture ahead of an agent question that was already waiting.
+
+    **An exhausted script waits rather than failing**, which is honest and is the one thing that
+    will surprise you: there are no timeouts anywhere in §3.7, so a question with no gesture left
+    behaves like a real terminal nobody is sitting at, and the test hangs instead of failing. Assert
+    `not term.remaining` afterwards to catch a script the run never fully spent.
+
+    The terminal comes back at its own type rather than as a `Terminal`, because reading it back is
+    half of what it is for: `remaining` is the script's leftovers, `displayed()` is what a person
+    would be looking at now, `slot()` is the board still updating behind a question, and `respond()`
+    drives one built from an empty list a gesture at a time. It is a `Terminal` wherever one is
+    wanted, this module's `terminal=` included.
+
+    The delegation is to `config/container.py` because that module is the only one allowed to
+    construct an adapter, and this one is a sibling of `agl.cli` two layers above it (contract 5).
+    So the class lives in `adapters/rich_terminal/scripted.py`, the `new` is in the composition
+    root, and the name an author writes is here.
+    """
+    return container.answering(responses)
+
+
+def a_run[P](
+    harness: Harness,
+    params: P,
+    *,
+    base: str = _BASE,
+    activity: str | None = None,
+) -> Run[P]:
+    """A `Run` over a harness's bundle, to call a view with. Nothing it builds runs anything.
+
+        run = testing.a_run(harness, FixParams(request=REQUEST))
+        assert views.board(run, REQUEST) == Screen(
+            Rows([Row("request", REQUEST), Row("agent", "")])
+        )
+
+        working = testing.a_run(harness, FixParams(request=REQUEST), activity="Bash: pytest -q")
+        assert views.board(working, REQUEST) != views.board(run, REQUEST)
+
+    **This exists because §3.7's board takes the live `Run` and not a string.** `show` registers a
+    view function and its arguments and invokes them again every frame, which is what makes
+    `Text(run.activity or "")` live with no component of its own - so a board that was handed
+    `run.activity` as a value would be frozen at the moment of the `show`, which is exactly what
+    per-frame re-invocation exists to avoid. An author testing their own board therefore needs a
+    `Run`, and `agl.sdk` has no way to give them one: `Run` is on the front door as a *type*, and
+    `services` is `sdk/_engine`'s bundle while `scope` is a `ports.home_layout.RunScope`. Both are
+    the framework's to compose, and until this existed a workflow's own test file composed them by
+    hand.
+
+    **The name is `a_run` and it is module-level, not a `Harness` method.** `Harness.run` already
+    means "drive `api.run`", and two members a keystroke apart meaning *start a whole run* and
+    *build an object that runs nothing* is a worse cost than an unusual function name: the mistake
+    would be silent in one direction, `harness.a_run(...)` reading as a typo for the operation. It
+    is a function beside `harness()`, `over()` and `answering()` for the same reason those are -
+    this module's public surface is functions that build things and one class that drives two.
+
+    **It takes the `Harness` because that is what already holds both of the things a `Run` needs**
+    and neither is a caller's to invent: `harness.fakes.services` is the all-fakes bundle and
+    `harness.scope` is the project and label its runs are recorded under. Taking a `FakeServices`
+    instead would leave the scope to be composed at the call site out of `ports.ids`, which is the
+    reach this is here to remove.
+
+    `params` is an instance of the workflow's own params dataclass, at the type it declared - the
+    one argument that is genuinely the author's, and what makes the result a `Run[P]` their view
+    can be annotated against. It is positional because a `Run` without params is not a thing this
+    builds; there is no default, `P` having no value this module could invent.
+
+    `base` is where this namespace's chain would start. It defaults to a well-formed sha that names
+    no state in the bundle's repository, which is honest for everything this builds: nothing here
+    takes a step, so the value is never resolved, never restored to and never fingerprinted. A test
+    that does go on to take a step passes the head it wants.
+
+    **`activity=` is where this `Run` starts, and it goes through `reports` below** - the two of
+    them are between them the one sanctioned write of the engine's activity cell in this
+    repository. `run.activity` is a property over `Steps._activity`, a private attribute of a
+    private class under `sdk/_engine/`, and nothing public writes it - correctly, because the only
+    thing that sets it for real is an adapter reporting a line from inside a running step, through
+    a callback the port hands out for the duration of one call (§3.7: live-only, never persisted).
+    A board is worth testing at an activity anyway, so the reach is here, once, where it can say
+    what it is - rather than in every author's test file, which is what stage 17 recorded as the
+    worst line in the stage. `None` is the ordinary value and means what it means everywhere else:
+    nothing is running, and the cell has never been written.
+
+    **A keyword and not only `reports(run, ...)` afterwards**, because the overwhelmingly common
+    board test asserts one frame at one activity, and `a_run(harness, params, activity=line)` is
+    that in one line rather than two. What a keyword cannot express is a board *moving*, which is
+    the whole of why `reports` exists beside it rather than inside it.
+
+    **Nothing this builds runs, commits or shows anything.** The bundle is here so that
+    `Run.__post_init__` has something to build a `Steps` out of; no workspace is opened, no ledger
+    is touched, no terminal is drawn on and `harness.recorded` stays exactly as long as it was. A
+    `Run` this returns is a value to call a pure view with, and `harness.run(workflow, ...)` is
+    still the only thing in this module that makes a run happen.
+    """
+    run: Run[P] = Run(
+        params=params, services=harness.fakes.services, scope=harness.scope, base=base
+    )
+    # Through `reports` and not by reaching in here, so there is one writer of that cell in this
+    # module rather than two. Unconditional, because the cell is `None` until something writes it
+    # and `activity=None` is therefore what it already says.
+    reports(run, activity)
+    return run
+
+
+def reports(run: Run[object], activity: str | None) -> None:
+    """Say that the agent serving `run` is now doing `activity` - or `None`, that it stopped.
+
+        run = testing.a_run(harness, params, activity="Read: src/retry.py")
+        first = views.board(run, REQUEST)
+
+        testing.reports(run, "Bash: pytest -q")
+
+        assert views.board(run, REQUEST) != first        # the same object, read again
+        assert views.board(run, REQUEST) == views.board(run, REQUEST)
+
+    **This is `a_run`'s other half, and the same one sanctioned reach.** `run.activity` is a
+    property over `Steps._activity`, a private attribute of a private class under `sdk/_engine/`,
+    and this is what stands in for the thing that writes it for real: an adapter calling
+    `on_activity` from inside a live step, through a callback the port hands out for the duration
+    of one `AgentRunner.run` (§3.7 - the string is the adapter's own, live-only, never persisted).
+    The whole of the framework's part in it is an assignment, and so is the whole of this.
+
+    **A constructor argument cannot express the property §3.7's design rests on**, which is why
+    this exists beside `a_run` rather than being folded into it. `show` registers a view function
+    and its arguments and invokes them again every frame, so `Text(run.activity or "")` is live
+    with no component of its own - and what makes that *true of a given board* is that the same
+    `Run`, read twice with a report in between, yields two different screens. Two `Run`s built at
+    two activities do not say that: they say the board is a function of its argument, which a board
+    caching per object would satisfy too. A test that wants to watch a board move has to play the
+    adapter twice, and this is that call.
+
+    `None` is the ordinary value on both sides of it - nothing is running - and is what the cell
+    holds between steps, before an adapter's first line, and for the whole of a step replayed from
+    the journal. So `reports(run, None)` is how a test says the step ended, which is the other
+    frame a board has to render honestly.
+
+    Takes `Run[object]` rather than `Run[P]`: the activity cell knows nothing about a workflow's
+    params, and `Run` is covariant in them, so a `Run[FixParams]` is accepted with no cast at the
+    call site and nothing here is generic in a parameter it never reads.
+
+    **Nothing else moves.** No entry, no fingerprint, no store write, no frame drawn - §3.7 keeps
+    activity out of every one of those, and a function here that did any of them would be
+    describing a mechanism the framework does not have. It writes one string and returns.
+    """
+    # The reach both this module's public builders make, in one line and in one place. Written
+    # through `_steps` rather than through a public setter on `Steps`, because a setter there would
+    # be a second way to report activity that no adapter goes through - and `sdk/_engine/steps.py`'s
+    # "the only writer is a callback the port hands out during a live call" would stop being true
+    # of the framework rather than merely of this harness.
+    run._steps._activity = activity
 
 
 def _innermost(namespaces: Sequence[Namespace]) -> str | None:

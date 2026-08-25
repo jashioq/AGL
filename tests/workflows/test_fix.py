@@ -26,21 +26,24 @@ them:
 ## The views, and why they need no terminal at all
 
 **A view is a pure function of its arguments**, so every assertion about one is a call and a
-comparison against the `Screen` it returned - no display, no redraw loop, no keystrokes, and nothing
+comparison against the `Screen` it returned - no display, no redraw loop, no gestures, and nothing
 that could block. That is the whole of what makes the two screens below testable here rather than at
-17.3, and it is worth saying explicitly because the alternative is what stage 16 flagged: answering
-an interactive screen needs a `Terminal` that can take input, AGL ships none an author can drive,
-and a test that tried to *answer* `agent_question` would be a test of `RichTerminal` wearing this
-package's name. Nothing here answers a screen. These tests read the value a person would have been
-shown, which is the half this package owns.
+17.3: what a person would have been shown is the half this package owns, and reading it needs no
+terminal at all. **Nothing in this first half answers a screen**, and that is now a division of
+labour rather than a limit - 18.0 shipped `testing.answering([...])`, so answering one is possible,
+and it belongs in the second half where there is a run to answer *inside of*. A view's own shape is
+the cheaper claim and is worth keeping cheap: an assertion about `agent_question`'s free-text field
+that had to drive a whole run to see it would fail for a dozen reasons that are not about the view.
 
-The board is the one that costs something, and the cost is on the record: it takes a `Run`, because
-§3.7's board reads `run.activity` out of a live object rather than being handed a string that would
-be frozen at the moment of the `show`. A `Run` is on the SDK's front door as a *type* and is not
-constructible from it - `services`, `scope` and `base` are `_engine`, `ports` and the framework's -
-so `_run` below builds one through `agl.testing`, which a test may do and a workflow may not, and
-sets the activity through `_steps` because nothing public writes it. Both are named where they
-happen.
+The board is the one that costs something, and the cost is now the harness's rather than this
+file's: it takes a `Run`, because §3.7's board reads `run.activity` out of a live object rather
+than being handed a string that would be frozen at the moment of the `show`. A `Run` is on the
+SDK's front door as a *type* and is not constructible from it - `services`, `scope` and `base` are
+`_engine`, `ports` and the framework's. Stage 17 built one here by hand and wrote the activity
+through `_steps._activity`, a private attribute of a private engine class, and reported the pair as
+a finding; 18.0 closed it with `testing.a_run(harness, params, activity=...)` and its companion
+`testing.reports(run, line)`, so `_run` below is one call, watching a board *move* is one more, and
+the reach is in the harness, once, where it is argued.
 
 ## The second half is an interruption and not a kill, and the name of this file does not say kill
 
@@ -78,12 +81,17 @@ how a `Terminal` behaves and this one deliberately does not - and it is written 
 alone, `Terminal` being on the front door. `tests/sdk/test_run_terminal.py::_Recording` is the same
 object for the same reason one layer down.
 
-**A question can be reached but not answered.** 17.2 recorded the gap and this file does not repair
-it: AGL ships no input-capable `Terminal` an external author can drive, so a workflow's
-`on_question` handler can be driven to the *refusal* and not to an answer. That is still worth
-driving, and it is sharper than it sounds - `UpstreamUnavailable` naming `agent_question` says that
-the implementer's question reached this workflow's own screen through this workflow's own handler,
-and a run that completes instead says the handler was never on the role.
+**A question can now be answered, and both endings are worth pinning.** 17.2 recorded a gap - AGL
+shipped no input-capable `Terminal` an external author could drive, so a workflow's `on_question`
+handler could be driven to the *refusal* and not to an answer - and 18.0(i) closed it with
+`testing.answering([...])`, a third `Terminal` that runs `tests/contracts/terminal.py`'s
+input-capable half. So there are two tests down there and neither replaces the other. The refusal
+is still exactly what an unattended run does and is sharper than it sounds: `UpstreamUnavailable`
+naming `agent_question` says that the implementer's question reached this workflow's own screen
+through this workflow's own handler, and a run that completes instead says the handler was never on
+the role. The answer is the other half, and it is the one this workflow could not have before: a
+scripted gesture comes back through `views.agent_question`'s own `Choice`, into `answer`, into the
+live agent session, and the run goes on to record its steps.
 """
 
 from collections.abc import Callable, Mapping, Sequence
@@ -95,19 +103,13 @@ from typing import Final, Self, cast
 import pytest
 
 from agl import testing
-
-# `agl.ports.errors` is not on the SDK's front door and neither `agl.sdk` nor `agl.testing`
-# re-exports a single exception class, so a workflow author asserting *how* their run refused has
-# nowhere else to import from. All three below are that reach: `InputError` for a flag a parser
-# would not take, `InternalError` for a question no screen could answer, and `UpstreamUnavailable`
-# for the refusal a headless terminal makes when this workflow's handler puts a screen up. Reported
-# as a finding rather than routed around.
-from agl.ports.errors import InputError, InternalError, UpstreamUnavailable
 from agl.sdk import (
     Answer,
     Capability,
     Choice,
     Claude,
+    InputError,
+    InternalError,
     OpenAI,
     Question,
     Restriction,
@@ -118,6 +120,7 @@ from agl.sdk import (
     Terminal,
     Text,
     TextInput,
+    UpstreamUnavailable,
 )
 from agl.sdk import params as sdk_params
 
@@ -135,10 +138,6 @@ PROMPTS: Final = Path(__file__).resolve().parents[2] / "src/agl/workflows/fix/pr
 
 REQUEST: Final = "the retry loop drops the last error"
 """What an operator asked for, in one place, because the board renders it and a step is given it."""
-
-BASE: Final = "4a91c07f2b3e8d15c6a0f31d8e2b47c9a6013f5e"
-"""The head a `Run` starts from. Nothing below takes a step, so this is a well-formed sha and not a
-commit that exists anywhere."""
 
 
 def _finding(severity: str, file: str = "src/a.py") -> Finding:
@@ -345,25 +344,16 @@ def test_the_severity_the_workflow_branches_on_is_one_of_the_ones_it_asks_for() 
 def _run(where: Path, activity: str | None = None) -> Run[FixParams]:
     """A `Run` to show a board over, with an activity line on it if the test wants one.
 
-    **Two reaches past the SDK's front door, both a test's and neither the workflow's.**
-    `agl.testing.harness` is what builds a bundle of fakes - `Run` takes a `services`, a `scope` and
-    a base ref, none of which `agl.sdk` exports or could - and `_steps._activity` is written
-    directly because activity is set by an adapter inside a running step and by nothing else. A
-    workflow author testing their own board hits both of these, and there is no supported spelling
-    for either; that is reported as a finding rather than wrapped in a helper that hides it.
+    One call, and the whole of what this file needs to say about building one. `testing.a_run` is
+    18.0's answer to the finding this helper used to carry: a `Run` needs a `services` bundle and a
+    `RunScope`, neither of which `agl.sdk` exports or could, and its activity is a private cell of
+    a private engine that only an adapter inside a running step writes for real. Both reaches are
+    in the harness now, once, where they are argued - so what is left here is a workflow author's
+    own line, and this helper exists only to spell `FixParams(request=REQUEST)` in one place.
 
-    Nothing here runs, commits or shows anything: the bundle exists so that `Run.__post_init__` has
-    something to build a `Steps` out of.
+    Nothing it builds runs, commits or shows anything.
     """
-    harness = testing.harness(where)
-    run = Run(
-        params=FixParams(request=REQUEST),
-        services=harness.fakes.services,
-        scope=harness.scope,
-        base=BASE,
-    )
-    run._steps._activity = activity
-    return run
+    return testing.a_run(testing.harness(where), FixParams(request=REQUEST), activity=activity)
 
 
 def test_the_board_shows_the_request_and_the_line_the_adapter_last_reported(tmp_path: Path) -> None:
@@ -400,12 +390,18 @@ def test_the_board_reads_the_activity_again_on_every_frame(tmp_path: Path) -> No
     Two calls either side of a change in what the agent is doing have to differ, and two calls with
     nothing changed in between have to be equal - the second half being what lets the terminal skip
     the write. A board handed the activity as a value would pass every other test in this file and
-    fail this one by never changing at all.
+    fail this one by never changing at all, and so would one that read the live object once and
+    cached the answer against the `Run` it was handed.
+
+    `testing.reports` is what plays the adapter here: the cell behind `run.activity` is written for
+    real by a backend reporting from inside a running step, and this is the harness's stand-in for
+    that call. Until 18.0 this line was `run._steps._activity = ...`, a private attribute of a
+    private engine class written from a workflow's own test file.
     """
     run = _run(tmp_path, activity="Read: src/retry.py")
     first = views.board(run, REQUEST)
 
-    run._steps._activity = "Bash: pytest -q"
+    testing.reports(run, "Bash: pytest -q")
     second = views.board(run, REQUEST)
 
     assert first != second
@@ -971,8 +967,11 @@ class _Watching(Terminal):
     `tests/sdk/test_run_terminal.py::_Recording` says of itself: `tests/contracts/terminal.py` is
     what says how a `Terminal` behaves and this class is under its eye nowhere at all. It is used by
     one test, it answers nothing, and a `Screen` carrying responses is a failure here rather than a
-    question it might quietly answer with `None` - which is the shape 17.2 flagged and is not a
-    thing this file is going to grow.
+    question it might quietly answer with `None`. That refusal is why this class stayed small when
+    18.0 shipped `testing.answering([...])`: a terminal that can answer a question now exists and
+    is a conforming one, so the reason to grow this into a second implementation went away rather
+    than being resisted. What is missing here is only the slot's contents, which is a `Screen` a
+    conforming terminal is free to draw and forget.
     """
 
     def __init__(self) -> None:
@@ -991,8 +990,10 @@ class _Watching(Terminal):
         if view(**params).responses:
             raise AssertionError(
                 f"the view {getattr(view, '__name__', view)!r} asks a question and this terminal "
-                f"answers nothing. AGL ships no input-capable `Terminal` a workflow author can "
-                f"drive, and a recorder that invented an answer here would be that gap papered over"
+                f"answers nothing - it exists to record what a board was handed and does nothing "
+                f"else. A test that wants a question answered wants `testing.answering([...])`, "
+                f"which is a conforming `Terminal`; inventing an answer here would be that class's "
+                f"job done badly by something no contract suite has ever looked at"
             )
         return cast("T", None)
 
@@ -1062,11 +1063,13 @@ async def test_the_implementers_question_reaches_this_workflows_own_screen(tmp_p
     carry on - so the run *completes*, the approval gate silently absent, which is the outcome
     `sdk/roles.py` spends four paragraphs refusing.
 
-    **What this cannot do is answer.** 17.2 recorded the gap - AGL ships no input-capable `Terminal`
-    an external author can drive - and this file does not repair it: the question path is asserted
-    as far as the screen and no further, and `harness.recorded` being empty is the honest statement
-    of where the run stopped. A step that raised writes no entry (§3.6), so the implement step is
-    unrecorded, the branch is at its base, and `agl resume` would start it again attended.
+    **This is the unattended ending and it is still the real one**, which is why 18.0 kept it after
+    shipping a terminal that can answer: `container.fakes()` builds a `HeadlessTerminal` because a
+    run with nobody at it is what `agl run` in a cron job is, and §3.7 has no timeouts anywhere, so
+    refusing is the only honest thing left. `harness.recorded` being empty is the statement of where
+    that run stopped - a step that raised writes no entry (§3.6), so the implement step is
+    unrecorded, the branch is at its base, and `agl resume` starts it again attended. The test below
+    is the attended half.
     """
 
     def asking(task: testing.AgentTask) -> testing.Reply:
@@ -1078,6 +1081,102 @@ async def test_the_implementers_question_reaches_this_workflows_own_screen(tmp_p
         await harness.run(fix, "-r", REQUEST)
 
     assert harness.recorded == (), "a step that died on an unanswerable question left an entry"
+
+
+ASKED: Final = Question(
+    prompt="Rename the helper, or leave it?", options=("rename", "leave")
+)
+"""What the implementer stops to ask. Two options and free text allowed, which is the ordinary
+shape and the one `views.agent_question` renders as two `Choice`s and a field after them."""
+
+TYPED: Final = "three, and log the last error"
+"""What the person types into that field rather than picking either option - which is why the
+gesture below names response **2**: index 0 and 1 are the agent's own options and 2 is the
+`TextInput` this workflow puts after them. A screen of any other shape has no response there, and
+`queues.Screens.answer` refuses a position nothing occupies - so the index is itself the assertion
+that what took the gesture was `views.agent_question` with this question in it."""
+
+
+def _asking_agent(
+    term: testing.ScriptedTerminal, behind: list[Screen[object] | None]
+) -> testing.Agent:
+    """An implementer that stops to ask, and a reviewer that finds nothing. One whole clean run.
+
+    The implementer writes before it asks, for `_agent`'s reason one section up: a `Reply` touches
+    no worktree, so an agent that only replied would leave `commit="implement fix"` with nothing to
+    carry and this run's branch where it started.
+
+    It also reads the terminal's slot on its way past, which is the only moment that reading says
+    anything: the slot is what a person is looking at *while the run is in flight*, and
+    `Screens.close` empties it on the way out of the terminal's context - "closing is not somebody
+    un-asking", but the board really is gone once the display has been handed back. So the board is
+    asserted from inside the step it was put up for, which is also the honest altitude for it.
+    """
+
+    def agent(task: testing.AgentTask) -> testing.Reply:
+        if any(tool.name == report_findings.name for tool in task.tools):
+            return testing.Reply(calls=[_payload(())], says="reviewed it")
+        behind.append(term.slot())
+        _wrote(task, CHANGED, IMPLEMENTED)
+        return testing.Reply(asks=[ASKED], says="implemented it")
+
+    return agent
+
+
+@pytest.mark.asyncio
+async def test_a_person_answers_the_implementers_question_and_the_run_carries_on(
+    tmp_path: Path,
+) -> None:
+    """The other ending, and the one this workflow could not reach until 18.0.
+
+    17.2 recorded the gap - AGL shipped no input-capable `Terminal` an external author could drive
+    - and `testing.answering([...])` closed it with a third conforming implementation. So the whole
+    path is drivable now: the agent stops to ask, `fix`'s `answer` closure puts the question on
+    `views.agent_question`, a person picks something, the `Answer` goes back into the same live
+    session, and the run goes on to record its steps. Every one of those is a decision this package
+    made, and the one previously asserted only as far as the refusal.
+
+    **The gesture's index is the sharpest assertion here.** `Press(2, ...)` names the third response
+    of whatever screen was in front of the terminal, and `views.agent_question` puts the free-text
+    field after the agent's two options - so a handler routing to a screen with fewer responses, or
+    a view that dropped the field this workflow promises, is an `InternalError` out of the queue
+    rather than a quietly different answer. What comes back is `TextInput.maps(TYPED)`, which is
+    this package's `Answer` constructor, so the string a person typed reaches the agent unedited.
+
+    **`remaining` is the other direction and it is not decoration.** A workflow that never showed a
+    question - `run.step` handed the declared `implementer` instead of `replace(implementer,
+    on_question=answer)` - completes perfectly well, both fakes answering the agent "nobody is
+    listening", and the only trace is a script nobody spent. That is the failure `sdk/roles.py`
+    spends four paragraphs refusing, and here it is one comparison.
+
+    **And the board is up in the slot while all this happens.** §3.7 puts a passive screen in the
+    slot and keeps writing it under a question, so the agent reads `slot()` on its way past and what
+    it finds is this workflow's own board with nothing running yet. A `fix` that had shown its board
+    as a *question* would be queued rather than slotted and would find `None` there - and would also
+    have blocked before its first step, which is the failure the board's own passivity test guards
+    from the other side.
+    """
+    behind: list[Screen[object] | None] = []
+    term = testing.answering([testing.Press(2, TYPED)])
+    harness = testing.harness(
+        tmp_path, agent=_asking_agent(term, behind), files=SEED, terminal=term
+    )
+
+    await harness.run(fix, "-r", REQUEST)
+
+    assert [entry.step for entry in harness.recorded] == list(CLEAN_RUN), (
+        "the run did not finish after its question was answered, so the answer did not reach the "
+        "session the agent was asking from"
+    )
+    assert term.remaining == (), (
+        "the script was never spent, so no screen with three responses was ever shown - which is "
+        "what a run whose step was handed the declared role rather than one carrying `answer` "
+        "looks like from outside: it completes, and the approval gate is silently absent"
+    )
+    assert behind == [Screen(Rows([Row("request", REQUEST), Row("agent", "")]))], (
+        "the board was not in the slot while the step that asks was running, so either it was "
+        "never put up or it was shown as something other than a passive screen"
+    )
 
 
 # --- kill at every step boundary, resume, assert identical --------------------------------------

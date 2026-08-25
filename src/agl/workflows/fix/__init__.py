@@ -99,12 +99,13 @@ repository as a chain of trees and messages, the reviewer's scratch file gone fr
 `review` step wiped, and the whole run interrupted at every step boundary and every *combination* of
 boundaries, resumed, and compared against a run that was never interrupted.
 
-Two things that test cannot do, both stated there rather than papered over. It **interrupts and does
-not kill** - `tests/sdk/test_kill_and_resume.py` is the version that ends a real process - and it
-can drive the question path only as far as the refusal a headless terminal makes, because AGL ships
-no input-capable `Terminal` an external author can drive. The second is stage 16's finding, carried
-forward unrepaired; what it costs here is that `answer` below is asserted to have put its question
-on this package's own screen, and not that anybody answered it.
+One thing that test cannot do, stated there rather than papered over: it **interrupts and does not
+kill** - `tests/sdk/test_kill_and_resume.py` is the version that ends a real process. The question
+path used to be a second one, drivable only as far as the refusal a headless terminal makes,
+because AGL shipped no input-capable `Terminal` an external author could drive; that was stage 16's
+finding and 18.0 repaired it with `agl.testing.answering([...])`. So both endings of `answer` below
+are asserted now - the refusal an unattended run gets, and a person picking something and the
+`Answer` going back into the same live session.
 """
 
 from dataclasses import dataclass, replace

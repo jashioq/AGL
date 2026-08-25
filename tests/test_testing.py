@@ -7,8 +7,10 @@ author writes and nothing else: a params dataclass of `arg()` fields, a payload 
 reporting tool, three roles, a screen, and three `@workflow` functions. Every import of AGL is one
 line - `agl.sdk` for the workflow and `agl.testing` for the test - and nothing here reaches into
 `agl.ports`, `agl.sdk._engine`, `agl.config` or `agl.adapters` except in the two places that are
-about the escape hatch and say so. If any of that had needed a third import or a piece of framework
-knowledge, the harness would have been wrong and the fix would have been in the harness.
+about the escape hatch and say so, plus `tree_layout.run_branch` in the last section, which has to
+name the branch a run's commits land on in order to say that one run's `commit=` left nothing on it.
+If any of that had needed a third import or a piece of framework knowledge, the harness would have
+been wrong and the fix would have been in the harness.
 
 The four things the deliverable asks for, one test each and in order: a workflow runs to completion
 on fakes; a scripted agent's reported payload comes back as the step result; a scripted question
@@ -38,49 +40,52 @@ what the count is counted from.
   * **The payload assertion reads the ledger** through `harness.recorded`, and the value it compares
     is one nothing in the framework could have invented: it is the mapping this file's own agent
     handed to the reporting tool.
-  * **The question assertion reads a string a person typed.** The answer that reaches the agent
-    exists nowhere in this file except as a keystroke, so nothing a handler answering from a
-    constant could produce would satisfy it.
+  * **The question assertion reads what a person picked.** The answer that reaches the agent gets
+    there only by a gesture spent on a screen the *workflow* built out of the agent's own question,
+    so nothing a handler answering from a constant could produce would satisfy it - the script says
+    "the second response", and which string that is was decided by the view under test.
 
-## The one place this is not author-shaped, and it is a finding rather than a shortcut
+## The place this used to not be author-shaped, and what closed it
 
 `container.fakes()` builds a `HeadlessTerminal`, which refuses every `Screen[T]` with
 `UpstreamUnavailable` - correctly, since a workflow needing human input cannot run with nobody
-there. AGL ships no second input-capable `Terminal`, and `adapters/rich_terminal/headless.py` and
-`tests/sdk/test_agent_questions.py` both argue at length that a third one written for tests would be
-under `tests/contracts/terminal.py`'s eye nowhere at all. So answering a screen means the real
-`RichTerminal` over a `Keys`, which is the seam that port exists for - and here that is
-`instruments.keyboard.Typing`, a module inside this repository that a workflow author outside it
-does not have.
+there. Until 18.0 AGL shipped no second input-capable `Terminal`, so answering a screen meant the
+real `RichTerminal` (the `agl[terminal]` extra) over a `Keys` of the test's own, which here was
+`instruments.keyboard.Typing` - a module inside this repository that a workflow author outside it
+does not have, driving a class `.importlinter`'s contract 6 forbids a workflow to touch. That was
+reported as a gap rather than papered over, and 18.0(i) closed it: `testing.answering([...])` is a
+third implementation that runs `tests/contracts/terminal.py`'s input-capable half, so the seam is
+a list of gestures rather than a tty.
 
-That is a real gap in what `agl.testing` can offer on a bare `pip install agl`, it is reported as
-one, and it is not papered over by pretending the arrangement is simpler than it is. Everything
-*else* in the two question tests is the author's: the screen is a view of theirs, the handler is a
-closure over their `Run`, and the assertion is about their workflow.
+**Both question tests are written on it**, which is the point rather than a tidy-up: this file is
+what an author can write on a bare `pip install agl`, and a test here that still needed a keyboard
+of AGL's own would be measuring something they cannot have. Everything else in the two was always
+theirs - the screen is a view of theirs, the handler is a closure over their `Run`, and the
+assertion is about their workflow.
 
 ## Every await is bounded
 
 §3.7 has no timeouts anywhere - "an unanswered question blocks its step indefinitely" - so a mistake
-in a test that answers a screen is a hang rather than a failure. The two that drive a terminal run
-under `asyncio.timeout`; the rest cannot block, there being nobody to wait for.
+in a test that answers a screen is a hang rather than a failure, and `answering()` says so in as
+many words: a question with no gesture left waits exactly as a real terminal with nobody at it does.
+The two that answer a screen therefore run under `asyncio.timeout`; the rest cannot block, there
+being nobody to wait for.
 """
 
 import asyncio
-import io
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Final
 
 import pytest
-from rich.console import Console
 
 from agl import testing
 from agl.adapters.claude_code.fake import Conversation, Script
-from agl.adapters.rich_terminal.terminal import RichTerminal
 from agl.config import container
 from agl.ports.agent import AgentOutcome, StopReason
 from agl.ports.errors import InputError
-from agl.ports.tree_layout import TreesRoot
+from agl.ports.tree_layout import TreesRoot, run_branch
 from agl.sdk import (
     Answer,
     Choice,
@@ -89,6 +94,8 @@ from agl.sdk import (
     Question,
     Restriction,
     Role,
+    Row,
+    Rows,
     Run,
     Screen,
     Text,
@@ -96,10 +103,17 @@ from agl.sdk import (
     reporting_tool,
     workflow,
 )
-from agl.testing import Agent, AgentTask, Call, Recorded, Reply
-from instruments.keyboard import DEADLINE, Typing
+from agl.testing import Agent, AgentTask, Call, Press, Recorded, Reply
 
 # `asyncio_mode = "strict"`, so every async test below carries its own marker.
+
+DEADLINE: Final = 5.0
+"""Seconds a test that answers a screen is allowed to take, and the whole of why it exists is that
+§3.7 has no timeouts: an exhausted script waits forever, exactly as a real terminal with nobody at
+it does, so a scripting mistake is a hang rather than a failure. Generous, because it is not a
+performance assertion - these runs are in-memory and take milliseconds - and it fires only when
+something is genuinely never going to be answered. `remaining` catches the opposite mistake, a
+script the run never fully spent, and it is a comparison rather than a wait."""
 
 
 # --- what a workflow author writes -----------------------------------------------------------
@@ -290,25 +304,6 @@ def _asking_agent(seen: list[str]) -> Agent:
     return agent
 
 
-# --- fixtures the two question tests need, and nothing else does -----------------------------
-
-
-@pytest.fixture
-def keys() -> Typing:
-    """A keyboard, standing in for the person a `Screen[T]` is waiting on."""
-    return Typing()
-
-
-@pytest.fixture
-def terminal(keys: Typing) -> RichTerminal:
-    """The one terminal AGL ships that can answer a question, over a console nobody watches.
-
-    The module docstring records this as the gap it is: a workflow author outside this repository
-    has `RichTerminal` but no `Keys` to drive it with.
-    """
-    return RichTerminal(Console(file=io.StringIO(), width=100), keys)
-
-
 @pytest.fixture(autouse=True)
 def _nothing_carried_over() -> None:
     """The module-level records, emptied before each test and never by a workflow."""
@@ -359,37 +354,38 @@ async def test_a_scripted_payload_comes_back_as_the_step_result(tmp_path: Path) 
 
 
 @pytest.mark.asyncio
-async def test_a_scripted_question_reaches_the_workflows_own_screen(
-    tmp_path: Path, terminal: RichTerminal, keys: Typing
-) -> None:
+async def test_a_scripted_question_reaches_the_workflows_own_screen(tmp_path: Path) -> None:
     """The agent asks, the workflow's handler shows its own screen, and a person answers it.
 
     Each assertion rules out a different way of passing: the handler was called with the question
     the agent asked, and with all three of its fields (`allow_free_text=False` included); the
-    keystroke came back as the `Answer` the workflow's *own* view built out of that question's first
+    gesture came back as the `Answer` the workflow's *own* view built out of that question's first
     option, which nothing answering from a constant could produce; the step completed and recorded;
     and it was **one** dispatch, which is §3.7's "one step, one session, N rounds" - a workflow loop
     that re-invoked the step per round would reach the same final answer and cost a second session.
+
+    `answering([0])` is the whole of the person here, and a bare `int` is `Press(int)` - so "the
+    first response of whatever is on screen" is what this scripts, and which string that is was
+    decided by `approve` out of the agent's own `options`. Until 18.0 this needed the
+    `agl[terminal]` extra and a `Keys` of AGL's own; the module docstring says what that cost.
     """
     seen: list[str] = []
-    harness = testing.harness(tmp_path, agent=_asking_agent(seen), terminal=terminal)
+    term = testing.answering([0])
+    harness = testing.harness(tmp_path, agent=_asking_agent(seen), terminal=term)
 
     async with asyncio.timeout(DEADLINE):
-        running = asyncio.create_task(harness.run(asking, "-r", "add oauth"))
-        await keys.entered("1")
-        await running
+        await harness.run(asking, "-r", "add oauth")
 
     assert [question.prompt for question in asked] == [PROPOSAL]
     assert asked[0].options == (GO_AHEAD, NOT_YET) and asked[0].allow_free_text is False
     assert answers == [Answer(GO_AHEAD)]
     assert _steps(harness.recorded) == ["decide"]
     assert seen == ["asking"], "the question was answered by re-running the step, not in-session"
+    assert term.remaining == (), "the run never showed a screen, so nothing spent the gesture"
 
 
 @pytest.mark.asyncio
-async def test_the_answer_returns_into_the_same_session(
-    tmp_path: Path, terminal: RichTerminal, keys: Typing
-) -> None:
+async def test_the_answer_returns_into_the_same_session(tmp_path: Path) -> None:
     """§3.7's other half: what the person picked reaches the agent, inside the call it asked from.
 
     **This is the escape hatch, used as an escape hatch.** A `Reply` is computed before the run and
@@ -398,20 +394,27 @@ async def test_the_answer_returns_into_the_same_session(
     harness rather than outside it. `agl.sdk.testing` states the limitation and names this way
     round it; this test is what proves the way round works.
 
-    The value on the ledger is the string the keyboard typed, which exists nowhere else in this
-    file: nothing a framework interposing on the answer could produce would satisfy it.
-    """
+    **Two seams in one test, and only one of them is the escape hatch.** The bundle is composed by
+    hand because the agent has to branch on an answer; the *terminal* is `answering([1])`, the
+    supported one, handed to that bundle through `with_terminal` exactly as `harness(terminal=...)`
+    hands it to the one it built. So reaching for a raw `Script` costs a bundle and does not cost a
+    person - which is what `over()` is for.
 
+    The value on the ledger got there only by the second response of a screen `approve` built out
+    of the agent's own `options`, so nothing a framework interposing on the answer could produce
+    would satisfy it. `Press(1)` and not `Press(0)`: the two options differ, and a terminal that
+    answered with the first would pass an assertion written against `GO_AHEAD`.
+    """
+    term = testing.answering([Press(1)])
     fakes = container.fakes(TreesRoot(tmp_path / "trees"), claude=_negotiating())
-    harness = testing.over(fakes.with_terminal(terminal))
+    harness = testing.over(fakes.with_terminal(term))
 
     async with asyncio.timeout(DEADLINE):
-        running = asyncio.create_task(harness.run(asking, "-r", "add oauth"))
-        await keys.entered("2")
-        await running
+        await harness.run(asking, "-r", "add oauth")
 
     assert answers == [Answer(NOT_YET)]
     assert [entry.value for entry in harness.recorded] == [{"summary": NOT_YET, "high": 0}]
+    assert term.remaining == ()
 
 
 @pytest.mark.asyncio
@@ -774,3 +777,212 @@ async def test_two_harnesses_in_one_directory_are_told_apart_by_project_and_labe
     assert record is not None, "nothing was recorded at the scope this harness says it runs at"
     assert record["label"] == FIRST_RUN
     assert record["params"] == {"request": "add oauth"}
+
+
+# --- `a_run`, and what a `Reply` alone does not do -----------------------------------------------
+#
+# Two things an author meets once they go past a workflow that merely runs: showing their own
+# board, which needs a live `Run` and cannot have one from `agl.sdk`; and testing a `commit=`,
+# where an agent scripted only as a `Reply` leaves nothing for the framework to commit. Both are
+# documented in `agl/testing.py`, and these are the claims those documents make.
+
+SEED: Final[Mapping[str, bytes]] = {"src/a.py": b"pass\n"}
+"""The repository every run in this section starts from, so that "nothing was committed" is a
+comparison against a tree and not against emptiness."""
+
+WRITTEN: Final = "implemented.py"
+"""What the implementer in this section leaves in its checkout - the side effect a `Reply` has no
+field for and a real agent would have had."""
+
+ACTIVITY: Final = "Edit: src/a.py"
+"""A line in the serving adapter's own words, which is the only kind there is (§3.7)."""
+
+ELSEWHERE: Final = "b7c1d4f09a2e63518cd047fb29e15a83d604c7f2"
+"""A head of the caller's own choosing, to tell `base=` from the default `a_run` falls back to."""
+
+
+def a_board(run: Run, request: str) -> Screen:
+    """A workflow author's board: what was asked for, and what the agent is doing about it.
+
+    Above the tests with the workflows, because it is the same kind of thing - a view is a pure
+    function of its arguments, and this is what `a_run` exists so that somebody can call. Passive:
+    no responses, so `show` would drop it in the slot and answer immediately without waiting for
+    anyone. It takes the `Run` and not `run.activity`, which is the whole point (§3.7).
+    """
+    return Screen(Rows([Row("request", request), Row("agent", run.activity or "")]))
+
+
+def _writing(seen: list[str]) -> Agent:
+    """`_agent`'s replies, plus the file an implementer would have left in the checkout.
+
+    Keyed on whether the task declares any tool, which is `sdk/testing.py`'s own sharpest handle
+    and here picks out the effect step: the reviewer runs under `NO_VCS_WRITES` and its step passes
+    no `commit=`, so anything written there is wiped on the way out by design.
+    """
+    replies = _agent(seen)
+
+    def agent(task: AgentTask) -> Reply:
+        if not task.tools:
+            (task.workspace / WRITTEN).write_bytes(b"what the implementer wrote\n")
+        return replies(task)
+
+    return agent
+
+
+def _on_the_branch(harness: testing.Harness) -> Mapping[str, bytes]:
+    """What the run's own line of work holds now - which is what its `commit=` steps put there.
+
+    `run_branch` is the one reach into `agl.ports` this section makes and the module docstring
+    names it: "what did this run commit" has no answer that does not name the branch, and
+    `harness.fakes.repository` is addressed by branch and by state.
+    """
+    tip = harness.fakes.repository.tip(run_branch(harness.scope.label))
+    assert tip is not None, "the run's branch does not exist, so nothing ran here at all"
+    return harness.fakes.repository.tree_of(tip)
+
+
+def test_a_run_is_built_over_the_harnesss_own_bundle_and_its_own_address(tmp_path: Path) -> None:
+    """`a_run` composes the two things a `Run` needs and `agl.sdk` cannot hand over.
+
+    Asserted by identity, because "the same bundle" is the property and not "an equal one": a
+    factory that built a second `FakeServices` would give an author a `Run` whose terminal, store
+    and repository were not the ones their harness reads back afterwards, and every assertion in a
+    board test would be about a bundle nothing else touches.
+    """
+    harness = testing.harness(tmp_path, files=SEED)
+
+    run = testing.a_run(harness, DemoParams(request="add oauth"))
+
+    assert run.params == DemoParams(request="add oauth")
+    assert run.services is harness.fakes.services
+    assert run.scope is harness.scope
+    assert run.terminal is harness.fakes.services.terminal
+
+
+def test_a_run_reports_the_activity_it_was_built_with_and_nothing_otherwise(tmp_path: Path) -> None:
+    """`activity=` is the harness's one write of the engine's cell; `None` is the ordinary value.
+
+    `run.activity` is a property over `Steps._activity`, which only an adapter reporting from inside
+    a live step writes for real - so without this keyword a board could only ever be tested empty,
+    and with it the two states a board renders are both reachable from a supported spelling.
+    """
+    harness = testing.harness(tmp_path)
+
+    assert testing.a_run(harness, DemoParams(request="add oauth")).activity is None
+    assert testing.a_run(harness, DemoParams(request="add oauth"), activity=ACTIVITY).activity == (
+        ACTIVITY
+    )
+
+
+def test_a_board_is_a_function_of_the_run_it_is_handed(tmp_path: Path) -> None:
+    """What `a_run` is for: calling a view, and comparing the `Screen` it answered with.
+
+    The empty cell is the one worth writing out in full, because it is what §3.7 renders whenever
+    nothing is running and it is the state an `activity=` keyword alone can reach.
+    """
+    harness = testing.harness(tmp_path)
+    idle = testing.a_run(harness, DemoParams(request="add oauth"))
+    working = testing.a_run(harness, DemoParams(request="add oauth"), activity=ACTIVITY)
+
+    assert a_board(idle, "add oauth") == Screen(
+        Rows([Row("request", "add oauth"), Row("agent", "")])
+    )
+    assert a_board(working, "add oauth") != a_board(idle, "add oauth")
+
+
+def test_reports_moves_a_board_that_is_already_up(tmp_path: Path) -> None:
+    """`reports` is the half of the reach a constructor argument cannot express.
+
+    §3.7's design is that `show` registers a view and its arguments and invokes them again every
+    frame, so the claim is about **one** `Run`: read it, report something, read it again, and the
+    two screens differ. A board that read `run.activity` once and cached it against the object it
+    was handed satisfies everything `a_run(activity=...)` can ask on its own and fails here, which
+    is why the two functions exist rather than one.
+
+    The equality half is the other thing the terminal needs: two calls with nothing reported in
+    between must compare equal, because that comparison is how the redraw loop decides to write
+    nothing at all. And `reports(run, None)` is the step ending - the state a replayed step is in
+    for the whole of its life, where reporting anything would be a lie.
+    """
+    harness = testing.harness(tmp_path)
+    run = testing.a_run(harness, DemoParams(request="add oauth"), activity=ACTIVITY)
+    first = a_board(run, "add oauth")
+
+    testing.reports(run, "Bash: pytest -q")
+    second = a_board(run, "add oauth")
+
+    assert first != second
+    assert second == a_board(run, "add oauth")
+
+    testing.reports(run, None)
+
+    assert a_board(run, "add oauth") == Screen(
+        Rows([Row("request", "add oauth"), Row("agent", "")])
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_run_built_for_a_view_starts_where_it_was_told_and_records_nothing(
+    tmp_path: Path,
+) -> None:
+    """The other half of what `a_run` promises: `base=`, and that none of this is a run.
+
+    The default base is a well-formed sha naming no state the bundle holds, which is honest because
+    nothing built here takes a step - so the assertion worth writing is that a caller who does have
+    a head gets theirs. And nothing is written anywhere: no record at the scope, no entry on the
+    ledger. A factory that had quietly opened a workspace or written a record would make a board
+    test into a run, and the author's next `harness.run` would meet a label already in use.
+    """
+    harness = testing.harness(tmp_path, files=SEED)
+
+    default = testing.a_run(harness, DemoParams(request="add oauth"))
+    named = testing.a_run(harness, DemoParams(request="add oauth"), base=ELSEWHERE)
+
+    assert named.base == ELSEWHERE
+    assert default.base != ELSEWHERE
+    assert harness.recorded == ()
+    assert await harness.fakes.store.read_record(harness.scope) is None
+
+
+@pytest.mark.asyncio
+async def test_an_agent_that_only_replies_leaves_every_commit_message_with_nothing_to_carry(
+    tmp_path: Path,
+) -> None:
+    """The trap `agl/testing.py` documents, made into the failure it actually produces.
+
+    A `Reply` has no member that touches the worktree, and `commit_all` is "a no-op when nothing is
+    dirty, returning the unchanged head" - so a step passing `commit="implement add oauth"` over an
+    agent that only replied records the head it started from and the branch stays exactly where the
+    run cut it. The two harnesses below run the *same workflow* with the *same `commit=`* and differ
+    in one line of the author's own agent, and that line is the whole difference between a branch
+    holding work and an empty one.
+
+    **Why this is worth a test rather than a paragraph.** Both runs succeed, both ledgers are
+    identical, `harness.recorded` cannot tell them apart, and neither the framework nor the fake
+    reports anything - §3.3's framework "does not inspect whether HEAD moved", deliberately. So a
+    test written to pin a workflow's three `commit=` decisions passes against a workflow that
+    dropped all three, and the only place that shows is here, on the branch.
+
+    Two labels in one directory, because §3.5 keys the trees root by the label alone and the second
+    harness would otherwise provision over the first one's checkout.
+    """
+    quiet: list[str] = []
+    replying = testing.harness(tmp_path, agent=_agent(quiet), files=SEED, label="replying")
+    await replying.run(demo, "-r", "add oauth")
+
+    busy: list[str] = []
+    working = testing.harness(tmp_path, agent=_writing(busy), files=SEED, label="working")
+    await working.run(demo, "-r", "add oauth")
+
+    assert quiet == busy == ["effect", "reporting"], "the two runs did not walk the same workflow"
+    assert _steps(replying.recorded) == _steps(working.recorded) == ["implement", "review"], (
+        "the ledgers differ, so this is not a comparison between one workflow and itself"
+    )
+    assert _on_the_branch(replying) == SEED, (
+        "the run whose agent only returned a `Reply` committed something, which nothing in it "
+        "could have produced - a `Reply` has no member that writes a file"
+    )
+    assert _on_the_branch(working) == {**SEED, WRITTEN: b"what the implementer wrote\n"}, (
+        "the run whose agent wrote into `task.workspace` did not commit it, so the one line "
+        "`agl/testing.py` tells an author to add does not in fact reach the branch"
+    )

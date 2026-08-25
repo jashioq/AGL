@@ -19,7 +19,12 @@ the first, and the drift would surface as a `Screen` an adapter could not draw.
 
 `sdk/tools.py` is the module that is deliberately *not* this: it re-exports `ports.agent.Tool` and
 carries the reporting-tool declaration besides, and its first paragraph says so, because §5's
-sentence about pure re-export facades covers this module and `sdk/questions.py` and no third.
+sentence about pure re-export facades covers this module, `sdk/questions.py` and `sdk/errors.py`.
+That third one arrived at 18.0, when a workflow's own test file was found reaching into
+`agl.ports.errors` to say how a run had refused; it holds no logic on the same terms as these two,
+and differs from them in one way that is worth knowing about here - it takes the `AglError`
+hierarchy out of `ports/errors.py` and leaves that module's exit-code table to `cli/exit_codes.py`,
+which is a seam its own port draws rather than a curation of the kind the next section forbids.
 
 ## The whole of `ports.terminal.__all__`, not a chosen subset
 
