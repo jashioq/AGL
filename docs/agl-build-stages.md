@@ -375,8 +375,8 @@ property test as the acceptance criterion.
 | # | Deliverable |
 |---|---|
 | 12.0 | **Two stage-11 corrections in `journal.py`, first.** Both were found while reviewing stage 11's report and both are already in §3.6. (i) The counter must advance **when an entry is written, not when a step is called** — a step that crashes and is retried within one run currently consumes a slot, so the retry lands at `n = 1` while a later resume asks for `n = 0`, misses, and pays an agent again. (ii) A dataclass input must contribute its **qualified type name**: `asdict` erases the type, so `Finding("T-01", 3)` and `Ticket("T-01", 3)` fingerprint identically and changing an input's type while keeping its shape **replays the wrong result** — the only one of the family that returns a false hit rather than re-running. Mutate both cross-process |
-| 12.1 | `Run.step()` — journal lookup, `AgentTask` construction from a `Role`, dispatch, **commit-or-wipe per `commit=`**, entry write in that order (§3.3). Two constraints stage 11 measured: **nothing may await between taking the counter and dispatching** — 11.4 found that provisioning a worktree inside a sibling coroutine is a suspension that hands ordering to git, and the mutation went red at only 3 of 4 kill points until the worktrees were provisioned before the `gather`; and **serialize steps within a namespace** (§3.6), since two concurrent steps there share one `Workspace` and each one's restore wipes the other's in-flight files. Also owns the failure path 11.3 deliberately left out: the wipe runs on success and on failure alike. `commit=` given → commit dirty state with that message; omitted → `reset --hard` to `last_good` plus `clean -fd`, on success and on failure alike. No check of what the role declared, no comparison of HEAD before and after |
-| 12.2 | `sdk/roles.py` — `Role(instructions, model, restrictions, tools, requires, on_question)` |
+| 12.1 | `Run.step(role, commit=None, **inputs)` — **no `name=`**: the memo address is `role.name`, and two calls on one role separate by inputs or by the counter. Journal lookup, `AgentTask` construction from a `Role`, dispatch, **commit-or-wipe per `commit=`**, entry write in that order (§3.3). Two constraints stage 11 measured: **nothing may await between taking the counter and dispatching** — 11.4 found that provisioning a worktree inside a sibling coroutine is a suspension that hands ordering to git, and the mutation went red at only 3 of 4 kill points until the worktrees were provisioned before the `gather`; and **serialize steps within a namespace** (§3.6), since two concurrent steps there share one `Workspace` and each one's restore wipes the other's in-flight files. Also owns the failure path 11.3 deliberately left out: the wipe runs on success and on failure alike. `commit=` given → commit dirty state with that message; omitted → `reset --hard` to `last_good` plus `clean -fd`, on success and on failure alike. No check of what the role declared, no comparison of HEAD before and after |
+| 12.2 | `sdk/roles.py` — a frozen `Role(name, instructions, restrictions, tools, requires, on_question, plan_only)` plus the `@role(model=…)` decorator that registers `(name, model)` at import for preflight to read (§3.2, §3.3). A role is declared as a **factory** returning a frozen `Role`, so the author decides which knobs a call site may turn |
 | 12.3 | `sdk/tools.py` — re-export of `ports.agent.Tool` plus the reporting-tool declaration helper that derives a payload schema from a workflow dataclass; **reporting vs effect step**; malformed payload rejected back to the agent in-session (§3.3) |
 | 12.4 | `Run.activity` — current string from the serving adapter, `None` when idle, never persisted. *(This row's cancellation note was imprecise and stage 12 corrected it: a single cancellation is delivered once, at the worker's await, and the `finally` then runs clean — the hazard begins at the second. And `shield` alone is insufficient, since `await shield(ending)` re-raises immediately and leaves the ending running detached; shield and loop until it is done.)* |
 
@@ -392,7 +392,7 @@ and a new file. Changing only a commit message does not invalidate the entry.
 
 | # | Deliverable |
 |---|---|
-| 13.0 | **Three stage-12 gaps, first — all now in the plan.** (i) `**inputs` are fingerprinted but never reach the agent: the framework appends one structured block of canonical JSON under a fixed heading (§3.3). Templating was rejected — these prompts carry JSON Schemas, so `str.format` breaks on braces. Without this, §3.3's own `w.step("triage", triage, findings=highs)` fingerprints correctly and the agent never sees the findings. (ii) `prompt_file()` in `sdk/roles.py`, reading at declaration time — a role holding a filename fingerprints the filename, so editing a prompt moves nothing and a resume replays the old wording's output as a cache hit. (iii) A reporting tool's **payload type contributes its qualified name** to the fingerprint, closing the same erasure 12.0 closed for inputs: two structurally identical payload types derive a byte-identical schema, so an old entry replays into the new type |
+| 13.0 | **Three stage-12 gaps, first — all now in the plan.** (i) `**inputs` are fingerprinted but never reach the agent: the framework appends one structured block of canonical JSON under a fixed heading (§3.3). Templating was rejected — these prompts carry JSON Schemas, so `str.format` breaks on braces. Without this, §3.3's own triage step fingerprints its findings correctly and the agent never sees them. (ii) `prompt_file()` in `sdk/roles.py`, reading at declaration time — a role holding a filename fingerprints the filename, so editing a prompt moves nothing and a resume replays the old wording's output as a cache hit. (iii) A reporting tool's **payload type contributes its qualified name** to the fingerprint, closing the same erasure 12.0 closed for inputs: two structurally identical payload types derive a byte-identical schema, so an old entry replays into the new type |
 | 13.1 | `Run.worktree(name, base=None)` — child `Run`, branch derivation `agl/_work/<label>/<name>` (**not** `agl/<label>/<name>` — that is a ref directory/file conflict, §3.9), idempotent reopen |
 | 13.2 | `sdk/_engine/worktrees.py` — nested namespace storage, `worktrees/<name>/steps/…`, arbitrary depth |
 | 13.3 | Per-namespace head chaining; concurrent lock-free entry writes from sibling children |
@@ -477,6 +477,30 @@ work around it.
 
 **Accept:** **no framework change was required by this stage.** A diff outside `workflows/split/`
 means an abstraction was missing and should be reported, not patched around.
+
+---
+
+## Stage 18.5 — The authoring surface
+
+A late simplification, taken after `fix` and `split` were written and read back. Three things the
+author was restating that the framework can already see, all removed rather than defaulted — an
+override kept "because it is cheap" is a second way to do one thing, and the surface is what R1 is
+measured on.
+
+| # | Deliverable |
+|---|---|
+| 18.5.1 | **`run.step` loses `name=`.** The memo address becomes `role.name`; two calls on one role separate by their inputs, or by the counter when the inputs match. Entry paths move from `steps/<call-site name>/` to `steps/<role name>/` |
+| 18.5.2 | **A role becomes a `@role(model=…)` factory returning a frozen `Role`.** The decorator registers `(name, model)` at import; the factory closes the override surface, so a call site can turn only the knobs the author exposed — a bare `replace()` on a module-level instance could change the model or the restrictions |
+| 18.5.3 | **`@workflow` loses `roles=`.** Preflight collects providers from the decorator's registry and **never invokes a factory**, which it could not do without arguments it does not have. Capability containment still runs per step, where the real role exists |
+| 18.5.4 | Port `fix` and `split` to the new spelling, and re-measure targets #2 and #1 |
+
+**Accept:** `fix` reads without ceremony — no `roles=`, no per-step names, no `dataclasses` import —
+and preflight still refuses a logged-out provider **at second zero**, not after the first step.
+
+**Known cost, accepted:** the decorator's registry over-approximates. A role imported into a
+workflow module but never used makes preflight demand a provider the run does not need — a false
+refusal, which is loud and fixable rather than silent, and erring toward refusing early is the right
+direction.
 
 ---
 

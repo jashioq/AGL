@@ -256,8 +256,8 @@ src/agl/
 │
 ├── sdk/                    ★ PUBLIC API, own semver.
 │   ├── workflow.py             @workflow · Run · Stop
-│   ├── roles.py                Role(instructions, model, restrictions, tools,
-│   │                                requires, on_question)
+│   ├── roles.py                @role(model=…) · Role(name, instructions, restrictions,
+│   │                                tools, requires, on_question, plan_only)
 │   ├── tools.py                re-exports ports Tool + the reporting-tool
 │   │                           declaration helper (§3.3) — this one has logic
 │   ├── params.py               arg()
@@ -406,8 +406,26 @@ commit *)` is a wildcard rule matched with whitespace collapsed, and is the corr
 code's spelling is quoted in §1.1 as history; it must not be built.
 
 **Preflight needs to see the roles, and a workflow's roles are not reachable from its function.**
-Roles carrying `on_question` are closures over `Run`, built inside the workflow body, so `@workflow`
-takes a keyword-only `roles=` declaring them. That makes preflight two halves: `check_ready` per
+Roles are built inside the workflow body — a handler role is a closure over `Run` — so nothing at
+decoration time can enumerate them.
+
+**A role is a factory carrying a `@role(model=…)` decorator**, and that is what preflight reads:
+
+```python
+@role(model=Claude.OPUS)
+def implementer(*, on_question: QuestionHandler | None = None) -> Role:
+    return Role(name="implement", instructions=prompt_file("prompts/implement.md"),
+                restrictions={Restriction.NO_VCS_WRITES}, on_question=on_question)
+```
+
+The decorator registers `(name, model)` at import; preflight collects providers from the registry and
+**never invokes the function**, which it could not do without arguments it does not have. The factory
+is what closes the override surface — an author decides exactly which knobs a call site may turn, and
+everything else is unreachable, because a bare `replace()` on a module-level instance would let a call
+site change the model or the restrictions. Capability containment still happens per step, where the
+real role exists.
+
+That makes preflight two halves: `check_ready` per
 distinct model plus capability containment **at second zero**, and containment only, memoised, at
 every `run.step`. The second half is what makes the folded implications below real — the natural
 spelling for a handler role is `replace(module_role, on_question=h)`, so the role preflight saw is
@@ -498,7 +516,7 @@ build commands are therefore independent by design: the prompt's drive the agent
 | | What it is |
 |---|---|
 | **Params** | a dataclass of `arg()` fields — all named flags, no positionals |
-| **Roles** | instructions + model + restrictions + tools + required capabilities + `plan_only`, **declared to `@workflow(roles=…)`** so preflight can see them (§3.2) |
+| **Roles** | a `@role(model=…)` factory returning a frozen `Role` — name, instructions, restrictions, tools, required capabilities, `plan_only`. The decorator is what preflight reads (§3.2); the factory is what closes the override surface |
 | **Tools** | the payload schemas agents report through |
 | **Views** | pure functions of state, in `views/`. Nothing renders without them (§3.7) |
 | **Shape** | one async function |
@@ -575,7 +593,7 @@ old one.
 
 ```
 run.params                        the workflow's typed params
-run.step(name, role, commit=None, **inputs)
+run.step(role, commit=None, **inputs)
                                   the only unit of work — fingerprinted and replayed
 run.worktree(name, base=None)     a child Run: new worktree, new namespace
 run.integrate()                   land this Run's branch into its parent's — serialized, gated
@@ -589,8 +607,11 @@ attribute.
 **`run.params`** — the typed dataclass, parsed and validated. mypy knows `run.params.concurrent` is
 an `int`. Validation failure is `InputError` → exit 2, before anything runs.
 
-**`run.step(name, role, commit=None, **inputs)`** — the only thing that persists anything. Resolves an entry from
-`(label, namespace, name)` plus a fingerprint (§3.6). On a hit it returns the stored value without
+**`run.step(role, commit=None, **inputs)`** — the only thing that persists anything. Resolves an
+entry from `(label, namespace, role.name)` plus a fingerprint (§3.6). **The step takes no name of its
+own**: the role already carries one, so a per-call-site string would be a second place to say the
+same thing. Two calls on one role land in the same directory and are separated by their inputs, or by
+the counter when the inputs match. On a hit it returns the stored value without
 running. On a miss it resets the worktree to the last good head, builds an `AgentTask` from the
 Role, dispatches to that model's provider, commits or wipes per `commit=`, and stores the result.
 `**inputs` are ordinary Python values and they *are* part of the fingerprint; `commit` is a real
@@ -634,12 +655,12 @@ is serving it, or `None` when nothing is running. Never persisted; purely visual
 #### Single-worktree workflow — a first-class shape
 
 ```python
-@workflow(name="fix", params=FixParams)
-async def fix(run: Run) -> None:
-    await run.step("implement", implementer, commit="implement fix")
-    findings = await run.step("review", reviewer)          # no commit= — worktree wiped
+@workflow(name="fix", version="1.1", params=FixParams)
+async def fix(run: Run[FixParams]) -> None:
+    await run.step(implementer(), request=run.params.request, commit="implement fix")
+    findings = await run.step(reviewer())                  # no commit= — worktree wiped
     if findings.high():
-        await run.step("repair", implementer, findings=findings.high(),
+        await run.step(implementer(), findings=findings.high(),
                        commit="address review findings")
 ```
 
@@ -651,11 +672,11 @@ on the same `Run`. Commits land on `agl/hotfix` directly — that branch is the 
 ```python
 @workflow(name="tickets", params=TicketsParams)
 async def tickets(run: Run) -> None:
-    spec = await run.step("spec", interview)
+    spec = await run.step(interview())
 
     # decompose negotiates approval inside its own session via on_question (§3.7) —
     # it returns only once the human has approved the proposal
-    proposed = await run.step("tickets", decompose, spec=spec)
+    proposed = await run.step(decompose(on_question=approve), spec=spec)
 
     backlog = Backlog(proposed.tickets)                # cycle check HERE, before any agent runs
     await drive(run, backlog, limit=run.params.concurrent)
@@ -677,14 +698,14 @@ async def ticket_pass(parent: Run, backlog: Backlog, ticket: Ticket,
     blocker = children.get(ticket.blocked_by[0]) if ticket.blocked_by else None
     w = parent.worktree(ticket.id, base=blocker)       # workflow resolves its own graph;
                                                        # framework only derives the branch name
-    await w.step("implement", implementer,             # prompt instructs TDD; the agent runs
+    await w.step(implementer(),                        # prompt instructs TDD; the agent runs
                  commit=f"implement {ticket.id}")      # its own tests, repeatedly, unbounded
     findings = await gather(                           # reviewers take no commit= — their
-        w.step("review_quality", review_quality),      # worktree is restored on the way out.
-        w.step("review_spec",    review_spec),         # same namespace, so these serialize (§3.6)
+        w.step(review_quality()),                      # worktree is restored on the way out.
+        w.step(review_spec()),                         # same namespace, so these serialize (§3.6)
     )
     if highs := high(findings):
-        backlog.add(await w.step("triage", triage, findings=highs))
+        backlog.add(await w.step(triage(), findings=highs))
         return
     outcome = await w.integrate()
     while outcome.conflicted:                          # while, not if — §3.4 explains why
@@ -935,7 +956,7 @@ repo a project is, free to go stale on a hand-rename. The repair §1.10 actually
 **resolved once per invocation**, not resolved in constant time: one directory listing, parse until
 the first `repo` matches, and never again for the life of the process.
 
-`steps/` and `worktrees/` are sibling subtrees so `worktree("review")` and `step("review", …)` in
+`steps/` and `worktrees/` are sibling subtrees so `worktree("review")` and a role named `review` in
 the same Run cannot collide.
 
 #### `run.json`
@@ -1059,7 +1080,7 @@ otherwise produce an identical fingerprint every iteration and hit its own cache
 never persisted; replay walks the same calls in the same order and reproduces the same values.
 
 **Why it is scoped per namespace and step name, not per invocation.** Concurrent siblings produce
-identical `base` values — `T-01` and `T-02` both call `step("implement", implementer)` with the same
+identical `base` values — `T-01` and `T-02` both call `step(implementer())` with the same
 role, no inputs, and the same parent head. A per-invocation counter lets the interleaving decide who
 gets `n = 0`, and the interleaving differs on resume, so each child looks in its own scope for a
 digest that is not there and **both re-run, forever, silently**.
@@ -1095,7 +1116,7 @@ is financial, not an exception.
 
 ```
 for each step, in replay order:
-    entry = read(steps/<name>/<digest>.json) or None
+    entry = read(steps/<role.name>/<digest>.json) or None
 
     if entry:                                   # digest already encodes role+inputs+head+n
         last_good = entry.head
@@ -1304,12 +1325,12 @@ view through the same single entry point. The framework has no opinion on presen
 async def approve(q: Question) -> Answer:
     return await run.terminal.show(views.approve_backlog, question=q, priority=5)
 
-decompose = Role(
-    instructions=prompt_file("prompts/decompose.md"),   # read at declaration; see below
-    model=Claude.OPUS,
-    tools=[report_tickets],
-    on_question=approve,                 # async (Question) -> Answer
-)
+@role(model=Claude.OPUS)
+def decompose(*, on_question: QuestionHandler | None = None) -> Role:
+    return Role(name="tickets",
+                instructions=prompt_file("prompts/decompose.md"),   # read at declaration
+                tools=[report_tickets],
+                on_question=on_question)
 ```
 
 **`instructions` is prompt text, never a path.** A role holding a filename would fingerprint the
@@ -1331,7 +1352,7 @@ session per round, discarding the reasoning that produced the proposal and re-de
 spec each time.
 
 ```python
-backlog = Backlog((await run.step("tickets", decompose, spec=spec)).tickets)
+backlog = Backlog((await run.step(decompose(on_question=approve), spec=spec)).tickets)
 ```
 
 The prompt instructs: propose, ask for approval, revise until approved, then call `report_tickets`.
@@ -1680,6 +1701,9 @@ the same shape §3.9 already uses, and not stored status.
 | An abstract `Display` port | Forcing a terminal and a websocket into one shape yields a worse terminal and a worse browser, and blocks running both at once. `run.terminal` now, `run.web` later, each with its own concepts. |
 | `--display` flag / display selection | Nothing to select: a workflow uses whichever surfaces it wants, and they coexist. |
 | A type-checked `show(**params)` | Measured at stage 19: `ParamSpec` cannot coexist with `show`'s `priority=` keyword (mypy refuses arguments after `ParamSpec.args`), and every workable variant moves `priority` — which the plan spells three ways in three places, across 92 call sites. `TypeIs` cannot narrow `outcome.conflict` either, since it needs a narrowable positional and §3.4 mandates that `retry()` moves the outcome in place. The two are one finding: the unnarrowed `Optional` costs nothing precisely *because* `**params` is unchecked. If it is ever worth closing, the shape is **priority moving onto `Screen[T]`** — where §3.7 already says it is the only place it means anything — which makes `show` `ParamSpec`-typeable and keeps the choice workflow-owned. |
+| A `name=` on `run.step` | The role already carries one, so a per-call-site string is a second place to say the same thing. Two calls on one role separate by inputs, or by the counter when they match. Inferring it from the caller's variable name was rejected: it breaks on anything but a bare identifier, and it would make a memo address depend on a local variable. |
+| `roles=` on `@workflow` | Roles are built inside the workflow body, so nothing at decoration time can enumerate them — but a `@role(model=…)` decorator registers `(name, model)` at import, which is all preflight's provider check needs. One declaration, not two. |
+| A bare `replace()` on a module-level `Role` | It lets a call site change the model or the restrictions — a mutation with pleasant syntax. A factory returning a frozen `Role` lets the author decide exactly which knobs a call site may turn. |
 | Named priority levels | `MEDIUM`/`HIGH` would encode "agent question" and "merge conflict" — tickets' concepts. A plain int keeps the terminal comparing numbers. |
 | Change-detection for re-rendering | Would need observable wrappers or dirty flags inside workflow-owned data. Per-frame call-and-diff needs none, and the diff makes it cheap. |
 | Screen input preservation across preemption, and question timeouts | Known and accepted for v1.1. |
@@ -1738,14 +1762,14 @@ generality, which this plan forbids.
 # workflows/split — ~30 lines, and every framework path is exercised
 @workflow(name="split", params=SplitParams)
 async def split(run: Run) -> None:
-    chunks = await run.step("plan", planner)
+    chunks = await run.step(planner())
     async with TaskGroup() as tg:
         for c in chunks.items:
             tg.create_task(do_chunk(run, c))
 
 async def do_chunk(parent: Run, c: Chunk) -> None:
     w = parent.worktree(c.id)
-    await w.step("implement", implementer, commit=f"implement {c.id}")
+    await w.step(implementer(), commit=f"implement {c.id}")
     await w.integrate()
 ```
 
