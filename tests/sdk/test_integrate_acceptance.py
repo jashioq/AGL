@@ -115,7 +115,7 @@ from agl.ports.tree_layout import TreesRoot, base_worktree, run_branch, worktree
 from agl.ports.verifier import Verifier, VerifierOutcome
 from agl.ports.workspace import Workspace
 from agl.sdk._engine.services import Services
-from agl.sdk.roles import Role
+from agl.sdk.roles import Role, role
 from agl.sdk.tools import reporting_tool
 from agl.sdk.workflow import Run, workflow
 from instruments.landing import (
@@ -192,12 +192,13 @@ class NoParams:
 REPORT: Final = reporting_tool("report", "report what you did", Summary)
 
 
-def _role(instructions: str) -> Role[Summary]:
+@role(model=Claude.SONNET)
+def _role(name: str, instructions: str) -> Role[Summary]:
     """A reporting role that may commit: its result is `REPORT`'s payload, read back as a
-    `Summary`."""
+    `Summary`. `name` is the address its entries go to, `run.step` carrying none (§3.3)."""
     return Role(
+        name=name,
         instructions=instructions,
-        model=Claude.SONNET,
         restrictions=set[Restriction](),
         tools=(REPORT,),
     )
@@ -206,12 +207,12 @@ def _role(instructions: str) -> Role[Summary]:
 # Module-level, which is what a `Role` is (§3.3), and distinct per writer: the script below decides
 # what to write from the instructions it was handed, so two roles sharing a string would be two
 # namespaces writing one file.
-PREPARE: Final = _role("prepare the parent")
-COLLIDE: Final = _role("implement over the same file the parent touched")
-REVIEW: Final = _role("review the target's worktree")
-LOOK_AGAIN: Final = _role("review the target's worktree a second time")
-RECORD: Final = _role("record what the run has landed so far")
-BUILDS: Final = {name: _role(f"implement {name}") for name in CHILDREN}
+PREPARE: Final = _role("prepare", "prepare the parent")
+COLLIDE: Final = _role("implement", "implement over the same file the parent touched")
+REVIEW: Final = _role("review", "review the target's worktree")
+LOOK_AGAIN: Final = _role("look-again", "review the target's worktree a second time")
+RECORD: Final = _role("record", "record what the run has landed so far")
+BUILDS: Final = {name: _role("implement", f"implement {name}") for name in CHILDREN}
 
 
 def _agent(recorded: list[str] | None = None) -> Script:
@@ -424,7 +425,7 @@ async def _landed_children(run: Run[None], names: Sequence[str]) -> None:
     """Give each named child a namespace and one commit of its own, before anything lands."""
     for name in names:
         child = run.worktree(name)
-        await child.step("implement", BUILDS[name], commit=f"implement {name}")
+        await child.step(BUILDS[name], commit=f"implement {name}")
 
 
 # --- criterion 5: the root has no parent, and the refusal says which kind of refusal it is --------
@@ -461,7 +462,7 @@ async def test_the_root_refuses_to_integrate_with_the_error_the_plan_asks_for(
     harness = _harness(tmp_path)
     run = await _tree(harness)
     child = run.worktree(CHILDREN[0])
-    await child.step("implement", BUILDS[CHILDREN[0]], commit="implement T-01")
+    await child.step(BUILDS[CHILDREN[0]], commit="implement T-01")
 
     with pytest.raises(InputError) as raised:
         await run.integrate()
@@ -589,9 +590,9 @@ async def _held(
     run = await _tree(harness, verifier=verifier)
     blocked = run.worktree(CHILDREN[0])
     spare = run.worktree(CHILDREN[1])
-    await run.step("prepare", PREPARE, commit="prepare the parent")
-    await blocked.step("implement", COLLIDE, commit="implement T-01")
-    await spare.step("implement", BUILDS[CHILDREN[1]], commit="implement T-02")
+    await run.step(PREPARE, commit="prepare the parent")
+    await blocked.step(COLLIDE, commit="implement T-01")
+    await spare.step(BUILDS[CHILDREN[1]], commit="implement T-02")
     return harness, run, blocked, spare
 
 
@@ -665,7 +666,7 @@ async def test_a_step_in_the_target_namespace_waits_while_a_conflict_is_undecide
     conflict = await blocked.integrate()
     assert conflict.conflicted is True, "this test needs a target left holding a landing"
 
-    step = asyncio.create_task(run.step("review", REVIEW))
+    step = asyncio.create_task(run.step(REVIEW))
     finished, _ = await asyncio.wait({step}, timeout=_SERIALIZED)
 
     assert not finished, (
@@ -705,9 +706,9 @@ async def test_a_conflict_held_in_one_target_does_not_stop_a_landing_into_anothe
     middle = run.worktree("middle")
     grandchild = middle.worktree("grandchild")
     spare = run.worktree(CHILDREN[2])
-    await middle.step("prepare", PREPARE, commit="prepare the middle namespace")
-    await grandchild.step("implement", COLLIDE, commit="implement over it")
-    await spare.step("implement", BUILDS[CHILDREN[2]], commit="implement T-03")
+    await middle.step(PREPARE, commit="prepare the middle namespace")
+    await grandchild.step(COLLIDE, commit="implement over it")
+    await spare.step(BUILDS[CHILDREN[2]], commit="implement T-03")
 
     stuck = await grandchild.integrate()
     assert stuck.conflicted is True, "this test needs one target left holding a landing"
@@ -743,7 +744,7 @@ async def test_a_nested_landing_advances_the_middle_namespace_so_its_own_landing
     run = await _tree(harness)
     middle = run.worktree("middle")
     grandchild = middle.worktree("grandchild")
-    await grandchild.step("implement", BUILDS[CHILDREN[0]], commit="implement T-01")
+    await grandchild.step(BUILDS[CHILDREN[0]], commit="implement T-01")
     built = await _head(harness, Namespace("grandchild"))
 
     inner = await grandchild.integrate()
@@ -880,10 +881,10 @@ def world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _World:
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", absent)
     monkeypatch.setenv("GIT_CONFIG_SYSTEM", absent)
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
-    for role in ("AUTHOR", "COMMITTER"):
-        monkeypatch.setenv(f"GIT_{role}_NAME", "AGL acceptance")
-        monkeypatch.setenv(f"GIT_{role}_EMAIL", "agl@example.invalid")
-        monkeypatch.setenv(f"GIT_{role}_DATE", MOMENT)
+    for identity in ("AUTHOR", "COMMITTER"):
+        monkeypatch.setenv(f"GIT_{identity}_NAME", "AGL acceptance")
+        monkeypatch.setenv(f"GIT_{identity}_EMAIL", "agl@example.invalid")
+        monkeypatch.setenv(f"GIT_{identity}_DATE", MOMENT)
     return _new_world(tmp_path / "world")
 
 
@@ -973,9 +974,9 @@ async def test_a_red_gate_leaves_a_real_target_unmerged_and_its_tree_clean(world
     services = _real(world, gate=gate)
     run = await _real_run(world, services)
     first, second = run.worktree(CHILDREN[0]), run.worktree(CHILDREN[1])
-    await run.step("prepare", PREPARE, commit="prepare the parent")
-    await first.step("implement", BUILDS[CHILDREN[0]], commit="implement T-01")
-    await second.step("implement", BUILDS[CHILDREN[1]], commit="implement T-02")
+    await run.step(PREPARE, commit="prepare the parent")
+    await first.step(BUILDS[CHILDREN[0]], commit="implement T-01")
+    await second.step(BUILDS[CHILDREN[1]], commit="implement T-02")
     branch = run_branch(LABEL)
     before = _tip(world, branch)
     built = _tip(world, worktree_branch(LABEL, Namespace(CHILDREN[0])))
@@ -1028,7 +1029,7 @@ async def test_a_red_gate_leaves_a_real_target_unmerged_and_its_tree_clean(world
     )
 
     await outcome.abort()
-    await run.step("review", REVIEW)
+    await run.step(REVIEW)
 
     assert _tip(world, branch) == before, (
         f"{branch} moved to {_tip(world, branch)!r} when the parent's next step restored to its "
@@ -1080,8 +1081,8 @@ async def test_a_landed_child_survives_the_parents_next_fingerprint_miss(world: 
     services = _real(world, gate=_Gate(passed=True), recorded=recorded)
     run = await _real_run(world, services)
     child = run.worktree(CHILDREN[0])
-    await run.step("prepare", PREPARE, commit="prepare the parent")
-    await child.step("implement", BUILDS[CHILDREN[0]], commit="implement T-01")
+    await run.step(PREPARE, commit="prepare the parent")
+    await child.step(BUILDS[CHILDREN[0]], commit="implement T-01")
     built = _tip(world, worktree_branch(LABEL, Namespace(CHILDREN[0])))
     branch = run_branch(LABEL)
 
@@ -1090,7 +1091,7 @@ async def test_a_landed_child_survives_the_parents_next_fingerprint_miss(world: 
     assert _contains(world, built, branch), "the landing did not reach the run's own branch"
 
     recorded.clear()
-    await run.step("review", REVIEW)
+    await run.step(REVIEW)
 
     assert recorded == [REVIEW.instructions], (
         f"the parent's next step ran {recorded} rather than missing its fingerprint and calling "
@@ -1121,8 +1122,8 @@ async def test_a_landed_child_survives_the_parents_next_fingerprint_miss(world: 
         "what its ending `restore` is for"
     )
 
-    await run.step("look-again", LOOK_AGAIN)
-    await run.step("record", RECORD, commit="record what has landed")
+    await run.step(LOOK_AGAIN)
+    await run.step(RECORD, commit="record what has landed")
 
     assert _read(world.target / _file(CHILDREN[0])) == _work(CHILDREN[0]), (
         "a second miss in the parent deleted the landed child, so the advance survived one restore "
@@ -1164,7 +1165,7 @@ async def test_three_children_land_into_one_real_base_and_all_three_survive(
     services = _real(world, gate=_Gate(passed=True, watcher=watcher), watcher=watcher)
     run = await _real_run(world, services)
     for name in CHILDREN:
-        await run.worktree(name).step("implement", BUILDS[name], commit=f"implement {name}")
+        await run.worktree(name).step(BUILDS[name], commit=f"implement {name}")
     built = {name: _tip(world, worktree_branch(LABEL, Namespace(name))) for name in CHILDREN}
     branch = run_branch(LABEL)
 
@@ -1239,8 +1240,8 @@ async def raises_mid_conflict(run: Run[NoParams]) -> None:
     only from an object that is going away with the workflow.
     """
     child = run.worktree(CHILDREN[0])
-    await run.step("prepare", PREPARE, commit="prepare the parent")
-    await child.step("implement", COLLIDE, commit="implement T-01")
+    await run.step(PREPARE, commit="prepare the parent")
+    await child.step(COLLIDE, commit="implement T-01")
     outcome = await child.integrate()
     if not outcome.conflicted:  # pragma: no cover - the arrangement guarantees a collision
         raise AssertionError("this workflow exists to raise while a conflict is unresolved")
@@ -1303,7 +1304,7 @@ async def test_a_workflow_that_raises_mid_conflict_gives_back_the_lease_and_the_
         "a person had started"
     )
 
-    stepped = asyncio.create_task(run.step("review", REVIEW))
+    stepped = asyncio.create_task(run.step(REVIEW))
     landing = asyncio.create_task(child.integrate())
     said, again = await asyncio.wait_for(
         asyncio.gather(stepped, landing), timeout=_LIVENESS
@@ -1367,14 +1368,14 @@ async def test_a_land_that_raises_does_not_strand_the_targets_lease(tmp_path: Pa
     harness = _harness(tmp_path)
     run = await _tree(harness, integrator=_Refuses(harness.services.integrator))
     first, second = run.worktree(CHILDREN[0]), run.worktree(CHILDREN[1])
-    await first.step("implement", BUILDS[CHILDREN[0]], commit="implement T-01")
-    await second.step("implement", BUILDS[CHILDREN[1]], commit="implement T-02")
+    await first.step(BUILDS[CHILDREN[0]], commit="implement T-01")
+    await second.step(BUILDS[CHILDREN[1]], commit="implement T-02")
 
     with pytest.raises(UpstreamUnexpected):
         await first.integrate()
 
     landing = asyncio.create_task(second.integrate())
-    stepped = asyncio.create_task(run.step("review", REVIEW))
+    stepped = asyncio.create_task(run.step(REVIEW))
     outcome, said = await asyncio.wait_for(asyncio.gather(landing, stepped), timeout=_LIVENESS)
 
     assert outcome.conflicted is False, (
@@ -1417,7 +1418,7 @@ async def test_cancelling_a_queued_landing_does_not_strand_the_target(tmp_path: 
         f"cancelled while queued held nothing, so nothing it did may reach the next one"
     )
     assert _read(_fake_target(tmp_path) / _file(CHILDREN[1])) == _work(CHILDREN[1])
-    assert await asyncio.wait_for(run.step("review", REVIEW), timeout=_LIVENESS) is not None
+    assert await asyncio.wait_for(run.step(REVIEW), timeout=_LIVENESS) is not None
 
 
 # --- what the gate does to a landing a person concluded with their own hands ----------------------
@@ -1963,7 +1964,7 @@ async def test_integrating_one_child_twice_lands_it_once_and_says_so_both_times(
     harness = _harness(tmp_path)
     run = await _tree(harness)
     child = run.worktree(CHILDREN[0])
-    await child.step("implement", BUILDS[CHILDREN[0]], commit="implement T-01")
+    await child.step(BUILDS[CHILDREN[0]], commit="implement T-01")
 
     first = await child.integrate()
     second = await child.integrate()

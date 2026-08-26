@@ -978,7 +978,7 @@ async def test_two_gathered_steps_in_one_namespace_do_not_overlap(tmp_path: Path
 async def test_concurrent_siblings_each_write_their_own_entry_and_both_replay(
     tmp_path: Path,
 ) -> None:
-    """§3.6's own example: `T-01` and `T-02` both `step("implement", implementer)`.
+    """§3.6's own example: `T-01` and `T-02` both `step(implementer)`.
 
     Same role, same inputs, same parent head - so identical bases by construction, and the only
     thing separating the two entries is the namespace in the counter's key. One `Fingerprints` is

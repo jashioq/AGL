@@ -74,7 +74,7 @@ being nobody to wait for.
 
 import asyncio
 from collections.abc import Awaitable, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
@@ -92,6 +92,7 @@ from agl.sdk import (
     Claude,
     OpenAI,
     Question,
+    QuestionHandler,
     Restriction,
     Role,
     Row,
@@ -101,6 +102,7 @@ from agl.sdk import (
     Text,
     arg,
     reporting_tool,
+    role,
     workflow,
 )
 from agl.testing import Agent, AgentTask, Call, Press, Recorded, Reply
@@ -136,30 +138,40 @@ class Findings:
 
 REPORT: Final = reporting_tool("report_findings", "report what the review found", Findings)
 
-IMPLEMENT: Final = Role(
-    instructions="implement what the request asks for",
-    model=Claude.SONNET,
-)
-"""An effect role: no reporting tool, so the step's result is `null` and its effect is commits."""
+@role(model=Claude.SONNET)
+def implement() -> Role:
+    """An effect role: no reporting tool, so the step's result is `null` and its effect is
+    commits."""
+    return Role(name="implement", instructions="implement what the request asks for")
 
-REVIEW: Final = Role(
-    instructions="review the worktree and report what you found",
-    model=OpenAI.SOL,
-    restrictions={Restriction.NO_VCS_WRITES},
-    tools=[REPORT],
-)
-"""A reporting role, on the other provider - §3.3's `fix` shape: Claude implements, OpenAI
-reviews. Paired below with a step that passes no `commit=`, which is what §3.3 asks of a
-read-only role."""
 
-DECIDE: Final = Role(
-    instructions="propose something, ask whether to go ahead, then report what was decided",
-    model=Claude.SONNET,
-    tools=[REPORT],
-)
-"""The role the two question tests use. `on_question` is not declared here and cannot be: §3.7's
-handler is a closure over the workflow's own `Run`, so the role that runs is
-`replace(DECIDE, on_question=...)`, built inside the function."""
+@role(model=OpenAI.SOL)
+def review() -> Role[Findings]:
+    """A reporting role, on the other provider - §3.3's `fix` shape: Claude implements, OpenAI
+    reviews. Paired below with a step that passes no `commit=`, which is what §3.3 asks of a
+    read-only role."""
+    return Role(
+        name="review",
+        instructions="review the worktree and report what you found",
+        restrictions={Restriction.NO_VCS_WRITES},
+        tools=[REPORT],
+    )
+
+
+@role(model=Claude.SONNET)
+def decide(*, on_question: QuestionHandler | None = None) -> Role[Findings]:
+    """The role the two question tests use, and the one factory here with a parameter.
+
+    §3.7's handler is a closure over the workflow's own `Run`, so it cannot be written at this
+    level - which is exactly what a factory parameter is for: `decide()` is what a workflow
+    declares and `decide(on_question=...)` is what it steps with, and nothing else about this role
+    is reachable from either call."""
+    return Role(
+        name="decide",
+        instructions="propose something, ask whether to go ahead, then report what was decided",
+        tools=[REPORT],
+        on_question=on_question,
+    )
 
 
 def approve(question: Question) -> Screen[Answer]:
@@ -174,16 +186,22 @@ def approve(question: Question) -> Screen[Answer]:
     )
 
 
-@workflow(name="demo", version="1", params=DemoParams, roles=[IMPLEMENT, REVIEW])
+@workflow(name="demo", version="1", params=DemoParams)
 async def demo(run: Run[DemoParams]) -> None:
-    """Implement, then review what was implemented. Two steps, two providers, one worktree."""
-    await run.step("implement", IMPLEMENT, commit=f"implement {run.params.request}")
-    findings = await run.step("review", REVIEW, request=run.params.request)
+    """Implement, then review what was implemented, and repair what the review found.
+
+    `fix`'s shape at its smallest, including the part UF1.1 changed: the repair runs `implement()`
+    a second time, and since `run.step` carries no name of its own the two land under one
+    `steps/implement/` - which is why `harness.recorded` below reads `implement`, `review`,
+    `implement` rather than naming a third step. Their inputs differ, so they are two digests.
+    """
+    await run.step(implement(), commit=f"implement {run.params.request}")
+    findings = await run.step(review(), request=run.params.request)
     if findings.high:
-        await run.step("repair", IMPLEMENT, note=findings.summary, commit="address the review")
+        await run.step(implement(), note=findings.summary, commit="address the review")
 
 
-@workflow(name="asking", version="1", params=DemoParams, roles=[DECIDE])
+@workflow(name="asking", version="1", params=DemoParams)
 async def asking(run: Run[DemoParams]) -> None:
     """One step whose agent stops to ask, answered by a person at a screen this workflow owns."""
 
@@ -193,10 +211,10 @@ async def asking(run: Run[DemoParams]) -> None:
         answers.append(picked)
         return picked
 
-    await run.step("decide", replace(DECIDE, on_question=answered))
+    await run.step(decide(on_question=answered))
 
 
-@workflow(name="landing", version="1", params=DemoParams, roles=[IMPLEMENT])
+@workflow(name="landing", version="1", params=DemoParams)
 async def landing(run: Run[DemoParams]) -> None:
     """One child worktree, one committing step, one integration - §3.9's shape at its smallest.
 
@@ -206,7 +224,7 @@ async def landing(run: Run[DemoParams]) -> None:
     take a run all the way to a landing to see one.
     """
     ticket = run.worktree("T-01")
-    await ticket.step("implement", IMPLEMENT, commit=f"implement {run.params.request}")
+    await ticket.step(implement(), commit=f"implement {run.params.request}")
     outcome = await ticket.integrate()
     verdict = outcome.verdict
     gated.append((outcome.conflicted, "" if verdict is None else verdict.output))
@@ -642,7 +660,7 @@ async def test_a_resume_can_be_interrupted_at_its_own_first_step(tmp_path: Path)
 
     await harness.resume(demo)
 
-    assert _steps(harness.recorded) == ["implement", "review", "repair"]
+    assert _steps(harness.recorded) == ["implement", "review", "implement"]
     assert seen == ["effect", "reporting", "effect"], (
         "across three invocations each step's agent must have run exactly once: an interrupted "
         "resume abandons what comes after its kill point and replays what came before it"
@@ -670,7 +688,7 @@ async def test_a_resumes_kill_point_counts_that_resumes_own_entries(tmp_path: Pa
     await harness.run(demo, "-r", "add oauth", interrupt_after=1)
     await harness.resume(demo, interrupt_after=2)
 
-    assert _steps(harness.recorded) == ["implement", "review", "repair"], (
+    assert _steps(harness.recorded) == ["implement", "review", "implement"], (
         "the resume stopped short of the two steps it was asked for, so `interrupt_after=` counted "
         "what an earlier invocation wrote as well as its own"
     )

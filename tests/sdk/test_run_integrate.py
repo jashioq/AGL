@@ -69,7 +69,7 @@ from agl.ports.home_layout import RunScope
 from agl.ports.ids import Namespace, ProjectName, RunLabel
 from agl.ports.tree_layout import TreesRoot
 from agl.ports.verifier import Verifier, VerifierOutcome
-from agl.sdk.roles import Role
+from agl.sdk.roles import Role, role
 from agl.sdk.testing import Agent, Call, Reply
 from agl.sdk.tools import reporting_tool
 from agl.sdk.workflow import Run, workflow
@@ -148,12 +148,13 @@ class NoParams:
 REPORT: Final = reporting_tool("report", "report what you did", Summary)
 
 
-def _role(instructions: str) -> Role[Summary]:
+@role(model=Claude.SONNET)
+def _role(name: str, instructions: str) -> Role[Summary]:
     """A reporting role that may commit: its result is `REPORT`'s payload, read back as a
-    `Summary`."""
+    `Summary`. `name` is the address its entries go to, `run.step` carrying none (§3.3)."""
     return Role(
+        name=name,
         instructions=instructions,
-        model=Claude.SONNET,
         restrictions=set[Restriction](),
         tools=(REPORT,),
     )
@@ -162,12 +163,12 @@ def _role(instructions: str) -> Role[Summary]:
 # Module-level, which is what a `Role` is (§3.3), and distinct per writer: the scripted agent below
 # decides what to write from the instructions it was handed, so two roles that shared a string would
 # be two children writing one file.
-PREPARE: Final = _role("prepare the parent")
-IMPLEMENT_FIRST: Final = _role("implement T-01")
-IMPLEMENT_SECOND: Final = _role("implement T-02")
-COLLIDE: Final = _role("implement T-01, over the same file the parent touched")
-REVIEW: Final = _role("review the parent's worktree")
-HOLDING: Final = _role("review the parent's worktree, slowly")
+PREPARE: Final = _role("prepare", "prepare the parent")
+IMPLEMENT_FIRST: Final = _role("implement", "implement T-01")
+IMPLEMENT_SECOND: Final = _role("implement", "implement T-02")
+COLLIDE: Final = _role("implement", "implement T-01, over the same file the parent touched")
+REVIEW: Final = _role("review", "review the parent's worktree")
+HOLDING: Final = _role("review", "review the parent's worktree, slowly")
 
 # Which files each role's agent leaves behind, keyed by the instructions it is dispatched with.
 # Keyed on the prompt because that is the only thing the port hands a script that says which step
@@ -371,7 +372,7 @@ async def test_a_childs_work_lands_in_the_parents_line_of_work(tmp_path: Path) -
     harness = _harness(tmp_path)
     run = await _tree(harness)
     ticket = run.worktree("T-01")
-    await ticket.step("implement", IMPLEMENT_FIRST, commit="implement T-01")
+    await ticket.step(IMPLEMENT_FIRST, commit="implement T-01")
     landed = await _head(harness, TICKET)
 
     outcome = await ticket.integrate()
@@ -403,9 +404,9 @@ async def test_the_parents_last_good_advances_to_the_landing_head(tmp_path: Path
     harness = _harness(tmp_path)
     run = await _tree(harness)
     ticket = run.worktree("T-01")
-    await run.step("prepare", PREPARE, commit="prepare the parent")
+    await run.step(PREPARE, commit="prepare the parent")
     before = run._steps.last_good
-    await ticket.step("implement", IMPLEMENT_FIRST, commit="implement T-01")
+    await ticket.step(IMPLEMENT_FIRST, commit="implement T-01")
 
     outcome = await ticket.integrate()
 
@@ -436,12 +437,12 @@ async def test_the_parents_next_step_does_not_delete_the_child_that_landed(tmp_p
     harness = _harness(tmp_path)
     run = await _tree(harness)
     ticket = run.worktree("T-01")
-    await run.step("prepare", PREPARE, commit="prepare the parent")
-    await ticket.step("implement", IMPLEMENT_FIRST, commit="implement T-01")
+    await run.step(PREPARE, commit="prepare the parent")
+    await ticket.step(IMPLEMENT_FIRST, commit="implement T-01")
     outcome = await ticket.integrate()
     assert outcome.conflicted is False
 
-    await run.step("review", REVIEW)
+    await run.step(REVIEW)
 
     assert (_target_dir(tmp_path) / FIRST).is_file(), (
         "the landed child's file is gone from the target's checkout after a read-only step in the "
@@ -472,8 +473,8 @@ async def test_two_children_landing_at_once_serialize_and_both_go_in(tmp_path: P
     run = await _tree(harness)
     first = run.worktree("T-01")
     second = run.worktree("T-02")
-    await first.step("implement", IMPLEMENT_FIRST, commit="implement T-01")
-    await second.step("implement", IMPLEMENT_SECOND, commit="implement T-02")
+    await first.step(IMPLEMENT_FIRST, commit="implement T-01")
+    await second.step(IMPLEMENT_SECOND, commit="implement T-02")
     landed = (await _head(harness, TICKET), await _head(harness, SIBLING))
 
     outcomes = await asyncio.wait_for(
@@ -523,9 +524,9 @@ async def test_a_landing_waits_for_a_step_already_running_in_the_target_namespac
     harness = _harness(tmp_path, pause)
     run = await _tree(harness)
     ticket = run.worktree("T-01")
-    await ticket.step("implement", IMPLEMENT_FIRST, commit="implement T-01")
+    await ticket.step(IMPLEMENT_FIRST, commit="implement T-01")
 
-    step = asyncio.create_task(run.step("review", HOLDING))
+    step = asyncio.create_task(run.step(HOLDING))
     await asyncio.wait_for(pause.started.wait(), timeout=_LIVENESS)
     landing = asyncio.create_task(ticket.integrate())
 
@@ -563,8 +564,8 @@ async def _hold_the_target(tmp_path: Path) -> tuple[container.FakeServices, Run[
     harness = _harness(tmp_path)
     run = await _tree(harness)
     ticket = run.worktree("T-01")
-    await run.step("prepare", PREPARE, commit="prepare the parent")
-    await ticket.step("implement", COLLIDE, commit="implement T-01")
+    await run.step(PREPARE, commit="prepare the parent")
+    await ticket.step(COLLIDE, commit="implement T-01")
     return harness, run, ticket
 
 
@@ -659,7 +660,7 @@ async def test_a_landed_outcome_is_settled_too_and_neither_verb_acts_on_it(tmp_p
     harness = _harness(tmp_path)
     run = await _tree(harness)
     ticket = run.worktree("T-01")
-    await ticket.step("implement", IMPLEMENT_FIRST, commit="implement T-01")
+    await ticket.step(IMPLEMENT_FIRST, commit="implement T-01")
     outcome = await ticket.integrate()
     assert outcome.conflicted is False
     settled = outcome.head
@@ -711,8 +712,8 @@ async def test_a_retry_that_concludes_another_childs_landing_is_not_reported_as_
     # does on the way out - the adapter's hold is deliberately not aborted (§3.4).
     first = await _tree(harness)
     a = first.worktree("T-01")
-    await first.step("prepare", PREPARE, commit="prepare the parent")
-    await a.step("implement", COLLIDE, commit="implement T-01")
+    await first.step(PREPARE, commit="prepare the parent")
+    await a.step(COLLIDE, commit="implement T-01")
     held = await a.integrate()
     assert held.conflicted is True, "this test needs a target left holding a landing"
     first.leases.release_all()
@@ -723,9 +724,9 @@ async def test_a_retry_that_concludes_another_childs_landing_is_not_reported_as_
     second = await _tree(harness)
     a_again = second.worktree("T-01")
     b = second.worktree("T-02")
-    await second.step("prepare", PREPARE, commit="prepare the parent")
-    await a_again.step("implement", COLLIDE, commit="implement T-01")
-    await b.step("implement", IMPLEMENT_SECOND, commit="implement T-02")
+    await second.step(PREPARE, commit="prepare the parent")
+    await a_again.step(COLLIDE, commit="implement T-01")
+    await b.step(IMPLEMENT_SECOND, commit="implement T-02")
     (_target_dir(tmp_path) / CONTESTED).write_bytes(RESOLVED)
 
     outcome = await b.integrate()
@@ -784,8 +785,8 @@ async def walks_away(run: Run[NoParams]) -> None:
     object that is going away with the workflow.
     """
     ticket = run.worktree("T-01")
-    await run.step("prepare", PREPARE, commit="prepare the parent")
-    await ticket.step("implement", COLLIDE, commit="implement T-01")
+    await run.step(PREPARE, commit="prepare the parent")
+    await ticket.step(COLLIDE, commit="implement T-01")
     outcome = await ticket.integrate()
     if not outcome.conflicted:  # pragma: no cover - the arrangement guarantees a collision
         raise AssertionError("this workflow exists to leave a conflict unresolved")
@@ -913,7 +914,7 @@ async def test_a_landing_that_passes_the_gate_advances_the_chain(tmp_path: Path)
     harness.verifier.answers(container.FAKE_BUILD, passed=True, status=0, output="42 passed")
     run = await _tree(harness)
     ticket = run.worktree("T-01")
-    await ticket.step("implement", IMPLEMENT_FIRST, commit="implement T-01")
+    await ticket.step(IMPLEMENT_FIRST, commit="implement T-01")
     landed = await _head(harness, TICKET)
 
     outcome = await ticket.integrate()
@@ -966,8 +967,8 @@ async def test_a_failing_gate_reverts_the_landing_and_never_reaches_the_advance(
     harness.verifier.answers(container.FAKE_BUILD, passed=False, status=2, output=RED)
     run = await _tree(harness)
     ticket = run.worktree("T-01")
-    await run.step("prepare", PREPARE, commit="prepare the parent")
-    await ticket.step("implement", IMPLEMENT_FIRST, commit="implement T-01")
+    await run.step(PREPARE, commit="prepare the parent")
+    await ticket.step(IMPLEMENT_FIRST, commit="implement T-01")
     landed = await _head(harness, TICKET)
     before = await _head(harness, None)
     chain = run._steps.last_good
@@ -1054,7 +1055,7 @@ async def test_the_gate_runs_the_configured_command_in_the_targets_own_checkout(
     gate = _Recorded(passed=True, leaves=ARTIFACT)
     run = await _tree_gated_by(harness, gate)
     ticket = run.worktree("T-01")
-    await ticket.step("implement", IMPLEMENT_FIRST, commit="implement T-01")
+    await ticket.step(IMPLEMENT_FIRST, commit="implement T-01")
 
     outcome = await ticket.integrate()
 
@@ -1090,7 +1091,7 @@ async def test_a_failing_gate_takes_the_builds_leavings_away_with_the_landing(
     harness = _harness(tmp_path)
     run = await _tree_gated_by(harness, _Recorded(passed=False, leaves=ARTIFACT))
     ticket = run.worktree("T-01")
-    await ticket.step("implement", IMPLEMENT_FIRST, commit="implement T-01")
+    await ticket.step(IMPLEMENT_FIRST, commit="implement T-01")
 
     outcome = await ticket.integrate()
 
@@ -1128,7 +1129,7 @@ async def test_abort_after_a_failed_gate_settles_it_and_gives_the_lease_back(
     harness.verifier.answers(container.FAKE_BUILD, passed=False)
     run = await _tree(harness)
     ticket = run.worktree("T-01")
-    await ticket.step("implement", IMPLEMENT_FIRST, commit="implement T-01")
+    await ticket.step(IMPLEMENT_FIRST, commit="implement T-01")
     before = await _head(harness, None)
     chain = run._steps.last_good
     outcome = await ticket.integrate()
@@ -1184,7 +1185,7 @@ async def test_retry_after_a_failed_gate_lands_again_and_goes_through_the_gate_a
     harness.verifier.answers(container.FAKE_BUILD, passed=False)
     run = await _tree(harness)
     ticket = run.worktree("T-01")
-    await ticket.step("implement", IMPLEMENT_FIRST, commit="implement T-01")
+    await ticket.step(IMPLEMENT_FIRST, commit="implement T-01")
     landed = await _head(harness, TICKET)
     chain = run._steps.last_good
     outcome = await ticket.integrate()
@@ -1251,7 +1252,7 @@ async def test_a_retry_that_collides_leaves_no_trace_of_the_gate_that_refused_th
     harness.verifier.answers(container.FAKE_BUILD, passed=False, status=2, output=RED)
     run = await _tree(harness)
     ticket = run.worktree("T-01")
-    await ticket.step("implement", COLLIDE, commit="implement T-01")
+    await ticket.step(COLLIDE, commit="implement T-01")
 
     outcome = await ticket.integrate()
 

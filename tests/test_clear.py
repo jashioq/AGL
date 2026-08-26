@@ -87,7 +87,7 @@ from agl.ports.tree_layout import (
     worktree_dir,
 )
 from agl.ports.workspace import Workspace, WorkspaceProvider
-from agl.sdk.roles import Role
+from agl.sdk.roles import Role, role
 from agl.sdk.workflow import Run, workflow
 
 # `asyncio_mode = "strict"`, so every async test below carries its own marker.
@@ -113,25 +113,34 @@ class NoParams:
     """A workflow that takes nothing, and still has a params class to derive no flags from."""
 
 
-# An effect role: no reporting tool, so a step over it results in `null` and its whole purpose is
-# that an agent wrote a file the step then commits. `Claude.SONNET` because a role has to name a
-# model and the fakes bundle serves both providers; nothing below depends on which.
-WRITING: Final = Role(instructions="leave some work behind", model=Claude.SONNET)
+@role(model=Claude.SONNET)
+def writing() -> Role:
+    """An effect role: no reporting tool, so a step over it results in `null` and its whole purpose
+    is that an agent wrote a file the step then commits.
+
+    `Claude.SONNET` because a role has to name a model and the fakes bundle serves both providers;
+    nothing below depends on which. A zero-argument factory because nothing about it is decided at
+    a call site - three steps below run it and none of them varies anything."""
+    return Role(name="work", instructions="leave some work behind")
 
 
-@workflow(name="nesting", version="1.0", params=NoParams, roles=[WRITING])
+@workflow(name="nesting", version="1.0", params=NoParams)
 async def nesting(run: Run[NoParams]) -> None:
     """A run with something at every depth: its own work, a child's, and the child's child's.
 
     Each step commits, so all three lines of work end up ahead of the base ref - which is what
     makes `agl/auth` unmerged without any arrangement, and what makes "the child branches were
     deleted" a claim about names that really exist.
+
+    One role serves all three, which is now also one step name: what separates the three entries is
+    the namespace each runs in, and `steps/` sits under every scope. The depth is the claim here,
+    and a role per level would only be three copies of one declaration saying so twice.
     """
-    await run.step("root", WRITING, commit="the run's own work")
+    await run.step(writing(), commit="the run's own work")
     child = run.worktree(str(CHILD))
-    await child.step("child", WRITING, commit="the child's work")
+    await child.step(writing(), commit="the child's work")
     grandchild = child.worktree(str(GRANDCHILD))
-    await grandchild.step("grandchild", WRITING, commit="the grandchild's work")
+    await grandchild.step(writing(), commit="the grandchild's work")
 
 
 @workflow(name="quiet", version="1.0", params=NoParams)
@@ -798,9 +807,9 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     for name in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"):
         monkeypatch.setenv(name, str(tmp_path / "nonexistent-git-config"))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
-    for role in ("AUTHOR", "COMMITTER"):
-        monkeypatch.setenv(f"GIT_{role}_NAME", "AGL clear")
-        monkeypatch.setenv(f"GIT_{role}_EMAIL", "agl@example.invalid")
+    for identity in ("AUTHOR", "COMMITTER"):
+        monkeypatch.setenv(f"GIT_{identity}_NAME", "AGL clear")
+        monkeypatch.setenv(f"GIT_{identity}_EMAIL", "agl@example.invalid")
     work = tmp_path / "repo"
     work.mkdir()
     _git(work, "init", "-q", "-b", "main")

@@ -53,7 +53,7 @@ from agl.ports.run import JsonValue, RunSpec
 from agl.ports.tree_layout import TreesRoot, base_worktree, run_branch
 from agl.ports.workspace import Workspace, WorkspaceProvider
 from agl.sdk.params import arg
-from agl.sdk.roles import Role
+from agl.sdk.roles import Role, role
 from agl.sdk.workflow import Run, Stop, workflow
 
 # `asyncio_mode = "strict"`, so every async test below carries its own marker.
@@ -92,10 +92,14 @@ class ReviewNotConverging(Stop):
 SEEDED: Final = "src/a.txt"
 LANDED: Final = "src/landed.txt"
 
-# An effect role: no reporting tool, so a step over it results in `null` and its whole purpose is
-# that a step happened at all. `Claude.SONNET` because a role has to name a model and the fakes
-# bundle serves both providers; nothing below depends on which.
-LOOKING: Final = Role(instructions="look at what is already here", model=Claude.SONNET)
+@role(model=Claude.SONNET)
+def looking() -> Role:
+    """An effect role: no reporting tool, so a step over it results in `null` and its whole purpose
+    is that a step happened at all.
+
+    `Claude.SONNET` because a role has to name a model and the fakes bundle serves both providers;
+    nothing below depends on which."""
+    return Role(name="look", instructions="look at what is already here")
 
 
 # What each workflow was handed and what one of them raised, at module level because the workflows
@@ -126,7 +130,7 @@ async def stepping(run: Run[NoParams]) -> None:
     exists to reach `Steps._namespace`, which is the lazy open 13.4 stopped being the first caller
     of. The walk restores the checkout on the way out and records `null`.
     """
-    await run.step("look", LOOKING)
+    await run.step(looking())
 
 
 def _point(name: str, attribute: str) -> EntryPoint:
@@ -458,9 +462,9 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     for name in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"):
         monkeypatch.setenv(name, str(tmp_path / "nonexistent-git-config"))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
-    for role in ("AUTHOR", "COMMITTER"):
-        monkeypatch.setenv(f"GIT_{role}_NAME", "AGL api")
-        monkeypatch.setenv(f"GIT_{role}_EMAIL", "agl@example.invalid")
+    for identity in ("AUTHOR", "COMMITTER"):
+        monkeypatch.setenv(f"GIT_{identity}_NAME", "AGL api")
+        monkeypatch.setenv(f"GIT_{identity}_EMAIL", "agl@example.invalid")
     work = tmp_path / "repo"
     work.mkdir()
     _git(work, "init", "-q", "-b", "main")

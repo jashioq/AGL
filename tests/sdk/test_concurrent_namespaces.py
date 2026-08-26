@@ -73,7 +73,7 @@ from agl.ports.home_layout import AglHome, RunScope
 from agl.ports.ids import ProjectName, RunLabel
 from agl.ports.run import JsonValue
 from agl.ports.tree_layout import TreesRoot
-from agl.sdk.roles import Role
+from agl.sdk.roles import Role, role
 from agl.sdk.testing import Agent, Call, Reply
 from agl.sdk.tools import reporting_tool
 from agl.sdk.workflow import Run
@@ -82,7 +82,7 @@ PROJECT: Final = ProjectName("myapp")
 LABEL: Final = RunLabel("auth")
 SCOPE: Final = RunScope(PROJECT, LABEL)
 
-# §3.6's own example, by name: "`T-01` and `T-02` both call `step("implement", implementer)` with
+# §3.6's own example, by name: "`T-01` and `T-02` both call `step(implementer)` with
 # the same role, no inputs, and the same parent head".
 SIBLINGS: Final = ("T-01", "T-02")
 
@@ -121,12 +121,17 @@ class Summary:
 REPORT: Final = reporting_tool("report", "report what you did", Summary)
 
 
-def _role(instructions: str, *, read_only: bool = False) -> Role[Summary]:
-    """A reporting role: its result is `REPORT`'s payload, read back as a `Summary`."""
+@role(model=Claude.SONNET)
+def _role(name: str, instructions: str, *, read_only: bool = False) -> Role[Summary]:
+    """A reporting role: its result is `REPORT`'s payload, read back as a `Summary`. `name` is what
+    its entries are recorded under, `run.step` carrying none of its own (§3.3).
+
+    The three parameters are this file's whole override surface, which is what a `@role` factory
+    buys (§3.3): the model is on the decorator and unreachable from any call below."""
     restrictions = {Restriction.NO_VCS_WRITES} if read_only else set[Restriction]()
     return Role(
+        name=name,
         instructions=instructions,
-        model=Claude.SONNET,
         restrictions=restrictions,
         tools=(REPORT,),
     )
@@ -134,10 +139,12 @@ def _role(instructions: str, *, read_only: bool = False) -> Role[Summary]:
 
 # Module-level, which is what a `Role` is (§3.3: "a module-level value shared across steps and
 # across concurrent runs"), and load-bearing for every "identical `base`" claim below: two children
-# calling `step("implement", IMPLEMENT)` with no inputs are hashing the same object's fields.
-PLAN: Final = _role("plan the ticket", read_only=True)
-IMPLEMENT: Final = _role("implement the ticket")
-REVIEW: Final = _role("review the worktree", read_only=True)
+# calling `step(IMPLEMENT)` with no inputs are hashing the same object's fields - and, since the
+# call carries no name of its own (§3.3), addressing the same `steps/implement/` inside their own
+# namespaces.
+PLAN: Final = _role("plan", "plan the ticket", read_only=True)
+IMPLEMENT: Final = _role("implement", "implement the ticket")
+REVIEW: Final = _role("review", "review the worktree", read_only=True)
 
 
 # --- the repository, the bundle, and the run -----------------------------------------------------
@@ -160,9 +167,9 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     for name in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"):
         monkeypatch.setenv(name, str(tmp_path / "nonexistent-git-config"))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
-    for role in ("AUTHOR", "COMMITTER"):
-        monkeypatch.setenv(f"GIT_{role}_NAME", "AGL contract")
-        monkeypatch.setenv(f"GIT_{role}_EMAIL", "agl@example.invalid")
+    for identity in ("AUTHOR", "COMMITTER"):
+        monkeypatch.setenv(f"GIT_{identity}_NAME", "AGL contract")
+        monkeypatch.setenv(f"GIT_{identity}_EMAIL", "agl@example.invalid")
     work = tmp_path / "repo"
     work.mkdir()
     _git(work, "init", "-q", "-b", "main")
@@ -403,7 +410,7 @@ async def test_two_children_neither_of_which_can_finish_until_the_other_starts_b
         async with asyncio.timeout(_LIVENESS):
             both = await asyncio.gather(
                 *(
-                    child.step("implement", IMPLEMENT, commit="implement the ticket")
+                    child.step(IMPLEMENT, commit="implement the ticket")
                     for child in children
                 )
             )
@@ -480,7 +487,7 @@ async def test_the_rendezvous_two_children_pass_is_one_two_steps_of_a_namespace_
 
     with pytest.raises(TimeoutError):
         async with asyncio.timeout(_SERIALIZED):
-            await asyncio.gather(run.step("review", REVIEW), run.step("review", REVIEW))
+            await asyncio.gather(run.step(REVIEW), run.step(REVIEW))
 
     assert record.entered == ["_base"], (
         f"the agents dispatched into one namespace were {record.entered}, so both steps were in "
@@ -505,7 +512,7 @@ async def test_two_siblings_at_one_head_replay_when_the_second_walk_completes_th
 ) -> None:
     """§3.6 rule 1, in the one shape that can fail: the same two siblings, interleaved twice.
 
-    Both children call `step("implement", IMPLEMENT)` with the same role, no inputs and the same
+    Both children call `step(IMPLEMENT)` with the same role, no inputs and the same
     parent head, so their `base` values are **identical by construction** - and that is asserted
     rather than assumed, as the sharpest thing available: the two entry files carry the same name.
     A digest is `sha256(base + ":" + n)`, so one filename in two namespaces' directories is one
@@ -585,10 +592,10 @@ async def _walk(run: Run[None], relay: _Relay) -> dict[str, Summary]:
     children = {name: run.worktree(name) for name in relay.order}
     for name in relay.order:
         # Sequential, awaited, and before the gather - the class docstring and the test's say why.
-        await children[name].step("plan", PLAN)
+        await children[name].step(PLAN)
 
     async def _sibling(name: str) -> tuple[str, Summary]:
-        made = await children[name].step("implement", IMPLEMENT, commit="implement the ticket")
+        made = await children[name].step(IMPLEMENT, commit="implement the ticket")
         relay.released(name)
         return name, made
 
@@ -634,10 +641,10 @@ async def test_a_head_advanced_behind_the_frameworks_back_does_not_move_the_chai
     record = _Dispatches()
     run = _run(repository, tmp_path, base, _alone(record))
 
-    await run.step("spec", REVIEW)
-    await run.worktree("T-01").step("implement", IMPLEMENT, commit="implement the ticket")
+    await run.step(REVIEW)
+    await run.worktree("T-01").step(IMPLEMENT, commit="implement the ticket")
     assert sorted(record.left) == ["T-01", "_base"]
-    chained = _field(_only(tmp_path, "spec"), "head")
+    chained = _field(_only(tmp_path, "review"), "head")
     assert chained == base, "a read-only step moved the run's chain"
 
     checkout = _trees_dir(tmp_path) / "_base"
@@ -648,10 +655,8 @@ async def test_a_head_advanced_behind_the_frameworks_back_does_not_move_the_chai
     assert advanced != chained
 
     resumed = _run(repository, tmp_path, base, _alone(record))
-    replayed = await resumed.step("spec", REVIEW)
-    child = await resumed.worktree("T-01").step(
-        "implement", IMPLEMENT, commit="implement the ticket"
-    )
+    replayed = await resumed.step(REVIEW)
+    child = await resumed.worktree("T-01").step(IMPLEMENT, commit="implement the ticket")
 
     assert (replayed, child) == (Summary("_base"), Summary("T-01"))
     assert sorted(record.left) == ["T-01", "_base"], (
@@ -659,7 +664,7 @@ async def test_a_head_advanced_behind_the_frameworks_back_does_not_move_the_chai
         "That is §3.6's own example: every step, every resume, forever, with the run still "
         "finishing and still right"
     )
-    assert len(_entries(tmp_path, "spec")) == 1
+    assert len(_entries(tmp_path, "review")) == 1
     assert len(_entries(tmp_path, "implement", "T-01")) == 1, (
         "the child re-ran, so it was cut from where the run's checkout physically is rather than "
         "from the chain - and every step under that namespace re-fingerprints with it"

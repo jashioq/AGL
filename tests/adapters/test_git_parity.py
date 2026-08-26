@@ -232,9 +232,9 @@ def pair(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Mapping[str, _Bundl
     for name in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"):
         monkeypatch.setenv(name, str(tmp_path / "nonexistent-git-config"))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
-    for role in ("AUTHOR", "COMMITTER"):
-        monkeypatch.setenv(f"GIT_{role}_NAME", "AGL parity")
-        monkeypatch.setenv(f"GIT_{role}_EMAIL", "agl@example.invalid")
+    for identity in ("AUTHOR", "COMMITTER"):
+        monkeypatch.setenv(f"GIT_{identity}_NAME", "AGL parity")
+        monkeypatch.setenv(f"GIT_{identity}_EMAIL", "agl@example.invalid")
 
     work = tmp_path / "repo"
     work.mkdir()
@@ -1182,8 +1182,8 @@ async def test_one_state_has_one_identity_on_the_fake_and_one_per_recording_on_g
         start = await workspace.head()
         recorded: list[str] = []
         for when in ("2001-02-03T04:05:06+00:00", "2001-02-03T04:05:07+00:00"):
-            for role in ("AUTHOR", "COMMITTER"):
-                monkeypatch.setenv(f"GIT_{role}_DATE", when)
+            for identity in ("AUTHOR", "COMMITTER"):
+                monkeypatch.setenv(f"GIT_{identity}_DATE", when)
             await workspace.restore(start)
             _put(workspace, ALPHA, _body("the same work, recorded twice"))
             recorded.append(await workspace.commit_all("the same message, twice"))

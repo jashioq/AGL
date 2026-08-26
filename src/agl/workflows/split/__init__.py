@@ -201,7 +201,7 @@ class SplitParams:
     money rather than correctness."""
 
 
-@workflow(name="split", version="1.1", params=SplitParams, roles=[planner, implementer])
+@workflow(name="split", version="1.1", params=SplitParams)
 async def split(run: Run[SplitParams]) -> None:
     """Divide the request into chunks, then run and land every one of them at once.
 
@@ -230,12 +230,22 @@ async def split(run: Run[SplitParams]) -> None:
     could reorder the two: this `show` is the one suspension point in between, and it happens after
     every namespace has been taken, which is what the ordering argument above asks for.
 
+    **There is no line here for the implementer, and that is UF1.4 undoing UF1.2.** The hoist put
+    `agent = implementer()` between the board and the `TaskGroup` and threaded the value into
+    `_implement` as a third parameter, to save N-1 reads of one prompt file. It bought those reads -
+    microseconds each, against a step that runs an agent for minutes - with a bound name, an extra
+    parameter and a `Role` import into this module, which is one ceremony traded for another and the
+    swap this stage exists to catch. So the role is built at the step that uses it, the way
+    `planner()` is on the first line above, and the ordering argument is untouched either way: every
+    namespace is taken in the comprehension, and taking a synchronous call *out* of the window
+    between that and the `TaskGroup` can only make it shorter.
+
     **Nothing is gathered.** `TaskGroup` is awaited by its own `async with`, so this function
     returns when the last chunk has landed or been given up on, and the first chunk to raise cancels
     the rest and leaves here as a `BaseExceptionGroup`. That is `TaskGroup`'s contract rather than
     AGL's, and the module docstring names what it costs at the CLI's exit code.
     """
-    plan = await run.step("plan", planner, request=run.params.request, chunks=run.params.chunks)
+    plan = await run.step(planner(), request=run.params.request, chunks=run.params.chunks)
     children = {chunk.id: run.worktree(chunk.id) for chunk in plan.items}
     await run.terminal.show(views.board, chunks=plan.items, runs=children)
     async with TaskGroup() as group:
@@ -249,7 +259,10 @@ async def _implement(w: Run[SplitParams], chunk: Chunk) -> None:
     Module-level and private, because it is one chunk's half of this workflow and not a second
     workflow - `@workflow` decorates one function, `run` reaches this one through the child `Run` it
     is handed, and there is nothing here a `Run` does not already carry. `w` is the child, spelled
-    the way §3.3 and Part 4 both spell it.
+    the way §3.3 and Part 4 both spell it, and the two parameters are the whole of what one chunk
+    needs to be told: which namespace it runs in, and what it was assigned. The role is not among
+    them - `implementer()` is called on the line that steps with it, so N chunks build N identical
+    roles off one declaration and the caller has no third argument to thread down.
 
     **`commit=` is what makes this step's work exist.** The framework commits whatever the agent
     left dirty under `implement <id>` and records the resulting head; that head is what
@@ -273,7 +286,7 @@ async def _implement(w: Run[SplitParams], chunk: Chunk) -> None:
     made. The two verbs that end this loop are the two that release the lease, and each appears
     once.
     """
-    await w.step("implement", implementer, chunk=chunk, commit=f"implement {chunk.id}")
+    await w.step(implementer(), chunk=chunk, commit=f"implement {chunk.id}")
     outcome = await w.integrate()
     while outcome.conflicted:
         # `conflict` and `verdict` rather than `outcome`, because the view takes what it renders:

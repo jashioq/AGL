@@ -38,8 +38,9 @@ overrides it. Three things carry the decision:
 ## What is on it, and what is not
 
 **On it, by layer of the thing an author writes** (§3.3's four): the params helper `arg`; the role
-vocabulary - `Role`, `prompt_file`, `RoleIncompleteError`, and the enums a role is declared out of,
-`Claude`, `OpenAI`, `ModelId`, `Restriction`, `Capability`, `QuestionHandler`; the tool declarations
+vocabulary - `role` and the `RoleFactory` it produces, `Role`, `prompt_file`,
+`RoleIncompleteError`, and the enums a role is declared out of, `Claude`, `OpenAI`, `ModelId`,
+`Restriction`, `Capability`, `QuestionHandler`; the tool declarations
 `reporting_tool`, `ReportingTool`, `Tool`, `ToolResult` and `describe`, which is to a payload field
 what `arg` is to a params field and is on the door for that reason; the eight terminal components
 and the `Terminal` they are shown on; `Question` and `Answer`, which is what an `on_question`
@@ -59,10 +60,17 @@ module that carries the vocabulary the member speaks.
 
 `Claude` and `Restriction` are worth a sentence, because they are the names most obviously *not*
 declared in this package. They are `ports/agent.py`'s, for the layering reason `Screen` is
-`ports/terminal.py`'s - an `AgentRunner` speaks them - and an author writing `model=Claude.OPUS`
-should no more reach into `ports` for that than for a `Screen`. So `sdk/roles.py` re-exports them
-beside the `Role` they are fields of, and this module takes them from there: **everything here comes
-from a module in this package**, which is what keeps the two import styles one surface.
+`ports/terminal.py`'s - an `AgentRunner` speaks them - and an author writing
+`@role(model=Claude.OPUS)` should no more reach into `ports` for that than for a `Screen`. So
+`sdk/roles.py` re-exports them beside the declaration they are spelled in, and this module takes
+them from there: **everything here comes from a module in this package**, which is what keeps the
+two import styles one surface.
+
+`RoleFactory` is on the door for a narrower reason than the rest of that list: nobody types it, it
+is what `@role(model=…)` leaves bound to a name, and it is on the door because a module that
+annotates one - or a test that asks whether a name is a role declaration at all - would otherwise
+be the first thing since 18.0 to import a `Role`'s own vocabulary from a submodule while `Role`
+itself came through here.
 
 **Not on it, each for its own reason:**
 
@@ -147,8 +155,10 @@ from agl.sdk.roles import (
     QuestionHandler,
     Restriction,
     Role,
+    RoleFactory,
     RoleIncompleteError,
     prompt_file,
+    role,
 )
 from agl.sdk.terminal import (
     Choice,
@@ -196,6 +206,7 @@ __all__ = [
     "Response",
     "Restriction",
     "Role",
+    "RoleFactory",
     "RoleIncompleteError",
     "Row",
     "Rows",
@@ -216,5 +227,6 @@ __all__ = [
     "describe",
     "prompt_file",
     "reporting_tool",
+    "role",
     "workflow",
 ]

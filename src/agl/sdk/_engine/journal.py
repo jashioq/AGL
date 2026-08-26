@@ -35,15 +35,25 @@ are therefore written with the colliding pair spelled out.
 
 **Rule 1 - the counter is scoped per `(namespace, step name)`, and never per invocation.** The key
 is `(scope, step, base)`. Concurrent siblings produce identical bases by construction: `T-01` and
-`T-02` both call `step("implement", implementer)` with the same role, no inputs, and the same parent
-head, so nothing about the two calls differs except which worktree they are in. A per-invocation
+`T-02` both call `step(implementer)` with the same role, no inputs, and the same parent head, so
+nothing about the two calls differs except which worktree they are in. A per-invocation
 counter lets the interleaving decide which of them gets `n = 0`; the interleaving differs on resume,
 so on the second run each child looks in its own scope for a digest that is not there and both
 re-run, forever, silently. Scoping to the namespace makes it deterministic under concurrency,
 because siblings occupy different namespaces. The step name is in the key for a smaller reason that
-is just as sharp: two differently-named steps sharing a role, inputs and head are recorded under
-different `steps/<name>/` directories, so their counts are separate ledgers and have to be separate
-counts.
+is just as sharp: two same-based steps under different names are recorded under different
+`steps/<name>/` directories, so their counts are separate ledgers and have to be separate counts -
+and two roles differing only in `name` fingerprint identically, `name` being no term of `base_of`,
+so nothing but this key keeps their ledgers apart.
+
+**Since UF1.1 the step name is `role.name`, which is where the counter stops being a corner
+case.** §3.3 took the per-call-site name off `run.step`, so two calls on one role in one namespace
+are one address, and what separates them is their `base` when their inputs or their heads differ
+and `n` when neither does. `fix` is the first kind - its two `implementer` calls pass different
+inputs and start from different heads, so both sit at `n = 0` under two digests - and the second
+kind is the plain one a workflow reaches by asking one role the same question twice over an
+unchanged tree. Nothing but `n` tells those apart, and the two-method shape below is what keeps it
+honest across a resume.
 
 **And it advances when an entry is written, not when a step is called** (§3.6, in those words). A
 step that raised is not done - "a step is done when its file is there" - so it consumed no slot,
@@ -350,6 +360,11 @@ def base_of(
 
 class Fingerprints:
     """The counter `n`, scoped per `(namespace, step name)`. One instance per run.
+
+    The step name is the role's (§3.3: the call carries none), so "two calls on one role in one
+    namespace, with the same inputs and the same head" is one key three times over and `n` is the
+    only thing between them. Rule 1 in the module docstring is where that is argued; it is repeated
+    here because this class is where somebody reading the mechanism arrives.
 
     **Two methods and not one, which is rule 1's second half.** `digest` answers "what address is
     this invocation's", and `claimed` says "an entry now exists at it". §3.6: "the counter advances

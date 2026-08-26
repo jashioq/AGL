@@ -39,8 +39,8 @@ Two facts about that tree shape every signature here.
 A's run and reports no such label in repo B. A run is addressed by a `ProjectName` *and* a
 `RunLabel`, and there is no function here that takes a label alone.
 
-**`steps/` and `worktrees/` are sibling subtrees**, so `worktree("review")` and
-`step("review", ...)` in one run cannot collide - and `worktrees/` nests arbitrarily, so a step
+**`steps/` and `worktrees/` are sibling subtrees**, so `worktree("review")` and a step named
+`review` in one run cannot collide - and `worktrees/` nests arbitrarily, so a step
 inside `T-01/worktrees/sub-b/` sits at the end of a *sequence* of namespaces, not one.
 `RunScope` is that sequence and `scope_dir` is the only loop that walks it. Neither `steps/`
 nor `worktrees/` is addressable on its own: a caller has nothing to join a namespace onto, so
@@ -217,8 +217,8 @@ def run_record(home: AglHome, scope: RunScope) -> Path:
 def step_dir(home: AglHome, scope: RunScope, step: StepName) -> Path:
     """`<scope>/steps/<step>/` - one step's entries, in the scope that ran it.
 
-    `steps/` and `worktrees/` are siblings under every scope, which is what keeps
-    `step("review", ...)` and `worktree("review")` in one run out of each other's way.
+    `steps/` and `worktrees/` are siblings under every scope, which is what keeps a step named
+    `review` and `worktree("review")` in one run out of each other's way.
     """
     return scope_dir(home, scope) / _STEPS / str(step)
 

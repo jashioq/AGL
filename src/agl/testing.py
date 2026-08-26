@@ -324,12 +324,19 @@ class Recorded:
     """
 
     step: str
-    """The name the workflow passed to `run.step`, as a plain `str`.
+    """The name of the `Role` this step ran, as a plain `str`.
 
     A `str` and not the `StepName` the store is addressed by, because the author typed a string:
-    `run.step("review", reviewer)` compares against `"review"` and should not need a constructor to
+    `Role(name="review", ...)` compares against `"review"` and should not need a constructor to
     do it. §3.3 makes step names opaque - "rename `T-01` to `banana` and the framework behaves
-    identically" - so nothing is lost by handing back what was written."""
+    identically" - so nothing is lost by handing back what was written.
+
+    **It comes off the role and not off the call**, because since UF1.1 the call carries no name
+    (§3.11): `run.step(role, **inputs)` records under `steps/<role name>/`. So a workflow running
+    one role twice - `fix`'s implementer, which implements and then repairs - appears here twice
+    under one name. What separates the two is their order in this list, which is the order the
+    workflow called them in; on an effect role their `value` is `null` both times and this type
+    deliberately carries no digest."""
 
     namespace: str | None
     """The worktree this step ran in - `run.worktree(name)`'s name - or `None` for the run's own.

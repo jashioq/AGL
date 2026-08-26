@@ -66,7 +66,7 @@ from agl.ports.store import Store
 from agl.ports.tree_layout import TreesRoot, base_worktree, run_branch
 from agl.ports.workspace import Workspace, WorkspaceProvider
 from agl.sdk.params import arg
-from agl.sdk.roles import Role
+from agl.sdk.roles import Role, role
 from agl.sdk.tools import reporting_tool
 from agl.sdk.workflow import Run, Stop, workflow
 
@@ -113,15 +113,36 @@ class Summary:
 
 REPORT: Final = reporting_tool("report", "report what this step produced", Summary)
 
-# Two roles, differing only in their prompt, so the two steps below take two fingerprints. Read-only
-# and paired with steps that pass no `commit=`, which is what §3.3 asks an author to write.
-FIRST: Final = Role(
-    instructions="do the first thing",
-    model=Claude.SONNET,
-    restrictions={Restriction.NO_VCS_WRITES},
-    tools=(REPORT,),
-)
-SECOND: Final = replace(FIRST, instructions="do the second thing")
+# Two roles, differing in name and prompt, so the two steps below are two addresses and two
+# fingerprints. Read-only and paired with steps that pass no `commit=`, which is what §3.3 asks an
+# author to write.
+#
+# Two factories rather than one `replace` of the other, which is what UF1.2 took away: a factory
+# closes the override surface, and a role that could be re-spelled at a call site is a role whose
+# fingerprint terms a call site can move. The duplication is four literals and it is the honest
+# version of a distinction that is only ever declared once.
+
+
+@role(model=Claude.SONNET)
+def first() -> Role[Summary]:
+    """The first of two steps, and the address `steps/first/`."""
+    return Role(
+        name="first",
+        instructions="do the first thing",
+        restrictions={Restriction.NO_VCS_WRITES},
+        tools=(REPORT,),
+    )
+
+
+@role(model=Claude.SONNET)
+def second() -> Role[Summary]:
+    """The second, differing in the two terms that make it a second address and a second digest."""
+    return Role(
+        name="second",
+        instructions="do the second thing",
+        restrictions={Restriction.NO_VCS_WRITES},
+        tools=(REPORT,),
+    )
 
 
 class Interrupted(Exception):
@@ -146,7 +167,7 @@ interrupt: Final[list[str]] = []
 raised: Final[list[Stop]] = []
 
 
-@workflow(name="two_steps", version="1.1", params=ResumeParams, roles=[FIRST, SECOND])
+@workflow(name="two_steps", version="1.1", params=ResumeParams)
 async def two_steps(run: Run[ResumeParams]) -> None:
     """Two steps, with a place between them for the process to die.
 
@@ -156,10 +177,10 @@ async def two_steps(run: Run[ResumeParams]) -> None:
     kernel would have killed it changes nothing about the ledger it left behind.
     """
     handed.append(run)
-    produced.append(await run.step("first", FIRST))
+    produced.append(await run.step(first()))
     if interrupt:
         raise Interrupted(interrupt[0])
-    produced.append(await run.step("second", SECOND))
+    produced.append(await run.step(second()))
 
 
 @workflow(name="quiet", version="1", params=NoParams)
@@ -195,13 +216,13 @@ async def shifting_after(run: Run[NoParams]) -> None:
     handed.append(run)
 
 
-@workflow(name="drifting", version="1.0", params=ResumeParams, roles=[FIRST])
+@workflow(name="drifting", version="1.0", params=ResumeParams)
 async def drifting_before(run: Run[ResumeParams]) -> None:
     """The params class the record is written from. Registered under `drifting`."""
     handed.append(run)
 
 
-@workflow(name="drifting", version="1.0", params=OtherParams, roles=[FIRST])
+@workflow(name="drifting", version="1.0", params=OtherParams)
 async def drifting_after(run: Run[OtherParams]) -> None:
     """The same name and the **same version**, with the params renamed underneath - the one way a
     record can reach `params.from_json` disagreeing with the class, and the fault it names."""

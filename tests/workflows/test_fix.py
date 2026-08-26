@@ -5,8 +5,8 @@ half is every value this package declares, asserted by importing it; the second 
 whole workflow* down - is 17.3, which runs `fix` on an all-fakes bundle, interrupts it at every step
 boundary, resumes it and asserts the final state is the one an uninterrupted run leaves. The three
 `commit=` decisions, the branch over `findings.high()`, the `request=` input, the two `show` calls
-and the `replace` that gives the implementer a handler are reachable *only* from the second half:
-they are arguments to calls, and nothing imports an argument.
+and the `implementer(on_question=…)` that gives the implementer a handler are reachable *only* from
+the second half: they are arguments to calls, and nothing imports an argument.
 
 The three things worth pinning in the first half, in the order this package's own docstrings argue
 them:
@@ -97,8 +97,10 @@ scripted gesture comes back through `views.agent_question`'s own `Choice`, into 
 live agent session, and the run goes on to record its steps.
 """
 
+import json
+import sys
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
 from typing import Final, Self, cast
@@ -106,6 +108,18 @@ from typing import Final, Self, cast
 import pytest
 
 from agl import testing
+
+# The second reach past the front door, for the one claim no supported surface can answer:
+# `steps/implement/` holding two files. `ports/store.py` has no member that lists a step's entries -
+# deliberately, "the four lookups are by address and a digest is the journal's to compute" - and
+# `testing.Recorded` carries the value and not the digest, deliberately too. So the one test about
+# *where* this workflow's entries land swaps the bundle's in-memory ledger for the real one and
+# reads the directory, which is the instrument `tests/test_measurable_targets.py` uses for target
+# #11 and for the same reason.
+from agl.adapters.filesystem.store import FilesystemStore
+from agl.config import container
+from agl.ports.home_layout import AglHome
+from agl.ports.tree_layout import TreesRoot
 from agl.sdk import (
     Answer,
     Capability,
@@ -116,6 +130,7 @@ from agl.sdk import (
     OpenAI,
     Question,
     Restriction,
+    RoleFactory,
     Row,
     Rows,
     Run,
@@ -173,7 +188,7 @@ def test_a_review_that_found_nothing_at_all_has_nothing_to_repair() -> None:
 
 
 def test_high_findings_survive_the_fingerprint_that_the_repair_step_takes_over_them() -> None:
-    """`high()`'s docstring claims its result can be passed straight into `run.step(...,
+    """`high()`'s docstring claims its result can be passed straight into `run.step(implementer,
     findings=...)`, which means `_canonical` has to be able to walk it.
 
     That is the claim worth checking here rather than at 17.3: it is about the *shape* this module
@@ -220,6 +235,17 @@ def test_a_missing_findings_list_is_a_rejection_and_an_empty_one_is_a_result() -
     assert report_findings.rejection({"findings": []}) is None
 
 
+def test_the_two_roles_carry_the_names_their_entries_are_filed_under() -> None:
+    """The declaration UF1.1 moved here from the call sites, pinned where it is written.
+
+    A step takes no name of its own (§3.3), so these two strings are the whole of what decides
+    where this workflow's entries land - `steps/implement/` and `steps/review/` - and renaming one
+    moves that workflow's ledger without moving one digest inside it. Two roles and three steps, so
+    one of these names is spent twice; that is the section near the bottom of this file.
+    """
+    assert (implementer().name, reviewer().name) == ("implement", "review")
+
+
 def test_the_reviewer_is_declared_read_only_beside_a_step_that_will_wipe_its_worktree() -> None:
     """§3.3's pairing, half of it. The `review` call passes no `commit=`, so the framework restores
     the checkout and deletes everything not in it when the step ends - whatever the agent did. The
@@ -230,8 +256,8 @@ def test_the_reviewer_is_declared_read_only_beside_a_step_that_will_wipe_its_wor
     call in `__init__.py` really does omit `commit=` - is 17.3's, because seeing it means running
     the workflow.
     """
-    assert Restriction.NO_VCS_WRITES in reviewer.restrictions
-    assert Restriction.NO_FILE_WRITES in reviewer.restrictions
+    assert Restriction.NO_VCS_WRITES in reviewer().restrictions
+    assert Restriction.NO_FILE_WRITES in reviewer().restrictions
 
 
 def test_the_implementer_leaves_committing_to_the_framework_that_is_going_to_do_it() -> None:
@@ -243,7 +269,7 @@ def test_the_implementer_leaves_committing_to_the_framework_that_is_going_to_do_
     that commits on its own account moves the branch under a framework that is about to commit and
     record on top of it, so the restriction is the declaration that committing here is not this
     agent's job. Nothing else in this suite pins it and no gate would notice it going missing."""
-    assert Restriction.NO_VCS_WRITES in implementer.restrictions
+    assert Restriction.NO_VCS_WRITES in implementer().restrictions
 
 
 def test_the_two_roles_name_two_providers_and_no_vendor_syntax() -> None:
@@ -253,36 +279,39 @@ def test_the_two_roles_name_two_providers_and_no_vendor_syntax() -> None:
     really do route to different adapters - which is the whole reason `fix` is the workflow the
     target is measured on.
     """
-    assert implementer.model is Claude.OPUS
-    assert reviewer.model is OpenAI.SOL
-    assert implementer.model.provider is not reviewer.model.provider
+    assert implementer().model is Claude.OPUS
+    assert reviewer().model is OpenAI.SOL
+    assert implementer().model.provider is not reviewer().model.provider
 
 
 def test_the_reviewer_reports_through_one_tool_and_the_implementer_through_none() -> None:
     """What makes `review` a reporting step and `implement` an effect step - and therefore what
-    makes `run.step("review", reviewer)` hand back a `Findings` where the other two hand back
+    makes `run.step(reviewer())` hand back a `Findings` where the other two hand back
     `None`."""
-    assert reviewer.tools == (report_findings,)
-    assert implementer.tools == ()
+    assert reviewer().tools == (report_findings,)
+    assert implementer().tools == ()
     assert report_findings.payload is Findings
 
 
 def test_each_role_requires_what_its_prompt_actually_asks_of_a_backend() -> None:
-    """`requires` is compared against what a provider can do before the run starts, so an
-    over-declaration refuses a backend that would have worked and an under-declaration is a run that
-    dies at the step instead of at second zero.
+    """`requires` is compared against what a provider can do at the first step that uses the role -
+    §3.2's containment, which UF1.3 left at `run.step` and nowhere earlier, a `requires` being on a
+    `Role` and unreachable without calling the factory preflight may not call. So an
+    over-declaration refuses a backend that would have worked, and an under-declaration is a run
+    that dies later than it needed to, or - when the member left out is `MID_RUN_QUESTIONS` and
+    `sdk/roles.py` had no `on_question` to fold it in from - does not die at all.
 
     `MID_RUN_QUESTIONS` is on the implementer and not on the reviewer, and neither half is
     incidental: the implementer is the role the workflow hands a handler to, and the reviewer is the
     one §3.7 names as running on the backend with no second asking mechanism, where declaring a
     handler is the case preflight's third check exists to refuse.
     """
-    assert implementer.requires == frozenset(
+    assert implementer().requires == frozenset(
         {Capability.FILE_EDIT, Capability.SHELL, Capability.MID_RUN_QUESTIONS}
     )
-    assert reviewer.requires == frozenset({Capability.SHELL, Capability.TOOL_CALLING})
-    assert reviewer.on_question is None
-    assert implementer.on_question is None
+    assert reviewer().requires == frozenset({Capability.SHELL, Capability.TOOL_CALLING})
+    assert reviewer().on_question is None
+    assert implementer().on_question is None
 
 
 def test_both_roles_hold_their_prompt_text_and_not_a_path_to_it() -> None:
@@ -290,8 +319,8 @@ def test_both_roles_hold_their_prompt_text_and_not_a_path_to_it() -> None:
     fingerprints the filename, so editing the prompt moves no digest and a resume replays what the
     old wording produced. `Role` cannot refuse it - the field is a `str` either way - so the only
     place this can be caught is here."""
-    assert implementer.instructions == (PROMPTS / "implement.md").read_text(encoding="utf-8")
-    assert reviewer.instructions == (PROMPTS / "review.md").read_text(encoding="utf-8")
+    assert implementer().instructions == (PROMPTS / "implement.md").read_text(encoding="utf-8")
+    assert reviewer().instructions == (PROMPTS / "review.md").read_text(encoding="utf-8")
 
 
 def test_the_review_prompt_names_the_commit_message_the_workflow_writes() -> None:
@@ -299,15 +328,15 @@ def test_the_review_prompt_names_the_commit_message_the_workflow_writes() -> Non
     fingerprint (§3.6: it is cosmetic), so editing `commit="implement fix"` re-runs nothing and
     quietly stops agreeing with the prompt that tells the reviewer which commit to read. This is
     what notices."""
-    assert "implement fix" in reviewer.instructions
+    assert "implement fix" in reviewer().instructions
 
 
 def test_the_review_prompt_promises_no_inputs_block_because_the_step_passes_none() -> None:
-    """`run.step("review", reviewer)` passes no `**inputs`, and `_composed` then appends nothing at
+    """`run.step(reviewer())` passes no `**inputs`, and `_composed` then appends nothing at
     all - no heading, no separator, not a newline. A review prompt that told its agent to read a
     block underneath it would be describing something that is never there."""
-    assert "## Inputs" not in reviewer.instructions
-    assert "## Inputs" in implementer.instructions
+    assert "## Inputs" not in reviewer().instructions
+    assert "## Inputs" in implementer().instructions
 
 
 def test_the_request_is_a_required_named_flag_and_there_are_no_positionals() -> None:
@@ -323,14 +352,26 @@ def test_the_request_is_a_required_named_flag_and_there_are_no_positionals() -> 
         sdk_params.parse(FixParams, ["a bare positional"])
 
 
-def test_the_workflow_declares_its_params_its_version_and_both_roles() -> None:
-    """What `@workflow` hands the framework, and the one line of it that is not a fact about the
-    function: `roles=`, which is the only way §3.2's preflight can see a role before the run starts.
-    A workflow that declared neither role would preflight against nothing and pass."""
+def test_the_workflow_declares_its_params_and_its_version_and_no_roles_at_all() -> None:
+    """What `@workflow` hands the framework, which since UF1.3 is three facts about the function
+    and nothing about roles.
+
+    The declaration that replaced `roles=` is the **import line at the top of this package's
+    `__init__.py`**: `preflight.check` is handed `fix.fn` and reads the `RoleFactory` values bound
+    in `vars(sys.modules[fix.fn.__module__])`, so `from agl.workflows.fix.roles import implementer,
+    reviewer` is what makes those two roles the ones this run's providers are checked for. The
+    second assertion is that line, read back the way the framework reads it - a `fix` that stopped
+    importing `reviewer` beside its workflow would start passing preflight on a machine with no
+    Codex CLI and then die at the review step, which is exactly what §3.2 exists to prevent."""
     assert fix.name == "fix"
     assert fix.version == "1.1"
     assert fix.params is FixParams
-    assert fix.roles == (implementer, reviewer)
+    bound = {
+        name: found.model
+        for name, found in vars(sys.modules[fix.fn.__module__]).items()
+        if isinstance(found, RoleFactory)
+    }
+    assert bound == {"implementer": Claude.OPUS, "reviewer": OpenAI.SOL}
 
 
 def test_the_severity_the_workflow_branches_on_is_one_of_the_ones_it_asks_for() -> None:
@@ -370,7 +411,7 @@ def test_the_vocabulary_reaching_the_model_is_a_term_in_the_reviewers_fingerprin
         "the severity vocabulary is not in `fix`'s derived schema verbatim, so editing "
         "`SEVERITIES` would move no digest and this workflow would be paying rule 6's price again"
     )
-    declared = next(tool for tool in reviewer.tools if tool.name == report_findings.name)
+    declared = next(tool for tool in reviewer().tools if tool.name == report_findings.name)
     assert dict(declared.payload_schema) == dict(report_findings.payload_schema), (
         "the reviewer role does not carry this module's declaration, so the schema asserted above "
         "is not the one `base_of` would hash for the review step"
@@ -563,21 +604,30 @@ def test_the_question_this_screen_could_not_answer_cannot_be_built(tmp_path: Pat
 
 
 def test_the_declared_implementer_requires_what_the_negotiating_one_will(tmp_path: Path) -> None:
-    """Preflight is two halves and this is what keeps the cheap one honest.
+    """The factory is the whole override surface, and this is what says a call site cannot shrink
+    what the role requires.
 
-    `fix` hands `run.step` a `replace(implementer, on_question=answer)`, and `sdk/roles.py` folds
+    `fix` hands `run.step` an `implementer(on_question=answer)`, and `sdk/roles.py` folds
     `MID_RUN_QUESTIONS` into that role's `requires` as it is built - so the role that runs needs a
-    backend able to ask whether or not `roles.py` says so. Half two of preflight would catch a
-    backend that cannot, at the first step, after a record, a worktree and a branch already exist.
-    The declaration is what moves that refusal to second zero, and this comparison is what says the
-    two halves are asking the same question: if the declared set were ever the smaller one, half one
-    would be passing runs that half two is going to refuse.
+    backend able to ask whether or not `roles.py` says so. `roles.py` says so anyway, and since
+    UF1.3 that is no longer about *when* the refusal lands: preflight reads models off factories and
+    never a `requires`, so containment happens at the first `run.step` either way.
+
+    What the declaration buys is that the two values agree. §3.11 makes a factory's parameter list
+    "the whole of the override surface", which is only worth reading if what it exposes cannot
+    change what the role demands - and `on_question` is the one knob `implementer` exposes. This
+    comparison is that property measured rather than trusted: `implementer()` is what a reader of
+    `roles.py` sees, `implementer(on_question=…)` is what the workflow runs, and if the declared set
+    were ever the smaller one, the requirement a reader could find would be weaker than the one a
+    run is refused on. The implication runs one way - `sdk/roles.py` folds members in and never out
+    - so this can only break by somebody editing the `requires=` line, which is exactly the edit it
+    is here to catch.
     """
 
     async def answer(question: Question) -> Answer:
         return Answer(question.prompt)
 
-    assert replace(implementer, on_question=answer).requires == implementer.requires
+    assert implementer(on_question=answer).requires == implementer().requires
 
 
 # --- driving the whole workflow on fakes ------------------------------------------------------
@@ -620,12 +670,18 @@ Writing them here is what makes an assertion about a checkout an assertion rathe
 a run that left something else on disk fails against these, and comparing what the run produced
 against what the run produced would fail against nothing."""
 
-HIGH_RUN: Final = ("implement", "review", "repair")
+HIGH_RUN: Final = ("implement", "review", "implement")
 CLEAN_RUN: Final = ("implement", "review")
 """The two programmes `fix` has, and the branch over `findings.high()` is the whole difference.
 
 Named as tuples of step names because that is what `harness.recorded` is compared against, and
-because their *lengths* are what the kill-point sweep sweeps over."""
+because their *lengths* are what the kill-point sweep sweeps over.
+
+**The third name is `implement` and not `repair`**, and that is not a typo. A step carries no name
+of its own since UF1.1 (§3.3, §3.11): the address is `role.name`, the repair pass runs the same
+`implementer`, so both land under `steps/implement/` and both say `implement` here. What tells them
+apart is their inputs, and the section below is where that is asserted as two digests in one
+directory rather than inferred from two rows with one name."""
 
 MUST_FIX: Final = _finding("high", CHANGED)
 WORTH_KNOWING: Final = _finding("medium", CHANGED)
@@ -895,6 +951,125 @@ async def test_a_review_that_found_nothing_high_ends_the_run_after_two_steps(
     assert len(seen) == 2, "an agent was paid for a step the ledger says never happened"
 
 
+# --- one role, two steps, one directory ----------------------------------------------------------
+#
+# The assertion UF1.1 is built around, and the one this workflow is the shipped instance of. `fix`
+# runs `implementer` twice and `run.step` carries no name, so both calls address `steps/implement/`
+# and everything rests on what separates them inside it. The instrument is the real
+# `FilesystemStore`, because the claim is about *paths* and neither `Store` nor `Recorded` hands one
+# out - see the import at the top of this file for why that reach is here and nowhere else.
+
+
+def _on_disk(
+    where: Path, seen: list[testing.AgentTask], *, found: Sequence[Finding]
+) -> tuple[testing.Harness, AglHome]:
+    """A harness whose ledger is a real on-disk one, and the `AGL_HOME` it files entries into.
+
+    `container.fakes(...)` then `with_store(...)` then `testing.over(...)` is the sanctioned
+    composition and not a way around the harness: `over` is the named escape hatch for a bundle a
+    caller built, it wraps whatever store the bundle carries, and `recorded`, `interrupt_after=` and
+    `resume` all go on working over the substitution. Everything else here is what
+    `testing.harness()` would have built.
+    """
+    home = AglHome(where / "home")
+    fakes = container.fakes(
+        TreesRoot(where / "trees"), files=SEED, agent=_agent(seen, found=found)
+    )
+    return testing.over(fakes.with_store(FilesystemStore(home))), home
+
+
+def _filed(home: AglHome, step: str) -> list[Mapping[str, object]]:
+    """Every entry this run wrote under `steps/<step>/`, parsed, in filename order.
+
+    The filename **is** the digest (§3.6), so "how many files" is "how many digests" and the two
+    claims below are one directory listing. Found by walking rather than by composing a path,
+    because a path composed here would be this file's second copy of the layout - what is asserted
+    is that the entries are under a directory named `step` which is itself under `steps/`, which is
+    the sentence, and `ports/home_layout.py` owns the rest of the address.
+    """
+    return [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in sorted(home.path.rglob("*.json"))
+        if path.parent.name == step and path.parent.parent.name == "steps"
+    ]
+
+
+def _distinct(entries: Sequence[Mapping[str, object]], field: str) -> set[object]:
+    """The distinct values of one field across a step's entries."""
+    return {entry[field] for entry in entries}
+
+
+@pytest.mark.asyncio
+async def test_the_implement_and_repair_steps_are_two_digests_in_one_directory(
+    tmp_path: Path,
+) -> None:
+    """One role, two steps, one address - and what keeps the two apart inside it.
+
+    §3.3 took the per-call-site name off `run.step`, so `implementer` serving both the implement
+    and the repair pass means both entries are filed under `steps/implement/`. The whole of what
+    then separates them is the fingerprint, and both of its moving terms differ here: the inputs
+    (`request=` against `findings=`, and `**inputs` are terms) and the head each call started from
+    (the repair starts after the implement commit). Two files, two fingerprints, two heads.
+
+    **The first-run half is what a collapse would break, and it would break it silently.** If the
+    two calls resolved to one digest, the second would find the first's entry, replay it, and
+    return - no agent, no repair, no second commit - and the run would report success having done
+    two thirds of the work. So `len(seen) == 3` is not bookkeeping here; it is the assertion that
+    the second address exists at all.
+
+    **The resume half is the other direction**: walking the same two calls again must hand each of
+    them *its own* entry back rather than handing the first one twice. Nothing new is written,
+    nobody is billed, and the branch and the checkout are exactly where the first run left them -
+    which is what "two calls, two results" means for a pair of effect steps, whose recorded values
+    are both `null` and whose results are the heads they leave the chain at.
+
+    The review is asserted beside them as the control: a directory listing that found two files
+    under every step name would say nothing about this one.
+    """
+    seen: list[testing.AgentTask] = []
+    harness, home = _on_disk(tmp_path, seen, found=(MUST_FIX, WORTH_KNOWING))
+
+    await harness.run(fix, "-r", REQUEST)
+
+    implemented = _filed(home, "implement")
+    assert [entry.step for entry in harness.recorded] == list(HIGH_RUN)
+    assert len(seen) == 3, "the repair pass never ran, so there is no second entry to be about"
+    assert len(implemented) == 2, (
+        f"`steps/implement/` holds {len(implemented)} entries and `fix` takes two steps on "
+        f"`implementer`. One would mean the two calls collapsed onto a single digest - the repair "
+        f"replaying the implement step's result - and anything else would mean the repair was "
+        f"filed somewhere other than under its role's name"
+    )
+    assert len(_filed(home, "review")) == 1, "the reviewer's single step wrote more than one entry"
+    assert len(_distinct(implemented, "fingerprint")) == 2, (
+        "the two entries under `steps/implement/` carry one fingerprint between them, so the "
+        "digest that addressed them was computed from something the two calls share - and one of "
+        "them is a file the other is about to be written over"
+    )
+    assert len(_distinct(implemented, "head")) == 2, (
+        "both implement entries recorded the same head, so the repair pass committed nothing on "
+        "top of the implement commit and the second entry is the first one's state under another "
+        "digest"
+    )
+
+    before = (await _committed(harness), _files(seen[0].workspace))
+
+    await harness.resume(fix)
+
+    assert len(seen) == 3, "the resume paid for an agent whose result was already on the ledger"
+    assert [entry.step for entry in harness.recorded] == list(HIGH_RUN), (
+        "the resume wrote an entry, so one of the two calls missed its fingerprint - and a run "
+        "that re-implements on every resume is §3.6's failure in the direction that only shows up "
+        "in the bill"
+    )
+    assert len(_filed(home, "implement")) == 2
+    assert (await _committed(harness), _files(seen[0].workspace)) == before, (
+        "the replay left the branch or the checkout somewhere else, which is what handing one "
+        "entry back to both calls looks like: the second call replays the first's head, the chain "
+        "ends before the repair commit, and the work is reachable from nothing the run recorded"
+    )
+
+
 # --- what the run leaves in the repository ------------------------------------------------------
 
 
@@ -1005,7 +1180,7 @@ async def test_the_operators_own_words_reach_the_implementer_and_the_findings_re
         "the implementer was dispatched without the request in its prompt, so the operator's own "
         "words reached the record and no agent"
     )
-    assert implement.instructions.startswith(implementer.instructions)
+    assert implement.instructions.startswith(implementer().instructions)
     assert MUST_FIX.summary in repair.instructions
     assert WORTH_KNOWING.summary not in repair.instructions, (
         "the repair agent was handed every finding rather than `findings.high()`, so it is being "
@@ -1028,12 +1203,13 @@ async def test_one_run_addresses_two_providers_and_both_preflight_checks_pass(
       adapter serves the task, so the assertion that the three dispatches are Claude, OpenAI,
       Claude is the assertion that two adapters served one run. Nothing in this package names a
       harness, an SDK or a binary to get that.
-    * **Both preflight checks passing.** They already have by the time anything below runs: §3.2's
-      preflight is `check_ready` over each distinct model and then `requires <= capabilities()` per
-      role, and `api.run` performs it *before* the record is written - so a run that has a
-      `run.json` and three entries is a run that passed both, for both providers, at second zero.
-      That is the invisible half, so the two questions are asked again here explicitly, of the same
-      runner the run used, in the test's own words.
+    * **Both preflight checks passing.** They already have by the time anything below runs, at the
+      two moments UF1.3 left them at: `api.run` asks `check_ready` over each distinct model its
+      module names, *before* the record is written, and every `run.step` contains what the role it
+      was handed requires. So a run that has a `run.json` and three entries is a run that passed
+      availability for both providers at second zero and containment for every role it ran. That is
+      the invisible half - passing either leaves nothing behind - so the two questions are asked
+      again here explicitly, of the same runner the run used, in the test's own words.
 
     Asking them means reaching `harness.fakes.services.agents`, which is a field of the port-typed
     bundle rather than anything `FakeServices` exposes - `config/container.py` deliberately does not
@@ -1052,14 +1228,15 @@ async def test_one_run_addresses_two_providers_and_both_preflight_checks_pass(
         "and OpenAI reviews, inside a single run - is not what this run did"
     )
     runner = harness.fakes.services.agents
-    for role in (implementer, reviewer):
-        # Preflight's two checks, in preflight's own order: availability first, over the model, and
-        # then containment of what the role requires. Either one refusing is a run that never
-        # starts - exit 6 for the first, exit 5 for the second.
-        await runner.check_ready(role.model)
-        assert role.requires <= await runner.capabilities(role.model), (
-            f"the backend serving {str(role.model)!r} does not offer everything this role "
-            f"requires, so preflight would refuse this run at second zero"
+    for declared in (implementer(), reviewer()):
+        # Preflight's two checks, in the order a run meets them: availability over the model, at
+        # second zero, and then containment of what the role requires, at the step it is handed to.
+        # Either one refusing is a run that produces none of the entries asserted above - exit 6
+        # for the first, exit 5 for the second.
+        await runner.check_ready(declared.model)
+        assert declared.requires <= await runner.capabilities(declared.model), (
+            f"the backend serving {str(declared.model)!r} does not offer everything this role "
+            f"requires, so this run would have been refused at its first step on that model"
         )
 
 
@@ -1172,8 +1349,8 @@ async def test_the_implementers_question_reaches_this_workflows_own_screen(tmp_p
 
     **Three of the workflow's decisions are in this one refusal**, and each fails differently:
     a handler routing to the board raises from the view's own signature instead; a workflow handing
-    `run.step` the declared `implementer` rather than `replace(implementer, on_question=answer)`
-    passes no handler at all, and both fakes then answer the agent "nobody is listening" and let it
+    `run.step` a plain `implementer()` rather than `implementer(on_question=answer)` passes no
+    handler at all, and both fakes then answer the agent "nobody is listening" and let it
     carry on - so the run *completes*, the approval gate silently absent, which is the outcome
     `sdk/roles.py` spends four paragraphs refusing.
 
@@ -1258,8 +1435,8 @@ async def test_a_person_answers_the_implementers_question_and_the_run_carries_on
     this package's `Answer` constructor, so the string a person typed reaches the agent unedited.
 
     **`remaining` is the other direction and it is not decoration.** A workflow that never showed a
-    question - `run.step` handed the declared `implementer` instead of `replace(implementer,
-    on_question=answer)` - completes perfectly well, both fakes answering the agent "nobody is
+    question - `run.step` handed a plain `implementer()` rather than one built with
+    `on_question=answer` - completes perfectly well, both fakes answering the agent "nobody is
     listening", and the only trace is a script nobody spent. That is the failure `sdk/roles.py`
     spends four paragraphs refusing, and here it is one comparison.
 

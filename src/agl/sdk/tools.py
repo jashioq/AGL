@@ -27,13 +27,16 @@ One write path, one ledger.
 `ReportingTool` is structurally a `Tool` minus its handler, plus the payload type, and the missing
 handler is the whole reason it is its own type rather than a `Tool` with a convenient constructor.
 
-**A `Role` is a module-level value.** It is declared once beside the prompt and reused across steps
-and across concurrent runs - §3.3's own tickets example gives every child worktree the same
-`implementer`. Capturing a payload means writing it somewhere, so a handler built *here* would close
-over a cell shared by every invocation that role ever serves, and two siblings reporting at once
-would each read the other's findings. `Run.step` (12.1) converts a declaration into an ordinary
-`ports.agent.Tool` at dispatch time, binding a handler that closes over that one invocation's
-capture cell, and the shared-state failure is then unrepresentable rather than avoided.
+**A `Role` is shared across steps and across concurrent runs.** It is declared once beside the
+prompt - §3.3's own tickets example gives every child worktree the same `implementer`, and `split`
+hands one value to N chunks at once - and since UF1.2 a declaration is a `@role(model=…)` factory
+whose body captures a `ReportingTool` from *this* module level, so every role it ever builds offers
+the same declaration object. Capturing a payload means writing it somewhere, so a handler built
+*here* would close over a cell shared by every invocation of every one of those roles, and two
+siblings reporting at once would each read the other's findings. `Run.step` (12.1) converts a
+declaration into an ordinary `ports.agent.Tool` at dispatch time, binding a handler that closes over
+that one invocation's capture cell, and the shared-state failure is then unrepresentable rather than
+avoided.
 
 **And `AgentTask.tools` must hold ordinary `Tool`s**, which is what keeps §3.3's rule that the
 adapter must not learn which tool is the reporting one. `ports/agent.py` spends a paragraph on it
@@ -47,7 +50,7 @@ object id), plus the payload type the framework deserializes with. A declaration
 is the honest shape of exactly that list.
 
 **Generic in its payload type**, so that the chain §3.3 promises type-checks: 12.2's `Role[P]`
-carries it, 12.1's `Run.step` returns it, and `findings = await run.step("review", reviewer)`
+carries it, 12.1's `Run.step` returns it, and `findings = await run.step(reviewer())`
 followed by `findings.high()` is checked rather than hoped for.
 
 ## What a payload field may be, and what is refused

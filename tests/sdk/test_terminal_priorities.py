@@ -122,7 +122,7 @@ from agl.ports.ids import Namespace, ProjectName, RunLabel
 from agl.ports.questions import Answer, Question
 from agl.ports.tree_layout import TreesRoot
 from agl.sdk._engine.integration import Integration
-from agl.sdk.roles import Role
+from agl.sdk.roles import Role, role
 from agl.sdk.terminal import Choice, Row, Rows, Screen, Text
 from agl.sdk.workflow import Run, workflow
 from instruments.keyboard import DEADLINE, TICK, Typing
@@ -345,29 +345,32 @@ def conflict(outcome: Integration) -> Screen[bool]:
 # --- the agents, and what each of them is for -----------------------------------------------------
 
 
-def _role(instructions: str) -> Role[None]:
+@role(model=Claude.SONNET)
+def _role(name: str, instructions: str) -> Role[None]:
     """An effect role: its result is `None` and its effect is commits (§3.3).
 
     No reporting tool anywhere in this file, because nothing here reads a step's value - what these
     steps are for is the files they leave, the lock they hold and the questions they ask.
     """
-    return Role(instructions=instructions, model=Claude.SONNET)
+    return Role(name=name, instructions=instructions)
 
 
+@role(model=Claude.SONNET)
 def _asking(instructions: str, handler: QuestionHandler) -> Role[None]:
-    """The same role with §3.7's callback on it, which is why it is built and not declared.
+    """The same role with §3.7's callback on it, which is why the handler is a factory parameter.
 
-    A `Role` is module-level data (§3.3) right up until it declares `on_question`, because the
-    handler "is a closure over the workflow's `Run`, keeping its signature to one parameter" - so
-    this one cannot exist before a run does. Declaring it also folds `MID_RUN_QUESTIONS` into
+    A role's declaration is a factory (§3.3) and the handler cannot be written into it, because it
+    "is a closure over the workflow's `Run`, keeping its signature to one parameter" - so this one
+    cannot exist before a run does, and the parameter list is what lets a call site supply it
+    without being able to supply anything else. Passing it also folds `MID_RUN_QUESTIONS` into
     `requires`, which `tests/sdk/test_roles.py` pins and nothing here restates.
     """
-    return Role(instructions=instructions, model=Claude.SONNET, on_question=handler)
+    return Role(name="ask", instructions=instructions, on_question=handler)
 
 
-PREPARE: Final = _role("prepare the parent")
-COLLIDE: Final = _role("implement T-03, over the same file the parent touched")
-AFTER: Final = _role("the parent's own next step, taken while a child is landing")
+PREPARE: Final = _role("prepare", "prepare the parent")
+COLLIDE: Final = _role("implement", "implement T-03, over the same file the parent touched")
+AFTER: Final = _role("after", "the parent's own next step, taken while a child is landing")
 
 ASK_FIRST: Final = "implement T-01, and ask which way before deciding"
 ASK_SECOND: Final = "implement T-02, and ask which way before deciding"
@@ -493,8 +496,8 @@ async def deciding(run: Run[NoParams]) -> None:
     `tests/contracts/_integration_targets.py` requires of a conflict a suite causes on purpose.
     """
     ticket = run.worktree(LANDING_CHILD)
-    await run.step("prepare", PREPARE, commit="prepare the parent")
-    await ticket.step("implement", COLLIDE, commit="implement T-03")
+    await run.step(PREPARE, commit="prepare the parent")
+    await ticket.step(COLLIDE, commit="implement T-03")
 
     outcome = await ticket.integrate()
     # Published before the branch below, and this is the only line of this workflow that is here for
@@ -542,18 +545,18 @@ async def contested(run: Run[NoParams]) -> None:
     first = run.worktree(FIRST_CHILD)
     second = run.worktree(SECOND_CHILD)
     landing = run.worktree(LANDING_CHILD)
-    await run.step("prepare", PREPARE, commit="prepare the parent")
-    await landing.step("implement", COLLIDE, commit="implement T-03")
+    await run.step(PREPARE, commit="prepare the parent")
+    await landing.step(COLLIDE, commit="implement T-03")
 
     questions = asyncio.gather(
-        first.step("ask", _asking(ASK_FIRST, answering)),
-        second.step("ask", _asking(ASK_SECOND, answering)),
+        first.step(_asking(ASK_FIRST, answering)),
+        second.step(_asking(ASK_SECOND, answering)),
     )
     await scene.proceed.wait()
 
     outcome = await landing.integrate()
     decided.append(outcome)
-    behind = asyncio.create_task(run.step("after", AFTER, commit="the parent's own next step"))
+    behind = asyncio.create_task(run.step(AFTER, commit="the parent's own next step"))
     if outcome.conflicted:
         if await run.terminal.show(conflict, outcome=outcome, priority=CONFLICT):
             await outcome.retry()

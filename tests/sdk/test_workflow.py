@@ -27,8 +27,9 @@ caught by the CLI's handler, which imports the other one - a divergence with no 
 deliberate end is reported as a crash.
 """
 
+import sys
 from collections.abc import Awaitable
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Final, assert_type
@@ -45,7 +46,7 @@ from agl.ports.tree_layout import TreesRoot
 from agl.sdk._engine.journal import Fingerprints
 from agl.sdk._engine.services import Services
 from agl.sdk.params import arg, parse
-from agl.sdk.roles import Role
+from agl.sdk.roles import Role, RoleFactory, role
 from agl.sdk.tools import reporting_tool
 from agl.sdk.workflow import Run, Stop, Workflow, workflow
 
@@ -103,21 +104,35 @@ class Findings:
     high: int
 
 
-# §3.2's motivating pair: one model per provider, in one workflow. Module level, because §3.3 keeps
-# roles "reusable module-level declarations" and because that is exactly the shape preflight can
-# see - a role built inside the workflow function is the case `sdk/_engine/steps.py` checks instead.
-IMPLEMENTER: Final = Role(instructions="implement it", model=Claude.OPUS)
-REVIEWER: Final = Role(
-    instructions="review it",
-    model=OpenAI.SOL,
-    tools=[reporting_tool("report_findings", "report what you found", Findings)],
-)
+# §3.2's motivating pair: one model per provider, in one workflow. Two `@role(model=…)` factories,
+# which is what §3.3 says a role declaration is - the model is on the decorator, where preflight can
+# read it without calling anything, and the `Role` is what the call below produces. Since UF1.3
+# these two names being bound *in this module* is the whole of what makes them the workflow below's
+# roles: there is no list on the decorator, and the namespace is the registry.
 
 
-@workflow(name="staffed", version="1.1", params=NoParams, roles=[IMPLEMENTER, REVIEWER])
+@role(model=Claude.OPUS)
+def implementer() -> Role:
+    """An effect role, so that the pair below is one `Role[None]` and one `Role[Findings]`."""
+    return Role(name="implement", instructions="implement it")
+
+
+@role(model=OpenAI.SOL)
+def reviewer() -> Role[Findings]:
+    """The second provider, and the reporting half of the pair."""
+    return Role(
+        name="review",
+        instructions="review it",
+        tools=[reporting_tool("report_findings", "report what you found", Findings)],
+    )
+
+
+@workflow(name="staffed", version="1.1", params=NoParams)
 async def staffed(run: Run[NoParams]) -> None:
-    """A workflow that declares its roles, which is the whole of what 16.1 added to this decorator.
-    Nothing runs it here - `tests/sdk/test_preflight.py` is where the declaration is spent."""
+    """A workflow written beside two role factories and declaring neither, because since UF1.3
+    there is nothing to declare: the two names above are bound in this module, and the module is
+    what preflight reads. Nothing runs it here - `tests/sdk/test_preflight.py` is where the
+    namespace is spent."""
 
 
 # The load that succeeds into the wrong type. `test_registry.py` uses a string for this too.
@@ -173,39 +188,40 @@ def test_the_decorator_holds_the_function_unwrapped() -> None:
     assert tickets.fn.__qualname__ == "tickets"
 
 
-# --- `roles`, the field 16.1 added so that §3.2's preflight has something to walk ---------------
+# --- what the decorator no longer takes, and where preflight looks instead -----------------------
 
 
-def test_a_workflow_that_declares_no_roles_carries_an_empty_tuple() -> None:
-    """The default, and the reason it is one: a workflow may run no agent and declare nothing -
-    `workflows/noop/` did, until 19.1 deleted it - and §3.2's preflight over an empty tuple asks no
-    port anything.
+def test_a_workflow_holds_four_facts_and_every_one_of_them_is_about_the_function() -> None:
+    """UF1.3's whole content, read off the class rather than off its prose.
 
-    A tuple and not `None`, so that every caller iterates rather than narrowing - `preflight.check`
-    walks it twice and would otherwise carry a guard for a case that means "no roles" anyway."""
-    assert tickets.roles == ()
+    16.1's `roles` field was the one member here that was not a fact about `fn`, and it existed
+    because §3.2's preflight had no other way to see a role before a run started: roles are built
+    inside the workflow's own body, so nothing at decoration time could enumerate them. UF1.2
+    dissolved that - a role is a `@role(model=…)` factory carrying its model on the object bound at
+    import - and this is the line that says the field went with it.
 
-
-def test_declared_roles_are_kept_in_order_and_stored_as_a_tuple() -> None:
-    """Any sequence in, a tuple out - `Role.tools`' rule one layer up, and for its reason: a list is
-    what an author writes at a declaration and an immutable value is what every run of this workflow
-    should share. Order is kept because a refusal should arrive in the order the roles were written,
-    which is `preflight._models`' own argument for `dict.fromkeys` over a set."""
-    assert staffed.roles == (IMPLEMENTER, REVIEWER)
-    assert isinstance(staffed.roles, tuple)
+    Over `dataclasses.fields` and not over three `hasattr`s, so that a *fifth* member arriving here
+    fails this test rather than passing it silently."""
+    assert [held.name for held in fields(Workflow)] == ["name", "version", "params", "fn"]
 
 
-def test_roles_of_two_payload_types_widen_to_one_declaration() -> None:
-    """`Workflow.roles` is `tuple[Role[object], ...]`, and this is the line that has to type-check
-    for that to be usable: `IMPLEMENTER` is a `Role[None]` and `REVIEWER` a `Role[Findings]`, so a
-    workflow declaring both is declaring two different `Role[...]`s in one sequence.
+def test_the_registry_preflight_reads_is_the_module_the_function_was_written_in() -> None:
+    """What replaced the declaration, asserted as a namespace rather than argued as prose.
 
-    It works because `Role` is covariant in its payload parameter - `type[P]` and a `-> P` are its
-    only two uses of it - so the widening is checked by `mypy --strict` over `tests/` rather than
-    bought with a `cast` or an `Any` in the signature. The runtime assertion below is a
-    formality; the gate is that this module compiles."""
-    assert_type(staffed.roles, tuple[Role[object], ...])
-    assert [role.model for role in staffed.roles] == [Claude.OPUS, OpenAI.SOL]
+    `preflight.check` is handed `wf.fn` and reads the `RoleFactory` values in
+    `vars(sys.modules[fn.__module__])` - so the *import line above a workflow is its declaration*,
+    and this test fails if the two factories declared beside `staffed` ever stop being visible to
+    it. §3.11: "One declaration, not two."
+
+    It over-approximates by construction and that is the accepted cost: `staffed` steps with
+    neither factory and both models are demanded all the same. `tests/sdk/test_preflight.py`
+    measures what that costs a run; what is measured here is only the shape."""
+    bound = {
+        name: found.model
+        for name, found in vars(sys.modules[staffed.fn.__module__]).items()
+        if isinstance(found, RoleFactory)
+    }
+    assert bound == {"implementer": Claude.OPUS, "reviewer": OpenAI.SOL}
 
 
 # --- the narrowing `registry.load` performs ----------------------------------------------------

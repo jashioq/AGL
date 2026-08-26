@@ -80,7 +80,7 @@ from agl.ports.run import RunSpec
 from agl.ports.tree_layout import TreesRoot, base_worktree, run_branch
 from agl.sdk._engine.integration import Integration, Leases
 from agl.sdk._engine.services import Services
-from agl.sdk.roles import Role
+from agl.sdk.roles import Role, role
 from agl.sdk.tools import reporting_tool
 from agl.sdk.workflow import Run
 
@@ -138,21 +138,26 @@ class Summary:
 REPORT: Final = reporting_tool("report", "report what you did", Summary)
 
 
-def _role(instructions: str) -> Role[Summary]:
-    """A reporting role. Module-level in the parent's sense: one object per prompt, and the prompt
-    is the only thing a script is handed that says which step it is serving (§3.3)."""
+@role(model=Claude.SONNET)
+def _role(name: str, instructions: str) -> Role[Summary]:
+    """A reporting role, carrying the name its entries are recorded under (§3.3: the call carries
+    none). One value per prompt, and the prompt is the only thing a script is handed that says
+    which step it is serving (§3.3).
+
+    A factory taking the two terms that differ, which is what §3.3 says a role declaration is: the
+    model is on the decorator and no call site can reach it."""
     return Role(
+        name=name,
         instructions=instructions,
-        model=Claude.SONNET,
         restrictions=set[Restriction](),
         tools=(REPORT,),
     )
 
 
-PREPARE: Final = _role("prepare the parent")
-COLLIDE: Final = _role("implement over the same file the parent touched")
-IMPLEMENT: Final = _role("implement the ticket")
-AFTERWARDS: Final = _role("say what the run has landed so far")
+PREPARE: Final = _role("prepare", "prepare the parent")
+COLLIDE: Final = _role("implement", "implement over the same file the parent touched")
+IMPLEMENT: Final = _role("implement", "implement the ticket")
+AFTERWARDS: Final = _role("afterwards", "say what the run has landed so far")
 
 # Which files each prompt's agent leaves behind. Keyed on the prompt, because `AgentTask` carries no
 # namespace and no step name - deliberately (§3.3), and it is what makes one script serve a run.
@@ -408,8 +413,8 @@ async def _conflict(driver: _Driver, run: Run[None]) -> None:
     merge.
     """
     child = run.worktree(CHILD)
-    await run.step("prepare", PREPARE, commit="prepare the parent")
-    await child.step("implement", COLLIDE, commit=f"implement {CHILD}")
+    await run.step(PREPARE, commit="prepare the parent")
+    await child.step(COLLIDE, commit=f"implement {CHILD}")
     outcome = await child.integrate()
     driver.report("landed", outcome)
     driver.kill("integrated")
@@ -432,12 +437,12 @@ async def _clean(driver: _Driver, run: Run[None]) -> None:
     landing.
     """
     child = run.worktree(CHILD)
-    await run.step("prepare", PREPARE, commit="prepare the parent")
-    await child.step("implement", IMPLEMENT, commit=f"implement {CHILD}")
+    await run.step(PREPARE, commit="prepare the parent")
+    await child.step(IMPLEMENT, commit=f"implement {CHILD}")
     outcome = await child.integrate()
     driver.report("landed", outcome)
     driver.kill("integrated")
-    await run.step("afterwards", AFTERWARDS, commit="record what landed")
+    await run.step(AFTERWARDS, commit="record what landed")
 
 
 PROGRAMMES: Final[Mapping[str, Callable[[_Driver, Run[None]], Awaitable[None]]]] = {

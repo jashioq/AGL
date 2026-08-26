@@ -13,8 +13,8 @@ One run, one worktree, three sequential steps. Claude implements the change the 
 OpenAI reviews what Claude wrote, and if the review comes back with high-severity findings Claude
 repairs them. **Two providers inside a single run is the entire point of the workflow** (target #4),
 and neither this module nor any other in this package names a harness, an SDK or a binary to get
-them: `model=Claude.OPUS` and `model=OpenAI.SOL` sit in `roles.py` beside their prompts, and
-`task.model.provider` is what routes each to an adapter neither role can see.
+them: `@role(model=Claude.OPUS)` and `@role(model=OpenAI.SOL)` sit in `roles.py` above their
+prompts, and `task.model.provider` is what routes each to an adapter neither role can see.
 
 There is no `worktree()` here and no `integrate()`. Several agents working in one worktree is just
 several steps on the same `Run`; the `await`s are the sequencing, and the second step sees what the
@@ -25,11 +25,17 @@ nothing is merged into anything.
 
 `commit=` is the only difference between the three calls below, and it is not a detail:
 
-| step | `commit=` | what the framework does when it ends |
-|---|---|---|
-| `implement` | `"implement fix"` | commits everything dirty under that message, records the head |
-| `review` | omitted | restores the checkout to that head and deletes everything else |
-| `repair` | `"address review findings"` | commits again, on top |
+| call | filed under | `commit=` | what the framework does when it ends |
+|---|---|---|---|
+| implement | `steps/implement/` | `"implement fix"` | commits what is dirty, records the head |
+| review | `steps/review/` | omitted | restores the checkout to that head, deletes the rest |
+| repair | `steps/implement/` | `"address review findings"` | commits again, on top |
+
+**The first and third rows share a directory, and that is the shape UF1.1 bought.** A step takes no
+name of its own (§3.3): the address is `role.name`, both calls run `implementer`, so the two entries
+sit side by side under `steps/implement/` at two digests - two because `request=` and `findings=`
+are different inputs and inputs are fingerprint terms. The function's docstring below argues what
+that costs.
 
 The omission on `review` is the guarantee, not an oversight: a reviewer cannot leave a scratch file,
 a cache directory or a half-made edit behind, because the wipe runs whether the step returned or
@@ -76,9 +82,9 @@ Two screens, both in `views/`, both pure functions re-invoked by the redraw loop
 `views.board` is shown once before the first step and stays up for the whole run - the request, and
 the live activity line - and `views.agent_question` is what the implementer's mid-run questions are
 put on. §3.7: **agent questions are a callback on the Role**, so the mechanism is an `async def`
-below, closed over this `Run`, and `replace(implementer, on_question=...)` at the line the role is
-used. The handler is written inside the workflow function for the same reason the plan writes it
-there: it needs `run.terminal`, and a role built at module level cannot see one.
+below, closed over this `Run`, and `implementer(on_question=...)` at the line the role is built.
+The handler is written inside the workflow function for the same reason the plan writes it there:
+it needs `run.terminal`, and a factory called at module level could not be given one.
 
 **The handler is bound to the implementer and never to the reviewer.** The implementer is the agent
 that has something to negotiate about - it is writing the change, and §3.7's whole negotiation shape
@@ -93,8 +99,8 @@ case preflight exists to refuse. So it does not have one.
 
 Every argument in the function body is a decision, and an argument is exactly what importing a
 module cannot see: the three `commit=` values, the `request=` input, the branch on
-`findings.high()`, the two `show` calls and the `replace` that gives the implementer a handler are
-all reachable only by driving a run. `tests/workflows/test_fix.py` drives one - on
+`findings.high()`, the two `show` calls and the factory call that gives the implementer a handler
+are all reachable only by driving a run. `tests/workflows/test_fix.py` drives one - on
 `agl.testing`'s all-fakes harness, the way an author outside this repository would - and its second
 half is deliverable 17.3: a complete run of each branch, the two commits read back off the fake
 repository as a chain of trees and messages, the reviewer's scratch file gone from a checkout the
@@ -110,7 +116,7 @@ are asserted now - the refusal an unattended run gets, and a person picking some
 `Answer` going back into the same live session.
 """
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 
 from agl.sdk import Answer, Question, Run, arg, workflow
 from agl.workflows.fix import views
@@ -150,7 +156,7 @@ class FixParams:
     different things cannot replay each other's work."""
 
 
-@workflow(name="fix", version="1.1", params=FixParams, roles=[implementer, reviewer])
+@workflow(name="fix", version="1.1", params=FixParams)
 async def fix(run: Run[FixParams]) -> None:
     """Implement the requested change, review it, and repair what the review found.
 
@@ -163,27 +169,45 @@ async def fix(run: Run[FixParams]) -> None:
     role it is paired with declares `Restriction.NO_VCS_WRITES` for that reason. Read the two
     together; `roles.py` makes the argument.
 
-    **`repair` runs only when the review found something that must not ship.** `findings.high()` is
-    this workflow's own method on its own payload type, `high` is the one severity with a mechanical
-    consequence, and the result is passed straight back in as an input - fingerprinted, and appended
-    to the implementer's prompt as JSON. It is called twice rather than bound to a name because
-    §3.3 writes it that way and because it is a filter over a frozen value: the two calls cannot
-    disagree.
+    **The repair runs only when the review found something that must not ship.** `findings.high()`
+    is this workflow's own method on its own payload type, `high` is the one severity with a
+    mechanical consequence, and the result is passed straight back in as an input - fingerprinted,
+    and appended to the implementer's prompt as JSON. It is called twice rather than bound to a name
+    because §3.3 writes it that way and because it is a filter over a frozen value: the two calls
+    cannot disagree.
 
-    There is no loop around the review. A second review of the repair would be a second `review`
-    step with a different name, and a loop would need a bound and a halt policy - which is `split`'s
-    business and `tickets`', not one worktree's. If the repair introduces something new, the run
-    ends with it in the branch and a human reads the branch.
+    **The accepted consequence of `run.step` carrying no name: the repair is `implement` too.** It
+    is the same role, and since §3.11 took the per-call-site name off the call, the role's name is
+    the address - so both write into `steps/implement/`, and a `RoleIncompleteError` or a
+    `DeniedError` raised out of either one names the step `implement`. What tells them apart is
+    their digests: `request=` against `findings=` are different inputs, and the repair starts from
+    the head the implement commit left, so §3.6's two moving terms both move and the counter is
+    never asked to (both entries are at `n = 0`). The word "repair" survives only in this prose and
+    in the commit message. That is a real cost and it is paid deliberately: the alternative is a
+    second `Role` declared to say `repair`, which is a second copy of one prompt free to drift from
+    the first (`roles.py` makes that argument), or a per-call-site name, which is the second place
+    to say one thing §3.11 removed. There is no override, and adding one would be re-introducing
+    the parameter under another name.
+
+    There is no loop around the review either. A second review of the repair would be a second call
+    on `reviewer` - landing beside the first in `steps/review/`, separated by the head it started
+    from - and a loop would need a bound and a halt policy, which is `split`'s business and
+    `tickets`', not one worktree's. If the repair introduces something new, the run ends with it in
+    the branch and a human reads the branch.
 
     **`answer` is the whole of §3.7's "agent questions are a callback on the Role".** It is declared
     here rather than in `roles.py` because it closes over `run` - that is what keeps its signature
-    to the one parameter `QuestionHandler` has - and `dataclasses.replace` is what puts it on a role
-    without a second copy of the declaration to keep in step. `asking` and `implementer` are the
-    same agent, the same prompt, the same model and the same restrictions; the only difference is
-    that one of them can be answered. `sdk/roles.py` folds `MID_RUN_QUESTIONS` into `requires` as
-    the `replace` happens, so the role that reaches `run.step` requires it whether or not `roles.py`
-    said so - and `roles.py` says so anyway, which is what makes preflight's cheap half able to see
-    it. The argument for that is on the `implementer` declaration.
+    to the one parameter `QuestionHandler` has - and `implementer(on_question=answer)` is what puts
+    it on a role without a second copy of the declaration to keep in step. `asking` and a plain
+    `implementer()` are the same agent, the same prompt, the same model and the same restrictions;
+    the only difference is that one of them can be answered, because `on_question` is the one
+    parameter `roles.py` put in that factory's signature. What the factory replaced was
+    `replace(implementer, on_question=answer)`, which could have changed the model or dropped
+    `NO_VCS_WRITES` just as easily and read no worse for it (§3.11). `sdk/roles.py` folds
+    `MID_RUN_QUESTIONS` into `requires` as the role is built, so the role that reaches `run.step`
+    requires it whether or not `roles.py` said so - and `roles.py` says so anyway, so that the
+    declaration and the value this line produces require the same thing. The argument for that is
+    on the `implementer` declaration.
 
     **The board is shown once, and once is enough.** `show` registers this function's arguments, not
     a `Screen`, so the board re-reads `run.activity` every frame for as long as the run lasts, and a
@@ -212,11 +236,9 @@ async def fix(run: Run[FixParams]) -> None:
         """
         return await run.terminal.show(views.agent_question, question=question)
 
-    asking = replace(implementer, on_question=answer)
+    asking = implementer(on_question=answer)
     await run.terminal.show(views.board, run=run, request=run.params.request)
-    await run.step("implement", asking, request=run.params.request, commit="implement fix")
-    findings = await run.step("review", reviewer)
+    await run.step(asking, request=run.params.request, commit="implement fix")
+    findings = await run.step(reviewer())
     if findings.high():
-        await run.step(
-            "repair", asking, findings=findings.high(), commit="address review findings"
-        )
+        await run.step(asking, findings=findings.high(), commit="address review findings")

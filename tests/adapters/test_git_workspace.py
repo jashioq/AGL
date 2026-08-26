@@ -137,9 +137,9 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     for name in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"):
         monkeypatch.setenv(name, str(tmp_path / "nonexistent-git-config"))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
-    for role in ("AUTHOR", "COMMITTER"):
-        monkeypatch.setenv(f"GIT_{role}_NAME", "AGL contract")
-        monkeypatch.setenv(f"GIT_{role}_EMAIL", "agl@example.invalid")
+    for identity in ("AUTHOR", "COMMITTER"):
+        monkeypatch.setenv(f"GIT_{identity}_NAME", "AGL contract")
+        monkeypatch.setenv(f"GIT_{identity}_EMAIL", "agl@example.invalid")
     work = tmp_path / "repo"
     work.mkdir()
     _git(work, "init", "-q", "-b", "main")

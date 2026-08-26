@@ -46,7 +46,7 @@ from agl.ports.home_layout import RunScope
 from agl.ports.ids import ProjectName, RunLabel
 from agl.ports.tree_layout import TreesRoot, run_branch
 from agl.sdk.params import RefusingParser
-from agl.sdk.roles import Role
+from agl.sdk.roles import Role, role
 from agl.sdk.workflow import Run, workflow
 
 # `agl init` is the one command that reads `settings` and `cwd`, and no invocation below is one -
@@ -71,15 +71,17 @@ class NoParams:
     """A workflow that takes nothing, so every line below is AGL's own vocabulary."""
 
 
-# An effect role: no reporting tool, so the step's whole purpose is that an agent wrote a file the
-# `commit=` then records - which is what puts `agl/auth` ahead of the base ref.
-WRITING: Final = Role(instructions="leave some work behind", model=Claude.SONNET)
+@role(model=Claude.SONNET)
+def writing() -> Role:
+    """An effect role: no reporting tool, so the step's whole purpose is that an agent wrote a file
+    the `commit=` then records - which is what puts `agl/auth` ahead of the base ref."""
+    return Role(name="write", instructions="leave some work behind")
 
 
-@workflow(name="working", version="1.0", params=NoParams, roles=[WRITING])
+@workflow(name="working", version="1.0", params=NoParams)
 async def working(run: Run[NoParams]) -> None:
     """One step that commits, so this run's branch is not contained in the ref it started from."""
-    await run.step("write", WRITING, commit="the work this run produced")
+    await run.step(writing(), commit="the work this run produced")
 
 
 def _point(name: str) -> EntryPoint:

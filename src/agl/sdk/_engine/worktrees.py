@@ -12,7 +12,7 @@ itself, so arbitrary depth costs this module one call and no arithmetic. **Nothi
 path**, which is the same rule `ports/home_layout.py` states from its own side: `steps/` and
 `worktrees/` are deliberately not addressable, so a caller has nothing to join a namespace onto and
 a second copy of the nesting rule cannot drift from the first. It is also what makes
-`worktree("review")` and `step("review", ...)` in one `Run` two different subtrees under one scope
+`worktree("review")` and a step named `review` in one `Run` two different subtrees under one scope
 rather than one collision (§3.6).
 
 **The trees root is flat**, because a worktree inside another worktree's working tree appears to the

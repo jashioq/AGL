@@ -46,7 +46,7 @@ from agl.ports.tree_layout import TreesRoot
 from agl.ports.workspace import Workspace
 from agl.sdk._engine.integration import Integration, Leases
 from agl.sdk._engine.journal import Fingerprints, Journal
-from agl.sdk.roles import Role
+from agl.sdk.roles import Role, role
 from agl.sdk.testing import Agent, Reply
 from agl.sdk.workflow import Run
 
@@ -308,17 +308,18 @@ class _Pause:
         self.release = asyncio.Event()
 
 
-def _role(instructions: str) -> Role[None]:
+@role(model=Claude.SONNET)
+def _role(name: str, instructions: str) -> Role[None]:
     """An effect role: it writes files and commits, and reports nothing.
 
     No reporting tool, because nothing below reads a step's value - what these two roles are for is
     a commit in the child and a suspension in the parent.
     """
-    return Role(instructions=instructions, model=Claude.SONNET, restrictions=set[Restriction]())
+    return Role(name=name, instructions=instructions, restrictions=set[Restriction]())
 
 
-IMPLEMENT: Final = _role("implement T-01")
-HOLDING: Final = _role("review the parent's worktree, slowly")
+IMPLEMENT: Final = _role("implement", "implement T-01")
+HOLDING: Final = _role("review", "review the parent's worktree, slowly")
 
 _WRITES: Final[Mapping[str, Mapping[str, bytes]]] = {
     IMPLEMENT.instructions: {LANDED: b"the child's work\n"},
@@ -395,9 +396,9 @@ async def test_a_landing_cancelled_waiting_for_the_step_lock_gives_the_targets_l
         base=await history.resolve(await history.default_ref()),
     )
     ticket = run.worktree(TICKET)
-    await ticket.step("implement", IMPLEMENT, commit="implement T-01")
+    await ticket.step(IMPLEMENT, commit="implement T-01")
 
-    step = asyncio.create_task(run.step("review", HOLDING))
+    step = asyncio.create_task(run.step(HOLDING))
     await asyncio.wait_for(pause.started.wait(), timeout=_LIVENESS)
     queued = asyncio.create_task(ticket.integrate())
     running, _ = await asyncio.wait({queued}, timeout=_SERIALIZED)

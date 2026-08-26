@@ -64,7 +64,7 @@ from agl.ports.home_layout import AglHome, RunScope
 from agl.ports.ids import Namespace, ProjectName, RunLabel
 from agl.ports.run import JsonValue
 from agl.ports.tree_layout import TreesRoot
-from agl.sdk.roles import Role
+from agl.sdk.roles import Role, role
 from agl.sdk.tools import reporting_tool
 from agl.sdk.workflow import Run
 
@@ -124,9 +124,9 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     for name in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"):
         monkeypatch.setenv(name, str(tmp_path / "nonexistent-git-config"))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
-    for role in ("AUTHOR", "COMMITTER"):
-        monkeypatch.setenv(f"GIT_{role}_NAME", "AGL contract")
-        monkeypatch.setenv(f"GIT_{role}_EMAIL", "agl@example.invalid")
+    for identity in ("AUTHOR", "COMMITTER"):
+        monkeypatch.setenv(f"GIT_{identity}_NAME", "AGL contract")
+        monkeypatch.setenv(f"GIT_{identity}_EMAIL", "agl@example.invalid")
     work = tmp_path / "repo"
     work.mkdir()
     _git(work, "init", "-q", "-b", "main")
@@ -171,12 +171,13 @@ def _run(repository: Path, tmp_path: Path, base: str, script: Script | None = No
 # --- roles, and the agents that serve them -------------------------------------------------------
 
 
-def _role(instructions: str, *, read_only: bool = False) -> Role[Summary]:
+@role(model=Claude.SONNET)
+def _role(name: str, instructions: str, *, read_only: bool = False) -> Role[Summary]:
     """A reporting role: its result is `REPORT`'s payload, read back as a `Summary`."""
     restrictions = {Restriction.NO_VCS_WRITES} if read_only else set[Restriction]()
     return Role(
+        name=name,
         instructions=instructions,
-        model=Claude.SONNET,
         restrictions=restrictions,
         tools=(REPORT,),
     )
@@ -303,9 +304,9 @@ async def test_entries_nest_arbitrarily_while_every_checkout_is_a_flat_sibling(
     nested = ticket.worktree("sub-b")
     assert nested.scope == RunScope(PROJECT, LABEL, (TICKET, NESTED))
 
-    await run.step("spec", _role("write the spec", read_only=True))
-    await ticket.step("implement", _role("implement T-01"), commit="implement T-01")
-    await nested.step("implement", _role("implement sub-b"), commit="implement sub-b")
+    await run.step(_role("spec", "write the spec", read_only=True))
+    await ticket.step(_role("implement", "implement T-01"), commit="implement T-01")
+    await nested.step(_role("implement", "implement sub-b"), commit="implement sub-b")
 
     assert len(_entries(tmp_path, "spec")) == 1
     assert len(_entries(tmp_path, "implement", "T-01")) == 1
@@ -537,7 +538,7 @@ async def test_the_landing_seam_hands_out_the_namespaces_own_journal_and_checkou
     record = _Agent()
     written = {FEATURE: b"the callback route\n"}
     run = _run(repository, tmp_path, base, _agent(record, writes=written))
-    await run.step("spec", _role("write the spec"), commit="spec")
+    await run.step(_role("spec", "write the spec"), commit="spec")
 
     journal, workspace = await run._steps.landing()
     again_journal, again_workspace = await run._steps.landing()
@@ -577,14 +578,14 @@ async def test_a_reopened_namespace_replays_its_step_and_is_not_cut_again(
     """
     record = _Agent()
     written = {FEATURE: b"the callback route\n"}
-    role = _role("implement T-01")
+    role = _role("implement", "implement T-01")
 
     first = _run(repository, tmp_path, base, _agent(record, writes=written))
-    made = await first.worktree("T-01").step("implement", role, commit="implement T-01")
+    made = await first.worktree("T-01").step(role, commit="implement T-01")
     landed = _git(repository, "rev-parse", "refs/heads/agl/_work/auth/T-01").strip()
 
     second = _run(repository, tmp_path, base, _agent(record, writes=written))
-    replayed = await second.worktree("T-01").step("implement", role, commit="implement T-01")
+    replayed = await second.worktree("T-01").step(role, commit="implement T-01")
 
     assert replayed == made == Summary("implement T-01 #0")
     assert len(record.runs) == 1, "the resume paid for an agent whose result was on the ledger"
@@ -635,11 +636,11 @@ async def test_a_second_walk_over_a_nested_run_replays_every_namespace(
 
 async def _nested(run: Run[None]) -> list[Summary]:
     """Three namespaces deep: one step in the run, one in a child, and one in a grandchild."""
-    spec = await run.step("spec", _role("write the spec", read_only=True))
+    spec = await run.step(_role("spec", "write the spec", read_only=True))
     ticket = run.worktree("T-01")
-    built = await ticket.step("implement", _role("implement T-01"), commit="implement T-01")
+    built = await ticket.step(_role("implement", "implement T-01"), commit="implement T-01")
     nested = ticket.worktree("sub-b")
-    repaired = await nested.step("repair", _role("repair", read_only=True))
+    repaired = await nested.step(_role("repair", "repair", read_only=True))
     return [spec, built, repaired]
 
 
@@ -650,8 +651,8 @@ async def _nested(run: Run[None]) -> list[Summary]:
 async def test_a_step_and_a_worktree_of_the_same_name_address_different_places(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """§3.6: "`steps/` and `worktrees/` are sibling subtrees so `worktree("review")` and
-    `step("review", ...)` in the same Run cannot collide".
+    """§3.6: "`steps/` and `worktrees/` are sibling subtrees so `worktree("review")` and a step
+    named `review` in the same Run cannot collide".
 
     Both calls, in one `Run`, with the same string - and both work. `ids.py` keeps `StepName` and
     `Namespace` distinct types although their language is identical, on the argument that the two
@@ -662,8 +663,8 @@ async def test_a_step_and_a_worktree_of_the_same_name_address_different_places(
     run = _run(repository, tmp_path, base, _agent(record))
     review = run.worktree("review")
 
-    await run.step("review", _role("review the diff", read_only=True))
-    await review.step("implement", _role("implement the review's findings", read_only=True))
+    await run.step(_role("review", "review the diff", read_only=True))
+    await review.step(_role("implement", "implement the review's findings", read_only=True))
 
     assert len(_entries(tmp_path, "review")) == 1
     assert len(_entries(tmp_path, "implement", "review")) == 1
@@ -701,14 +702,14 @@ async def test_the_run_branch_and_a_child_branch_coexist_in_one_real_repository(
     record = _Agent()
     run = _run(repository, tmp_path, base, _agent(record))
     child = run.worktree("T-01")
-    read_only = _role("look at it", read_only=True)
+    read_only = _role("look", "look at it", read_only=True)
 
     if child_first:
-        await child.step("implement", read_only)
-        await run.step("spec", read_only)
+        await child.step(read_only)
+        await run.step(read_only)
     else:
-        await run.step("spec", read_only)
-        await child.step("implement", read_only)
+        await run.step(read_only)
+        await child.step(read_only)
 
     assert "refs/heads/agl/auth" in _branches(repository)
     assert "refs/heads/agl/_work/auth/T-01" in _branches(repository), (
@@ -741,12 +742,12 @@ async def test_a_child_starts_at_the_parents_logical_head_and_not_at_the_runs_ba
     record = _Agent()
     run = _run(repository, tmp_path, base, _agent(record, writes={FEATURE: b"the route\n"}))
 
-    await run.step("implement", _role("implement it"), commit="implement it")
+    await run.step(_role("implement", "implement it"), commit="implement it")
     advanced = _head(tmp_path, "implement")
     assert advanced != base
 
     child = run.worktree("T-01")
-    await child.step("review", _role("review", read_only=True))
+    await child.step(_role("review", "review", read_only=True))
 
     assert _head(tmp_path, "review", "T-01") == advanced, (
         "the child was cut from the run's pinned base rather than from where its parent's chain "
@@ -771,9 +772,9 @@ async def test_a_child_cut_from_a_sibling_starts_at_that_siblings_recorded_head(
     run = _run(repository, tmp_path, base, _agent(record, writes={FEATURE: b"the blocker\n"}))
 
     blocker = run.worktree("a")
-    await blocker.step("implement", _role("implement a"), commit="implement a")
+    await blocker.step(_role("implement", "implement a"), commit="implement a")
     blocked = run.worktree("b", base=blocker)
-    await blocked.step("review", _role("review", read_only=True))
+    await blocked.step(_role("review", "review", read_only=True))
 
     landed = _head(tmp_path, "implement", "a")
     assert landed != base
@@ -808,7 +809,7 @@ async def test_a_child_cut_from_a_ref_string_starts_where_that_ref_points(
 
     run = _run(repository, tmp_path, base, _agent(record))
     child = run.worktree("T-01", base="sidequest")
-    await child.step("review", _role("review", read_only=True))
+    await child.step(_role("review", "review", read_only=True))
 
     assert elsewhere != base
     assert _head(tmp_path, "review", "T-01") == elsewhere, (
@@ -842,13 +843,13 @@ async def test_a_child_is_cut_from_the_chain_and_not_from_where_the_branch_actua
     run = _run(repository, tmp_path, base, dying)
 
     with pytest.raises(_Crash):
-        await run.step("implement", _role("implement it"), commit="implement it")
+        await run.step(_role("implement", "implement it"), commit="implement it")
 
     moved = _git(repository, "rev-parse", "refs/heads/agl/auth").strip()
     assert moved != base and _entries(tmp_path, "implement") == []
 
     child = run.worktree("T-01")
-    await child.step("review", _role("review", read_only=True))
+    await child.step(_role("review", "review", read_only=True))
 
     assert _head(tmp_path, "review", "T-01") == base, (
         "the child was cut from where the branch physically is rather than from the run's chain, "
@@ -879,10 +880,10 @@ async def test_renaming_a_namespace_changes_the_paths_and_nothing_else(
     """
     record = _Agent()
     run = _run(repository, tmp_path, base, _agent(record))
-    role = _role("implement it", read_only=True)
+    role = _role("implement", "implement it", read_only=True)
 
-    assert await run.worktree("T-01").step("implement", role) == Summary("implement it #0")
-    assert await run.worktree("banana").step("implement", role) == Summary("implement it #0")
+    assert await run.worktree("T-01").step(role) == Summary("implement it #0")
+    assert await run.worktree("banana").step(role) == Summary("implement it #0")
 
     (named,) = _entries(tmp_path, "implement", "T-01")
     (renamed,) = _entries(tmp_path, "implement", "banana")

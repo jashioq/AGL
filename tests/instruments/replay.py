@@ -617,7 +617,7 @@ async def _retry(run: _Programme) -> None:
 async def _siblings(run: _Programme) -> None:
     """§3.6's `T-01`/`T-02`: one root step, then two children under one `asyncio.gather`.
 
-    Both siblings call `step("implement", ...)` with the same role, no inputs and the same parent
+    Both siblings call `step(implementer, ...)` with the same role, no inputs and the same parent
     head, so their `base` values are identical by construction and only the namespace in the
     counter's key keeps their entries apart. The parent runs the resume with the two **completing**
     in the opposite order, because rule 1's whole point is that the interleaving must not decide who

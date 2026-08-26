@@ -1,7 +1,7 @@
 """What a review found, and the tool the reviewer reports it through.
 
 §3.3 gives the workflow's own example as `if findings.high():`, and that one line settles where
-this module lives: `findings` is what `run.step("review", reviewer)` returned, `high()` is a method
+this module lives: `findings` is what `run.step(reviewer())` returned, `high()` is a method
 on it, and the framework has no type with a method about severity on it. A reporting tool's payload
 type is the workflow's own vocabulary - the framework stores it as JSON, reads it back as this
 class, and never learns what a finding is - so `Finding`, `Findings` and the branch the workflow
@@ -80,7 +80,7 @@ because the sentence needs them, not because the vocabulary is stored there.
 `Findings.findings` is a `tuple[Finding, ...]` and `high()` returns one. Three reasons, in the
 order they matter:
 
-* **`high()`'s result is a step input.** `run.step("repair", implementer, findings=findings.high())`
+* **`high()`'s result is a step input.** `run.step(implementer, findings=findings.high())`
   hands it to `sdk/_engine/journal.py::_canonical`, which walks a `list | tuple` identically and
   tags each dataclass at every depth with its qualified name (rule 6). A tuple of dataclasses
   survives the fingerprint exactly as a list of them does - measured, not assumed - so nothing here
@@ -106,7 +106,7 @@ __all__ = ["HIGH", "SEVERITIES", "Finding", "Findings", "report_findings"]
 
 HIGH: Final = "high"
 """The one severity the workflow branches on. `Findings.high()` compares against this and the
-`repair` step runs when the result is non-empty, so this string is the whole of what "worth another
+repair step runs when the result is non-empty, so this string is the whole of what "worth another
 agent" means in `fix`."""
 
 SEVERITIES: Final = (HIGH, "medium", "low")
@@ -167,7 +167,7 @@ class Finding:
 @dataclass(frozen=True, slots=True)
 class Findings:
     """Everything one review pass found: the payload of `report_findings`, and what
-    `run.step("review", reviewer)` hands back.
+    `run.step(reviewer())` hands back.
 
     A wrapper around one sequence rather than the sequence itself, because a reporting tool's
     payload is a dataclass (`sdk/tools.py` refuses anything else) and because §3.3's
@@ -188,7 +188,7 @@ class Findings:
         this workflow makes for itself.
 
         Returns a tuple rather than a `Findings`, and that is deliberate: the value is passed
-        straight into `run.step("repair", implementer, findings=...)`, where it is fingerprinted by
+        straight into `run.step(implementer, findings=...)`, where it is fingerprinted by
         `_canonical` and appended to the prompt as canonical JSON. A tuple of dataclasses walks that
         path unchanged - the module docstring says where it was checked - so wrapping it would buy
         nothing and would put a second type with a `findings` field in front of the repair agent.

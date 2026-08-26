@@ -28,15 +28,21 @@ Two things here are ordered all the same, and both are ordered by what §3.6 fin
 
 ## One thing happens before all five: §3.2's capability check over the role handed in
 
-`api.run` runs preflight over the roles the workflow **declared**, at second zero, which is the
-only place a missing harness can be caught before forty minutes of work. This module runs the
-containment half again, per step, over the role it was actually handed - and the two are not the
-same role. §3.7's question handler is a closure over a `Run`, so a role that asks is built inside
-the workflow function as `replace(declared_role, on_question=handler)`, and what preflight saw
-therefore had no `MID_RUN_QUESTIONS` in `requires` while what runs does. Without this line, such a
-role reaching a backend that cannot ask is the silent failure `sdk/roles.py` spends four paragraphs
-refusing: the adapter must not block, so the agent is told no answer is available, the approval
-gate is absent, and the step reports a result.
+`api.run` runs preflight at second zero over the models the workflow's module names, which is the
+only place a missing harness can be caught before forty minutes of work. **Containment is not
+there and since UF1.3 is only here**: it compares `role.requires` against what the backend reports,
+`requires` is on the `Role` a `@role(model=…)` factory returns, and preflight may not call a
+factory - it has no arguments for a parameter list the author chose. So this line is the whole of
+§3.2's second check.
+
+That was always the half with teeth, which is why the loss is affordable and the argument is
+`sdk/_engine/preflight.py`'s. §3.7's question handler is a closure over a `Run`, so a role that
+asks is built inside the workflow function as `factory(on_question=handler)`, and no check made
+before the body ran could have seen the `MID_RUN_QUESTIONS` folded into it. Without this line, such
+a role reaching a backend that cannot ask is the silent failure `sdk/roles.py` spends four
+paragraphs refusing: the adapter must not block, so the agent is told no answer is available, the
+approval gate is absent, and the step reports a result. What it costs is when the refusal lands - a
+mismatch is caught here, after a record and a worktree exist, rather than before either did.
 
 It is one `capabilities()` call per model per run - the run's own table is passed in - and never a
 `check_ready`, which costs a turn. `sdk/_engine/preflight.py` holds the whole argument.
@@ -113,9 +119,10 @@ does by accident and `integrate()` does deliberately on every landing.
 
 ## The reporting tool: converted here, captured here, and never named across the port
 
-`sdk/tools.py`'s `ReportingTool` deliberately carries no handler, because a `Role` is a module-level
-value shared across steps and across concurrent runs: a handler built beside the declaration would
-close over a cell shared by every invocation that role ever serves, and two siblings reporting at
+`sdk/tools.py`'s `ReportingTool` deliberately carries no handler, because a `Role` is shared across
+steps and across concurrent runs - and the declaration it carries is a module-level value that every
+role its factory builds offers: a handler built beside that declaration would close over a cell
+shared by every invocation that role ever serves, and two siblings reporting at
 once would each read the other's payload. So the conversion happens here, per invocation, and the
 handler closes over this one call's `_Capture`.
 
@@ -205,7 +212,7 @@ breaks on any prompt containing a brace and these prompts carry JSON Schemas; `%
 percent sign - so nothing in this module formats, substitutes or rewrites one character of what an
 author wrote. `_composed` is a concatenation and is meant to read as one: `role.instructions` comes
 out of it byte-identical, at the front, which the suite pins with a role whose text carries `{`,
-`}`, `{name}`, a JSON Schema and a `%s`. Without the append, §3.3's own `w.step("triage", triage,
+`}`, `{name}`, a JSON Schema and a `%s`. Without the append, §3.3's own `w.step(triage,
 findings=highs)` fingerprints the findings correctly and the triage agent never sees them, which is
 the whole of what 13.0(i) is.
 
@@ -411,7 +418,7 @@ class Steps:
         self._activity = line
 
     async def step[R](
-        self, name: str, role: Role[R], *, commit: str | None, inputs: Mapping[str, object]
+        self, role: Role[R], *, commit: str | None, inputs: Mapping[str, object]
     ) -> R:
         """Replay this step if it is recorded, and otherwise run its agent and record it.
 
@@ -420,17 +427,25 @@ class Steps:
         because three of its fields are fingerprint terms - and the worker, which is where the
         `AgentTask` is composed and the dispatch happens, so that a replay hit does neither.
 
+        **The address is `role.name` and there is no name parameter** (§3.3): the role carries one,
+        so a per-call-site string would be a second place to say the same thing. Two calls on one
+        role therefore reach this method with one `StepName` between them and separate below - at
+        `base_of`, when their inputs differ, and at the counter when they do not.
+
         The value comes back from the walk as `JsonValue` and leaves here as `R`: §3.6's "the Role
         declares the payload type and the framework deserializes on read", on a fresh run and on a
         replay alike, through the one `ReportingTool.read` that both paths share.
         """
         # First, and before anything is opened: a step name is a path segment, and a name that
-        # cannot be one should be refused with nothing provisioned and no agent paid for.
-        step = StepName(name)
-        # §3.2's capability check, over the role that will actually run rather than over the one
-        # the workflow declared - and the two differ routinely, because §3.7's handler is a closure
-        # over this `Run`, so a role that asks is spelled `replace(declared, on_question=handler)`
-        # here and reaches `api.run`'s preflight without `MID_RUN_QUESTIONS` in `requires`.
+        # cannot be one should be refused with nothing provisioned and no agent paid for. Refused
+        # at the declaration too - `Role.__post_init__` builds this same type - so this is the
+        # second of two and the one that a `Role` arriving from anywhere at all still passes.
+        step = StepName(role.name)
+        # §3.2's capability check, over the role that will actually run - and since UF1.3 the only
+        # place it happens, because preflight reads models off factories and a `requires` is on the
+        # `Role` a factory returns. It was always the half with teeth: §3.7's handler is a closure
+        # over this `Run`, so a role that asks is spelled `factory(on_question=handler)` here and
+        # carries a `MID_RUN_QUESTIONS` no second-zero check could have seen.
         # `sdk/_engine/preflight.py` argues why this half is what makes §3.2's third check real,
         # and why `check_ready` is deliberately not repeated at this line: it costs a turn, and it
         # asks about a state of the world preflight has already asked about.

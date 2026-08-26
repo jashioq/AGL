@@ -70,8 +70,8 @@ loop, and a dispatch that awaited everything would make them pretend otherwise.
 ## What `run` does, in order, and the two things it deliberately does not
 
 Load the workflow, refuse a label that is already taken, refuse a deliverable branch that already
-exists, ask §3.2's preflight whether the backends this workflow names are ready and can do what its
-roles require, pin the base ref to a full object name, claim the run, write `run.json`, provision
+exists, ask §3.2's preflight whether the backends this workflow's module names are ready, pin the
+base ref to a full object name, claim the run, write `run.json`, provision
 the run's own `_base` worktree from that pin, then open the terminal, await the workflow's function
 inside it, and give back every integration lease it was still holding. The order is load-and-parse
 first because those two refuse with no I/O at all - §3.3's "before anything runs" read as strictly
@@ -562,12 +562,14 @@ async def run(
     # for the reason the module docstring already gives about that `async with`: a refusal a person
     # has to read should not be drawn across a display AGL has taken over.
     #
-    # `services.agents` and `wf.roles`, not the bundle: `sdk/_engine/preflight.py` takes one port
-    # and the roles, so that the module whose job is to refuse before anything happens cannot grow
-    # a second reader. 16.2 makes this same call from `resume` - the record names the workflow, the
-    # registry hands back the same `Workflow`, and `wf.roles` is the same tuple - so nothing here
-    # has to move for it.
-    await preflight.check(services.agents, wf.roles)
+    # `services.agents` and `wf.fn`, not the bundle: `sdk/_engine/preflight.py` takes one port and
+    # the workflow's own function, so that the module whose job is to refuse before anything
+    # happens cannot grow a second reader. The function is what names the registry - UF1.3 took
+    # `roles=` off `@workflow`, and the `@role(model=…)` factories a workflow can reach are the
+    # ones bound in the module its `def` ran in - so nothing here has to know how a role is found.
+    # 16.2 makes this same call from `resume`: the record names the workflow, the registry hands
+    # back the same `Workflow`, and it is the same module.
+    await preflight.check(services.agents, wf.fn)
 
     # `base_ref` is what the user said and `base_sha` what it meant now. Without the second, a
     # commit landing between run and resume moves the first step's starting head (§3.6).
@@ -777,14 +779,14 @@ async def resume(
     # workflow.
     given = params.from_json(wf.params, spec.params)
 
-    # §3.2's preflight, over the same tuple `run` walked, and `sdk/_engine/preflight.py` says in as
-    # many words that nothing had to move for this call: the record names the workflow, the
-    # registry hands back the same `Workflow`, and `wf.roles` is the same tuple. It is here for
-    # `run`'s reason and one of its own - a resume happens on a machine the first invocation may
-    # not have been made on, hours later, and "is this backend ready" is the question whose answer
-    # is most likely to have changed in between. Everything above it refuses for free; nothing
-    # below it does.
-    await preflight.check(services.agents, wf.roles)
+    # §3.2's preflight, over the same namespace `run` walked, and `sdk/_engine/preflight.py` says
+    # in as many words that nothing had to move for this call: the record names the workflow, the
+    # registry hands back the same `Workflow`, and its function was written in the same module. It
+    # is here for `run`'s reason and one of its own - a resume happens on a machine the first
+    # invocation may not have been made on, hours later, and "is this backend ready" is the
+    # question whose answer is most likely to have changed in between. Everything above it refuses
+    # for free; nothing below it does.
+    await preflight.check(services.agents, wf.fn)
 
     # §3.9's `_base`, provisioned here for the reason `run` provisions it: "`agl/<label>` is a real
     # ref from run start and advances with each `integrate()`, so progress is inspectable live",

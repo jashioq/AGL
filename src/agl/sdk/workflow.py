@@ -271,7 +271,7 @@ tree, free to hand one a table or a counter that is not the run's, which is the 
 above exist to prevent.
 """
 
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, is_dataclass
 from inspect import iscoroutinefunction
 from typing import cast
@@ -395,9 +395,14 @@ class Run[P = object]:
     a directly-built `Run` can default without arranging anything - it holds no record of what
     preflight saw, and an empty one answers correctly on its first call.
 
-    `sdk/_engine/preflight.py` argues why the step needs this check at all when `api.run` has
-    already made the same one: the role a workflow hands to `run.step` is routinely
-    `replace(declared_role, on_question=handler)`, so it is not the role preflight was shown."""
+    **Since UF1.3 this is the only containment there is**, and the field's importance changed with
+    that rather than its shape. `api.run` used to make the same check at second zero over the roles
+    `@workflow(roles=…)` declared; that parameter is gone, and containment needs a role's
+    `requires`, which lives on the `Role` a factory returns and is unreachable without calling a
+    factory preflight has no arguments for. So a capability mismatch is now caught here, at the
+    first `run.step`, and nowhere earlier. `sdk/_engine/preflight.py` argues what that costs and why
+    it was always this half that made the check real: the role a workflow hands to `run.step` is
+    routinely `factory(on_question=handler)`, which is not the role any earlier check could see."""
 
     _parent: Run[P] | None = field(default=None, repr=False, compare=False)
     """The `Run` that cut this one, or `None` because nothing did. `integrate()`'s one seam.
@@ -530,20 +535,29 @@ class Run[P = object]:
         """
         return self.services.terminal
 
-    async def step[R](
-        self, name: str, role: Role[R], *, commit: str | None = None, **inputs: object
-    ) -> R:
+    async def step[R](self, role: Role[R], *, commit: str | None = None, **inputs: object) -> R:
         """Run one step, or replay it. §3.3's "the only thing that persists anything".
 
-            findings = await run.step("review", reviewer)
-            await run.step("repair", implementer, findings=findings.high(),
-                           commit="address review findings")
+            asking = implementer(on_question=answer)          # §3.3's factory, called once
+            findings = await run.step(reviewer())
+            await run.step(asking, findings=findings.high(),
+                           commit="address review findings")   # the same role, a second time
 
-        Resolves an entry from `(label, namespace, name)` plus a fingerprint over the role, the
-        inputs and this namespace's starting head. **On a hit it returns the stored value without
-        running anything** - no agent, no adapter, no cost. On a miss it restores the checkout to
-        the last good head, builds an `AgentTask` from the `Role`, dispatches it to that model's
-        provider, commits or wipes per `commit=`, and records what came back.
+        Resolves an entry from `(label, namespace, role.name)` plus a fingerprint over the role,
+        the inputs and this namespace's starting head. **On a hit it returns the stored value
+        without running anything** - no agent, no adapter, no cost. On a miss it restores the
+        checkout to the last good head, builds an `AgentTask` from the `Role`, dispatches it to
+        that model's provider, commits or wipes per `commit=`, and records what came back.
+
+        **The step takes no name of its own** (§3.3, and §3.11's rejected member): the role already
+        carries one, so a per-call-site string would be a second place to say the same thing, free
+        to disagree with the declaration it is naming. Two calls on one role land in the same
+        `steps/<role name>/` directory and are told apart inside it - by their inputs, which are
+        fingerprint terms, or by §3.6's counter when the inputs match. That is what the second line
+        above is: `fix` runs one `implementer` twice, once with a `request` and once with
+        `findings`, and gets two entries under `steps/implement/`. Inferring a name from the
+        caller's variable was rejected too - it breaks on anything but a bare identifier, and it
+        would make a memo address depend on a local variable.
 
         **`commit=` is one of the three places in AGL where a mistake destroys work** rather than
         costing a re-run - §3.6's landing left out of the parent's chain and §3.4's red gate
@@ -577,20 +591,25 @@ class Run[P = object]:
         **The result is the role's reporting-tool payload**, read back as the dataclass the role
         declared, on a fresh run and on a replay alike. A role declaring no reporting tool is an
         effect step: its result is `None` and its effect is commits. `Role[P = None]` is what makes
-        `outcome = await run.step("implement", implementer)` an error at the line that wrote it.
+        `outcome = await run.step(implementer())` an error at the line that wrote it.
 
-        `name` is opaque and validated on the way in - filesystem- and ref-safe, from
-        `[A-Za-z0-9._-]` - because it is concatenated into a path. `R` rather than `P`: `Run[P]`
-        already binds the workflow's params, and PEP 695 refuses a method parameter shadowing its
-        class's.
+        `role.name` is opaque and was validated where it was declared - filesystem- and ref-safe,
+        from `[A-Za-z0-9._-]` - because it is concatenated into a path, and it is validated again
+        here on the way in, `StepName` being cheap and a `Role` reaching this method from anywhere.
+        `R` rather than `P`: `Run[P]` already binds the workflow's params, and PEP 695 refuses a
+        method parameter shadowing its class's.
+
+        **`**inputs` may not be named `role` or `commit`** - those are this signature's own
+        keywords, and a collision is a loud `TypeError` at the call. `name` was the third until the
+        parameter went away, and it is now an ordinary input name like any other.
         """
-        return await self._steps.step(name, role, commit=commit, inputs=inputs)
+        return await self._steps.step(role, commit=commit, inputs=inputs)
 
     def worktree(self, name: str, base: Run[object] | str | None = None) -> Run[P]:
         """A child `Run` with its own worktree and its own namespace. §3.3's `run.worktree`.
 
             w = parent.worktree(ticket.id, base=blocker)
-            await w.step("implement", implementer, commit=f"implement {ticket.id}")
+            await w.step(agent, commit=f"implement {ticket.id}")
 
         **A plain synchronous call.** Not awaited, and deliberately not a context manager: "a
         context manager would tear the worktree down on exit, destroying exactly what you want to
@@ -832,9 +851,21 @@ class Workflow[P = object]:
     """What `@workflow` produces, what an entry point resolves to, and what `registry.load`
     narrows to with `isinstance`. A workflow, as the framework knows one.
 
-    Five facts and no behaviour. Everything else about running it - fingerprints, replay,
-    worktrees, branch naming, integration, preflight, exit codes, provider routing - is framework,
-    and §3.3's table is emphatic that it stays framework.
+    Four facts and no behaviour, and every one of them is a fact about the function. Everything
+    else about running it - fingerprints, replay, worktrees, branch naming, integration, preflight,
+    exit codes, provider routing - is framework, and §3.3's table is emphatic that it stays
+    framework.
+
+    **There was a fifth, and UF1.3 is where it went.** 16.1 added a `roles` field because preflight
+    had to be *told*: roles are built inside the workflow's own body - a handler role is a closure
+    over its `Run` (§3.7) - so nothing at decoration time could enumerate them, and §3.2's "collect
+    the providers named by the workflow's roles" had no mechanism without a second declaration for
+    an author to keep in step by hand. UF1.2 is what dissolved it. A role is now a `@role(model=…)`
+    factory, and the factory carries `(name, model)` on the object bound at import - so the *model*
+    is readable exactly where the role is not, and §3.2's provider check is about models.
+    `sdk/_engine/preflight.py` reads the factories in the namespace `fn` was written in and asks
+    this class for nothing, which is §3.11's entry for the parameter in as many words: "One
+    declaration, not two."
     """
 
     name: str
@@ -854,64 +885,48 @@ class Workflow[P = object]:
     keyword that supplies it, which is why one word covers a type here and a value there."""
 
     fn: _Function[P]
-    """The `async def` itself, unwrapped and unchanged. `api.py` awaits `fn(run)`."""
+    """The `async def` itself, unwrapped and unchanged. `api.py` awaits `fn(run)`.
 
-    roles: tuple[Role[object], ...] = ()
-    """Every role this workflow means to run, so that §3.2's preflight has something to walk.
-
-    **The one field here that is not a fact about the function**, and it exists because the
-    framework cannot otherwise see a single role. §3.3 keeps roles as "reusable module-level
-    declarations" inside the workflow's own package, and a role carrying `on_question` is built
-    inside the workflow function because §3.7's handler is a closure over that `Run`
-    (`sdk/roles.py` says so in as many words) - so there is nothing above to enumerate, and §3.2's
-    "collect the providers named by the workflow's roles" has no mechanism without this line.
-    `sdk/_engine/preflight.py` argues at length why the lazy alternative - checking each role at
-    the step that uses it - fails the stage's own acceptance criterion.
-
-    **`Role[object]` and not `Role[P]`**: `P` here is the *params* class, and a role's parameter is
-    its reporting tool's payload, which is a different type per role and belongs to none of them
-    collectively. `Role` is covariant in that parameter, so a tuple mixing `Role[Findings]` and
-    `Role[None]` widens to this with no cast and no `Any` - checked by `mypy --strict`, which is
-    what makes the widening safe to rely on rather than merely convenient.
-
-    **Defaulted to `()`**, so a workflow that runs no agent declares nothing and preflight over an
-    empty tuple asks nobody anything. `workflows/noop/` was the standing instance of that until 19.1
-    deleted it, and the default outlives it: it says what a workflow function is allowed to be, not
-    what AGL happens to ship. That is not a loophole either. A workflow that names roles here and
-    steps with a role it did not declare is still checked, at the step, by the other half of
-    preflight - the declaration buys the *early* refusal, and nothing rests on it being complete."""
+    **Also the whole of what preflight is given**, since UF1.3, and that is not a second job for
+    this field: a function knows the module its `def` was executed in, the `@role(model=…)`
+    factories a workflow can reach are the ones bound in that namespace, and a factory carries its
+    model without being called. So `preflight.check(runner, wf.fn)` reads a registry rather than a
+    declaration, and this class holds four facts instead of five."""
 
 
 def workflow[P](
-    *, name: str, version: str, params: type[P], roles: Sequence[Role[object]] = ()
+    *, name: str, version: str, params: type[P]
 ) -> Callable[[_Function[P]], Workflow[P]]:
     """Declare an async function to be a workflow. §3.3's one line of ceremony.
 
-        @workflow(name="fix", version="1.1", params=FixParams, roles=[implementer, reviewer])
+        @workflow(name="fix", version="1.1", params=FixParams)
         async def fix(run: Run[FixParams]) -> None:
             ...
 
-    Keyword-only, the first three required: a positional would make `@workflow("fix", "1.1",
+    Keyword-only and all three required: a positional would make `@workflow("fix", "1.1",
     FixParams)` a thing to get in the wrong order once and be wrong about for the life of a run's
     records. The decorated name becomes the `Workflow`, which is what the entry point points at.
 
-    `roles` is what §3.2's preflight walks before the run starts - see `Workflow.roles` for why the
-    framework cannot find them any other way, and `sdk/_engine/preflight.py` for what it does with
-    them. Any sequence is accepted and a tuple is stored, following `Role.tools`: a list is the
-    natural thing to write at a declaration and an immutable value is the right thing for something
-    every run of this workflow shares.
+    **Three arguments and no fourth, which is UF1.3's whole content.** There is no `roles=` here.
+    16.1 put one on this line because §3.2's preflight had no other way to see a role before the
+    run started, and it was a second declaration of something the author had already written: a
+    list to keep in step by hand with the factory calls in the body below it, and wrong in the
+    quiet direction the moment the two parted. What replaced it is not a default and not an
+    inference - it is that a role became a `@role(model=…)` factory (UF1.2), the decorator binds
+    `(name, model)` to the object at import, and the module a workflow is written in is therefore
+    already a registry of every model that workflow can name. The framework no longer has to be
+    told what it can read. `sdk/_engine/preflight.py` holds what it costs, which is an
+    over-approximation this decorator would have had no way to make smaller anyway: a workflow's
+    body is what decides which of its module's roles a run reaches, and the body has not run yet.
 
     Refuses with `InputError` - the module docstring argues the class - an empty `name` or
     `version`, a `params` that is not a dataclass class, and a function that is not a coroutine
     function. All four at import time, which is where a package that cannot be invoked correctly
-    should fail. Nothing about `roles` is refused here: every term of a `Role` was already checked
-    by `Role.__post_init__` at the line that declared it, and whether a backend can serve one is
-    what preflight asks a port about.
+    should fail.
     """
     _check_text("name", name)
     _check_text("version", version)
     _check_params(params)
-    declared = tuple(roles)
 
     def declare(fn: _Function[P]) -> Workflow[P]:
         if not iscoroutinefunction(fn):
@@ -920,7 +935,7 @@ def workflow[P](
                 f"{fn!r}. A workflow is one async function (§3.3), the framework awaits it, and a "
                 f"plain function returning an awaitable type-checks here and then never yields"
             )
-        return Workflow(name=name, version=version, params=params, fn=fn, roles=declared)
+        return Workflow(name=name, version=version, params=params, fn=fn)
 
     return declare
 

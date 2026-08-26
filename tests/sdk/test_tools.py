@@ -55,7 +55,7 @@ class Finding:
 
 @dataclass(frozen=True)
 class Findings:
-    """§3.3's `findings = await run.step("review", reviewer)` / `findings.high()`, as a payload:
+    """§3.3's `findings = await run.step(reviewer())` / `findings.high()`, as a payload:
     one field of every supported kind, and the method the workflow calls on what comes back."""
 
     summary: str
@@ -778,7 +778,7 @@ async def _step[P](declared: ReportingTool[P], payload: Mapping[str, JsonValue])
 
 @pytest.mark.asyncio
 async def test_the_payload_type_carries_through_to_what_the_workflow_calls() -> None:
-    """§3.3: `findings = await run.step("review", reviewer)` then `findings.high()`. `assert_type`
+    """§3.3: `findings = await run.step(reviewer())` then `findings.high()`. `assert_type`
     is the half `mypy --strict` checks; the call below is the half pytest checks."""
     findings = await _step(REPORT, _ONE_HIGH)
     assert_type(findings, Findings)

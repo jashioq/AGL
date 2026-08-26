@@ -1,4 +1,5 @@
-"""`Role` - instructions, model, restrictions, tools and required capabilities, as one value.
+"""`Role` - a name, instructions, restrictions, tools and required capabilities, as one value - and
+`@role(model=…)`, the factory decorator that is how one is declared.
 
 §1.2's charge against the previous implementation is that its roles were "five hand-written
 near-duplicate functions differing only in prompt, model, tools, and denials", and its verdict is
@@ -8,12 +9,133 @@ things a workflow author writes, and everything done *to* one - building an `Age
 fingerprinting it, routing it to a provider, checking it at preflight - is framework, and §3.3's
 table is emphatic that it stays framework.
 
-Frozen and slotted, for `ReportingTool`'s reason. A role is declared once and used many times:
-§3.3's tickets example hands every child worktree the same `implementer` and gives its two reviewers
-one declaration each for the whole run, so a role that could be edited by one step would be edited
-for all of them. (A role carrying `on_question` is built where its `Run` is in scope rather than at
-module level - §3.7's handler is a closure over that `Run` - which changes nothing here: the value
-is still immutable and still holds nothing belonging to a single invocation of itself.)
+Frozen and slotted, for `ReportingTool`'s reason. One `Role` value is used many times: §3.3's
+tickets example hands every child worktree the same `implementer` and `split` runs N chunks against
+one of them concurrently, so a role that could be edited by one step would be edited for all of
+them. Frozenness is what makes that safe by construction rather than by care - and the factory
+below is the other half of the same idea, since a value nobody can edit is worth little while a
+second constructor stands beside it that rebuilds it with any field replaced.
+
+## A role is declared by a factory, and the model is on the decorator
+
+§3.3's table says what a role *is*: "a `@role(model=…)` factory returning a frozen `Role`", and
+§3.11 rejects by name the thing it replaces - "a bare `replace()` on a module-level `Role` ... lets
+a call site change the model or the restrictions, a mutation with pleasant syntax". Those are one
+decision read from two sides, and §3.2 writes out what an author types:
+
+    @role(model=Claude.OPUS)
+    def implementer(*, on_question: QuestionHandler | None = None) -> Role:
+        return Role(name="implement", instructions=prompt_file("prompts/implement.md"),
+                    restrictions={Restriction.NO_VCS_WRITES}, on_question=on_question)
+
+**The parameter list is the whole of the override surface, and that is the point.** A call site may
+turn `on_question` and nothing else, because `on_question` is the one knob the author put in the
+signature; the prompt, the restrictions, the tools and the model are unreachable from outside the
+function. `replace(implementer, on_question=answer)` reached all of them instead - every field of a
+frozen dataclass is a keyword argument to `replace`, and there is no way to hand `replace` a
+whitelist. So the factory buys nothing about immutability, which the value already had. What it
+takes away is the *second constructor*: after this, one line in one module decides what a role is
+allowed to differ by, and a call site that wants a fifth knob has to go and ask for it there.
+
+**`model=` is on the decorator and appears nowhere in the `Role(...)` call.** §3.3's table lists a
+role's contents as "name, instructions, restrictions, tools, required capabilities" and stops. One
+declaration, not two: preflight reads the model off the factory *without invoking it* - it has no
+arguments to invoke it with - so the model has to be readable on the object that exists before any
+call is made, and a second copy typed inside the returned `Role` would be a copy free to disagree
+with the one preflight read. The decorator is therefore also what puts the model *on* the value it
+receives, which is the next section.
+
+## What the decorator registers, and how preflight reads it back
+
+**Two jobs, deliberately kept apart.** The first is registration: `@role(model=…)` records
+`(name, model)` on the factory object at import, which §3.2 says "is all preflight's provider check
+needs" - collect the models a workflow's roles name, and ask each provider whether its harness is
+installed and authenticated, before the run starts. The second is the override surface above.
+Neither needs the other, and reading them as one thing is what makes the decorator look like a
+registry when it is mostly a constructor.
+
+**The registry is the workflow module's own namespace, and the factory is the record.**
+`RoleFactory` carries `.model` and `.name` as plain attributes, readable without a call, and since
+UF1.3 preflight enumerates the `RoleFactory` values in `vars(sys.modules[workflow.fn.__module__])`
+and reads `.model` off each. Nothing is written to a process-global table: a module-level dict
+keyed by qualname would collect every role in every workflow the interpreter has imported, and
+preflight would then demand a provider for a workflow that is not being run. The stage's own "known
+cost, accepted" is the evidence for which scope was meant - "a role **imported into a workflow
+module** but never used makes preflight demand a provider the run does not need" - which is
+precisely the over-approximation a namespace scan makes and a global table does not stop at. It is
+the *workflow's* module and never the roles': `fix` declares its two in `workflows/fix/roles.py`
+and the import line in `workflows/fix/__init__.py` is what puts them where preflight looks.
+
+**`.name` is the factory's own name and not `Role.name`**, and the two differ on the shipped
+workflow: `fix`'s factory is `implementer` and the role it returns is `implement`. It could not be
+otherwise - the role's name is inside the function, unreachable without calling it, which is the
+thing preflight may not do - so this one is for diagnostics, and the model is what preflight reads.
+A refusal that says "the role declared by `implementer`" sends its reader to a line they can find;
+`Role.name` is the memo address and is a fact about a value that does not exist yet.
+
+## The model reaches the value through the decorator, and an unbound role refuses loudly
+
+Three framework readers want the model off a `Role` - `base_of` fingerprints it, `Run.step` puts it
+on the `AgentTask`, and `Capabilities.require` keys its per-run cache on it - and every one of them
+wants a `ModelId` rather than something to check first. (Preflight is not among them, and since
+UF1.3 that is exact rather than nearly: it collects distinct models off the *factories*, and never
+holds a `Role` at all.) So
+`role.model` is a `ModelId` and the optionality lives one field down: `_model: ModelId | None`, a
+private init field the decorator is the only sanctioned writer of, behind a `model` property that
+raises `InputError` naming `@role(model=…)` when nothing has bound one.
+
+**`replace` and not mutation, which is why the field is an `init` field.** The decorator calls
+`replace(built, _model=…)` on the value the author's function returned, so it never writes through
+a frozen instance's back - and `dataclasses.replace` on a `Role` goes on working for everyone else,
+carrying `_model` across like any other field. That is the property a `field(init=False)` would
+have cost: `replace` re-defaults an `init=False` field, so `replace(role, on_question=h)` would
+silently hand back a role with no model, and the refusal would arrive at the step rather than at
+the line.
+
+**What was rejected, in the order it was considered.**
+
+  * **Leave `model` public and optional.** One field, no property, and the whole cost moves into
+    the four readers above as an `if model is None` each - four places that have to invent an
+    answer for a state the decorator exists to prevent, and `base_of` would have to accept `None`
+    for a term §3.6 says is always there.
+  * **`field(init=False)` and `object.__setattr__` in the decorator.** Cheaper to write and it
+    breaks `replace` as described - and it is the decorator mutating a frozen value it was handed,
+    which is the mutation-with-pleasant-syntax this deliverable removed from call sites. Doing it
+    in the framework instead of in a workflow does not make it a different act.
+  * **A `BoundRole` subclass the decorator returns.** Two types for one thing: every annotation in
+    `sdk/_engine/` becomes a union or a lie, `Role[P]` stops being what §3.3 says an author
+    declares, and `replace` on the subclass has the same field problem one class further down.
+  * **Keep the model only on the factory and pass it to `run.step` beside the role.** It would
+    thread a second argument through `Run.step`, `Journal.step`, `base_of` and
+    `Capabilities.require` to keep two halves of one declaration together by hand, and a `Role`
+    handed to anything without its model would be a value that means nothing on its own.
+
+## `name` is the memo address, and the step no longer carries one of its own
+
+§3.11: "a `name=` on `run.step`" is a rejected member, because "the role already carries one, so a
+per-call-site string is a second place to say the same thing". So `run.step(role, **inputs)` takes
+no name and the entry goes to `steps/<role name>/`, which is the whole of what this field is for.
+Two calls on one role therefore land in **one** directory and are told apart inside it - by their
+inputs, which move the digest, or by §3.6's counter when the inputs match. `fix` is the shipped
+instance: the call that implements and the call that repairs are one `implementer` given a
+`request` and then some `findings`, and both are recorded under `steps/implement/` at two digests -
+which is also why the repair reports as `implement` everywhere a name is printed.
+
+**Validated here, at the line that declares it, by constructing the `StepName` it is about to
+become.** That type *is* the rule the layout applies - a path segment out of §3.3's allowlist,
+with the length cap and the reserved device names - so asking it here is the only way to check the
+name without writing a second copy of that rule inside `sdk/`. Refused at the declaration for the
+reason every other refusal in this module is: `sdk/_engine/steps.py` builds the same `StepName` on
+the way into a step, which is after the run started, after preflight, and possibly after other
+agents have been paid for.
+
+**It is not a fingerprint term, and that is the division of labour worth stating once.**
+`base_of` takes instructions, model, restrictions, tools, inputs and head; the name is nowhere in
+it and must not be. The name is the *address* - which directory the entries live in - and the
+digest is what is compared inside it. Renaming a role therefore moves its whole ledger to a new
+directory and re-runs everything under it, not because a digest changed but because nothing is
+looked up at the new address; editing the prompt keeps the address and moves the digest. The field
+docstring says the same thing where an author reads it.
 
 ## `instructions` is the prompt text, and not a path to it
 
@@ -48,6 +170,22 @@ alternatives are both wrong in ways that only show up after installation: the cu
 whatever the person's shell was in, which is the ambient read stage 11.0 spent a deliverable
 removing, and the package root would need this module to guess which of a caller's parent packages
 was meant.
+
+**Declaration time moved when the factory arrived, and the sentence above survived it unchanged.**
+A module-level `implementer = Role(...)` read its prompt once, at import; a
+`@role(model=…) def implementer(...)` reads it on **every call**, which for `fix` is twice a run
+and for `split` is once per chunk. Three things make that a non-event and one of them had to be
+checked rather than assumed. The digest does not move, because the file is not being edited between
+two calls in one run and the text is what is hashed either way. The read is a `read_text` of a file
+the author committed beside their workflow, which is measured in microseconds against a step that
+pays for an agent. And the resolution rule is still *the calling module's* directory, which is the
+one that had to be checked: the caller is now a function body rather than a module body, and a
+frame's `f_globals` is its module's either way - so `prompt_file("prompts/implement.md")` written
+inside a factory in `workflows/fix/roles.py` still finds `workflows/fix/prompts/implement.md`.
+`tests/sdk/test_roles.py` pins that against a package it builds on disk rather than against this
+paragraph. What did change is *when a bad prompt is refused*: a missing file used to fail at import
+and now fails at the first call, which for a workflow is still before any agent runs, since a
+factory is called at the top of the workflow function or at the step that uses it.
 
 ## `on_question` implies `MID_RUN_QUESTIONS`, and the author does not restate it
 
@@ -95,7 +233,9 @@ thing twice and the second copy can only be forgotten. **What forgetting it cost
 shape as the other implication's, one step less silent: the reporting step's agent is never offered
 its tool, so it cannot fire it, so `Run.step` raises `RoleIncompleteError` at exit 6 - a real
 failure, forty minutes and several agents into a run, naming a prompt that was never the problem.
-Preflight exists to turn exactly that into a refusal at second zero.
+Containment exists to turn exactly that into a refusal at the step that would have paid for it -
+before the dispatch and before anything is provisioned for it, which since UF1.3 is the earliest a
+capability mismatch can be caught at all.
 
 **The implication runs one way only**, identically: `requires={TOOL_CALLING}` with a role that
 declares no tools is left exactly as written. It says the author wants a backend that can call
@@ -123,27 +263,33 @@ reader goes looking for a line that is not in their file.
 ## `Role[P]`, and why the default is `None` rather than `object`
 
 `P` is the payload type of this role's reporting tool, and it is what carries §3.3's typing promise
-from `reporting_tool()` through to the workflow: 12.1's `Run.step` is
-`async def step[P](self, name, role: Role[P], ...) -> P`, so `findings = await run.step("review",
-reviewer)` followed by `findings.high()` is checked rather than hoped for.
+from `reporting_tool()` through to the workflow: `Run.step` is
+`async def step[P](self, role: Role[P], ...) -> P`, so `findings = await run.step(reviewer())`
+followed by `findings.high()` is checked rather than hoped for.
 
 `sdk/workflow.py` settled the same class of question for `Run[P]` and answered `object`, arguing
 that a workflow's params are "genuinely **unknown** and not **unchecked**". Checked here, and
 answered differently on purpose: an effect step's result is not unknown. §3.3 says it is `null`, so
 `None` is the true statement and `object` would be a vaguer one. `None` also earns something
 `object` would not - mypy's `func-returns-value` refuses to let a name be bound to it, so
-`outcome = await run.step("implement", implementer)` on an effect role is an error at the line that
-wrote it, which is the right answer to a step that has nothing to hand back. The *shape* is
+`outcome = await run.step(implementer())` on an effect role is an error at the line that wrote it,
+which is the right answer to a step that has nothing to hand back. The *shape* is
 `Run[P]`'s and `ports/terminal.py::Screen[T = None]`'s: `disallow_any_generics` is on under
 `--strict`, so a bare `Role` in an annotation needs a type-parameter default to be legal at all.
 
 **Inference, measured under `mypy --strict` rather than assumed.** These infer:
 
-    Role(instructions=..., model=..., tools=[report_findings])      -> Role[Findings]
-    Role(instructions=..., model=...)                               -> Role[None]
-    Role(instructions=..., model=..., tools=[])                     -> Role[None]
-    Role(instructions=..., model=..., tools=[read_spec])            -> Role[None]
-    Role(instructions=..., model=..., tools=(read_spec, report_findings)) -> Role[Findings]
+    Role(name=..., instructions=..., tools=[report_findings])   -> Role[Findings]
+    Role(name=..., instructions=...)                            -> Role[None]
+    Role(name=..., instructions=..., tools=[])                  -> Role[None]
+    Role(name=..., instructions=..., tools=[read_spec])         -> Role[None]
+    Role(name=..., instructions=..., tools=(read_spec, report_findings))
+                                                                -> Role[Findings]
+
+`RoleFactory[**P, R]` then carries whichever of those the author's function returns out to the call
+site: `R` is solved from the declaration's return annotation, so `reviewer() -> Role[Findings]`
+makes `run.step(reviewer())` a `Findings` and a bare `-> Role` makes it a `None`. The inference
+above is what decides which annotation is honest; the annotation is what the workflow sees.
 
 and one shape does not: a **list** display mixing a plain `Tool` with a `ReportingTool`. mypy has to
 choose one item type for a list before it can solve `P`, and the join of two unrelated classes is
@@ -152,7 +298,7 @@ choose one item type for a list before it can solve `P`, and the join of two unr
 `Role[None]`. Two spellings fix it, and `tests/sdk/test_roles.py` pins both:
 
     tools=(read_spec, report_findings)                              # a tuple, not a list
-    Role[Findings](instructions=..., model=..., tools=[read_spec, report_findings])
+    Role[Findings](name=..., instructions=..., tools=[read_spec, report_findings])
 
 The explicit spelling is checked and not merely tolerated: `Role[Tickets](tools=[report_findings])`
 where the declaration is a `ReportingTool[Findings]` is an error, so naming the wrong parameter is
@@ -164,11 +310,15 @@ caught rather than believed.
 package which cannot be invoked correctly should fail when it is imported. Everything here was typed
 by a workflow author, and exit 70 would send them hunting for a bug in the framework.
 
-Two of the three refusals below are `AgentTask.__post_init__`'s own, made one layer earlier and in
+Two of the four refusals below are `AgentTask.__post_init__`'s own, made one layer earlier and in
 its words, exactly as `ReportingTool.__post_init__` re-makes `Tool`'s two checks. The duplication is
 deliberate and it is not free-floating: `AgentTask` is constructed inside `Run.step`, after the
 journal missed, after the worktree was reset, and after earlier steps in the run have already paid
 for agents. Refused here, the reader is looking at the line they wrote.
+
+The fourth is the same move made against a different downstream: `StepName(role.name)` is built by
+`sdk/_engine/steps.py` on the way into every step, so a malformed name is refused there too - at a
+line in the engine, during a run, rather than at the declaration that typed it.
 
 Not refused here, and deliberately: **that a step taking no `commit=` uses a role declaring
 `Restriction.NO_VCS_WRITES`**. §3.3 calls that pairing "the author's job, by convention and not
@@ -215,10 +365,12 @@ module whose caller arrives in the next deliverable. Its argument is on the clas
 """
 
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from collections.abc import Set as AbstractSet
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from functools import update_wrapper
 from pathlib import Path
+from typing import Protocol
 
 from agl.ports.agent import (
     Capability,
@@ -230,12 +382,13 @@ from agl.ports.agent import (
     Tool,
 )
 from agl.ports.errors import InputError, UpstreamUnexpected
+from agl.ports.ids import StepName
 from agl.sdk.tools import ReportingTool
 
 # Listed rather than computed, for `sdk/terminal.py`'s reason. The six re-exports are the port
-# vocabulary `Role`'s own fields are spelled in - see the module docstring - and `sdk/__init__.py`
-# takes them from here rather than from `agl.ports.agent`, so that the package's front door and its
-# submodules are one surface rather than two.
+# vocabulary `Role`'s own fields and `@role`'s own argument are spelled in - see the module
+# docstring - and `sdk/__init__.py` takes them from here rather than from `agl.ports.agent`, so that
+# the package's front door and its submodules are one surface rather than two.
 __all__ = [
     "Capability",
     "Claude",
@@ -244,32 +397,62 @@ __all__ = [
     "QuestionHandler",
     "Restriction",
     "Role",
+    "RoleFactory",
     "RoleIncompleteError",
     "prompt_file",
+    "role",
 ]
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Role[P = None]:
-    """One agent, as the workflow author declares it. §3.3's "instructions + model + restrictions +
-    tools + required capabilities", and nothing besides.
+    """One agent, as the workflow author declares it. §3.3's "instructions + restrictions + tools +
+    required capabilities", plus the name its steps are recorded under, and nothing besides.
 
-    Keyword-only, following `@workflow` and for its reason. Six fields of which four have defaults,
-    and two of those - `restrictions` and `requires` - are both sets of `StrEnum` members, so a
-    positional call is a thing to transpose once and be wrong about for the life of a run's records.
-    §3.7's own example writes every argument by name.
+    **Returned by a `@role(model=…)` factory and not bound to a module-level name**, which is where
+    the model comes from and why none is typed here. The module docstring argues both halves; what
+    a reader of this class needs is that `Role(...)` alone builds a value whose `model` refuses to
+    be read, so the sanctioned spelling is the only one that produces a usable role.
 
-        reviewer = Role(
-            instructions=REVIEW_PROMPT,
-            model=OpenAI.SOL,
-            restrictions={Restriction.NO_VCS_WRITES, Restriction.NO_FILE_WRITES},
-            tools=[report_findings],
-            requires={Capability.SHELL},
-        )
+    Keyword-only, following `@workflow` and for its reason. Seven fields of which five have
+    defaults, and two of those - `restrictions` and `requires` - are both sets of `StrEnum` members,
+    so a positional call is a thing to transpose once and be wrong about for the life of a run's
+    records. §3.7's own example writes every argument by name.
+
+        @role(model=OpenAI.SOL)
+        def reviewer() -> Role[Findings]:
+            return Role(
+                name="review",
+                instructions=REVIEW_PROMPT,
+                restrictions={Restriction.NO_VCS_WRITES, Restriction.NO_FILE_WRITES},
+                tools=[report_findings],
+                requires={Capability.SHELL},
+            )
 
     `P` is the payload type of the reporting tool in `tools`, defaulting to `None` for an effect
     role - see the module docstring for what infers and what has to be spelled out.
     """
+
+    name: str
+    """What this role's steps are recorded under: the directory `steps/<name>/` in every namespace
+    it runs in. **The step takes no name of its own** (§3.3) - `run.step(role, **inputs)` reads this
+    one, because a per-call-site string would be a second place to say the same thing.
+
+    First, because it is what a reader of a declaration wants first and what an entry path is
+    composed out of. Two steps on one role land in one directory and are separated inside it: their
+    inputs move the digest, and §3.6's counter separates them when the inputs match. `fix`'s
+    `implementer` is the shipped instance of that, serving both the implement and the repair step.
+
+    **Not a fingerprint term, deliberately.** `base_of` takes instructions, model, restrictions,
+    tools, inputs and head, and this is none of them. The name is the *address* - which directory
+    holds the entries - and the digest is what is compared inside it. So editing a prompt moves the
+    digest and re-runs the step at the same address, while renaming a role moves the whole ledger
+    to a new address, where nothing is found and everything re-runs. Both are loud; neither is a
+    false hit.
+
+    Validated at this declaration by constructing `StepName`, which is the rule the layout will
+    apply anyway - a path segment, and never something composed into one here. The module docstring
+    argues why the refusal belongs at the line that wrote it."""
 
     instructions: str
     """The prompt, in full, as the author wrote it - the text and never a path to it.
@@ -278,14 +461,21 @@ class Role[P = None]:
     docstring makes it. Interpolating a step's `**inputs` into it is `Run.step`'s business (§3.3),
     so what is stored here is what the author typed and nothing derived from a call."""
 
-    model: ModelId
-    """Which model runs this role, named beside the prompt because the reason is semantic (§3.2):
-    this role touches sensitive code, that one needs deep judgement, this one is cheap.
+    _model: ModelId | None = None
+    """Where `@role(model=…)` puts the model, and the only field on this class an author does not
+    type. `None` is "no factory has bound one yet", and the `model` property below is what every
+    reader of a role goes through.
 
-    `Claude.OPUS` and `OpenAI.SOL` in one workflow is correct and expected. There is no
-    config-level override - ARCHITECTURE.md §6 and §3.2 both say so, and the argument is that an
-    override costs a schema, resolution and validation to buy *why is my Opus role running GPT-5?*
-    Which adapter serves it is `task.model.provider`'s business and nothing here needs to know."""
+    **An `init` field rather than `init=False`**, which is what keeps `dataclasses.replace` whole:
+    `replace` copies every init field across and re-defaults the rest, so a role that went through
+    a factory and then through a `replace` still has its model. It is also how the decorator writes
+    it - `replace(built, _model=…)` on the value the author's function returned, rather than an
+    `object.__setattr__` through the back of a frozen instance.
+
+    Private, because it is not part of what §3.3 says an author writes: `Role(_model=…)` is a
+    spelling the framework uses once, in `RoleFactory.__call__`, and typing it by hand would be the
+    second declaration of the model that "one declaration, not two" refuses. `mypy` refuses
+    `Role(model=…)` outright, which is the error a reader of the old spelling gets first."""
 
     restrictions: AbstractSet[Restriction] = frozenset()
     """What this role may not do, stated as AGL's intent and never as a vendor's syntax.
@@ -318,9 +508,13 @@ class Role[P = None]:
     """What a backend must be able to do at all for this role to run on it.
 
     The counterpart to `restrictions`: that is what the workflow forbids, this is what the backend
-    must offer. Compared against `runner.capabilities(model)` at preflight (stage 16), so a run that
-    cannot work dies at second zero rather than forty minutes in at the review step. Nothing here
-    checks it - this module reaches no port and asks no provider anything.
+    must offer. Compared against `runner.capabilities(model)` at every `run.step` (stage 16's
+    containment), so a role that cannot work is refused before its agent is dispatched and before
+    its checkout is cut, rather than forty minutes in with a result nobody can trust. **Not at
+    second zero, since UF1.3**: reaching this set means calling the factory that builds the role,
+    and preflight has no arguments to call one with - `sdk/_engine/preflight.py` argues what that
+    costs. Nothing here checks it either - this module reaches no port and asks no provider
+    anything.
 
     Two members are folded in rather than restated: declaring `on_question` adds
     `MID_RUN_QUESTIONS`, and declaring any `tools` adds `TOOL_CALLING`. The module docstring argues
@@ -345,6 +539,12 @@ class Role[P = None]:
     this is not one of them."""
 
     def __post_init__(self) -> None:
+        # Constructed for its refusal and discarded, exactly as `split`'s `Chunk` does with
+        # `Namespace`: `StepName` *is* the rule `steps/<name>/` will be composed under, so asking
+        # it here is the only way to check the name without a second copy of §3.3's allowlist
+        # living in `sdk/`. Its `InputError` names the character and the position, and it is raised
+        # while the author is looking at the declaration rather than at the first step of a run.
+        StepName(self.name)
         if not self.instructions.strip():
             raise InputError(
                 f"a role's instructions are the whole of what its agent is asked to do, and this "
@@ -377,18 +577,175 @@ class Role[P = None]:
         object.__setattr__(self, "tools", tools)
         object.__setattr__(self, "requires", requires)
 
+    @property
+    def model(self) -> ModelId:
+        """Which model runs this role, named on the decorator because the reason is semantic
+        (§3.2): this role touches sensitive code, that one needs deep judgement, this one is cheap.
+
+        `Claude.OPUS` and `OpenAI.SOL` in one workflow is correct and expected. There is no
+        config-level override - ARCHITECTURE.md §6 and §3.2 both say so, and the argument is that
+        an override costs a schema, resolution and validation to buy *why is my Opus role running
+        GPT-5?* Which adapter serves it is `task.model.provider`'s business and nothing here needs
+        to know.
+
+        **A `ModelId` and never an optional**, which is the whole reason this is a property over a
+        private field rather than a field of its own: `base_of` fingerprints it, `Run.step` puts it
+        on the `AgentTask` and `Capabilities.require` caches on it, and none of those three has an
+        answer for a role with no model. So the one place that can be missing is this one, and it
+        refuses rather than returning `None` for three callers to invent an answer to. Preflight is
+        not a fourth: it reads the model off the *factory*, which is why it can ask about a role it
+        must not build.
+
+        **`InputError`, at the first read**, which is this module's register for everything a
+        workflow author typed: a `Role` that never went through a factory was built by a line in
+        their file, and exit 70 would send them looking for a bug in the framework. It is the one
+        refusal here that cannot happen at the declaration - a `Role` is a legal value until
+        somebody asks it what it runs on - so it names the decorator instead, which is the line
+        that is missing rather than the line that is wrong."""
+        if self._model is None:
+            raise InputError(
+                f"the role named {self.name!r} has no model, so nothing can say which provider "
+                f"runs it, fingerprint it or check what its backend can do. A role's model is "
+                f"declared on its factory - `@role(model=Claude.OPUS)` above the function that "
+                f"returns this `Role` (§3.2, §3.3) - and is deliberately not a field of `Role` "
+                f"itself, so that preflight can read it without calling the factory. This value "
+                f"came from a bare `Role(...)`, which builds one nothing has bound a model to"
+            )
+        return self._model
+
+
+class RoleFactory[**P, R]:
+    """What `@role(model=…)` leaves bound to the author's name: a callable that builds the `Role`,
+    with the model readable off it before anything is called.
+
+    **Two surfaces, one object, and they answer different callers.** `factory(...)` is the
+    workflow's - it runs the author's function and binds the model onto what came back. `.model`
+    and `.name` are preflight's, and preflight uses only those: §3.2 says it "never invokes the
+    function, which it could not do without arguments it does not have", and this class is what
+    makes that sentence a fact about the type rather than a discipline.
+
+    **`RoleFactory[**P, R]` is what keeps the two typing promises §3.3 makes.** `P` is the author's
+    own parameter list, so `implementer(on_question=answer)` is checked against the signature they
+    wrote and a call that misspells the keyword is an error at that line rather than a role which
+    silently cannot ask. `R` is the payload type of the role's reporting tool, carried from
+    `reporting_tool()` through the declaration's return annotation to `run.step`, so
+    `findings = await run.step(reviewer())` followed by `findings.high()` is checked. Neither is
+    `Any`: a decorator returning `Callable[..., Role[Any]]` would type-check every call site in
+    both workflows and mean nothing at any of them.
+
+    `update_wrapper` for the ordinary reason - `__doc__`, `__name__`, `__qualname__` and
+    `__module__` come from the function, so the long argument an author writes under a role
+    declaration is still that name's docstring, and a traceback through a factory still says where
+    it was written.
+    """
+
+    __name__: str
+    __qualname__: str
+    """What `update_wrapper` copies off the decorated function, declared here so that `mypy` knows
+    the two exist. They are the function's own, not the role's - `.name` below says the same thing
+    in this class's own vocabulary, and is the one a caller should read."""
+
+    name: str
+    """The **factory's** name - `implementer` - and not the `Role.name` its steps are recorded
+    under, which for `fix` is `implement`.
+
+    It could not be the role's: that name is inside the function body, and reaching it means
+    calling the factory, which is the one thing preflight may not do. So this is the diagnostic
+    half of the `(name, model)` §3.2 says the decorator registers - it names the declaration a
+    reader has to go and find - and `.model` is the half preflight acts on."""
+
+    model: ModelId
+    """The model every `Role` this factory builds runs on, readable without building one.
+
+    §3.2's provider check is "collect the providers named by the workflow's roles" and then
+    `check_ready` per distinct model, at second zero. This attribute is the whole of what that
+    needs, and it is why the model is declared on the decorator rather than inside the function:
+    everything else about a role is knowable only by calling one."""
+
+    def __init__(self, declaration: Callable[P, Role[R]], model: ModelId) -> None:
+        update_wrapper(self, declaration)
+        self._declaration = declaration
+        self.name = declaration.__name__
+        self.model = model
+
+    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> Role[R]:
+        """The author's function, with this factory's model bound onto what it returned.
+
+        `replace` and not `object.__setattr__`: the value the author built is left alone and a new
+        one is returned with `_model` filled in, which is the same act the call sites this
+        deliverable removed were performing on roles they did not own. Doing it inside the
+        framework does not make it a different act - what makes it a different act is that the
+        field being set is the one field no author types, and that the value is one line old and
+        has been handed to nobody.
+
+        `__post_init__` runs again on the way through, which is free and is worth knowing: the
+        capability folds are idempotent - `on_question` implies `MID_RUN_QUESTIONS`, `tools`
+        implies `TOOL_CALLING` - and every refusal it makes was already made a microsecond earlier
+        inside the function.
+        """
+        return replace(self._declaration(*args, **kwargs), _model=self.model)
+
+
+class _RoleDecorator(Protocol):
+    """What `role(model=…)` hands back: a decorator that is generic in the function it is given.
+
+    Spelled as a callback protocol because the two type parameters are solved at the *decoration*
+    and not at the `role(model=…)` call - `role` knows nothing about the function it is about to be
+    applied to, and a `Callable[[Callable[P, Role[R]]], RoleFactory[P, R]]` return annotation would
+    bind `P` and `R` one call too early, leaving mypy to solve them against nothing. Private,
+    because no author writes it: it is the type of a two-line expression that exists only between
+    `@role(model=…)` and the line under it.
+    """
+
+    def __call__[**P, R](self, declaration: Callable[P, Role[R]], /) -> RoleFactory[P, R]: ...
+
+
+def role(*, model: ModelId) -> _RoleDecorator:
+    """Declare a role: the model it runs on, over the function that builds it.
+
+        @role(model=Claude.OPUS)
+        def implementer(*, on_question: QuestionHandler | None = None) -> Role:
+            return Role(name="implement", instructions=prompt_file("prompts/implement.md"),
+                        restrictions={Restriction.NO_VCS_WRITES}, on_question=on_question)
+
+    §3.3's "a `@role(model=…)` factory returning a frozen `Role`", and the module docstring holds
+    the argument for both halves - why the override surface is the function's parameter list, and
+    why the model is on this line rather than in the `Role(...)` under it.
+
+    **Keyword-only, and one argument.** `@role(Claude.OPUS)` would read as well and says nothing
+    about *what* the model is being given to, on a decorator that may grow a second registration
+    term later; `model=` is the same word the field it replaces was spelled with, so a reader
+    coming from the old spelling finds it where they expect. There is no `name=` here: the role
+    names itself, and a name on this line would be a second place to say the one thing §3.11 took
+    off `run.step`.
+
+    **Nothing is validated here and nothing could be.** A `ModelId` is a `StrEnum` member, so there
+    is no malformed value to refuse; everything else about the role is inside a function that has
+    not run yet, and running it to check is exactly what preflight may not do. Whether a provider
+    can actually serve this model is §3.2's first preflight check, which needs an `AgentRunner` and
+    happens at second zero - `sdk/_engine/preflight.py` - and the terms of the `Role` are refused
+    by `Role.__post_init__` at the first call.
+    """
+
+    def decorate[**P, R](declaration: Callable[P, Role[R]]) -> RoleFactory[P, R]:
+        return RoleFactory(declaration, model)
+
+    return decorate
+
 
 def prompt_file(path: str | Path) -> str:
     """The text of a prompt file, read **now**, at the line that declares the role.
 
     §3.7's sanctioned spelling, and it takes one argument because that is how §3.7 writes it:
 
-        decompose = Role(
-            instructions=prompt_file("prompts/decompose.md"),   # read at declaration
-            model=Claude.OPUS,
-            tools=[report_tickets],
-            on_question=approve,
-        )
+        @role(model=Claude.OPUS)
+        def decompose(*, on_question: QuestionHandler | None = None) -> Role[Tickets]:
+            return Role(
+                name="decompose",
+                instructions=prompt_file("prompts/decompose.md"),   # read at declaration
+                tools=[report_tickets],
+                on_question=on_question,
+            )
 
     **Reading at declaration time is the whole mechanism.** What the `Role` then holds is prompt
     *text*, so §3.6 fingerprints the prompt: edit `prompts/decompose.md`, resume, and the digest has
@@ -403,8 +760,15 @@ def prompt_file(path: str | Path) -> str:
     `workflows/tickets/prompts/decompose.md` when that package is installed anywhere. An absolute
     path is used exactly as given. The caller's file comes off the calling frame's `__file__`
     (`sys._getframe`, which is one attribute lookup, where `inspect.stack()` builds a `FrameInfo`
-    for every frame on the stack and reads source context for each - this runs at import, on a
-    module that may declare a dozen roles).
+    for every frame on the stack and reads source context for each - and since UF1.2 this runs
+    inside a factory rather than at import, so `split` pays for it once per chunk).
+
+    **The calling frame is a factory's body now, and that changes nothing**, which is worth one
+    sentence because it is the half of the resolution rule a reader would reasonably doubt. A
+    frame's `f_globals` is the globals of the module the *code* was written in, not of whoever
+    called it - so a factory defined in `workflows/fix/roles.py` and invoked from
+    `workflows/fix/__init__.py`, from `api.py` or from a test still resolves against
+    `workflows/fix/`. The module docstring says where that is measured.
 
     **A caller with no `__file__` - a REPL, an `exec`, a frozen import - is an `InputError` telling
     the author to pass an absolute path, and never a fall back to `Path.cwd()`.** The current
@@ -415,11 +779,14 @@ def prompt_file(path: str | Path) -> str:
 
     **Every refusal is an `InputError`, at declaration time**, which is this module's register and
     `arg()`'s and `@workflow`'s and `reporting_tool()`'s before it: a package that cannot be invoked
-    correctly should fail when it is imported, in front of the author, rather than forty minutes
-    into a run that has already paid for three agents. A missing file, a directory, a file that will
-    not open, one that is not UTF-8, and one that is empty or nothing but whitespace are the five,
-    and the last is `Role.__post_init__`'s own check made one line earlier and for its reason: an
-    empty prompt is the whole of what an agent was going to be asked.
+    correctly should fail in front of the author, rather than forty minutes into a run that has
+    already paid for three agents. Since UF1.2 that is the first call of the factory rather than the
+    import of the module it is written in - still before any agent, since a workflow calls its
+    factories at the step that uses them, and still with the author's own line in the traceback. A
+    missing file, a directory, a file that will not open, one that is not UTF-8, and one that is
+    empty or nothing but whitespace are the five, and the last is `Role.__post_init__`'s own check
+    made one line earlier and for its reason: an empty prompt is the whole of what an agent was
+    going to be asked.
 
     **The text is returned exactly as it was read**, trailing newline and all. Trimming it would be
     this module editing the author's prompt, and - since the text is hashed - a rule about
@@ -461,7 +828,7 @@ def prompt_file(path: str | Path) -> str:
     except OSError as unreadable:
         raise InputError(
             f"{where} could not be read: {unreadable}. The prompt is read where the role is "
-            f"declared, so this is the import failing rather than the run"
+            f"declared, so this is the role's factory failing rather than the step it was for"
         ) from unreadable
     if not text.strip():
         raise InputError(

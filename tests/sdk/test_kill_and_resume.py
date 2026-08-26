@@ -626,7 +626,7 @@ def test_concurrent_siblings_replay_when_the_resume_completes_them_the_other_way
 ) -> None:
     """§3.6's `T-01`/`T-02`, with the interleaving deliberately reversed on the resume.
 
-    Both children call `step("implement", ...)` with the same role, no inputs and the same parent
+    Both children call `step(implementer, ...)` with the same role, no inputs and the same parent
     head, so their `base` values are identical by construction and only the namespace in the
     counter's key separates their entries. Rule 1's whole point is that the interleaving must not
     decide who gets `n = 0` - "the interleaving differs on resume, so each child looks in its own

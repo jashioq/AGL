@@ -102,14 +102,14 @@ from agl.adapters.git.history import GitHistory
 from agl.adapters.git.workspace import GitWorkspaceProvider
 from agl.adapters.rich_terminal.terminal import RichTerminal
 from agl.config import container, registry
-from agl.ports.agent import AgentOutcome, AgentTask, Claude, StopReason
+from agl.ports.agent import AgentOutcome, AgentTask, Claude, QuestionHandler, StopReason
 from agl.ports.home_layout import AglHome, RunScope, step_dir
 from agl.ports.ids import ProjectName, RunLabel, StepName
 from agl.ports.questions import Answer, Question
 from agl.ports.terminal import Choice, Response, Screen, Text, TextInput
 from agl.ports.tree_layout import TreesRoot
 from agl.sdk._engine.services import Services
-from agl.sdk.roles import Role
+from agl.sdk.roles import Role, role
 from agl.sdk.tools import reporting_tool
 from agl.sdk.workflow import Run, workflow
 from instruments.keyboard import DEADLINE, Typing
@@ -123,9 +123,10 @@ LABEL: Final = RunLabel("auth")
 SCOPE: Final = RunScope(PROJECT, LABEL)
 
 STEP: Final = "decide"
-"""The one step every workflow below takes. Named once, because "one journal entry" is read out of
-`steps/<name>/` and a test naming that directory separately from the call would be checking its own
-spelling."""
+"""The name every role below carries, and so the one step every workflow below takes. Named once,
+because "one journal entry" is read out of `steps/<name>/` and a test naming that directory
+separately from the declaration would be checking its own spelling. It is on the role since UF1.1
+took the name off `run.step` (§3.3)."""
 
 
 @dataclass(frozen=True)
@@ -224,9 +225,26 @@ given: Final[list[Answer]] = []
 reported: Final[list[Summary]] = []
 
 
-# The three roles below are written out rather than built by a helper. They differ in exactly one
-# field - the one this file is about - and a factory taking `on_question=` as an argument would put
-# that difference behind a default value in a signature nobody reads.
+# The three workflows below share one role, and the difference this file is about is the one
+# argument its factory takes. Before UF1.2 they were three `Role(...)` literals, on the argument
+# that "a factory taking `on_question=` as an argument would put that difference behind a default
+# value in a signature nobody reads" - which §3.3 has since decided the other way: a role *is* a
+# `@role(model=…)` factory, and its parameter list is the whole of what a call site may vary. What
+# survives of the objection is why the call is written out at each `run.step` below rather than
+# parametrised once: the difference between these three is meant to be visible at the line that
+# takes the step, which is the only line on which they differ.
+
+
+@role(model=Claude.SONNET)
+def deciding(*, on_question: QuestionHandler | None = None) -> Role[Summary]:
+    """The one role this file drives, in its three states.
+
+    `deciding(on_question=…)` is what a negotiating workflow steps with - §3.7's handler is a
+    closure over the `Run`, so it can only arrive here as an argument - and `deciding()` is the
+    same role with nothing to answer it, which is the third workflow below and the case
+    `sdk/roles.py` says costs a workflow its approval gate silently.
+    """
+    return Role(name=STEP, instructions=PROMPT, tools=(REPORT,), on_question=on_question)
 
 
 @workflow(name="negotiating", version="1", params=NoParams)
@@ -248,10 +266,7 @@ async def negotiating(run: Run[NoParams]) -> None:
         given.append(answer)
         return answer
 
-    role = Role(
-        instructions=PROMPT, model=Claude.SONNET, tools=(REPORT,), on_question=on_question
-    )
-    reported.append(await run.step(STEP, role))
+    reported.append(await run.step(deciding(on_question=on_question)))
 
 
 @workflow(name="approving", version="1", params=NoParams)
@@ -274,10 +289,7 @@ async def approving(run: Run[NoParams]) -> None:
         given.append(Answer(text=verdict.said))
         return given[-1]
 
-    role = Role(
-        instructions=PROMPT, model=Claude.SONNET, tools=(REPORT,), on_question=on_question
-    )
-    reported.append(await run.step(STEP, role))
+    reported.append(await run.step(deciding(on_question=on_question)))
 
 
 @workflow(name="unattended", version="1", params=NoParams)
@@ -289,8 +301,7 @@ async def unattended(run: Run[NoParams]) -> None:
     approval gate is then simply absent, and §3.7's 'propose, ask for approval, revise until
     approved' becomes an agent approving itself."
     """
-    role = Role(instructions=PROMPT, model=Claude.SONNET, tools=(REPORT,))
-    reported.append(await run.step(STEP, role))
+    reported.append(await run.step(deciding()))
 
 
 def _point(name: str) -> EntryPoint:

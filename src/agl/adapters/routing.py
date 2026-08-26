@@ -164,14 +164,18 @@ class RoutingAgentRunner(AgentRunner):
         """Whether the adapter serving `model` can serve it right now. Returns nothing, or raises.
 
         One provider, because that is what was asked about. §3.2's first preflight check walks the
-        providers a workflow's roles actually name and calls this once for each, so a run needing
-        two of them dies at second zero on the missing one - and a routing runner that probed all
-        of its adapters here would fail a Claude-only workflow on an unauthenticated session it was
+        distinct models a workflow's roles name and calls this once for each, so a run needing two
+        of them dies at second zero on the missing one - and a routing runner that probed all of
+        its adapters here would fail a Claude-only workflow on an unauthenticated session it was
         never going to use.
 
         `UpstreamUnavailable` from the adapter reaches the caller unchanged, which is the whole
         point: preflight catches that class alone, and a router that wrapped it in anything of its
-        own would turn a logged-out session into an exit 70 telling somebody to file a bug.
+        own would turn a logged-out session into an exit 70 telling somebody to file a bug. What
+        preflight then does with it is preflight's own business and is not this promise read
+        backwards - it quotes the adapter's sentence whole and keeps the exception as the cause,
+        because it has one thing to add that no adapter can know: which role factory, in which
+        module, put that model in front of it.
         """
         await self._serving(model).check_ready(model)
 

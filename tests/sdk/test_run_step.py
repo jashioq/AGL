@@ -63,7 +63,14 @@ from agl.adapters.filesystem.store import FilesystemStore
 from agl.adapters.git.history import GitHistory
 from agl.adapters.git.workspace import GitWorkspaceProvider
 from agl.config import container
-from agl.ports.agent import AgentOutcome, Claude, Restriction, StopReason, ToolResult
+from agl.ports.agent import (
+    AgentOutcome,
+    Claude,
+    QuestionHandler,
+    Restriction,
+    StopReason,
+    ToolResult,
+)
 from agl.ports.errors import InputError
 from agl.ports.home_layout import AglHome, RunScope, step_dir
 from agl.ports.ids import ProjectName, RunLabel, StepName
@@ -71,7 +78,7 @@ from agl.ports.questions import Answer, Question
 from agl.ports.run import JsonValue
 from agl.ports.tree_layout import TreesRoot
 from agl.ports.workspace import Workspace
-from agl.sdk.roles import Role, RoleIncompleteError, prompt_file
+from agl.sdk.roles import Role, RoleIncompleteError, prompt_file, role
 from agl.sdk.tools import reporting_tool
 from agl.sdk.workflow import Run
 
@@ -154,9 +161,9 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     for name in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"):
         monkeypatch.setenv(name, str(tmp_path / "nonexistent-git-config"))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
-    for role in ("AUTHOR", "COMMITTER"):
-        monkeypatch.setenv(f"GIT_{role}_NAME", "AGL contract")
-        monkeypatch.setenv(f"GIT_{role}_EMAIL", "agl@example.invalid")
+    for identity in ("AUTHOR", "COMMITTER"):
+        monkeypatch.setenv(f"GIT_{identity}_NAME", "AGL contract")
+        monkeypatch.setenv(f"GIT_{identity}_EMAIL", "agl@example.invalid")
     work = tmp_path / "repo"
     work.mkdir()
     _git(work, "init", "-q", "-b", "main")
@@ -212,8 +219,13 @@ async def _checkout(repository: Path, tmp_path: Path, base: str) -> Workspace:
 # --- roles, and the agents that serve them -------------------------------------------------------
 
 
-def _role(instructions: str, *, read_only: bool = False) -> Role[Summary]:
+@role(model=Claude.SONNET)
+def _role(name: str, instructions: str, *, read_only: bool = False) -> Role[Summary]:
     """A reporting role: its result is `REPORT`'s payload, read back as a `Summary`.
+
+    `name` is what its entries are recorded under, since `run.step` carries none of its own
+    (§3.3) - so a test that wants two addresses declares two roles, and one that wants two calls at
+    one address hands this same object over twice.
 
     `read_only` declares `NO_VCS_WRITES`, which is what §3.3 asks an author to pair with a step
     that passes no `commit=`. Nothing checks the pairing - the framework does one predictable thing
@@ -221,16 +233,36 @@ def _role(instructions: str, *, read_only: bool = False) -> Role[Summary]:
     """
     restrictions = {Restriction.NO_VCS_WRITES} if read_only else set[Restriction]()
     return Role(
+        name=name,
         instructions=instructions,
-        model=Claude.SONNET,
         restrictions=restrictions,
         tools=(REPORT,),
     )
 
 
-def _effect(instructions: str) -> Role[None]:
+@role(model=Claude.SONNET)
+def _effect(name: str, instructions: str) -> Role[None]:
     """A role with no reporting tool: its result is `null` and its effect is commits (§3.3)."""
-    return Role(instructions=instructions, model=Claude.SONNET)
+    return Role(name=name, instructions=instructions)
+
+
+@role(model=Claude.SONNET)
+def _deciding(*, on_question: QuestionHandler | None = None) -> Role[Summary]:
+    """A reporting role that negotiates: §3.7's handler is a closure over a `Run`, so it can only
+    reach a role as the one argument this factory takes."""
+    return Role(name="decide", instructions="decide", tools=(REPORT,), on_question=on_question)
+
+
+@role(model=Claude.SONNET)
+def _restating() -> Role[Restatement]:
+    """`_role("review", "review", read_only=True)` in every fingerprint term but one: it reports
+    through a tool of the same name and description whose payload type is a different class."""
+    return Role(
+        name="review",
+        instructions="review",
+        restrictions={Restriction.NO_VCS_WRITES},
+        tools=(RESTATE,),
+    )
 
 
 class _Agent:
@@ -360,12 +392,12 @@ async def test_three_sequential_steps_replay_against_a_second_walk(
 
 async def _three(run: Run[None]) -> list[Summary]:
     """A workflow of three sequential steps - §3.3's `fix` shape, with a report on every one."""
-    spec = await run.step("spec", _role("write the spec", read_only=True))
+    spec = await run.step(_role("spec", "write the spec", read_only=True))
     # §3.3's typing promise, checked by `mypy --strict` over `tests/` rather than hoped for: the
     # `Role[Summary]` carries the payload type through `step` and out to the workflow.
     assert_type(spec, Summary)
-    built = await run.step("implement", _role("implement it"), commit="implement the spec")
-    review = await run.step("review", _role("review", read_only=True))
+    built = await run.step(_role("implement", "implement it"), commit="implement the spec")
+    review = await run.step(_role("review", "review", read_only=True))
     return [spec, built, review]
 
 
@@ -384,22 +416,22 @@ async def test_an_agent_that_never_reports_leaves_no_entry_and_the_step_runs_aga
     """
     record = _Agent()
     silent = _run(repository, tmp_path, base, _agent(record, reports=False, says="I have finished"))
-    role = _role("review", read_only=True)
+    role = _role("review", "review", read_only=True)
 
     with pytest.raises(RoleIncompleteError, match="report"):
-        await silent.step("review", role)
+        await silent.step(role)
 
     assert _entries(tmp_path, "review") == [], "a step with no result recorded one anyway"
 
     with pytest.raises(RoleIncompleteError):
-        await silent.step("review", role)
+        await silent.step(role)
 
     assert len(record.runs) == 2, "the second attempt replayed a step that had recorded nothing"
 
     # And the address the two failures would have used is still free: a walk whose agent does
     # report lands its entry there, which is what "claimed no slot" means from outside.
     reporting = _run(repository, tmp_path, base, _agent(record))
-    assert await reporting.step("review", role) == Summary("review #0")
+    assert await reporting.step(role) == Summary("review #0")
     assert len(record.runs) == 3
     assert len(_entries(tmp_path, "review")) == 1
 
@@ -428,7 +460,7 @@ async def test_the_incomplete_message_sends_the_reader_to_the_fix_the_stop_reaso
     run = _run(repository, tmp_path, base, _agent(record, reports=False, stop=stop, says=said))
 
     with pytest.raises(RoleIncompleteError) as raised:
-        await run.step("review", _role("review", read_only=True))
+        await run.step(_role("review", "review", read_only=True))
 
     assert fix in str(raised.value)
     assert said in str(raised.value), "the one thing the agent did say was dropped from the report"
@@ -453,7 +485,7 @@ async def test_a_step_with_commit_records_a_head_whose_tree_holds_the_agents_fil
     written = {FEATURE: b"the callback route\n"}
     run = _run(repository, tmp_path, base, _agent(record, writes=written))
 
-    await run.step("implement", _role("implement T-01"), commit="implement T-01")
+    await run.step(_role("implement", "implement T-01"), commit="implement T-01")
 
     recorded = _text(_one(tmp_path, "implement"), "head")
     assert FEATURE in _tree(repository, recorded), (
@@ -481,7 +513,7 @@ async def test_a_step_without_commit_leaves_the_worktree_byte_identical_to_last_
     left = {SEEDED: EDITED, SCRATCH: b"half a thought\n"}
     run = _run(repository, tmp_path, base, _agent(record, writes=left))
 
-    assert await run.step("review", _role("review", read_only=True)) == Summary("review #0")
+    assert await run.step(_role("review", "review", read_only=True)) == Summary("review #0")
 
     workspace = await _checkout(repository, tmp_path, base)
     assert (workspace.path / SEEDED).read_bytes() == SEED, "the tracked edit was not reverted"
@@ -503,13 +535,13 @@ async def test_changing_only_the_commit_message_does_not_invalidate_the_entry(
     made, message and all - and that half is asserted, because it is the one that surprises."""
     record = _Agent()
     written = {FEATURE: b"the callback route\n"}
-    role = _role("implement T-01")
+    role = _role("implement", "implement T-01")
 
     first = _run(repository, tmp_path, base, _agent(record, writes=written))
-    await first.step("implement", role, commit="implement T-01")
+    await first.step(role, commit="implement T-01")
 
     second = _run(repository, tmp_path, base, _agent(record, writes=written))
-    await second.step("implement", role, commit="implement T-01: add the oauth callback route")
+    await second.step(role, commit="implement T-01: add the oauth callback route")
 
     assert len(record.runs) == 1, "rewording a commit message re-ran the agent"
     recorded = _text(_one(tmp_path, "implement"), "head")
@@ -535,7 +567,7 @@ async def test_the_wipe_runs_when_a_step_raises_and_no_entry_is_written(
     run = _run(repository, tmp_path, base, _agent(record, writes=left, raises=True))
 
     with pytest.raises(_Crash, match="died mid-step"):
-        await run.step("review", _role("review", read_only=True))
+        await run.step(_role("review", "review", read_only=True))
 
     workspace = await _checkout(repository, tmp_path, base)
     assert (workspace.path / SEEDED).read_bytes() == SEED
@@ -564,7 +596,7 @@ async def test_a_step_that_raises_with_commit_commits_anyway_and_still_records_n
     )
 
     with pytest.raises(_Crash):
-        await run.step("implement", _role("implement T-01"), commit="implement T-01")
+        await run.step(_role("implement", "implement T-01"), commit="implement T-01")
 
     workspace = await _checkout(repository, tmp_path, base)
     committed = _git(workspace.path, "rev-parse", "HEAD").strip()
@@ -575,7 +607,7 @@ async def test_a_step_that_raises_with_commit_commits_anyway_and_still_records_n
     # And the retry restores past it, which is what makes the commit above harmless rather than a
     # half-done step nobody can see: `last_good` is chained from entries, and there are none.
     reporting = _run(repository, tmp_path, base, _agent(record))
-    await reporting.step("implement", _role("implement T-01"), commit="implement T-01")
+    await reporting.step(_role("implement", "implement T-01"), commit="implement T-01")
     assert _git(workspace.path, "rev-parse", "HEAD").strip() == base
     assert not (workspace.path / FEATURE).exists()
 
@@ -680,7 +712,7 @@ async def test_a_cancelled_step_still_wipes_the_worktree_and_records_nothing(
     workspace = await _checkout(repository, tmp_path, base)
     run = _run(repository, tmp_path, base, _blocks(record, running, left))
 
-    step = asyncio.create_task(run.step("review", _role("review", read_only=True)))
+    step = asyncio.create_task(run.step(_role("review", "review", read_only=True)))
     await running.wait()
     await _cancelled(step)
 
@@ -715,7 +747,7 @@ async def test_a_cancelled_step_with_commit_still_commits_and_still_records_noth
     run = _run(repository, tmp_path, base, blocked)
 
     step = asyncio.create_task(
-        run.step("implement", _role("implement T-01"), commit="implement T-01")
+        run.step(_role("implement", "implement T-01"), commit="implement T-01")
     )
     await running.wait()
     await _cancelled(step)
@@ -747,7 +779,7 @@ async def test_a_second_call_to_the_reporting_tool_is_refused_and_the_first_payl
     record = _Agent()
     run = _run(repository, tmp_path, base, _agent(record, calls=2))
 
-    assert await run.step("review", _role("review", read_only=True)) == Summary("review #0")
+    assert await run.step(_role("review", "review", read_only=True)) == Summary("review #0")
 
     assert [result.rejected for result in record.results] == [False, True]
     assert "already recorded" in record.results[1].text
@@ -774,7 +806,7 @@ async def test_a_malformed_payload_is_rejected_back_to_the_agent_and_not_raised(
 
     run = _run(repository, tmp_path, base, _corrects)
 
-    assert await run.step("review", _role("review", read_only=True)) == Summary("on reflection")
+    assert await run.step(_role("review", "review", read_only=True)) == Summary("on reflection")
     assert [result.rejected for result in record.results] == [True, False]
     assert "a string" in record.results[0].text
     assert len(record.runs) == 1
@@ -802,7 +834,7 @@ async def test_an_effect_step_records_a_null_value_and_the_commits_are_the_resul
         _agent(record, reports=False, writes={FEATURE: b"the callback route\n"}),
     )
 
-    await run.step("implement", _effect("implement T-01"), commit="implement T-01")
+    await run.step(_effect("implement", "implement T-01"), commit="implement T-01")
 
     entry = _one(tmp_path, "implement")
     assert entry["value"] is None, "an effect step recorded something other than null"
@@ -833,14 +865,8 @@ async def test_a_roles_question_handler_reaches_the_runner_and_its_answer_return
         return Answer(text="land it")
 
     run = _run(repository, tmp_path, base, _agent(record, asks="Land it, or keep going?"))
-    role = Role(
-        instructions="decide",
-        model=Claude.SONNET,
-        tools=(REPORT,),
-        on_question=_answers,
-    )
 
-    assert await run.step("decide", role) == Summary("decide #0")
+    assert await run.step(_deciding(on_question=_answers)) == Summary("decide #0")
     assert [question.prompt for question in record.asked] == ["Land it, or keep going?"]
     assert record.results[0].text == "land it", "the answer did not reach the agent that asked"
 
@@ -853,7 +879,7 @@ async def test_a_roles_question_handler_reaches_the_runner_and_its_answer_return
 # first of them is the obvious one:
 #
 #   * *The block never arrives.* Stage 12's actual behaviour and the whole of 13.0(i): §3.3's own
-#     `w.step("triage", triage, findings=highs)` fingerprints the findings correctly, pays for an
+#     `w.step(triage, findings=highs)` fingerprints the findings correctly, pays for an
 #     agent, and hands it a prompt with no findings in it. Nothing raises, the step records a
 #     result, and what the run produced is a triage of nothing.
 #   * *Something interpolates.* `_TEMPLATED` is a prompt carrying `{`, `}`, `{name}`, a JSON Schema
@@ -914,7 +940,7 @@ async def test_the_inputs_a_step_passes_are_appended_to_what_the_agent_is_asked(
     record = _Agent()
     run = _run(repository, tmp_path, base, _agent(record))
 
-    await run.step("triage", _role("triage the findings", read_only=True), ticket="T-01", high=3)
+    await run.step(_role("triage", "triage the findings", read_only=True), ticket="T-01", high=3)
 
     assert record.runs == ["triage the findings" + _HEADING + '{"high":3,"ticket":"T-01"}'], (
         "the step's inputs were fingerprinted and never shown to the agent, which is §3.3's own "
@@ -937,7 +963,7 @@ async def test_a_prompt_carrying_braces_and_percent_signs_reaches_the_agent_byte
     record = _Agent()
     run = _run(repository, tmp_path, base, _agent(record))
 
-    await run.step("triage", _role(_TEMPLATED, read_only=True), ticket="T-01")
+    await run.step(_role("triage", _TEMPLATED, read_only=True), ticket="T-01")
 
     (asked,) = record.runs
     assert asked.startswith(_TEMPLATED), (
@@ -961,7 +987,7 @@ async def test_a_step_with_no_inputs_is_dispatched_the_roles_instructions_and_no
     record = _Agent()
     run = _run(repository, tmp_path, base, _agent(record))
 
-    await run.step("review", _role("review the diff", read_only=True))
+    await run.step(_role("review", "review the diff", read_only=True))
 
     assert record.runs == ["review the diff"]
 
@@ -979,13 +1005,13 @@ async def test_the_same_inputs_in_a_different_keyword_order_compose_and_replay_t
     every step ever recorded, and this is the cheapest place that shows.
     """
     record = _Agent()
-    role = _role("triage the findings", read_only=True)
+    role = _role("triage", "triage the findings", read_only=True)
 
     first = _run(repository, tmp_path, base, _agent(record))
-    await first.step("triage", role, ticket="T-01", high=3)
+    await first.step(role, ticket="T-01", high=3)
 
     second = _run(repository, tmp_path, base, _agent(record))
-    await second.step("triage", role, high=3, ticket="T-01")
+    await second.step(role, high=3, ticket="T-01")
 
     assert len(record.runs) == 1, "reordering two keyword arguments re-ran the agent"
     assert record.runs[0].endswith('{"high":3,"ticket":"T-01"}'), (
@@ -1016,8 +1042,7 @@ async def test_a_dataclass_input_reaches_the_agent_as_its_fields_and_its_type(
     typed = '{"__agl_type__":"' + Finding.__module__ + '.Finding",'
 
     await run.step(
-        "triage",
-        _role("triage the findings", read_only=True),
+        _role("triage", "triage the findings", read_only=True),
         findings=[Finding("T-01", 3), Finding("T-07", 5)],
     )
 
@@ -1065,7 +1090,7 @@ async def test_a_role_declared_with_prompt_file_asks_the_agent_what_the_file_say
     prompt.write_text("Review the worktree against the spec.\n\nReport what you found.\n")
     run = _run(repository, tmp_path, base, _agent(record))
 
-    await run.step("review", _role(prompt_file(prompt), read_only=True))
+    await run.step(_role("review", prompt_file(prompt), read_only=True))
 
     assert record.runs == [prompt.read_text(encoding="utf-8")], (
         "the agent was not asked what the prompt file says. A role that carried the filename would "
@@ -1097,16 +1122,16 @@ async def test_editing_the_prompt_file_re_runs_the_step_and_the_agent_reads_the_
     prompt.write_text(first_wording, encoding="utf-8")
 
     first = _run(repository, tmp_path, base, _agent(record))
-    await first.step("review", _role(prompt_file(prompt), read_only=True))
+    await first.step(_role("review", prompt_file(prompt), read_only=True))
 
     unedited = _run(repository, tmp_path, base, _agent(record))
-    await unedited.step("review", _role(prompt_file(prompt), read_only=True))
+    await unedited.step(_role("review", prompt_file(prompt), read_only=True))
     assert len(record.runs) == 1, "the control: re-reading an unchanged prompt file must replay"
 
     edited_wording = "Review the worktree against the spec, and check the tests too.\n"
     prompt.write_text(edited_wording, encoding="utf-8")
     edited = _run(repository, tmp_path, base, _agent(record))
-    await edited.step("review", _role(prompt_file(prompt), read_only=True))
+    await edited.step(_role("review", prompt_file(prompt), read_only=True))
 
     assert record.runs == [first_wording, edited_wording], (
         "editing the prompt file moved nothing, so the resume replayed what the old wording "
@@ -1135,23 +1160,18 @@ async def test_a_step_reporting_through_another_payload_type_does_not_replay_the
     the second half of this and mean nothing by it.
     """
     record = _Agent()
-    review = _role("review", read_only=True)
-    restated = Role(
-        instructions="review",
-        model=Claude.SONNET,
-        restrictions={Restriction.NO_VCS_WRITES},
-        tools=(RESTATE,),
-    )
+    review = _role("review", "review", read_only=True)
+    restated = _restating()
 
     first = _run(repository, tmp_path, base, _agent(record))
-    assert await first.step("review", review) == Summary("review #0")
+    assert await first.step(review) == Summary("review #0")
 
     unchanged = _run(repository, tmp_path, base, _agent(record))
-    assert await unchanged.step("review", review) == Summary("review #0")
+    assert await unchanged.step(review) == Summary("review #0")
     assert len(record.runs) == 1, "the control: the same role twice is one agent run"
 
     swapped = _run(repository, tmp_path, base, _agent(record))
-    assert await swapped.step("review", restated) == Restatement("review #0")
+    assert await swapped.step(restated) == Restatement("review #0")
 
     assert len(record.runs) == 2, (
         "the step replayed an entry recorded for another payload type. The workflow asked for a "
@@ -1197,7 +1217,7 @@ async def test_activity_is_the_adapters_own_last_line_and_is_gone_when_the_step_
 
     run = _run(repository, tmp_path, base, _reports)
 
-    assert await run.step("review", _role("review", read_only=True)) == Summary("done")
+    assert await run.step(_role("review", "review", read_only=True)) == Summary("done")
 
     assert seen == [None, "Bash: ./gradlew build", "Edit: domain/usecase.kt"], (
         "the activity a step reported is not what came back out of `run.activity`: either an "
@@ -1236,7 +1256,7 @@ async def test_a_step_that_raises_leaves_no_activity_behind_and_a_replayed_one_r
     dying = _run(repository, tmp_path, base, _dies)
 
     with pytest.raises(_Crash):
-        await dying.step("review", _role("review", read_only=True))
+        await dying.step(_role("review", "review", read_only=True))
 
     assert dying.activity is None, (
         "an agent that died mid-`Bash` left `Bash` on the board. The cell is cleared on every exit "
@@ -1245,7 +1265,7 @@ async def test_a_step_that_raises_leaves_no_activity_behind_and_a_replayed_one_r
 
     # And now a walk that records something, followed by one that replays it.
     fresh = _run(repository, tmp_path, base, _agent(record))
-    assert await fresh.step("review", _role("review", read_only=True)) == Summary("review #0")
+    assert await fresh.step(_role("review", "review", read_only=True)) == Summary("review #0")
 
     async def _shouts(conversation: Conversation) -> AgentOutcome:
         record.runs.append(conversation.task.instructions)
@@ -1253,7 +1273,7 @@ async def test_a_step_that_raises_leaves_no_activity_behind_and_a_replayed_one_r
         return AgentOutcome(stop_reason=StopReason.COMPLETED, text="")
 
     replaying = _run(repository, tmp_path, base, _shouts)
-    assert await replaying.step("review", _role("review", read_only=True)) == Summary("review #0")
+    assert await replaying.step(_role("review", "review", read_only=True)) == Summary("review #0")
 
     assert len(record.runs) == 2, "the replay dispatched an agent, so it proves nothing about this"
     assert replaying.activity is None, (
@@ -1283,9 +1303,9 @@ async def test_two_gathered_steps_open_one_checkout_and_take_two_addresses(
     """
     record = _Agent()
     run = _run(repository, tmp_path, base, _agent(record))
-    role = _role("review", read_only=True)
+    role = _role("review", "review", read_only=True)
 
-    both = await asyncio.gather(run.step("review", role), run.step("review", role))
+    both = await asyncio.gather(run.step(role), run.step(role))
 
     assert list(both) == [Summary("review #0"), Summary("review #0")]
     assert len(record.runs) == 2
@@ -1298,20 +1318,54 @@ async def test_two_gathered_steps_open_one_checkout_and_take_two_addresses(
 # --- what a step refuses before it provisions anything -------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_a_step_name_that_could_not_be_a_path_segment_is_refused(
-    repository: Path, tmp_path: Path, base: str
-) -> None:
+def test_a_step_name_that_could_not_be_a_path_segment_is_refused_at_the_declaration() -> None:
     """§3.3: names are opaque strings, "validated on the way in" - filesystem- and ref-safe.
 
-    Refused before anything is opened and before any agent is dispatched, which is the whole reason
-    the `StepName` is constructed first: a run that cannot record a step should not pay for one.
+    Since UF1.1 the name is the role's, so this is where "on the way in" now is: at the line that
+    declared it, before a run exists at all. `tests/sdk/test_roles.py` holds the rest of the
+    refusal's shape; what is here is the half that belongs beside the step - that no `run.step`
+    could ever be reached with one.
+    """
+    with pytest.raises(InputError, match="step name"):
+        _role("../escape", "review", read_only=True)
+
+
+@pytest.mark.asyncio
+async def test_the_step_refuses_the_same_name_again_before_it_provisions_anything(
+    repository: Path, tmp_path: Path, base: str
+) -> None:
+    """The engine's own `StepName(role.name)`, which is above the journal lookup deliberately: a
+    run that cannot record a step should not pay for one, and should not cut a checkout for it
+    either.
+
+    **The role below did not come from `Role(...)`**, and it cannot: the declaration refuses this
+    name, which is the test above. So the only way to reach the engine's check is to build the
+    value the way nothing in AGL builds one - past `__post_init__`, field by field - and that is
+    what this does. It is not a shape a workflow can write, and the point of measuring it is that
+    the two checks are the duplication `sdk/roles.py` argues for by name (`AgentTask`'s refusals,
+    re-made one layer earlier): each has to hold on its own, or the outer one is the only one and
+    the inner one is decoration.
+
+    The field is `_model` because since UF1.2 nothing but `@role(model=…)` writes a role's model -
+    `Role.model` is the property that reads it and refuses when nothing has. This loop is writing
+    what a factory would have written, which is the same statement one field down.
     """
     record = _Agent()
     run = _run(repository, tmp_path, base, _agent(record))
+    undeclared: Role[Summary] = Role.__new__(Role)
+    for field, value in {
+        "name": "../escape",
+        "instructions": "review",
+        "_model": Claude.SONNET,
+        "restrictions": frozenset({Restriction.NO_VCS_WRITES}),
+        "tools": (REPORT,),
+        "requires": frozenset(),
+        "on_question": None,
+    }.items():
+        object.__setattr__(undeclared, field, value)
 
     with pytest.raises(InputError, match="step name"):
-        await run.step("../escape", _role("review", read_only=True))
+        await run.step(undeclared)
 
     assert record.runs == []
     assert not (tmp_path / "trees").exists(), "a refused step name provisioned a checkout anyway"

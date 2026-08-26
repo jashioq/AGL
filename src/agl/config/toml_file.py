@@ -463,7 +463,8 @@ def check_trees_root(path: Path, repo: Path, trees_root: Path) -> None:
     the writer, and a nested trees root is refused when it is written as well as when it is read.
 
     **This lives here and not in `sdk/_engine/preflight.py`**, and the reason is that no path ever
-    reaches preflight. That module takes an `AgentRunner` and roles; `api.run` takes a `ProjectName`
+    reaches preflight. That module takes an `AgentRunner` and the workflow's own function - one
+    port and the thing it is checking, and nothing else; `api.run` takes a `ProjectName`
     and deliberately not a `Project` (its docstring argues that at length); and `Services` holds
     ports and one build command. Widening any of those three signatures to carry two `Path`s would
     undo a decision each of them already argues for, in order to move a check into a module that

@@ -95,8 +95,8 @@ convert rather than fewer.
 not restated here: a payload is a frozen value that a later step and a replay both read again, a
 `list` field on a frozen dataclass is a mutable interior behind an immutable wrapper, and
 `sdk/tools.py` builds each field at the type it was declared so the JSON array survives the round
-trip as a tuple. `chunk` is passed to `run.step("implement", ...)` as an input, so `_canonical`
-walks this whole value and tags each dataclass with its qualified name.
+trip as a tuple. `chunk` is passed to `run.step(implementer, chunk=...)` as an input, so
+`_canonical` walks this whole value and tags each dataclass with its qualified name.
 """
 
 from dataclasses import dataclass
@@ -171,7 +171,7 @@ class Chunk:
 
 @dataclass(frozen=True, slots=True)
 class Chunks:
-    """A whole plan: the payload of `report_chunks`, and what `run.step("plan", planner)` hands
+    """A whole plan: the payload of `report_chunks`, and what `run.step(planner())` hands
     back.
 
     A wrapper around one sequence rather than the sequence itself, because a reporting tool's

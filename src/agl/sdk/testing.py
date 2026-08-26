@@ -59,8 +59,10 @@ than two spellings of `Agent` for a caller to choose between.
 Worth stating outright, because it is the first thing somebody reaches for. A task carries
 `instructions`, `workspace`, `model`, `restrictions`, `tools`, `context` and `plan_only`, and
 **which step it belongs to is not among them** - deliberately, since `ports/agent.py` keeps AGL's
-own ledger vocabulary out of the port and an adapter has no business knowing what a step is. So an
-agent dispatching per step keys on what the *role* made visible, and there are two good handles:
+own ledger vocabulary out of the port and an adapter has no business knowing what a step is.
+`Role.name` does not change that: it is the ledger address a step is recorded under, and it stops
+at `sdk/_engine/steps.py` like every other term this port has no vocabulary for. So an agent
+dispatching per step keys on what the *role* made visible, and there are two good handles:
 
   * **the reporting tool's name**, which is the sharpest one: a role reports through exactly one
     tool (`sdk/tools.py`), the author named it, and `task.tools` carries it under that name;

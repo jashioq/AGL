@@ -131,7 +131,7 @@ from agl.ports.agent import Provider
 from agl.ports.home_layout import AglHome
 from agl.ports.ids import ProjectName
 from agl.ports.tree_layout import TreesRoot, run_branch, worktree_branch
-from agl.sdk import Claude, Namespace, Role, Run, Workflow, arg, workflow
+from agl.sdk import Claude, Namespace, Role, Run, Workflow, arg, role, workflow
 from agl.testing import AgentTask, Reply
 
 REPO_ROOT: Final = Path(__file__).resolve().parent.parent
@@ -516,6 +516,14 @@ def test_every_workflow_package_is_one_entry_point_line_and_no_more() -> None:
 # `show`)", and under this method `fix` is 12 statements of which exactly those 4 are the screen
 # wiring. Any method that cannot reproduce that decomposition is measuring something else.
 #
+# **The third of those four is no longer spelled `replace`, and the count did not move.** Part 5 is
+# quoted above as it is written; what `fix` holds today is `asking =
+# implementer(on_question=answer)` - §3.11 replaced the `dataclasses.replace` with a factory call
+# whose parameter list is the whole override surface. It is the same statement doing the same job at
+# the same line, so the quotation is left verbatim and the decomposition it records is unchanged: a
+# handler, its body, the statement that puts the handler on a role, and the board's `show`. A wiring
+# count that moved when the spelling did would have been counting spellings.
+#
 # The method that was refused, and its numbers, because a reader deserves both: counting only the
 # **decorated function's body** gives `fix` = 8 and `split` = 6. Those are smaller and they are the
 # flattering pair, and they cannot reproduce the plan's "8 plus 4" - the whole of `fix`'s body is 8
@@ -545,8 +553,13 @@ def _counted(module: Path) -> tuple[int, int]:
     The wiring is identified structurally and not by line number: a statement counts as wiring if
     its own header names `terminal.show` or `on_question`, or if it *is* the handler function some
     `on_question=` keyword points at. That rule picks out exactly the four the plan names in `fix` -
-    the handler, its body, the `replace`, and the board's `show` - without this file holding a list
-    of line numbers that would rot on the next edit.
+    the handler, its body, the statement that puts the handler on a role, and the board's `show` -
+    without this file holding a list of line numbers that would rot on the next edit.
+
+    **Structural is what makes the rule survive §3.11.** The third of those four was
+    `replace(implementer, on_question=answer)` when the plan recorded it and is
+    `implementer(on_question=answer)` now; the `on_question` keyword is what both have in common and
+    is what this matches on, so the spelling changed under the rule without the count moving.
 
     `_header` and not `ast.unparse`, because unparsing a compound statement renders its whole body:
     the `@workflow` declaration would match `terminal.show` on account of a call four lines inside
@@ -605,9 +618,10 @@ def test_both_workflows_are_the_size_the_plan_recorded() -> None:
 
     assert fix_wiring == FIX_SCREEN_WIRING, (
         f"{FIX_PACKAGE.parent.name} spends {fix_wiring} statements on interactive-screen wiring "
-        f"and Part 5 records {FIX_SCREEN_WIRING} - a handler, its body, a `replace` for the asking "
-        f"role, and the board's `show`. The decomposition is what makes the floor a floor: if the "
-        f"wiring count moved, the number left under it is not §3.3's workflow any more."
+        f"and Part 5 records {FIX_SCREEN_WIRING} - a handler, its body, the statement that puts "
+        f"the handler on the asking role, and the board's `show`. The decomposition is what makes "
+        f"floor a floor: if the wiring count moved, the number left under it is not §3.3's "
+        f"workflow any more."
     )
     assert fix_total - fix_wiring == FIX_CORE, (
         f"`fix` is {fix_total} logical statements of which {fix_wiring} are screen wiring, leaving "
@@ -1084,17 +1098,20 @@ class _EightParams:
     request: str = arg("-r", "--request", help="what to do")
 
 
-_EIGHT_ROLE: Final = Role(instructions="do the work", model=Claude.SONNET)
+@role(model=Claude.SONNET)
+def _eight_role() -> Role:
+    """The one role the probe runs, so `agl run` has work to do."""
+    return Role(name="only", instructions="do the work")
 
 
-@workflow(name="probe", version="1", params=_EightParams, roles=[_EIGHT_ROLE])
+@workflow(name="probe", version="1", params=_EightParams)
 async def probe(run: Run[_EightParams]) -> None:
     """One step, so that `agl run` has work to do and `agl resume` has an entry to replay.
 
     Module-level, because `agl.testing` resolves a workflow the way an installed one is resolved -
     `<module>:<name>` - and a workflow declared inside a function names no module attribute.
     """
-    await run.step("only", _EIGHT_ROLE, request=run.params.request)
+    await run.step(_eight_role(), request=run.params.request)
 
 
 _EIGHT_POINT: Final = EntryPoint(name="probe", value=f"{__name__}:probe", group=registry.GROUP)
@@ -1326,42 +1343,60 @@ class _RenameParams:
     request: str = arg("-r", "--request", help="what to do")
 
 
-_RENAME_ROLE: Final = Role(instructions="do the work", model=Claude.SONNET)
+_RENAME_PROMPT: Final = "do the work"
+
+
+@role(model=Claude.SONNET)
+def _renamed(name: str) -> Role[None]:
+    """One role under whichever name it is asked for, and identical in every term a fingerprint
+    takes.
+
+    Since UF1.1 a step is recorded under `role.name` and the call carries none of its own (§3.3),
+    so "rename a step" is "declare the same role under another name" - which is what this makes
+    cheap. `name` is deliberately no term of `base_of`, and that is the whole of what the test
+    below measures. The model is on the decorator and therefore *cannot* differ between the two
+    sets below, which is the other half of what makes them comparable.
+    """
+    return Role(name=name, instructions=_RENAME_PROMPT)
+
 
 _RENAME_REQUEST: Final = "the same request, twice"
 
-_FIRST_STEPS: Final = ("alpha", "beta", "gamma")
-_SECOND_STEPS: Final = ("banana", "coconut", "durian")
+_FIRST_STEPS: Final = (_renamed("alpha"), _renamed("beta"), _renamed("gamma"))
+_SECOND_STEPS: Final = (_renamed("banana"), _renamed("coconut"), _renamed("durian"))
 _FIRST_SPACES: Final = ("one", "two")
 _SECOND_SPACES: Final = ("three", "four")
 
 
 async def _renameable(
-    run: Run[_RenameParams], *, steps: tuple[str, str, str], spaces: tuple[str, str]
+    run: Run[_RenameParams],
+    *,
+    steps: tuple[Role[None], Role[None], Role[None]],
+    spaces: tuple[str, str],
 ) -> None:
     """One programme, spelled once, parametrised by the names that are meant not to matter.
 
-    Two worktrees and three step names, and **nothing derived from either**: the inputs are plain
-    integers, so no name reaches a fingerprint through the one door §3.6 says is open. That is what
-    makes the comparison a rename rather than a change of inputs wearing one.
+    Two worktrees and three roles alike but for their names, and **nothing derived from either**:
+    the inputs are plain integers, so no name reaches a fingerprint through the one door §3.6 says
+    is open. That is what makes the comparison a rename rather than a change of inputs wearing one.
 
     No `commit=` and no `integrate()`, which is not an omission: this is the half of the target that
     holds, and the half that does not is measured by its own test below rather than by making this
     one quieter.
     """
-    await run.step(steps[0], _RENAME_ROLE, order=1)
+    await run.step(steps[0], order=1)
     for index, space in enumerate(spaces):
-        await run.worktree(space).step(steps[1], _RENAME_ROLE, order=10 + index)
-    await run.step(steps[2], _RENAME_ROLE, order=99)
+        await run.worktree(space).step(steps[1], order=10 + index)
+    await run.step(steps[2], order=99)
 
 
-@workflow(name="renamed", version="1", params=_RenameParams, roles=[_RENAME_ROLE])
+@workflow(name="renamed", version="1", params=_RenameParams)
 async def named_one(run: Run[_RenameParams]) -> None:
     """The workflow under one set of names."""
     await _renameable(run, steps=_FIRST_STEPS, spaces=_FIRST_SPACES)
 
 
-@workflow(name="renamed", version="1", params=_RenameParams, roles=[_RENAME_ROLE])
+@workflow(name="renamed", version="1", params=_RenameParams)
 async def named_two(run: Run[_RenameParams]) -> None:
     """The same workflow under a different name for every namespace and every step."""
     await _renameable(run, steps=_SECOND_STEPS, spaces=_SECOND_SPACES)
@@ -1375,19 +1410,19 @@ async def _landing(run: Run[_RenameParams], *, space: str) -> None:
     the landing for a fingerprint to be taken over the head that landing produced.
     """
     child = run.worktree(space)
-    await child.step("implement", _RENAME_ROLE, order=1, commit="land the work")
+    await child.step(_renamed("work"), order=1, commit="land the work")
     outcome = await child.integrate()
     assert not outcome.conflicted
-    await run.step("after", _RENAME_ROLE, order=2)
+    await run.step(_renamed("work"), order=2)
 
 
-@workflow(name="landing", version="1", params=_RenameParams, roles=[_RENAME_ROLE])
+@workflow(name="landing", version="1", params=_RenameParams)
 async def landing_one(run: Run[_RenameParams]) -> None:
     """The landing programme under one namespace."""
     await _landing(run, space="one")
 
 
-@workflow(name="landing", version="1", params=_RenameParams, roles=[_RENAME_ROLE])
+@workflow(name="landing", version="1", params=_RenameParams)
 async def landing_two(run: Run[_RenameParams]) -> None:
     """The landing programme under a different namespace, and nothing else different."""
     await _landing(run, space="three")
@@ -1441,9 +1476,11 @@ def _fingerprints(entries: Mapping[str, Mapping[str, object]]) -> list[str]:
 async def test_renaming_every_name_moves_no_fingerprint_at_all(tmp_path: Path) -> None:
     """#11 in its sharp form: rename everything nameable and every digest is byte-identical.
 
-    One workflow, declared twice with three different step names and two different namespace names
-    and nothing else different - same role, same model, same inputs, same seeded repository. Both
-    are run on their own bundle over their own on-disk ledger, and then three things are asserted:
+    One workflow, declared twice with three differently-named roles and two different namespace
+    names and nothing else different - same prompt, same model, same inputs, same seeded
+    repository. A step's name is its role's since UF1.1, so renaming one *is* declaring the role
+    under another name, and `Role.name` is deliberately no term of `base_of`. Both are run on their
+    own bundle over their own on-disk ledger, and then three things are asserted:
 
       * **The fingerprints are equal as multisets.** Not "the same number of entries", not "the same
         values" - the same digests, byte for byte. `base_of` hashes no name, and `digest` is

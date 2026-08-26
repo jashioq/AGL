@@ -170,7 +170,7 @@ def test_a_step_that_claims_nothing_leaves_the_next_call_at_the_same_address() -
 def test_two_concurrent_siblings_both_get_n_zero_rather_than_racing_for_it() -> None:
     """The failure a per-invocation counter produces, and the one §3.6 spells out.
 
-    `T-01` and `T-02` both call `step("implement", implementer)` with the same role, no inputs of
+    `T-01` and `T-02` both call `step(implementer)` with the same role, no inputs of
     their own and the same parent head, so their bases are identical by construction. A counter
     that did not know about namespaces would hand `n = 0` to whichever arrived first, and on resume
     the other one arrives first - so each child looks in its own `worktrees/<id>/steps/implement/`
