@@ -137,6 +137,15 @@ async def outcome_of(
 
 NOTE: Final = "record_note"
 _NOTE_SCHEMA: Final[Mapping[str, JsonValue]] = {
+    # `title` is here so that the free instruments exercise it, and for no other reason. This suite
+    # is about a port and has no business deriving a schema, so the rest of this dict stays
+    # hand-written - but `sdk/tools.py::_object_schema` writes a qualified type name into every
+    # derived payload schema at every depth, that schema crosses the port untouched, and until this
+    # line existed every free measurement of a tool reaching a real harness was taken on a schema
+    # without one. The spelling is `_object_schema`'s own, `f"{module}.{qualname}"`. See
+    # `docs/manual-qa.md` entry 15: what is still deferred there is a *vendor* accepting it, which
+    # needs an installed CLI; what this line closes is everything on AGL's side of the crossing.
+    "title": "tests.contracts._agent_tasks.Note",
     "type": "object",
     "properties": {"note": {"type": "string", "description": "The note, in one sentence."}},
     "required": ["note"],

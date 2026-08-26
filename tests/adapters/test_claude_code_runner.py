@@ -1388,6 +1388,48 @@ async def test_a_schema_carrying_only_a_type_survives_the_crossing(
 
 
 @pytest.mark.asyncio
+async def test_a_tools_schema_reaches_the_wire_as_the_workflow_declared_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The schema a client reads off this adapter's server is the one the workflow handed over.
+
+    The mirror of `test_openai_runner.py::test_a_tools_schema_reaches_the_model_as_the_workflow_
+    declared_it`, and it is here for the same reason: `sdk/tools.py::_object_schema` writes a
+    qualified type name into every derived payload schema as a `title`, because `base_of` hashes a
+    tool's name, description and schema and nothing else, so the schema is the only term a payload
+    type's identity can travel in. Nothing between here and the wire is entitled to rewrite it -
+    `_schema` above supplies `type` and `properties` when they are missing and touches nothing
+    else - and until this test existed every free measurement of a tool reaching a real harness on
+    this backend was taken on a schema with no annotation in it.
+
+    `Notes` rather than a schema built here, so that removing the `title` from `_NOTE_SCHEMA` fails
+    this test rather than making it vacuous. What is still deferred to the manual pass is a
+    *vendor's* acceptance of the annotation at registration, which needs an installed CLI:
+    `docs/manual-qa.md` entry 15.
+    """
+    repo = workspace(tmp_path)
+    notes = Notes()
+    seen: list[dict[str, Any]] = []
+
+    async def play(cli: Scripted) -> None:
+        await cli.say(init(repo))
+        seen.extend(await cli.listed("agl"))
+        await cli.say(ends(result="done", terminal_reason="completed"))
+
+    await offline(play, task_in(repo, tools=(notes.tool,)), monkeypatch)
+
+    advertised = next(entry for entry in seen if entry["name"] == notes.tool.name)
+    assert advertised["inputSchema"] == dict(notes.tool.payload_schema), (
+        f"the workflow's tool reached the wire as {advertised['inputSchema']!r}, and it declared "
+        f"{dict(notes.tool.payload_schema)!r}. Nothing here is entitled to rewrite it"
+    )
+    assert "title" in advertised["inputSchema"], (
+        "the fixture this test is pointed at no longer carries a `title`, so it now asserts "
+        "nothing about the annotation `_object_schema` writes - see `_NOTE_SCHEMA`"
+    )
+
+
+@pytest.mark.asyncio
 async def test_activity_is_the_tools_own_name_and_one_line_of_its_payload(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

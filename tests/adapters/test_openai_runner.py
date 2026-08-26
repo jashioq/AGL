@@ -1498,6 +1498,11 @@ async def test_a_tools_schema_reaches_the_model_as_the_workflow_declared_it(
         f"{dict(notes.tool.payload_schema)!r}. Nothing here is entitled to rewrite it"
     )
     assert declared["description"] == notes.tool.description
+    assert "title" in declared["inputSchema"], (
+        "the fixture this test is pointed at no longer carries a `title`, so the assertion above "
+        "no longer says anything about the annotation `sdk/tools.py::_object_schema` writes into "
+        "every derived payload schema - see `_NOTE_SCHEMA` and `docs/manual-qa.md` entry 15"
+    )
 
     schema = next(entry for entry in asking if entry["name"] == "ask")["inputSchema"]
     assert schema["type"] == "object" and "question" in schema["required"], (
