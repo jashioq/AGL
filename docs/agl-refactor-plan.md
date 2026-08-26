@@ -257,7 +257,7 @@ src/agl/
 ├── sdk/                    ★ PUBLIC API, own semver.
 │   ├── workflow.py             @workflow · Run · Stop
 │   ├── roles.py                @role(model=…) · Role(name, instructions, restrictions,
-│   │                                tools, requires, on_question, plan_only)
+│   │                                tools, requires, on_question)
 │   ├── tools.py                re-exports ports Tool + the reporting-tool
 │   │                           declaration helper (§3.3) — this one has logic
 │   ├── params.py               arg()
@@ -428,30 +428,45 @@ real role exists.
 That makes preflight two halves: `check_ready` per
 distinct model plus capability containment **at second zero**, and containment only, memoised, at
 every `run.step`. The second half is what makes the folded implications below real — the natural
-spelling for a handler role is `replace(module_role, on_question=h)`, so the role preflight saw is
-not the role that runs.
+spelling for a handler role is `implementer(on_question=h)`, so the role preflight saw is not the
+role that runs.
 
-**Two preflight checks, before the run starts:**
+**Preflight is a best-effort provider check plus a per-step guarantee.** The distinction is
+load-bearing and was measured at UF1: **capability containment cannot happen at second zero** at all,
+because it needs `role.requires`, which is unreachable without invoking a factory — which preflight
+may not do. So the eager pass covers providers only, and it covers them **as far as the registry can
+see**.
 
-1. **Provider availability.** Collect the providers named by the workflow's roles; for each, verify
-   its harness is **installed, on `PATH`, and authenticated** (§3.2.1) via
-   `AgentRunner.check_ready(model)`. Only an adapter can answer that question — config cannot — so
-   it is a port member rather than preflight logic. Both `check_ready` and `capabilities` take a
-   `ModelId` and are async: `RoutingAgentRunner` implements the same ABC, and with no model
-   argument it could only answer for "some provider," which is a lie in either direction. A Claude+OpenAI run dies at
-   second zero on a missing binary or a logged-out session — not forty minutes in at the review
-   step.
+**The registry scans the workflow module's namespace, and one level into any module bound there.**
+That finds `from .roles import implementer` and `from . import roles`. It does not find a factory
+reached through a dict or built at runtime, and when it misses one the run clears second zero naming
+no provider and dies at the first step — silently, which is the failure this check exists to prevent.
+**The per-step containment check is therefore the guarantee, and the eager pass is the optimisation**,
+not the reverse. §3.2's second-zero promise is real for the ordinary spelling and best-effort for the
+rest.
+
+**The eager check, before the run starts.** Provider availability: collect the providers named by the
+workflow's roles and, for each, verify its harness is **installed, on `PATH`, and authenticated**
+(§3.2.1) via
+`AgentRunner.check_ready(model)`. Only an adapter can answer that question — config cannot — so it is
+a port member rather than preflight logic. Both `check_ready` and `capabilities` take a `ModelId` and
+are async: `RoutingAgentRunner` implements the same ABC, and with no model argument it could only
+answer for "some provider," which is a lie in either direction. A Claude+OpenAI run dies at second
+zero on a missing binary or a logged-out session — not forty minutes in at the review step.
 An adapter handed a `ModelId` it does not serve raises `InputError`; it never silently substitutes.
 `capabilities()` must be **stable for the duration of a run** — preflight asks once and a workflow
 then runs for an hour on that answer.
 
-2. **Capability match.** A role declaring `requires={FILE_EDIT, MID_RUN_QUESTIONS}` is checked
-   against `runner.capabilities()`. This is the principled version of *"reviewers are never
-   subagents because `AskUserQuestion` isn't available"* — a vendor limitation becomes a checked
-   precondition instead of a structural workaround in a docstring.
+**The per-step check: capability match.** A role declaring `requires={FILE_EDIT,
+MID_RUN_QUESTIONS}` is checked against `runner.capabilities()`, memoised, at every `run.step`. This
+is the principled version of *"reviewers are never subagents because `AskUserQuestion` isn't
+available"* — a vendor limitation becomes a checked precondition instead of a structural workaround
+in a docstring. **The cost of it being per-step rather than eager:** a capability refusal arrives
+after `run.json` is written, the run lock taken and the root worktree opened, so the operator needs
+`agl clear <label>` before retrying. Same class, message and exit code, one step later.
 
-**Capability implications are folded in at declaration**, so they fall out of check 2 rather than
-needing a check each: `on_question` implies `MID_RUN_QUESTIONS` (§3.7 — the workflow genuinely cannot
+**Capability implications are folded in at declaration**, so they fall out of that check rather than
+needing one each: `on_question` implies `MID_RUN_QUESTIONS` (§3.7 — the workflow genuinely cannot
 run on a backend that cannot ask), and `tools=` implies `TOOL_CALLING`. Folding is one-way and writes
 into `requires`, which is not a fingerprint term, so it moves no digest. Forgetting either would
 otherwise be silent and expensive — a role that cannot ask, with a handler nobody calls, is an agent
@@ -516,7 +531,7 @@ build commands are therefore independent by design: the prompt's drive the agent
 | | What it is |
 |---|---|
 | **Params** | a dataclass of `arg()` fields — all named flags, no positionals |
-| **Roles** | a `@role(model=…)` factory returning a frozen `Role` — name, instructions, restrictions, tools, required capabilities, `plan_only`. The decorator is what preflight reads (§3.2); the factory is what closes the override surface |
+| **Roles** | a `@role(model=…)` factory returning a frozen `Role` — name, instructions, restrictions, tools, required capabilities. The decorator is what preflight reads (§3.2); the factory is what closes the override surface |
 | **Tools** | the payload schemas agents report through |
 | **Views** | pure functions of state, in `views/`. Nothing renders without them (§3.7) |
 | **Shape** | one async function |
@@ -622,9 +637,9 @@ considered and rejected — `str.format` breaks on any prompt containing a brace
 carry JSON Schemas; `%` breaks on a percent sign. The framework appends one structured block of
 canonical JSON under a fixed heading, and the author writes the prompt knowing inputs arrive at the
 end. One predictable thing, no template syntax imposed on every role, and roles stay reusable
-module-level declarations rather than being rebuilt per call. **`**inputs` may not be named `name`,
-`role`, or `commit`** — those are the signature's own keywords, and a collision is a loud
-`TypeError`.
+module-level declarations rather than being rebuilt per call. **`**inputs` may not be named `role`
+or `commit`** — those are the signature's own keywords, and a collision is a loud `TypeError`.
+`name` was freed when `run.step` lost it.
 
 **The heading and the composition sit outside every fingerprint**, so respelling them changes every
 prompt in AGL and moves no digest. That is the same trade §3.6 makes knowingly for the commit
@@ -1326,7 +1341,7 @@ async def approve(q: Question) -> Answer:
     return await run.terminal.show(views.approve_backlog, question=q, priority=5)
 
 @role(model=Claude.OPUS)
-def decompose(*, on_question: QuestionHandler | None = None) -> Role:
+def decompose(*, on_question: QuestionHandler | None = None) -> Role[Tickets]:
     return Role(name="tickets",
                 instructions=prompt_file("prompts/decompose.md"),   # read at declaration
                 tools=[report_tickets],
@@ -1804,7 +1819,7 @@ Two rules that matter more than the stage list:
 2. **`fix` is ~8 lines** and gets fingerprinted replay, a worktree, preflight, and exit codes free;
    **`split` is ~30** and adds concurrency, child worktrees, and integration with no framework
    change between them. Measured at stage 17: 8 logical statements for the workflow §3.3 specifies,
-   plus 4 more to wire one interactive screen (a handler, its body, a `replace` for the asking role,
+   plus 4 more to wire one interactive screen (a handler, its body, the asking role's construction,
    and the board's `show`). The floor is real; §3.7's question wiring sits on top of it.
 3. **Adding an agent backend** touches one adapter package, one line in the container, one config
    section. No workflow changes.

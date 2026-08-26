@@ -500,6 +500,17 @@ measured on.
 **Accept:** `fix` reads without ceremony — no `roles=`, no per-step names, no `dataclasses` import —
 and preflight still refuses a logged-out provider **at second zero**, not after the first step.
 
+### UF1 follow-up — three defects the change introduced
+
+| # | Deliverable |
+|---|---|
+| UF1.5 | **The registry under-approximates, and this is a regression.** `from agl.workflows.fix import roles` then `roles.implementer()` binds no factory the scan can see, so preflight asks about **zero models**, clears second zero naming no provider, and dies at the first step — silently, which is the failure §3.2 exists to prevent. `roles=` could not have this hole. Scan one level into any module bound in the workflow's namespace, and state in §3.2 and in the module that the eager pass is **best-effort** while per-step containment is the guarantee |
+| UF1.6 | **Two roles differing only in case share an address.** `StepName` allows `[A-Za-z0-9._-]`, so `Role(name="Review")` is legal — and `Review` and `review` in one namespace share a directory *and* a counter key, so two roles alike in every `base_of` term produce a **false cache hit**: the second step replays the first's value with no agent run. Declare two roles differing only in case; assert two entries and two dispatches |
+| UF1.7 | **`api.resume` refuses after taking the run lock.** A resumed run with a logged-out harness takes §3.10's lock and cuts `agl/<label>` before refusing. `api.run` is defended by `_no_record` and the `_Untouched` tripwire provider; `api.resume` has neither wired in, while `api.py` states the invariant the gap breaks — *"everything above it refuses for free; nothing below it does"* |
+
+**Accept:** each of the three mutated and red. UF1.6's is the sharpest — a false cache hit is the one
+failure mode in AGL that returns a **wrong answer** rather than re-running.
+
 **Known cost, accepted:** the decorator's registry over-approximates. A role imported into a
 workflow module but never used makes preflight demand a provider the run does not need — a false
 refusal, which is loud and fixable rather than silent, and erring toward refusing early is the right
