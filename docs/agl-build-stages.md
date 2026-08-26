@@ -480,19 +480,22 @@ means an abstraction was missing and should be reported, not patched around.
 
 ---
 
-## Stage 18.5 — The authoring surface
+## User Feedback 1 — The authoring surface
 
-A late simplification, taken after `fix` and `split` were written and read back. Three things the
+**Not a build stage — a change asked for after reading the finished workflows back.** The build
+order came from the plan; this came from the surface being used. Sequenced before 19B, because 19B
+measures targets #1 and #2 and measuring a spelling you have decided to replace measures the wrong
+thing. Three things the
 author was restating that the framework can already see, all removed rather than defaulted — an
 override kept "because it is cheap" is a second way to do one thing, and the surface is what R1 is
 measured on.
 
 | # | Deliverable |
 |---|---|
-| 18.5.1 | **`run.step` loses `name=`.** The memo address becomes `role.name`; two calls on one role separate by their inputs, or by the counter when the inputs match. Entry paths move from `steps/<call-site name>/` to `steps/<role name>/` |
-| 18.5.2 | **A role becomes a `@role(model=…)` factory returning a frozen `Role`.** The decorator registers `(name, model)` at import; the factory closes the override surface, so a call site can turn only the knobs the author exposed — a bare `replace()` on a module-level instance could change the model or the restrictions |
-| 18.5.3 | **`@workflow` loses `roles=`.** Preflight collects providers from the decorator's registry and **never invokes a factory**, which it could not do without arguments it does not have. Capability containment still runs per step, where the real role exists |
-| 18.5.4 | Port `fix` and `split` to the new spelling, and re-measure targets #2 and #1 |
+| UF1.1 | **`run.step` loses `name=`.** The memo address becomes `role.name`; two calls on one role separate by their inputs, or by the counter when the inputs match. Entry paths move from `steps/<call-site name>/` to `steps/<role name>/` |
+| UF1.2 | **A role becomes a `@role(model=…)` factory returning a frozen `Role`.** The decorator registers `(name, model)` at import; the factory closes the override surface, so a call site can turn only the knobs the author exposed — a bare `replace()` on a module-level instance could change the model or the restrictions |
+| UF1.3 | **`@workflow` loses `roles=`.** Preflight collects providers from the decorator's registry and **never invokes a factory**, which it could not do without arguments it does not have. Capability containment still runs per step, where the real role exists |
+| UF1.4 | Port `fix` and `split` to the new spelling, and re-measure targets #2 and #1 |
 
 **Accept:** `fix` reads without ceremony — no `roles=`, no per-step names, no `dataclasses` import —
 and preflight still refuses a logged-out provider **at second zero**, not after the first step.
