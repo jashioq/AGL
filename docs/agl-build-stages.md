@@ -500,16 +500,33 @@ measured on.
 **Accept:** `fix` reads without ceremony — no `roles=`, no per-step names, no `dataclasses` import —
 and preflight still refuses a logged-out provider **at second zero**, not after the first step.
 
-### UF1 follow-up — three defects the change introduced
+### UF1 follow-up — two defects the change introduced, and one gap it exposed
 
 | # | Deliverable |
 |---|---|
 | UF1.5 | **The registry under-approximates, and this is a regression.** `from agl.workflows.fix import roles` then `roles.implementer()` binds no factory the scan can see, so preflight asks about **zero models**, clears second zero naming no provider, and dies at the first step — silently, which is the failure §3.2 exists to prevent. `roles=` could not have this hole. Scan one level into any module bound in the workflow's namespace, and state in §3.2 and in the module that the eager pass is **best-effort** while per-step containment is the guarantee |
 | UF1.6 | **Two roles differing only in case share an address.** `StepName` allows `[A-Za-z0-9._-]`, so `Role(name="Review")` is legal — and `Review` and `review` in one namespace share a directory *and* a counter key, so two roles alike in every `base_of` term produce a **false cache hit**: the second step replays the first's value with no agent run. Declare two roles differing only in case; assert two entries and two dispatches |
-| UF1.7 | **`api.resume` refuses after taking the run lock.** A resumed run with a logged-out harness takes §3.10's lock and cuts `agl/<label>` before refusing. `api.run` is defended by `_no_record` and the `_Untouched` tripwire provider; `api.resume` has neither wired in, while `api.py` states the invariant the gap breaks — *"everything above it refuses for free; nothing below it does"* |
+| UF1.7 | **`api.resume`'s refuse-for-free invariant is untested.** *(Not a bug — the ordering was already correct; this row originally misread UF1's B-12 mutation as the shipped state.)* `api.run` is defended by `_no_record` and the `_Untouched` tripwire provider; `api.resume` has neither. Measured: with the ordering deliberately broken and only the new test deselected, **2132 of 2133 passed** — the invariant `api.py` states in as many words, *"everything above it refuses for free; nothing below it does"*, was held by that sentence and nothing else |
 
 **Accept:** each of the three mutated and red. UF1.6's is the sharpest — a false cache hit is the one
 failure mode in AGL that returns a **wrong answer** rather than re-running.
+
+**Carried out of the sibling sweep, into the review round.** UF1.6 asked whether any other name is
+transformed on its way to an address. Three are, and one is live:
+
+- **`config/toml_file.py::resolve_project` is a bug today.** It compares `project.repo.resolve() ==
+  root`, and `Path.resolve()` does not case-canonicalise on macOS — so a differently-spelled cwd
+  gives `NotFoundError` for a registered repo. The repair is `samefile`, not a fold.
+- **`RunLabel` is refused by the filesystem, not by AGL.** `api.run` detects a taken label with
+  `store.read_record(scope)`, a path read, so on a case-insensitive volume `Auth` reads back under
+  `auth` — the refusal is an `exists`-shaped accident and its message names the wrong spelling.
+  `api.resume` never compares `spec.label` to what was typed, so `agl resume auth` picks up the
+  `Auth` record and runs under `auth`. Nothing is clobbered on any traced path.
+- **`ProjectName` → `projects/<name>.toml`** has the same shape; `O_EXCL` prevents clobbering.
+
+Correct by construction and checked: `_checked_digest` (refuses rather than folds — right for a
+segment AGL generates), `Store.namespaces()` (rebuilds from the on-disk spelling), `split/chunks.py`,
+`tree_layout`, and `sources.py`'s `.upper()` over ten pairwise-distinct literals.
 
 **Known cost, accepted:** the decorator's registry over-approximates. A role imported into a
 workflow module but never used makes preflight demand a provider the run does not need — a false

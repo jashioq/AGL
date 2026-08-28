@@ -1029,6 +1029,11 @@ base    = sha256(canonical_json({
               head:   worktree head BEFORE this step runs,
           }))
 n       = times `base` was used earlier **in this namespace, for this step name** (0, 1, 2, …)
+          — the name is compared case-insensitively, in the counter key and in the entry
+          path alike (§3.3's allowlist admits capitals, so `Review` and `review` would
+          otherwise share a directory *and* a counter slot: two roles alike in every other
+          term would produce a **false cache hit**, replaying one's value for the other with
+          no agent run)
 digest  = sha256(base + ":" + str(n))        ← the filename
 ```
 
