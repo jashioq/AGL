@@ -33,18 +33,28 @@ entry found under a digest that something else computed, and its recorded result
 step whose inputs were not these. Nothing re-runs, nothing raises, and the answer is wrong. Both
 are therefore written with the colliding pair spelled out.
 
-**Rule 1 - the counter is scoped per `(namespace, step name)`, and never per invocation.** The key
-is `(scope, step, base)`. Concurrent siblings produce identical bases by construction: `T-01` and
-`T-02` both call `step(implementer)` with the same role, no inputs, and the same parent head, so
-nothing about the two calls differs except which worktree they are in. A per-invocation
-counter lets the interleaving decide which of them gets `n = 0`; the interleaving differs on resume,
-so on the second run each child looks in its own scope for a digest that is not there and both
-re-run, forever, silently. Scoping to the namespace makes it deterministic under concurrency,
-because siblings occupy different namespaces. The step name is in the key for a smaller reason that
-is just as sharp: two same-based steps under different names are recorded under different
-`steps/<name>/` directories, so their counts are separate ledgers and have to be separate counts -
-and two roles differing only in `name` fingerprint identically, `name` being no term of `base_of`,
-so nothing but this key keeps their ledgers apart.
+**Rule 1 - the counter is scoped per `(namespace, step directory)`, and never per invocation.** The
+key is `(scope, step.collision_key, base)`. Concurrent siblings produce identical bases by
+construction: `T-01` and `T-02` both call `step(implementer)` with the same role, no inputs, and the
+same parent head, so nothing about the two calls differs except which worktree they are in. A
+per-invocation counter lets the interleaving decide which of them gets `n = 0`; the interleaving
+differs on resume, so on the second run each child looks in its own scope for a digest that is not
+there and both re-run, forever, silently. Scoping to the namespace makes it deterministic under
+concurrency, because siblings occupy different namespaces. The step name is in the key for a smaller
+reason that is just as sharp: two same-based steps under different names are recorded under
+different `steps/<name>/` directories, so their counts are separate ledgers and have to be separate
+counts - and two roles differing only in `name` fingerprint identically, `name` being no term of
+`base_of`, so nothing but this key keeps their ledgers apart.
+
+**And the name enters that key folded, which is UF1.6 and the third collision in this module.** The
+sentence above is exact about *why* the name is there - "recorded under different `steps/<name>/`
+directories" - and `steps/Review/` and `steps/review/` are not different directories on a
+case-insensitive volume, which is macOS by default. `StepName` compares by its raw `value`, so
+keyed on the object they are two counts, both `n = 0`, both `sha256(base + ":0")`; and `base_of`
+has no name parameter, so two roles alike in every other term have one `base` to begin with. One
+directory, one digest, and the second step reads the first step's entry: a **false cache hit**, the
+one failure in AGL that returns a wrong answer rather than re-running. `_counter_key` below folds
+it, and argues why the fold belongs there and not on the path.
 
 **Since UF1.1 the step name is `role.name`, which is where the counter stops being a corner
 case.** §3.3 took the per-call-site name off `run.step`, so two calls on one role in one namespace
@@ -358,13 +368,72 @@ def base_of(
     return sha256(_dumps(fingerprinted).encode("utf-8")).hexdigest()
 
 
+def _counter_key(scope: RunScope, step: StepName, base: str) -> tuple[RunScope, str, str]:
+    """What two invocations are one ledger by: the namespace, the step's *directory*, and the base.
+
+    The name enters folded, by `StepName.collision_key` - "what two names are compared by when the
+    question is 'would these collide on disk?'" - and the question here is exactly that one. Rule 1
+    puts the name in this key because two names are two `steps/<name>/` directories and so two
+    ledgers; `steps/Review/` and `steps/review/` are **one** directory on a case-insensitive volume,
+    which is macOS by default, so they are one ledger and have to be one count. Keyed on the
+    `StepName` itself they are two, because `StepName` compares by its raw `value` - and `Role`
+    names are `[A-Za-z0-9._-]` (§3.3), so `Role(name="Review")` is a legal declaration and nothing
+    anywhere makes a corpus lowercase.
+
+    **What the fold buys is the collision, and both digests are wrong without it.** Two roles alike
+    in every term `base_of` takes have one `base`, because `base_of` has no name parameter - it is
+    the *directory* that was keeping them apart, and on this volume it is not. So both sit at
+    `n = 0`, both hash to `sha256(base + ":0")`, and the second step reads the first step's file,
+    matches the fingerprint recorded in it, and hands back a value no agent produced for it. That is
+    a **false cache hit**, and §3.6 names it as the failure class this module's collisions belong
+    to: nothing re-runs, nothing raises, and the answer is wrong.
+
+    **The fold is here and never on the path.** `home_layout.step_dir` composes `steps/<step>/` from
+    `str(step)` and must go on doing so: the author's spelling is the directory they are entitled
+    to, and folding the segment would have AGL write a directory nobody named and report a path that
+    is not the one on a case-sensitive volume. Folding the *count* instead is correct on both kinds
+    of volume - on a case-sensitive one the entries really are two files in two directories, and the
+    counter is then the only thing that made them two digests at all. `sdk/_engine/worktrees.py`
+    made the same trade one field over, keying its run-wide namespace table by `collision_key` while
+    leaving `worktree("T-01")` its own checkout directory.
+
+    **This moves no digest that any ledger holds.** `n` is never persisted (§3.6) and a digest is a
+    function of `n`'s value rather than of the key it was counted under, so the only way a folded
+    key could move one is by changing some name's count - and `collision_key` of an all-lowercase
+    name is that name. Any corpus that uses one spelling per name therefore counts identically
+    before and after, which is every run ever recorded: every shipped role name is lowercase. This
+    is not a stored-format change, and `tests/sdk/test_journal.py` pins the number rather than
+    taking that on trust.
+
+    **The scope is not folded, and does not need to be.** A `RunScope`'s namespaces compare by
+    their raw value, so `worktrees/T-01/` and `worktrees/t-01/` would be two keys here too - but
+    they cannot both occur, because `sdk/_engine/worktrees.py` refuses the second spelling run-wide
+    at the moment `worktree()` is called, by this same `collision_key`. The project and the label
+    are constant for the life of one `Fingerprints`, there being one per run. So the scope half is
+    defended by construction and the name half was defended by nothing, which is the whole of why
+    this function exists and why it folds one of its three terms.
+
+    The NFC half of the fold is unreachable, exactly as it is in `worktrees.py` and for the same
+    reason: §3.3's ASCII allowlist admits no character with two spellings, so no two accepted names
+    differ by normalisation alone. It stays because a name having one spelling is a property of the
+    character set and not of this comparison - widen the set and the fold is already correct.
+    """
+    return (scope, step.collision_key, base)
+
+
 class Fingerprints:
-    """The counter `n`, scoped per `(namespace, step name)`. One instance per run.
+    """The counter `n`, scoped per `(namespace, step directory)`. One instance per run.
 
     The step name is the role's (§3.3: the call carries none), so "two calls on one role in one
     namespace, with the same inputs and the same head" is one key three times over and `n` is the
     only thing between them. Rule 1 in the module docstring is where that is argued; it is repeated
     here because this class is where somebody reading the mechanism arrives.
+
+    **"Step directory" and not "step name", which is UF1.6.** The key folds the name's case, by
+    `StepName.collision_key`, because what rule 1 needs one count per is one `steps/<name>/`
+    directory - and two spellings of one name are one directory on a case-insensitive volume.
+    Keyed on the raw name they are two counts at `n = 0`, one digest, and a step replaying an entry
+    another step wrote. `_counter_key` above is that fold and the whole of the argument for it.
 
     **Two methods and not one, which is rule 1's second half.** `digest` answers "what address is
     this invocation's", and `claimed` says "an entry now exists at it". §3.6: "the counter advances
@@ -394,7 +463,11 @@ class Fingerprints:
         # reach through the same namespace - and `Journal.step` holds that namespace's lock across
         # both calls. The counter is deterministic under concurrency because of rule 1 and that
         # lock together; neither is sufficient alone.
-        self._counts: dict[tuple[RunScope, StepName, str], int] = {}
+        #
+        # The key is `_counter_key`'s and never a tuple written out here, so that the two methods
+        # below cannot disagree about what one ledger is - which they would do silently, `digest`
+        # reading a count `claimed` never advanced.
+        self._counts: dict[tuple[RunScope, str, str], int] = {}
 
     def digest(self, scope: RunScope, step: StepName, base: str) -> str:
         """The address for `(scope, step, base)` at its present count: `sha256(base + ":" + n)`.
@@ -403,8 +476,11 @@ class Fingerprints:
         suspend - and spend the one string on both the read and the write. Asking twice with
         nothing claimed in between gives the same answer twice, deliberately: an address is a
         question about the ledger, and asking it is not an event.
+
+        The `step` is folded into the key and not into the answer: what comes back is a digest, and
+        `home_layout.step_entry` joins it under the spelling the author wrote.
         """
-        count = self._counts.get((scope, step, base), 0)
+        count = self._counts.get(_counter_key(scope, step, base), 0)
         return sha256(f"{base}:{count}".encode()).hexdigest()
 
     def claimed(self, scope: RunScope, step: StepName, base: str) -> None:
@@ -418,7 +494,7 @@ class Fingerprints:
         calls live inside one method, `Journal.step`, rather than being an interface anything else
         is invited to pair up for itself.
         """
-        key = (scope, step, base)
+        key = _counter_key(scope, step, base)
         self._counts[key] = self._counts.get(key, 0) + 1
 
 

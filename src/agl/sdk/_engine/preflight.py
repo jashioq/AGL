@@ -3,7 +3,7 @@
 Two questions in the plan and two moments here, and which question is asked at which moment is the
 whole of this module's design.
 
-## The registry is the workflow's own module, and preflight never calls a factory
+## The registry is the workflow's own module and what it binds, and preflight never calls a factory
 
 §3.2 asks preflight to "collect the providers named by the workflow's roles", and until UF1.3 the
 framework had to be *told* what those were. Roles are built inside the workflow's own body - a
@@ -17,11 +17,20 @@ import - so the model is readable exactly where the role is not. §3.2's first c
 **providers**, providers come from **models**, and a model is the one thing about a role that is
 knowable before the workflow's body has run. §3.11: "One declaration, not two."
 
-**So the registry is `vars(sys.modules[fn.__module__])`, and nothing is registered anywhere else.**
-`sdk/roles.py` chose that scope and argues it: a process-global table keyed by qualname would
-collect every role in every workflow the interpreter has imported, and preflight would then demand
-a provider for a workflow that is not being run. The module a workflow is written in is the
-smallest namespace that certainly contains every factory that workflow can reach by name.
+**So the registry is `vars(sys.modules[fn.__module__])`, plus one level into any module bound
+there, and nothing is registered anywhere else.** `sdk/roles.py` chose that scope and argues it: a
+process-global table keyed by qualname would collect every role in every workflow the interpreter
+has imported, and preflight would then demand a provider for a workflow that is not being run.
+
+**The one level is UF1.5's, and what it answers is a defect rather than a preference.** A role
+arrives in a workflow through one of two imports an author picks between on grounds that have
+nothing to do with preflight: `from .roles import implementer` binds a factory in the workflow's
+namespace, and `from . import roles` binds a *module* and reaches `roles.implementer()` through it.
+Reading only the first found nothing at all in the second case - preflight asked about **zero**
+models, cleared second zero naming no provider, and the run died at its first step with whatever
+the adapter said. That is not a narrower registry, it is a check that silently did not run, and it
+is the exact failure §3.2 exists to prevent. Neither scope is complete even now, and the section
+below is where that is said rather than left to be discovered.
 
 **The scan happens here, at preflight, and not at decoration.** A workflow's module is executed top
 to bottom, so a factory written *below* the `@workflow` function is not bound to anything when the
@@ -83,9 +92,39 @@ refusal, which is loud and fixable rather than silent, and erring toward refusin
 right direction. The framework cannot do better from here - which of a module's roles a run
 actually reaches is decided by the workflow's body, and the body has not run.
 
+**UF1.5 made that wider, and the widening is the same trade taken once more rather than a new
+one.** A module bound in the workflow's namespace is read too, so `from . import roles` demands the
+provider of every factory in `roles.py` and not only of the ones this workflow steps with - and a
+workflow module that binds *another workflow's* module demands that workflow's backends as well.
+The cost is real and it is larger than the paragraph above's. What it buys is that the
+module-qualified spelling is checked at all, and the failure it replaces was the silent one: a
+false refusal is loud, names its factory and its two modules, and is one import from being fixed.
+
+**What this scan cannot see, said plainly rather than implied by an omission.** It reads the
+`RoleFactory` values bound in the workflow's module and those bound in the modules bound there, and
+that is the whole of it. It does not see a factory held in a dict, a list, or any other container;
+one built at run time by a call or a comprehension rather than bound by an `import` or a `def`; one
+bound two modules deep, behind a module that itself only binds another; or one reached through
+anything that is not a module - a class attribute, an instance, somebody's own namespace object.
+**When it misses one, the run clears second zero naming no provider and dies at the first step**,
+with whatever the adapter says and nothing from here. Nothing in this module enumerates a
+workflow's roles, and no line of it may be written as though it did.
+
+**And that is acceptable for one reason rather than for a comfortable one: the per-step containment
+check is the guarantee and this pass is the optimisation**, not the reverse. §3.2 says it in those
+words - "preflight is a best-effort provider check plus a per-step guarantee" - and that ordering is
+what makes the boundary a cost instead of a lie. A factory the scan missed is not an unchecked
+role: `Capabilities.require` runs over the role the workflow actually hands to `run.step`, missed
+or not, which is the check §3.2 calls the guarantee and the one no namespace could have made. What
+is lost is earliness on the *other* question - a harness that is not there surfaces at the first
+dispatch, in the adapter's own words, rather than at second zero in preflight's - and the cure is
+the spelling, not a deeper scan: a factory bound where this function looks is checked, and §3.2's
+second-zero promise is exact for the ordinary spelling and best-effort for the rest.
+
 **So the refusal says where the demand came from.** A person meeting this reads that
-`{model}` is required by the factory `{name}`, in the module it was declared in, seen in the module
-the workflow is written in - and that an imported-but-unused role is a known cause. Without that,
+`{model}` is required by the factory `{name}`, in the module it was declared in, reached from the
+module the workflow is written in - and that an unused import is a known cause, of the name itself
+or of a module that binds it, since after UF1.5 either can be the line to delete. Without that,
 "that harness is not on `PATH`" is a dead end for a workflow whose author never meant to name that
 provider at all: they have a vendor's name and nothing to pull on. `_not_ready` below is the
 sentence, and `tests/sdk/test_preflight.py` asserts the over-approximation as behaviour, because it
@@ -180,6 +219,7 @@ function's `__module__` is the module its `def` ran in, an entry point is what i
 
 import sys
 from collections.abc import Callable
+from types import ModuleType
 from typing import Any, Final
 
 from agl.ports.agent import AgentRunner, Capability, ModelId
@@ -284,8 +324,10 @@ async def check(runner: AgentRunner, declared_by: _Declaration) -> None:
 
     `declared_by` is the workflow's own `async def` - `wf.fn`, and never a `Workflow`, which this
     module could not import without a cycle. What is read off it is `__module__`, and what that
-    names is the registry: the `@role(model=…)` factories bound in that namespace, each carrying
-    the model it will build roles on. No factory is called and no `Role` is built.
+    names is the registry: the `@role(model=…)` factories bound in that namespace and in any module
+    bound there, each carrying the model it will build roles on. No factory is called and no `Role`
+    is built. That scan is best-effort by §3.2's own ordering and the module docstring lists what it
+    cannot reach; the guarantee is `Capabilities.require` at every step.
 
     One refusal, and it is `UpstreamUnavailable` (exit 6) when a backend cannot serve a model right
     now - the harness is not there. The adapter's own sentence is quoted whole and its exception is
@@ -310,17 +352,38 @@ async def check(runner: AgentRunner, declared_by: _Declaration) -> None:
 
 
 def _declared_beside(declared_by: _Declaration) -> tuple[RoleFactory[..., Any], ...]:
-    """Every `@role(model=…)` factory bound in the module this function was written in.
+    """Every `@role(model=…)` factory bound in the module this function was written in, and every
+    one bound in a module bound there.
 
     Read now rather than at decoration, which is the ordering that makes this correct: a module runs
     top to bottom, so a factory written below the `@workflow` function is not bound when the
     decorator runs, and a snapshot taken there would miss it silently. By the time a run starts, the
     module is whole.
 
-    In binding order, because `dict` is, and a module's namespace is one: a run naming three
-    backends should report the first one the author wrote, not whichever one happened to hash
-    lowest today. Imported names are included and that is the documented over-approximation, not an
-    oversight - the module docstring says what it costs and `_not_ready` says it to whoever hits it.
+    **Two tiers, because two imports reach a role and until UF1.5 only one of them was seen.**
+    `from .roles import implementer` binds a factory in the workflow's namespace; `from . import
+    roles` binds a module and reaches `roles.implementer()` through it, binding no factory this
+    function could find. So the second spelling asked about zero models and cleared second zero
+    naming no provider - the silent miss the module docstring opens on. Imported names count in
+    both tiers, which is the documented over-approximation rather than an oversight: the module
+    docstring says what it costs, and `_not_ready` says it to whoever hits it.
+
+    **Exactly one level, and nothing recurses.** A module bound inside a bound module is not read.
+    The depth is a choice about how wide the over-approximation runs and not a limit of the
+    mechanism, and one level is what the two spellings above need; anything deeper is one of the
+    things the module docstring says this scan does not see.
+
+    **Direct bindings first, then the ones reached through a module, `vars()` order within each.**
+    `_demanded` keeps the *first* factory naming each model so that a refusal names a declaration
+    its reader can go and find, and the nearest one - the line in the file they already have open -
+    is the one worth naming. Within a tier the order is the namespace's own, because `dict` is
+    insertion ordered and a module's namespace is one: a run naming three backends reports the
+    first the author wrote, not whichever hashed lowest today.
+
+    **One factory can arrive twice and nothing here prevents it.** `from . import roles` beside
+    `from .roles import implementer` reaches one object through both tiers. `_demanded` dedups by
+    *model*, which absorbs that for free along with the unrelated case of two factories naming one
+    model, so a second sighting costs a `setdefault` that finds its key already taken.
 
     `RoleFactory[..., Any]` because neither parameter is read here. `**P` is the author's own
     signature, which preflight exists not to call, and `R` is the payload type of a role that will
@@ -337,7 +400,16 @@ def _declared_beside(declared_by: _Declaration) -> tuple[RoleFactory[..., Any], 
             f"(§3.11), and an entry point is what imported that module, so there is no supported "
             f"way to reach this line"
         )
-    return tuple(bound for bound in vars(written_in).values() if isinstance(bound, RoleFactory))
+    # Taken as a tuple once, because it is walked twice and the second walk is over the same
+    # bindings the first one read: two `vars()` calls would be two answers to one question.
+    beside = tuple(vars(written_in).values())
+    return tuple(bound for bound in beside if isinstance(bound, RoleFactory)) + tuple(
+        inside
+        for bound in beside
+        if isinstance(bound, ModuleType)
+        for inside in vars(bound).values()
+        if isinstance(inside, RoleFactory)
+    )
 
 
 def _demanded(factories: tuple[RoleFactory[..., Any], ...]) -> tuple[RoleFactory[..., Any], ...]:
@@ -373,20 +445,34 @@ def _not_ready(
     namespace scan rather than from a line the author wrote, and that scan over-approximates: a
     factory imported into the workflow's module and never stepped with demands its provider here
     just the same. So the sentence names the factory, the module it was declared in, and the module
-    it was seen in - and then says that an imported-but-unused role is a known cause, because
-    otherwise the one person this over-approximation ever inconveniences has a provider name and no
-    thread to pull.
+    it was reached from - and then says that an unused import is a known cause, because otherwise
+    the one person this over-approximation ever inconveniences has a provider name and no thread to
+    pull.
+
+    **Which import, since UF1.5, is the part this had to stop assuming.** The scan reads one level
+    into any module bound in the workflow's namespace, so a factory can reach preflight without its
+    *name* being bound in that module at all - `from . import roles` is the ordinary spelling and
+    binds only `roles`. "If `<factory>` is imported into `<workflow module>` and never used" was
+    then a sentence sending its reader to look for a line that is not in their file - exactly what
+    `_unmet`'s two clauses exist to prevent, one check over. So both bindings are named, and so is
+    what the wider scan does: importing a module for one of its roles demands the providers of all
+    of them, which is the shape of false refusal a reader will not otherwise guess at. Neither
+    naming needs to know which tier this factory came through - the reader has `factory.__module__`
+    and their own file, and one grep answers it.
     """
     return (
         f"{refusal} - and AGL asked because {str(factory.model)!r} is the model of the role "
-        f"factory `{factory.name}`, declared in {factory.__module__!r} and bound in "
+        f"factory `{factory.name}`, declared in {factory.__module__!r} and reached from "
         f"{workflow_module!r}, which is the module this run's workflow is written in. Preflight "
-        f"reads the `@role(model=…)` factories in that namespace and asks each distinct model's "
-        f"backend whether it is ready, without calling any of them (§3.2). That namespace "
-        f"over-approximates, deliberately: a role imported into a workflow's module and never "
-        f"stepped with still demands its provider here, which is the known cost of one declaration "
-        f"instead of two. If `{factory.name}` is imported into {workflow_module!r} and never used, "
-        f"dropping the import drops this demand; otherwise the harness above is the thing to fix"
+        f"reads the `@role(model=…)` factories in that namespace - and in any module bound in it - "
+        f"and asks each distinct model's backend whether it is ready, without calling any of them "
+        f"(§3.2). That scan over-approximates, deliberately: a role imported into a workflow's "
+        f"module and never stepped with still demands its provider here, and so does every other "
+        f"role of a module imported for one of them, which is the known cost of one declaration "
+        f"instead of two. If nothing in {workflow_module!r} steps with `{factory.name}`, this is a "
+        f"false refusal and the line that put the demand there is an import - of `{factory.name}` "
+        f"itself, or of a module that binds it - so dropping that import drops this demand; "
+        f"otherwise the harness above is the thing to fix"
     )
 
 

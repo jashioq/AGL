@@ -565,8 +565,9 @@ async def run(
     # `services.agents` and `wf.fn`, not the bundle: `sdk/_engine/preflight.py` takes one port and
     # the workflow's own function, so that the module whose job is to refuse before anything
     # happens cannot grow a second reader. The function is what names the registry - UF1.3 took
-    # `roles=` off `@workflow`, and the `@role(model=…)` factories a workflow can reach are the
-    # ones bound in the module its `def` ran in - so nothing here has to know how a role is found.
+    # `roles=` off `@workflow`, and the `@role(model=…)` factories preflight reads are the ones
+    # bound in the module its `def` ran in, plus one level into any module bound there (UF1.5) - so
+    # nothing here has to know how a role is found, nor that the scan is best-effort by design.
     # 16.2 makes this same call from `resume`: the record names the workflow, the registry hands
     # back the same `Workflow`, and it is the same module.
     await preflight.check(services.agents, wf.fn)

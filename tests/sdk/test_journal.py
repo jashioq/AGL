@@ -61,6 +61,12 @@ _HEAD: Final = "4a91c07f2b3e8d15c6a0b7f31d92e8054c6a0f13"
 # assertions print when they fail looks like what the journal actually passes.
 _BASE: Final = "9f2c4e" + "b" * 54 + "a71b"
 
+# `sha256(_BASE + ":0")`, typed out rather than computed, and the one number in this file that is
+# not derived from anything. UF1.6 folded the counter's key; this is what a lowercase step name at
+# `n = 0` addressed before that change and addresses after it, which is the whole of "no digest
+# moved". See the test that spends it.
+_UNMOVED: Final = "7306ba76493375197951fdd5b434cb08750602dc6e0c226b5997346c5037e46d"
+
 
 async def _never_called(payload: Mapping[str, JsonValue]) -> ToolResult:
     """A handler is a callable and a callable's `repr` carries an object id, so no fingerprint may
@@ -223,6 +229,53 @@ def test_two_step_names_in_one_scope_count_independently() -> None:
     quality = _take(counter, _SCOPE, StepName("review_quality"))
     security = _take(counter, _SCOPE, StepName("review_security"))
     assert quality == security == _digest(_BASE, 0)
+
+
+def test_two_spellings_of_one_step_name_count_as_one_ledger_because_they_are_one_directory() -> (
+    None
+):
+    """UF1.6, in the arithmetic: the counter key is folded, so the second spelling is `n = 1`.
+
+    `steps/Review/` and `steps/review/` are one directory on a case-insensitive volume, which is
+    macOS by default, so they are one ledger and have to be one count. The test above is the
+    complement and the pair is the whole rule: two names that are two directories count apart, two
+    spellings of one name count together.
+
+    Keyed on the raw name instead, both of these sit at `n = 0` and produce **one digest** - and
+    since `base_of` has no name parameter, two roles alike in every other term produce one `base`
+    too, so the second step reads the first step's entry. That is a false cache hit: a recorded
+    value handed back for a step that was never run, which is the one failure in AGL that returns a
+    wrong answer rather than an unnecessary re-run. `tests/sdk/test_run_step.py` runs the two roles
+    for real; what is here is the one line of arithmetic underneath it.
+    """
+    counter = Fingerprints()
+    capitalised = _take(counter, _SCOPE, StepName("Review"))
+    lowercase = _take(counter, _SCOPE, StepName("review"))
+    assert capitalised == _digest(_BASE, 0)
+    assert lowercase == _digest(_BASE, 1), "two spellings of one directory both claimed n = 0"
+    assert capitalised != lowercase
+
+
+def test_folding_the_counter_key_moves_no_digest_a_single_spelling_ever_wrote() -> None:
+    """The fold is not a stored-format change, and this is the proof rather than the claim.
+
+    `n` is never persisted (§3.6) and the digest is a function of `n`'s *value*, not of the key it
+    was counted under - so the only way folding the key could move a digest already on a ledger is
+    by changing some name's count. `collision_key` of an all-lowercase name is that name, which
+    makes the mapping from names to counts identical for any corpus that uses one spelling per
+    name: every run ever recorded, since every shipped role name is lowercase.
+
+    Pinned as a literal and not as `_digest(_BASE, 0)`, deliberately: the arithmetic helper is what
+    the rest of this file checks the counter against, and a change that moved both would leave
+    every one of those tests agreeing with it. This is the number itself, the way a ledger holds it.
+    """
+    assert StepName("review_quality").collision_key == "review_quality"
+    counter = Fingerprints()
+    assert counter.digest(_SCOPE, StepName("review_quality"), _BASE) == _UNMOVED
+    assert _take(counter, _SCOPE, StepName("review_quality")) == _UNMOVED
+    assert _take(counter, _SCOPE, StepName("review_security")) == _UNMOVED, (
+        "two lowercase names that were two counts became one"
+    )
 
 
 def test_a_digest_is_a_filename_the_layout_will_spend_without_asking_again() -> None:

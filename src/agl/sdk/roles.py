@@ -57,6 +57,7 @@ registry when it is mostly a constructor.
 **The registry is the workflow module's own namespace, and the factory is the record.**
 `RoleFactory` carries `.model` and `.name` as plain attributes, readable without a call, and since
 UF1.3 preflight enumerates the `RoleFactory` values in `vars(sys.modules[workflow.fn.__module__])`
+- and, since UF1.5, those in any module bound there, so that `from . import roles` is seen at all -
 and reads `.model` off each. Nothing is written to a process-global table: a module-level dict
 keyed by qualname would collect every role in every workflow the interpreter has imported, and
 preflight would then demand a provider for a workflow that is not being run. The stage's own "known

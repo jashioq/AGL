@@ -18,10 +18,12 @@ what a provider that failed would leave, and only a tripwire tells the two apart
 
 **The registry is a module namespace, so several claims are claims about a whole module.** Since
 UF1.3, a workflow's roles are the `@role(model=…)` factories bound in the module its `def` was
-executed in. This file is *one* namespace, and it holds six factories over two models - the right
-shape for dedup and ordering, and the wrong shape for every claim about what a namespace does not
-hold. `tests/instruments/preflight/` is where those three live, one module each: no factory at all,
-a factory imported and never used, and a factory written below the workflow function.
+executed in, and since UF1.5 also the ones bound in any module bound there. This file is *one*
+namespace, and it holds six factories bound directly over two models - the right shape for dedup
+and ordering, and the wrong shape for every claim about what a namespace does not hold or about how
+a factory reaches it. `tests/instruments/preflight/` is where those four live, one module each: no
+factory at all, a factory imported and never used, a factory written below the workflow function,
+and a factory reached only as `roles.implementer()` through a bound module.
 
 **The two halves are tested against each other, not separately.** The interesting case is a role
 that *passes* preflight and must still be refused: `implementer(on_question=handler)` is the
@@ -249,11 +251,12 @@ def _point(name: str, target: str) -> EntryPoint:
 POINTS: Final = (
     _point("two_providers", f"{__name__}:two_providers"),
     _point("replacing", f"{__name__}:replacing"),
-    # The three whose claim is about a namespace this file cannot have, each in a module of its
-    # own - `tests/instruments/preflight/` says why one file could not hold all three.
+    # The four whose claim is about a namespace this file cannot have, each in a module of its
+    # own - `tests/instruments/preflight/` says why one file could not hold all four.
     _point("unstaffed", "instruments.preflight.unstaffed:unstaffed"),
     _point("unused", "instruments.preflight.unused:unused"),
     _point("late", "instruments.preflight.late:late"),
+    _point("qualified", "instruments.preflight.qualified:qualified"),
 )
 
 
@@ -459,6 +462,70 @@ async def test_a_factory_written_below_the_workflow_is_still_found(tmp_path: Pat
 
     assert stub.asked_ready == [Claude.HAIKU]
     assert entered == ["late"]
+
+
+@pytest.mark.asyncio
+async def test_a_role_reached_through_a_module_is_refused_at_second_zero(tmp_path: Path) -> None:
+    """**UF1.5's acceptance criterion**: a module-qualified workflow refuses at second zero.
+
+    `instruments/preflight/qualified.py` writes the two lines §3.3 puts in front of every author -
+    `from . import roles`, then `await run.step(roles.implementer())` - and binds no `RoleFactory`
+    in its own namespace at all. UF1.3's scan read that namespace and only that namespace, so it
+    found nothing, asked **zero** backends anything, cleared second zero naming no provider, and
+    let the run die at its first step with whatever the adapter said. That is the failure §3.2
+    exists to prevent arriving with no warning, and it is worse than the over-approximation below
+    for one reason: it is silent. `@workflow(roles=[…])` could not have had it, because the list
+    named the roles.
+
+    So the same four questions as the acceptance criterion above, because "at second zero" means
+    the same thing here and is not weaker for the role having been harder to find: the class and
+    exit 6, no record under `AGL_HOME` for an operator to `agl clear` before retrying, the
+    `_Untouched` tripwire rather than a directory listing - a provider that ran and failed leaves
+    no directory either - and the workflow function never entered.
+
+    The refusal is the whole test rather than the count of what was asked. `stub.asked_ready` is
+    the positive case's business one test down; what this one is about is that a run which used to
+    start does not.
+    """
+    entered.clear()
+    harness = _fakes(tmp_path)
+    stub = _Stub(ready=False)
+
+    with pytest.raises(UpstreamUnavailable) as caught:
+        await _start(harness, "qualified", agents=stub, opens=False)
+
+    assert exit_code_for(caught.value) == 6
+    assert await _no_record(harness), "a run refused at preflight left a record to be cleared"
+    assert entered == [], "the workflow ran although its backend was never ready"
+
+
+@pytest.mark.asyncio
+async def test_a_module_qualified_workflow_passes_on_the_model_reached_through_the_module(
+    tmp_path: Path,
+) -> None:
+    """The other side of it: a ready harness, and the question was asked about the right model.
+
+    A refusal alone would go green against a scan that had learned to refuse module-qualified
+    workflows on principle, so this asks what the run actually spent. One question, about
+    `OpenAI.TERRA`, which no other module this suite drives names - so it can only have come from
+    `instruments/preflight/roles.py`, reached one level through the `roles` binding next door.
+
+    The dispatch is asserted with it, because the two together are what make the demand *correct*
+    rather than merely present: the model preflight asked about is the model the body then ran on.
+    A scan that guessed at some other model would satisfy the first assertion and fail this one.
+    """
+    entered.clear()
+    harness = _fakes(tmp_path)
+    stub = _Stub()
+
+    await _start(harness, "qualified", agents=stub)
+
+    assert stub.asked_ready == [OpenAI.TERRA], (
+        "preflight did not ask about the one model this workflow names, which it names through a "
+        "module binding rather than through a factory bound beside its own function"
+    )
+    assert [task.model for task in stub.ran] == [OpenAI.TERRA]
+    assert entered == ["qualified"]
 
 
 # --- half one: the over-approximation, which is documented behaviour -----------------------------

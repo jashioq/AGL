@@ -120,6 +120,29 @@ def test_steps_and_worktrees_are_siblings_so_one_name_cannot_be_both() -> None:
     assert as_step.parent != as_worktree.parent
 
 
+def test_a_name_reaches_disk_in_the_spelling_its_author_wrote_and_not_a_folded_one() -> None:
+    """UF1.6's other half: the fold belongs in the counter's key, and never in a path segment.
+
+    `Role(name="Review")` is a legal declaration - §3.3's allowlist is `[A-Za-z0-9._-]` - and
+    `steps/Review/` is the directory it is entitled to. Two spellings of one name are one directory
+    on a case-insensitive volume and two on a case-sensitive one, and the repair for that is
+    `Fingerprints`' folded counter key, which is correct on both. Lowercasing the segment here
+    would instead make AGL write a directory nobody named, print a path no `ls` on a case-sensitive
+    volume would show beside the run's own, and answer "where are my entries" with a lie.
+
+    Character for character, therefore, and for every segment `ids.py` composes: `_checked_digest`
+    is the one place in this module that has an opinion about case, and it has it about a digest
+    AGL generated rather than about anything a person typed.
+    """
+    mixed = RunScope(ProjectName("MyApp"), RunLabel("Auth")).inside(Namespace("T-01"))
+    capitalised = step_dir(_HOME, _SCOPE, StepName("Review"))
+    assert capitalised == Path(f"{_RUN}/steps/Review")
+    assert capitalised != step_dir(_HOME, _SCOPE, StepName("review"))
+    assert step_entry(_HOME, mixed, StepName("Review"), _DIGEST) == Path(
+        f"/agl-home/projects/MyApp/runs/Auth/worktrees/T-01/steps/Review/{_DIGEST}.json"
+    )
+
+
 def test_the_run_record_is_per_run_wherever_inside_the_run_it_is_asked_from() -> None:
     """One `run.json`, at the top. A scope three worktrees down still answers with that one."""
     deep = _SCOPE.inside(Namespace("T-01")).inside(Namespace("sub-b"))

@@ -414,22 +414,27 @@ async def test_the_workflow_is_handed_its_params_as_the_dataclass_the_record_sto
 
 
 class _Counting(Store):
-    """The bundle's own store with a note taken of every `write_record`, and nothing else changed.
+    """The bundle's own store with a note taken of every write it is asked for, and nothing changed.
 
     `_Watching` below is the same instrument one port over, and `src/agl/testing.py::_Ledger` is the
     precedent for the shape: a decorator whose every member delegates, so the store underneath is
     still the bundle's `MemoryStore` and `tests/contracts/store.py` remains the only thing that says
     how a `Store` behaves. This one has no behaviour of its own to be wrong about either.
 
-    It counts the *scopes* rather than the calls, because the one thing a reader wants from a
-    failure is which run was written to. Installed with `FakeServices.with_store`, which is what
-    keeps `harness.store` and `harness.services.store` the same object - a `replace` around the
-    bundle would leave the test reading a different ledger from the one the run used.
+    `wrote` counts the *scopes* rather than the calls, because the one thing a reader wants from a
+    failure is which run was written to. `entries` is the same note one member over, and the two
+    live on one instrument because `Store` has exactly two writing members - so "nothing was
+    written", which the refusal test at the foot of this module asserts of a resume, is a claim
+    about both, and a decorator watching one of them would leave half that sentence resting on
+    nothing. Installed with `FakeServices.with_store`, which is what keeps `harness.store` and
+    `harness.services.store` the same object - a `replace` around the bundle would leave the test
+    reading a different ledger from the one the run used.
     """
 
     def __init__(self, store: Store) -> None:
         self._store = store
         self.wrote: list[RunScope] = []
+        self.entries: list[str] = []
 
     async def read_record(self, scope: RunScope) -> dict[str, JsonValue] | None:
         return await self._store.read_record(scope)
@@ -446,6 +451,7 @@ class _Counting(Store):
     async def write_entry(
         self, scope: RunScope, step: StepName, digest: str, value: Mapping[str, JsonValue]
     ) -> None:
+        self.entries.append(str(step))
         await self._store.write_entry(scope, step, digest, value)
 
     async def namespaces(self, scope: RunScope) -> tuple[Namespace, ...]:
@@ -818,3 +824,129 @@ async def test_the_params_rebuild_refuses_before_preflight_spends_a_turn(tmp_pat
     assert runner.asked == [Claude.SONNET], (
         "the stub never refused anything, so the assertion above is not about an ordering"
     )
+
+
+class _NotTaken(WorkspaceProvider):
+    """A provider that refuses to have been reached. Every member is a tripwire, `hold` above all.
+
+    `tests/sdk/test_preflight.py::_Untouched` is this instrument for `api.run`, and this is a second
+    small class rather than that one promoted to `tests/instruments/`. **The messages are the
+    instrument**, a tripwire's entire output being the sentence it fails with, and a resume's are
+    different sentences rather than `run`'s with a noun swapped. `_Untouched.open` says a workspace
+    "was provisioned anyway", which of a resume would be wrong twice over: `api.resume` provisions
+    one deliberately two lines under preflight, and does it over a checkout that is usually already
+    there, idempotently, by `ports/workspace.py`'s "an existing workspace is returned exactly as it
+    stands". `_Untouched.remove` and `.discard` name `api.run` outright. Sharing one class means
+    either templating every message on which operation is under test - four hand-written sentences
+    turned into four that say less - or loosening them until they fit both, which is weakening the
+    file that already leans on them. The duplication being bought here is eight lines with no
+    behaviour in them, and it is cheaper than either.
+
+    `AssertionError` and never an `AglError`, which is what makes this legible from a `raises`: a
+    `pytest.raises(UpstreamUnavailable)` around a resume that took the lock fails carrying the
+    sentence below rather than passing on the exception the test was already expecting.
+
+    **`hold` is the member this class exists for.** §3.10's run lock is a claim on the run's own
+    directory and *making that directory is its one side effect* - `FakeWorkspaceProvider.hold` and
+    the real provider agree about that - so a resume that took it and then refused would have left
+    something behind on a run it declined to walk. That is the half of `api.py`'s ordering rule this
+    module can falsify: "everything above it refuses for free; nothing below it does".
+    """
+
+    async def open(self, label: RunLabel, namespace: Namespace | None, base: str) -> Workspace:
+        raise AssertionError(
+            "preflight refused this resume and `_base` was opened anyway, so §3.9's `agl/<label>` "
+            "was cut - or reopened - for a run nobody is walking"
+        )
+
+    async def remove(self, label: RunLabel, namespace: Namespace | None) -> None:
+        raise AssertionError("nothing in `api.resume` takes a workspace back - that is `clear`")
+
+    async def discard(self, label: RunLabel, namespace: Namespace | None) -> None:
+        raise AssertionError("nothing in `api.resume` deletes a line of work - that is `clear`")
+
+    def hold(self, label: RunLabel) -> AbstractAsyncContextManager[None]:
+        raise AssertionError(
+            "preflight refused this resume and §3.10's run lock was taken anyway. The claim is a "
+            "lock on the run's own directory and making that directory is the one side effect of "
+            "taking it, so a refusal underneath it is a refusal that left something behind"
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_resume_refused_at_preflight_takes_no_lock_and_writes_nothing(
+    tmp_path: Path,
+) -> None:
+    """`api.resume`'s own sentence about preflight, pinned by something that is not that sentence.
+
+    "Everything above it refuses for free; nothing below it does" is a claim about the two lines
+    directly under it - §3.10's run lock and `_base` - and `tests/sdk/test_preflight.py` makes the
+    same claim mechanical for `api.run`, with a tripwire provider and an assertion about what is
+    under `AGL_HOME`. `api.resume` had neither wired in: its tests asserted that
+    `UpstreamUnavailable` came out and nothing about what was taken or written on the way, so the
+    ordering rested on a comment. **The ordering is not what this test changes** - `preflight.check`
+    already sits above `workspaces.hold`, and this adds no more than a way to find out when it
+    stops.
+
+    **The "nothing written" half is not `api.run`'s, and cannot be.** There it is `_no_record`: a
+    run refused at preflight must leave nothing under `AGL_HOME`, or an operator has to `agl clear`
+    a run that never started before retrying the one they meant. A resume *requires* a record to
+    exist, so its absence is not available as the assertion; what a refused resume owes is the
+    record it found, unmoved - `api.resume`'s "The record is read and never rewritten" - and not one
+    new step on the ledger.
+
+    The run in front is what stops that being a claim about an empty store. It is interrupted
+    between its two steps, so there is exactly one record and one entry standing when the resume is
+    refused, and both counters are asserted to have moved before they are cleared - an instrument
+    that recorded nothing would otherwise report silence and be believed.
+
+    Six assertions and each fails differently. The class and the exit code say the refusal reaching
+    the operator is still §3.2's. The tripwire says the lock was not taken and `_base` not opened,
+    which no directory listing could say - the run has a checkout already, so its presence
+    afterwards is evidence of nothing. The store says the record was not rewritten and the ledger
+    not appended to. `handed` says the workflow itself never started. And `runner.asked` is what
+    stops the whole thing passing for the wrong reason: preflight really was reached, and
+    `check_ready` really was what said no, rather than the resume having refused somewhere above for
+    a reason of its own.
+    """
+    dispatched: list[str] = []
+    harness = _fakes(tmp_path, dispatched)
+    counting = _Counting(harness.store)
+    harness = harness.with_store(counting)
+    _clear()
+    interrupt.append("killed between the two steps")
+
+    with pytest.raises(Interrupted):
+        await _start(harness)
+
+    before = await _record(harness)
+    assert counting.wrote == [SCOPE], "the run in front wrote no record for the resume to leave"
+    assert counting.entries == ["first"], (
+        "the run in front left no entry, so 'no entry was appended' below would hold over an empty "
+        "ledger and measure nothing"
+    )
+    counting.wrote.clear()
+    counting.entries.clear()
+
+    runner = _NotReady()
+    services = replace(harness.services, agents=runner, workspaces=_NotTaken())
+    _clear()
+
+    with pytest.raises(UpstreamUnavailable) as caught:
+        await api.resume(services, PROJECT, LABEL, points=POINTS)
+
+    assert exit_code_for(caught.value) == 6
+    assert runner.asked == [Claude.SONNET], (
+        "preflight was never reached, so nothing here is about an ordering: every other assertion "
+        "in this test holds of a resume that refused above it for some reason of its own"
+    )
+    assert counting.wrote == [], (
+        "a resume refused at preflight rewrote `run.json`. `api.resume` promises the record is "
+        "read and never rewritten, and the invocation with least business moving it is the one "
+        "that declined to walk the run at all"
+    )
+    assert counting.entries == [], "a resume refused at preflight appended a step to the ledger"
+    assert await _record(harness) == before, (
+        "the record a refused resume found is not the record it left behind"
+    )
+    assert handed == [], "the workflow was invoked although preflight had refused its backend"

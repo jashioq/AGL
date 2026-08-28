@@ -1181,6 +1181,86 @@ async def test_a_step_reporting_through_another_payload_type_does_not_replay_the
     assert len(_entries(tmp_path, "review")) == 2
 
 
+# --- two roles whose names differ only in case ----------------------------------------------------
+
+
+def _numbered(record: _Agent) -> Script:
+    """An agent whose answer says which dispatch it was, so two results cannot look alike.
+
+    `_agent` builds its payload out of the instructions, which is exactly what two roles alike in
+    every fingerprint term have in common - so a replay and a re-run would report the same string
+    and the test below could only count dispatches. This one counts them into the payload, which
+    puts the false cache hit in the *value* a workflow reads rather than only in a recorder.
+    """
+
+    async def _script(conversation: Conversation) -> AgentOutcome:
+        record.runs.append(conversation.task.instructions)
+        payload = {"text": f"dispatch {len(record.runs)}"}
+        record.results.append(await conversation.call(REPORT.name, payload))
+        return AgentOutcome(stop_reason=StopReason.COMPLETED, text="")
+
+    return _script
+
+
+def _recorded(tmp_path: Path, *steps: str) -> set[str]:
+    """Every entry filename under these step directories, deduplicated - the honest entry count.
+
+    A set of names rather than a sum of lengths, because the two directories this is asked about
+    are **one** directory on a case-insensitive volume and two on a case-sensitive one: adding the
+    globs up double-counts every file on macOS, and globbing only one of them misses the other's on
+    Linux. An entry is named for its digest, so the names are unique across the pair either way and
+    the size of the set is the number of entries however the volume spells the directories.
+    """
+    home = AglHome(tmp_path / "home")
+    return {
+        path.name for step in steps for path in step_dir(home, SCOPE, StepName(step)).glob("*.json")
+    }
+
+
+@pytest.mark.asyncio
+async def test_two_roles_differing_only_in_case_do_not_replay_each_others_entries(
+    repository: Path, tmp_path: Path, base: str
+) -> None:
+    """UF1.6, and the sharpest failure in this file: a **false cache hit**.
+
+    `StepName` allows `[A-Za-z0-9._-]`, so `Role(name="Review")` is a legal declaration, and since
+    UF1.1 a step's address is its role's name. Two roles differing only in case, in one namespace,
+    alike in every term `base_of` takes - same instructions, same model, same restrictions, same
+    tools, no inputs, and run back to back over a tree neither commits to, so the same head - are
+    one `base` by construction, because `base_of` has no name parameter to tell them apart.
+
+    What separated them was the counter's key and the directory. Keyed on the raw `StepName`, both
+    sat at `n = 0` and hashed to one digest; and `steps/Review/` and `steps/review/` are **one
+    directory** on a case-insensitive volume, which is macOS by default. So the second step read the
+    first step's file, matched the fingerprint it found there, and handed back a value no agent
+    produced for it - no re-run, no exception, and the wrong answer. Every other silent failure in
+    §3.6 costs money; this one costs correctness.
+
+    The repair is `Fingerprints`' folded counter key, not a folded path segment: the author's
+    spelling reaches disk verbatim (`tests/ports/test_home_layout.py`) and the second spelling
+    lands at `n = 1`, which is right on a case-sensitive volume too, where the entries are two
+    files in two directories and the counter is the only thing that made them two digests.
+
+    The assertions are in the order they lose their meaning: the value, which is what a workflow
+    actually reads; the dispatch count, which is what a replay is; and the ledger, which is what a
+    resume will walk.
+    """
+    record = _Agent()
+    run = _run(repository, tmp_path, base, _numbered(record))
+
+    capitalised = await run.step(_role("Review", "review", read_only=True))
+    lowercase = await run.step(_role("review", "review", read_only=True))
+
+    assert capitalised == Summary("dispatch 1")
+    assert lowercase == Summary("dispatch 2"), (
+        "the second role was handed the first one's recorded value. Two roles that differ only in "
+        "case shared one address, so `review` replayed what `Review` reported - a result no agent "
+        "produced for it, off the ledger, with nothing raised and nothing re-run"
+    )
+    assert len(record.runs) == 2, "one of the two steps was never dispatched to an agent"
+    assert len(_recorded(tmp_path, "Review", "review")) == 2
+
+
 # --- `run.activity` ------------------------------------------------------------------------------
 
 
