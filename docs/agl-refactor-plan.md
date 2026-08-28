@@ -530,7 +530,7 @@ build commands are therefore independent by design: the prompt's drive the agent
 
 | | What it is |
 |---|---|
-| **Params** | a dataclass of `arg()` fields — all named flags, no positionals |
+| **Params** | a dataclass of `arg()` fields — all named flags, no positionals. Declared by annotating the workflow function's own parameter, `Run[FixParams]`; nothing restates it on the decorator |
 | **Roles** | a `@role(model=…)` factory returning a frozen `Role` — name, instructions, restrictions, tools, required capabilities. The decorator is what preflight reads (§3.2); the factory is what closes the override surface |
 | **Tools** | the payload schemas agents report through |
 | **Views** | pure functions of state, in `views/`. Nothing renders without them (§3.7) |
@@ -670,7 +670,7 @@ is serving it, or `None` when nothing is running. Never persisted; purely visual
 #### Single-worktree workflow — a first-class shape
 
 ```python
-@workflow(name="fix", version="1.1", params=FixParams)
+@workflow(version="1.1")
 async def fix(run: Run[FixParams]) -> None:
     await run.step(implementer(), request=run.params.request, commit="implement fix")
     findings = await run.step(reviewer())                  # no commit= — worktree wiped
@@ -685,8 +685,8 @@ on the same `Run`. Commits land on `agl/hotfix` directly — that branch is the 
 #### Tickets — decomposition owned entirely by the workflow
 
 ```python
-@workflow(name="tickets", params=TicketsParams)
-async def tickets(run: Run) -> None:
+@workflow(version="1.2")
+async def tickets(run: Run[TicketsParams]) -> None:
     spec = await run.step(interview())
 
     # decompose negotiates approval inside its own session via on_question (§3.7) —
@@ -752,6 +752,26 @@ allowing one is a class of problem rather than a bug.
 **Reserved names.** `_base` is refused as a namespace (it is the run's own worktree directory), and
 `_work` is refused as a label (it is the child-branch prefix). Both compared case-insensitively,
 per §3.9.
+
+#### What the decorator does not take
+
+**`@workflow` carries only what nothing else can see.** Three arguments were removed for one reason:
+each restated something the framework already had.
+
+- **`params=`** is the annotation on the workflow function's own parameter. `Run[FixParams]` is a
+  declaration mypy already enforces — misspell `run.params.reqest` and it errors today — so reading
+  it back is not inference from a coincidence. A bare `Run` means no params, which is `Run[P]`'s
+  PEP 696 default.
+- **`roles=`** is the `@role(model=…)` registry (§3.2).
+- **`name=`** is the entry-point key, which is what routing already uses.
+
+**Resolve all of it lazily, never at decoration.** A params class or a role defined *below* the
+workflow function is not bound when the decorator runs, and `from __future__ import annotations`
+makes every hint a string needing `fn.__globals__`.
+
+**`version=` stays, and is the only one that can.** Nothing can infer *"I changed the shape of this
+workflow"* — and it is what stands between a reordered step and a silently swapped result, since a
+mismatch refuses the resume rather than replaying into the new order.
 
 #### Registration
 
@@ -1729,6 +1749,7 @@ the same shape §3.9 already uses, and not stored status.
 | Screen input preservation across preemption, and question timeouts | Known and accepted for v1.1. |
 | `run.scope` / `run.workspace` | Memo namespacing and worktree provisioning are the same act; `worktree()` does both. |
 | `@workflow(view=…)` | Workflows switch views freely, so views are pushed, not declared once. |
+| `name=`, `params=` and `roles=` on `@workflow` | Each restated something the framework already had: the entry-point key, the annotation on the function's own parameter, and the `@role(model=…)` registry. `version=` is the only argument nothing can infer, and it is what stands between a reordered step and a silently swapped result. |
 | Default progress view | Presentation is the workflow's ownership. |
 | Positional CLI args | All params are named flags via `arg()`. |
 | Schema migration | Stamp the version, refuse on mismatch. Runs live hours. |
@@ -1780,8 +1801,8 @@ generality, which this plan forbids.
 
 ```python
 # workflows/split — ~30 lines, and every framework path is exercised
-@workflow(name="split", params=SplitParams)
-async def split(run: Run) -> None:
+@workflow(version="1.1")
+async def split(run: Run[SplitParams]) -> None:
     chunks = await run.step(planner())
     async with TaskGroup() as tg:
         for c in chunks.items:

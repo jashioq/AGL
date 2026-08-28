@@ -535,6 +535,30 @@ direction.
 
 ---
 
+## User Feedback 2 — The workflow decorator
+
+Same feedback as UF1, one level up: `@workflow(name=…, version=…, params=…)` asks the author for
+three things, and two of them are already written somewhere the framework can read.
+
+**The rule that decides this and the next one:** the decorator carries only what nothing else can
+see. `params=` is the annotation on the function's own parameter; `name=` is the entry-point key that
+already does the routing; `version=` is the only one nothing can infer.
+
+| # | Deliverable |
+|---|---|
+| UF2.0 | **`config/toml_file.py::resolve_project` — a live bug, carried from UF1's sibling sweep.** It compares `project.repo.resolve() == root`, and `Path.resolve()` does not case-canonicalise on macOS, so a differently-spelled cwd gives `NotFoundError` for a registered repo. `samefile`, not a fold. First, because it is the only finding in the build so far that a user hits on day one doing nothing unusual |
+| UF2.1 | **Investigate `name=` before removing it, and report before deciding.** The entry-point key is what routes; `RunSpec.workflow` records the name the user typed and resume asks the registry by that key, so the decorator's copy may already do less than it looks. Two questions, both silent if wrong: does anything **compare** the declared name to the entry-point key — and if not, is that a bug the parameter was hiding, since `agl workflows` listing one name while `agl run` accepts another is the failure? And where does a `Workflow` get its name when it is **not** reached through the registry — the harness, a direct import in a test — or error messages lose their subject? |
+| UF2.2 | **`params=` comes from the annotation.** `get_type_hints(fn)` on the first positional parameter, then `get_args(...)[0]`; a bare `Run` means no params, which is `Run[P]`'s PEP 696 default. Resolve **lazily**, never at decoration — a params class defined below the workflow function is not bound when the decorator runs, and `from __future__ import annotations` makes every hint a string needing `fn.__globals__`. Refuse a first parameter that is not a `Run` with `InputError`, naming the line |
+| UF2.3 | Port `fix`, `split` and `noop`; re-measure targets #1 and #2 |
+
+**Accept:** `@workflow(version="1.1")` is the whole declaration. A workflow whose annotation and
+whose params disagree is impossible rather than merely unlikely, since there is one place to say it.
+
+**Watch for:** a `Workflow` built outside the registry with no name, and an annotation the resolver
+cannot see — both fail silently if the resolver falls back to a default rather than refusing.
+
+---
+
 ## Stage 19 — Hardening and target verification
 
 Two sessions. **19A works the backlog; 19B measures the targets against its result** — verifying
