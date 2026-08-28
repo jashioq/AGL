@@ -512,17 +512,22 @@ and preflight still refuses a logged-out provider **at second zero**, not after 
 failure mode in AGL that returns a **wrong answer** rather than re-running.
 
 **Carried out of the sibling sweep, into the review round.** UF1.6 asked whether any other name is
-transformed on its way to an address. Three are, and one is live:
+transformed on its way to an address. Four are; one was live and is closed.
 
-- **`config/toml_file.py::resolve_project` is a bug today.** It compares `project.repo.resolve() ==
-  root`, and `Path.resolve()` does not case-canonicalise on macOS — so a differently-spelled cwd
-  gives `NotFoundError` for a registered repo. The repair is `samefile`, not a fold.
+- ~~`config/toml_file.py::resolve_project`~~ — **closed at UF2.0.** `Path.resolve()` does not
+  case-canonicalise on macOS, so a differently-spelled cwd gave `NotFoundError` for a registered
+  repo. Repaired with `samefile`: the question is whether two paths name the same directory, which
+  the filesystem can answer and string comparison cannot.
 - **`RunLabel` is refused by the filesystem, not by AGL.** `api.run` detects a taken label with
   `store.read_record(scope)`, a path read, so on a case-insensitive volume `Auth` reads back under
   `auth` — the refusal is an `exists`-shaped accident and its message names the wrong spelling.
   `api.resume` never compares `spec.label` to what was typed, so `agl resume auth` picks up the
   `Auth` record and runs under `auth`. Nothing is clobbered on any traced path.
 - **`ProjectName` → `projects/<name>.toml`** has the same shape; `O_EXCL` prevents clobbering.
+- **`check_trees_root` has `resolve_project`'s bug inverted**, found at UF2: `is_relative_to`
+  compares path *parts*, so a `trees_root` genuinely inside `repo` under a different spelling is
+  **accepted** rather than refused. A missed refusal rather than a false one, so not a day-one
+  break — and there is no one-line repair, because containment is not a single `stat`.
 
 Correct by construction and checked: `_checked_digest` (refuses rather than folds — right for a
 segment AGL generates), `Store.namespaces()` (rebuilds from the on-disk spelling), `split/chunks.py`,
@@ -549,7 +554,7 @@ already does the routing; `version=` is the only one nothing can infer.
 | UF2.0 | **`config/toml_file.py::resolve_project` — a live bug, carried from UF1's sibling sweep.** It compares `project.repo.resolve() == root`, and `Path.resolve()` does not case-canonicalise on macOS, so a differently-spelled cwd gives `NotFoundError` for a registered repo. `samefile`, not a fold. First, because it is the only finding in the build so far that a user hits on day one doing nothing unusual |
 | UF2.1 | **Investigate `name=` before removing it, and report before deciding.** The entry-point key is what routes; `RunSpec.workflow` records the name the user typed and resume asks the registry by that key, so the decorator's copy may already do less than it looks. Two questions, both silent if wrong: does anything **compare** the declared name to the entry-point key — and if not, is that a bug the parameter was hiding, since `agl workflows` listing one name while `agl run` accepts another is the failure? And where does a `Workflow` get its name when it is **not** reached through the registry — the harness, a direct import in a test — or error messages lose their subject? |
 | UF2.2 | **`params=` comes from the annotation.** `get_type_hints(fn)` on the first positional parameter, then `get_args(...)[0]`; a bare `Run` means no params, which is `Run[P]`'s PEP 696 default. Resolve **lazily**, never at decoration — a params class defined below the workflow function is not bound when the decorator runs, and `from __future__ import annotations` makes every hint a string needing `fn.__globals__`. Refuse a first parameter that is not a `Run` with `InputError`, naming the line |
-| UF2.3 | Port `fix`, `split` and `noop`; re-measure targets #1 and #2 |
+| UF2.3 | Port `fix` and `split`; re-measure targets #1 and #2. *(`noop` was deleted at 19.1.)* |
 
 **Accept:** `@workflow(version="1.1")` is the whole declaration. A workflow whose annotation and
 whose params disagree is impossible rather than merely unlikely, since there is one place to say it.

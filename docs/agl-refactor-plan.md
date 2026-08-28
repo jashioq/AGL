@@ -760,10 +760,19 @@ each restated something the framework already had.
 
 - **`params=`** is the annotation on the workflow function's own parameter. `Run[FixParams]` is a
   declaration mypy already enforces — misspell `run.params.reqest` and it errors today — so reading
-  it back is not inference from a coincidence. A bare `Run` means no params, which is `Run[P]`'s
-  PEP 696 default.
+  it back is not inference from a coincidence. **A bare `Run` means no params** — but note that
+  `Run[P]`'s PEP 696 default is `object`, which is a *typing* fact and not a runtime one: `object` is
+  not a dataclass, and `arg()` parsing, `to_json` and `from_json` all require one. Read literally the
+  default would make `agl run` refuse every params-less workflow, so the framework supplies a private
+  empty dataclass instead. That is the honest cost of the removal — ceremony moved off the author and
+  onto the framework, which is the right direction, but it is a concept that did not exist before.
 - **`roles=`** is the `@role(model=…)` registry (§3.2).
-- **`name=`** is the entry-point key, which is what routing already uses.
+- **`name=`** is the entry-point key, which is what routing already uses. UF2 measured the
+  consequence of having both, and it runs the opposite way to the obvious worry: nothing in `src/`
+  compares them, so a workflow declaring `name="fix"` under an entry point spelled `hotfix` produced
+  no divergence at all — every user-visible path reads the key or argv. What it produced was a
+  `Workflow` that **lied about itself**, which makes `name=` the mechanism creating the disagreement
+  rather than the guard against it.
 
 **Resolve all of it lazily, never at decoration.** A params class or a role defined *below* the
 workflow function is not bound when the decorator runs, and `from __future__ import annotations`
