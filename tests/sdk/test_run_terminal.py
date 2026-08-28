@@ -186,7 +186,7 @@ terminals: Final[list[Terminal]] = []
 live: Final[list[str]] = []
 
 
-@workflow(name="showing", version="1", params=NoParams)
+@workflow(version="1")
 async def showing(run: Run[NoParams]) -> None:
     """Shows one passive board and returns, which is the whole of what `api.run` has to allow."""
     terminals.append(run.terminal)

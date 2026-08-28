@@ -78,7 +78,7 @@ def writing() -> Role:
     return Role(name="write", instructions="leave some work behind")
 
 
-@workflow(name="working", version="1.0", params=NoParams)
+@workflow(version="1.0")
 async def working(run: Run[NoParams]) -> None:
     """One step that commits, so this run's branch is not contained in the ref it started from."""
     await run.step(writing(), commit="the work this run produced")

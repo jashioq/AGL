@@ -353,8 +353,13 @@ def test_the_request_is_a_required_named_flag_and_there_are_no_positionals() -> 
 
 
 def test_the_workflow_declares_its_params_and_its_version_and_no_roles_at_all() -> None:
-    """What `@workflow` hands the framework, which since UF1.3 is three facts about the function
-    and nothing about roles.
+    """What `@workflow` hands the framework, which since UF1.3 is nothing about roles, since UF2.1
+    is no name at all - `fix` is what `pyproject.toml`'s entry point calls this workflow, and the
+    decorator holds no second copy of that - and since UF2.2 is `version="1.1"` and the function.
+
+    `fix.params` is still `FixParams` and the assertion below did not move, but what it asserts did:
+    the class is now read off `async def fix(run: Run[FixParams])` rather than off a second copy of
+    the name on the decorator, so this line checks the annotation resolves as well as what it says.
 
     The declaration that replaced `roles=` is the **import line at the top of this package's
     `__init__.py`**: `preflight.check` is handed `fix.fn` and reads the `RoleFactory` values bound
@@ -363,7 +368,6 @@ def test_the_workflow_declares_its_params_and_its_version_and_no_roles_at_all() 
     second assertion is that line, read back the way the framework reads it - a `fix` that stopped
     importing `reviewer` beside its workflow would start passing preflight on a machine with no
     Codex CLI and then die at the review step, which is exactly what §3.2 exists to prevent."""
-    assert fix.name == "fix"
     assert fix.version == "1.1"
     assert fix.params is FixParams
     bound = {

@@ -92,25 +92,25 @@ required_with: Final[list[RequiredCollisionParams]] = []
 defaulted_with: Final[list[DefaultedCollisionParams]] = []
 
 
-@workflow(name="flagged", version="1.1", params=FlaggedParams)
+@workflow(version="1.1")
 async def flagged(run: Run[FlaggedParams]) -> None:
     """Records what it was given, which is the whole of what these tests ask of a workflow."""
     flagged_with.append(run.params)
 
 
-@workflow(name="prefixed", version="1.1", params=PrefixParams)
+@workflow(version="1.1")
 async def prefixed(run: Run[PrefixParams]) -> None:
     """Records `--fro`, the flag `allow_abbrev=True` would have handed to `--from` instead."""
     prefixed_with.append(run.params)
 
 
-@workflow(name="required", version="1.1", params=RequiredCollisionParams)
+@workflow(version="1.1")
 async def required(run: Run[RequiredCollisionParams]) -> None:
     """Never reached: its `-n` is required and the generic parser took the line's only one."""
     required_with.append(run.params)
 
 
-@workflow(name="defaulted", version="1.1", params=DefaultedCollisionParams)
+@workflow(version="1.1")
 async def defaulted(run: Run[DefaultedCollisionParams]) -> None:
     """Reached, and holding its default, because the generic parser answered its `-n` first."""
     defaulted_with.append(run.params)

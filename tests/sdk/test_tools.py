@@ -425,7 +425,10 @@ def test_a_payload_that_is_not_a_dataclass_is_refused() -> None:
 
 
 def test_a_payload_instance_where_the_class_belonged_is_refused() -> None:
-    """The mistake `sdk/workflow.py::_check_params` refuses in the same words, one layer along."""
+    """`read` builds an instance of `payload`, so an instance is one the tool cannot build and
+    whose fields already hold what the agent was going to be asked for. `sdk/workflow.py` refused
+    this in the same words about a params class until UF2.2 read that class off an annotation,
+    where a type is all it can be - a payload is an argument, so this is the layer it survives."""
     with pytest.raises(InputError) as refusal:
         reporting_tool("report", "report it", Findings(summary="", findings=[]))  # type: ignore[arg-type]
     assert "never an instance" in str(refusal.value)

@@ -127,8 +127,8 @@ because a second listing of them here would be a second thing to keep in step wi
 
 `api.run` takes `points=` and `api.py`'s docstring names this caller: "a caller that has its own set
 - this suite, and 16.5's harness running a workflow the author has not installed yet - supplies
-one." An author has a `Workflow`, not an entry-point string, so this module composes the string
-their `pyproject.toml` would have carried - `agl.workflows.fix:fix` - out of the decorated
+one." An author has a `Workflow`, not an entry-point string, so this module composes the whole line
+their `pyproject.toml` would have carried - `fix = "agl.workflows.fix:fix"` - out of the decorated
 function's own module and name, and then **loads it back through `config/registry.py` and checks it
 is the same object**.
 
@@ -138,6 +138,28 @@ gets, so a workflow this harness can run is a workflow an entry point can reach 
 published anything. A workflow declared inside a function, or bound to a module attribute under a
 different name, is refused here with the reason rather than discovered by an operator on the day
 they install it.
+
+**Both halves of that line are the one string**, which is §3.3's registration form read literally:
+`fix = "agl.workflows.fix:fix"` names the attribute in its key, so the key this module derives is
+the function's own name and the composed point cannot be internally inconsistent. Since UF2.1 a
+`Workflow` carries no name of its own to build the key from, and that is the point rather than a
+constraint worked around: there is one name, it is the entry-point key, and the harness gets it
+from the same object it gets the value from.
+
+**The limit that follows, stated as a limit rather than left to be met.** An entry-point key is any
+string a TOML table can hold and a Python attribute is not, so `my-workflow = "pkg:my_workflow"` is
+a legal installation this harness cannot reproduce: it runs that workflow under `my_workflow`, and
+a test reading `RunSpec.workflow` back off the record after a harness run sees that rather than the
+hyphen. Nothing else in AGL treats the two keys differently - the name is opaque to every path that
+carries it - so what is lost is the spelling and not a behaviour.
+
+**And that is not the silent under-approximation UF1 warned about**, which is worth saying because
+from a distance it is the same shape. This module *composes* an installation rather than reading
+one: both halves of the point come from one object, and nothing in AGL compares a workflow's name to
+anything - a key is the name a run is started under and is opaque past that. So the derived key is
+self-consistent rather than a guess that could be quietly wrong about a package somebody installed;
+what it cannot do is know a key its author has not written down yet, and until a `pyproject.toml`
+says otherwise there is no other key for it to be wrong about.
 
 ## Params are flags, and that is the round trip
 
@@ -525,7 +547,7 @@ class Harness:
             await api.run(
                 self.fakes.services,
                 self.scope.project,
-                workflow.name,
+                point.name,
                 self.scope.label,
                 flags,
                 base_ref=base_ref,
@@ -872,9 +894,21 @@ def _resolvable[P](workflow: Workflow[P]) -> EntryPoint:
     """The entry point `workflow` would be registered as, checked by loading it back.
 
     §3.3's registration line is `fix = "agl.workflows.fix:fix"`, and this composes exactly that
-    string out of the decorated function's own module and name - which is what makes the check
-    below meaningful rather than circular: the resolution is `config/registry.py`'s, the same one an
+    line out of the decorated function's own module and name - which is what makes the check below
+    meaningful rather than circular: the resolution is `config/registry.py`'s, the same one an
     installed workflow gets, so a workflow this returns for is a workflow an entry point can reach.
+
+    **The key is `named` too, and that is one string rather than two.** §3.3's form spells the
+    attribute in the key - `fix` on the left, `:fix` on the right - so deriving both halves from
+    `fn.__qualname__` is that form written down, and the two cannot part. The refusal just below
+    makes `named` a real module attribute before it is used for either, so the key is an identifier
+    and not something a `<locals>` qualname smuggled in.
+
+    **What it cannot reproduce, said as a limit** and not implied by an omission: an entry-point key
+    is any string a TOML table can hold, and `my-workflow = "pkg:my_workflow"` is a perfectly legal
+    installation with a key no Python attribute could carry. A workflow like that runs here under
+    `my_workflow`. The module docstring argues why that is a spelling this harness cannot know
+    rather than a guess it makes, and why it under-approximates nothing.
 
     **The refusal is the interesting half.** `@workflow` returns a `Workflow` and the decorated
     *name* is what an entry point points at, so the two ways this fails are a workflow declared
@@ -886,20 +920,19 @@ def _resolvable[P](workflow: Workflow[P]) -> EntryPoint:
     named = workflow.fn.__qualname__
     if "." in named:
         raise InputError(
-            f"the workflow {workflow.name!r} is declared as {named!r} inside something else, so "
-            f"there is no module attribute for an entry point to name. A workflow is registered as "
+            f"the workflow declared as {named!r} is inside something else, so there is no module "
+            f"attribute for an entry point to name. A workflow is registered as "
             f"`<module>:<name>` (§3.3) and the harness resolves it the way an installed one is "
             f"resolved, so declare it at the top level of its module"
         )
-    point = EntryPoint(name=workflow.name, value=f"{where}:{named}", group=registry.GROUP)
-    resolved: Workflow[object] = registry.load((point,), workflow.name, Workflow)
+    point = EntryPoint(name=named, value=f"{where}:{named}", group=registry.GROUP)
+    resolved: Workflow[object] = registry.load((point,), named, Workflow)
     if resolved is not workflow:
         raise InputError(
-            f"the workflow {workflow.name!r} was handed to the harness, but {point.value!r} - the "
-            f"entry point its own module and function name compose - resolves to a different "
-            f"object. `@workflow` returns the `Workflow` and the decorated name is what an entry "
-            f"point points at, so this happens when the decorated function is bound to a name "
-            f"other than its own. Register it as `{where}:<the attribute it is bound to>` and give "
-            f"the harness that same object"
+            f"the workflow handed to the harness is not what {point.value!r} resolves to, and that "
+            f"is the entry point its own module and function name compose. `@workflow` returns the "
+            f"`Workflow` and the decorated name is what an entry point points at, so this happens "
+            f"when the decorated function is bound to a name other than its own. Register it as "
+            f"`{where}:<the attribute it is bound to>` and give the harness that same object"
         )
     return point

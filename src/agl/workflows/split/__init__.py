@@ -201,7 +201,7 @@ class SplitParams:
     money rather than correctness."""
 
 
-@workflow(name="split", version="1.1", params=SplitParams)
+@workflow(version="1.1")
 async def split(run: Run[SplitParams]) -> None:
     """Divide the request into chunks, then run and land every one of them at once.
 

@@ -124,7 +124,7 @@ def writing() -> Role:
     return Role(name="work", instructions="leave some work behind")
 
 
-@workflow(name="nesting", version="1.0", params=NoParams)
+@workflow(version="1.0")
 async def nesting(run: Run[NoParams]) -> None:
     """A run with something at every depth: its own work, a child's, and the child's child's.
 
@@ -143,7 +143,7 @@ async def nesting(run: Run[NoParams]) -> None:
     await grandchild.step(writing(), commit="the grandchild's work")
 
 
-@workflow(name="quiet", version="1.0", params=NoParams)
+@workflow(version="1.0")
 async def quiet(run: Run[NoParams]) -> None:
     """Takes no step at all, so `agl/auth` never leaves the commit the run was cut from.
 
@@ -158,7 +158,7 @@ async def quiet(run: Run[NoParams]) -> None:
 refused: Final[list[ConflictError]] = []
 
 
-@workflow(name="clearing", version="1.0", params=NoParams)
+@workflow(version="1.0")
 async def clearing(run: Run[NoParams]) -> None:
     """Clears itself, from inside itself, which is the one way one process can be two invocations.
 

@@ -214,7 +214,7 @@ def reporter() -> Role[_Found]:
 # first - and the answer must not depend on which module the workflow happens to be written in.
 
 
-@workflow(name="two_providers", version="1.1", params=NoParams)
+@workflow(version="1.1")
 async def two_providers(run: Run[NoParams]) -> None:
     """§3.2's own case: this module names Claude and OpenAI, so one run asks both.
 
@@ -224,7 +224,7 @@ async def two_providers(run: Run[NoParams]) -> None:
     entered.append("two_providers")
 
 
-@workflow(name="replacing", version="1.1", params=NoParams)
+@workflow(version="1.1")
 async def replacing(run: Run[NoParams]) -> None:
     """Steps with a role that requires asking, in a module whose factories require nothing.
 

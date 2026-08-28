@@ -156,7 +156,7 @@ class FixParams:
     different things cannot replay each other's work."""
 
 
-@workflow(name="fix", version="1.1", params=FixParams)
+@workflow(version="1.1")
 async def fix(run: Run[FixParams]) -> None:
     """Implement the requested change, review it, and repair what the review found.
 

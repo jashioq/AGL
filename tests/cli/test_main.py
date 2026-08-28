@@ -101,19 +101,19 @@ UNTRANSLATED: Final = "a chunk's adapter forgot to translate this"
 handed: Final[list[Run[NoParams]]] = []
 
 
-@workflow(name="probe", version="1.1", params=NoParams)
+@workflow(version="1.1")
 async def probe(run: Run[NoParams]) -> None:
     """Returns. Stage 10's wiring probe, standing in for 10.5's `workflows/noop/`."""
     handed.append(run)
 
 
-@workflow(name="halting", version="0.1", params=NoParams)
+@workflow(version="0.1")
 async def halting(run: Run[NoParams]) -> None:
     """Ends deliberately, with a reason of its own - exit 7, and not printed as a failure."""
     raise ReviewNotConverging("two rounds and no convergence")
 
 
-@workflow(name="exploding", version="0.1", params=NoParams)
+@workflow(version="0.1")
 async def exploding(run: Run[NoParams]) -> None:
     """Raises something that is not an `AglError` at all: a translation that did not happen."""
     raise ValueError("an adapter forgot to translate this")
@@ -131,20 +131,20 @@ async def _chunk(error: Exception) -> None:
     raise error
 
 
-@workflow(name="failing", version="0.1", params=NoParams)
+@workflow(version="0.1")
 async def failing(run: Run[NoParams]) -> None:
     """`fix`'s shape: one failure, raised sequentially. The half of the parity with no group."""
     raise UpstreamUnavailable(UNREACHABLE)
 
 
-@workflow(name="chunked", version="0.1", params=NoParams)
+@workflow(version="0.1")
 async def chunked(run: Run[NoParams]) -> None:
     """`split`'s shape: the same failure as `failing`, raised inside one child of a `TaskGroup`."""
     async with asyncio.TaskGroup() as chunks:
         chunks.create_task(_chunk(UpstreamUnavailable(UNREACHABLE)))
 
 
-@workflow(name="nested", version="0.1", params=NoParams)
+@workflow(version="0.1")
 async def nested(run: Run[NoParams]) -> None:
     """A chunk that opens a `TaskGroup` of its own, so the same leaf arrives one group deeper."""
 
@@ -156,7 +156,7 @@ async def nested(run: Run[NoParams]) -> None:
         chunks.create_task(deeper())
 
 
-@workflow(name="agreeing", version="0.1", params=NoParams)
+@workflow(version="0.1")
 async def agreeing(run: Run[NoParams]) -> None:
     """Two chunks, two classes, one code: "agree" as §3.1 means it rather than class equality."""
     async with asyncio.TaskGroup() as chunks:
@@ -164,7 +164,7 @@ async def agreeing(run: Run[NoParams]) -> None:
         chunks.create_task(_chunk(UpstreamUnexpected(UNPARSEABLE)))
 
 
-@workflow(name="disagreeing", version="0.1", params=NoParams)
+@workflow(version="0.1")
 async def disagreeing(run: Run[NoParams]) -> None:
     """Two chunks that say to do two different things - 6 and 4, and no honest way to choose."""
     async with asyncio.TaskGroup() as chunks:
@@ -172,14 +172,14 @@ async def disagreeing(run: Run[NoParams]) -> None:
         chunks.create_task(_chunk(ConflictError(TAKEN)))
 
 
-@workflow(name="halting_together", version="0.1", params=NoParams)
+@workflow(version="0.1")
 async def halting_together(run: Run[NoParams]) -> None:
     """`halting`'s deliberate end, raised inside a chunk instead. The same words, on purpose."""
     async with asyncio.TaskGroup() as chunks:
         chunks.create_task(_chunk(ReviewNotConverging(NO_CONVERGENCE)))
 
 
-@workflow(name="halting_and_failing", version="0.1", params=NoParams)
+@workflow(version="0.1")
 async def halting_and_failing(run: Run[NoParams]) -> None:
     """One chunk that ended deliberately and one that broke - 7 and 6, which do not agree."""
     async with asyncio.TaskGroup() as chunks:
@@ -187,7 +187,7 @@ async def halting_and_failing(run: Run[NoParams]) -> None:
         chunks.create_task(_chunk(UpstreamUnavailable(UNREACHABLE)))
 
 
-@workflow(name="chunked_bug", version="0.1", params=NoParams)
+@workflow(version="0.1")
 async def chunked_bug(run: Run[NoParams]) -> None:
     """`exploding` inside a chunk: the leaf nobody translated, and the one a traceback is for."""
     async with asyncio.TaskGroup() as chunks:

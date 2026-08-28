@@ -60,12 +60,12 @@ class NoParams:
     """A workflow that takes nothing: its help is a usage line and no options."""
 
 
-@workflow(name="tickets", version="1.0", params=Flagged)
+@workflow(version="1.0")
 async def tickets(run: Run[Flagged]) -> None:
     """Declared for its flags alone; nothing below runs it."""
 
 
-@workflow(name="probe", version="1.0", params=NoParams)
+@workflow(version="1.0")
 async def probe(run: Run[NoParams]) -> None:
     """Declared so the listing has a second name in it, and one with no flags to print."""
 

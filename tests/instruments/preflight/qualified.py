@@ -27,7 +27,7 @@ from . import roles
 __all__ = ["qualified"]
 
 
-@workflow(name="qualified", version="1.1", params=NoParams)
+@workflow(version="1.1")
 async def qualified(run: Run[NoParams]) -> None:
     """Steps with a role no scan of this namespace's own bindings could have found."""
     entered.append("qualified")

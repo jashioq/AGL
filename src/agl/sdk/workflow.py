@@ -10,8 +10,12 @@ guessed at.
 **The decorator returns the `Workflow`, not the function.** §3.3's registration line is
 `tickets = "agl.workflows.tickets:tickets"`, so the decorated name *is* the entry point's target,
 and what an entry point resolves to is what the registry hands to `api.py`. A decorator that
-returned the function would leave the framework holding a callable with no name, no version and no
-params class, and it would be back to asking a module what it contains.
+returned the function would leave the framework holding a callable it had to interrogate: a
+`version` is not on a function and cannot be read off one, and an attribute stapled to it by the
+decorator is one `hasattr` away from the duck typing §1.2 charges. Since UF2.2 the params *are*
+readable off the function - `Workflow.params` reads them - and that sharpens the point rather than
+blunting it, because what is left on the object is exactly the one fact nothing else can see,
+carried as a field of a class `isinstance` can narrow to.
 
 ## What this module builds: six members, of which four are delegates and one is a read
 
@@ -102,10 +106,15 @@ for a workflow that never reads its params. Both classes here take `P = object`,
 true statement. `Any` would wave `run.params.concurrent` through on a workflow that declared no such
 field - §3.3's one typing promise turned into a lie in the place it is easiest to believe.
 
-The decorator ties the two ends together: `@workflow(params=TicketsParams)` infers `P` from that
-argument and then requires a function taking a `Run[TicketsParams]`, so declaring one params class
-and annotating another is an error at the decoration site. A function annotated with a bare `Run` is
-accepted at any `P`, `Run` being covariant in it.
+**Since UF2.2 the annotation is not one end of that but both.** `workflow()` is
+`def workflow[P](*, version: str) -> Callable[[_Function[P]], Workflow[P]]`, so `P` flows purely
+from `_Function[P] = Callable[[Run[P]], Awaitable[None]]` - that is, from `run: Run[TicketsParams]`
+and from nothing else - and `Workflow.params` reads the same annotation back at runtime through
+`get_type_hints`. The declaration and the inference source are one object, which is why "declaring
+one params class and annotating another" is no longer an error to catch but a sentence with nothing
+to refer to. While there were two, the pair could disagree in the quiet direction: `Run` is
+covariant in `P`, so `@workflow(params=FixParams)` over `async def fix(run: Run)` type-checked
+exactly, and handed the run a `FixParams` the function had annotated itself unable to read.
 
 ## The bundle, the address, the base, and the counter
 
@@ -184,16 +193,24 @@ told to end. Put `except Stop: raise` first, or catch the narrower classes.
 ## Every refusal is `InputError`
 
 The faults this module can see are one kind: a workflow package declaring itself wrongly - an empty
-name, an empty version, a `params=` that is not a dataclass, a function that is not `async`.
-`config/registry.py` settled the class for exactly this shape of fault and `sdk/params.py` followed
-it: the declaration was written by a package the operator installed, AGL only read it, and exit 70
-reads as "file a bug" against the wrong codebase. Exit 2 says fix what you supplied, which is as
-true of a decorator argument as of a flag. None of these is `InternalError`, which is for an
-invariant AGL alone controls, and this module controls nothing that a workflow author does not type.
+version, a function that is not `async`, and since UF2.2 a first parameter this module cannot read a
+params class off. `config/registry.py` settled the class for exactly this shape of fault and
+`sdk/params.py` followed it: the declaration was written by a package the operator installed, AGL
+only read it, and exit 70 reads as "file a bug" against the wrong codebase. Exit 2 says fix what you
+supplied, which is as true of an annotation as of a flag. None of these is `InternalError`, which is
+for an invariant AGL alone controls, and this module controls nothing that a workflow author does
+not type.
 
-`@workflow` runs at import time, so its refusal leaves the workflow package's import as the exit 2
-it already is: `registry.load` catches `ImportError` and `AttributeError` and passes everything else
-through untouched.
+**Two of the three are at import time and the third cannot be**, which UF2.2 changed and which is
+worth saying rather than leaving to be discovered. `@workflow` runs at import, so a blank `version`
+and a function that is not a coroutine function leave the workflow package's import as the exit 2 it
+already is: `registry.load` catches `ImportError` and `AttributeError` and passes everything else
+through untouched. The annotation is resolved *lazily*, at the first read of `Workflow.params`,
+because a params class declared below the workflow function is not bound when the decorator runs -
+so its refusals surface one moment later, on the `agl run` that asked. That moment is still before
+anything happens: `api.run` reads `wf.params` to parse argv, ahead of the record, the lock, the
+preflight and every port. `Workflow.params` argues the lateness and `_declared` holds the five
+refusals.
 
 ## `version` is on the decorator, and required
 
@@ -208,22 +225,37 @@ nothing to say about it writes `version="1"` once. §3.3's examples predate the 
 
 ## What `@workflow` does not check
 
-**That the params dataclass is a *params* dataclass.** `arg()` already refuses a malformed flag
-where it is written, and `params.parser_for` refuses a field declared without one, a spelling
-claimed twice and a field type nothing can parse - naming the field, which is what the reader needs.
+**That the params class is a *params* dataclass**, and since UF2.2 not even that it is a dataclass.
+`arg()` already refuses a malformed flag where it is written, and `params.parser_for` refuses a
+class that is not a dataclass at all, a field declared without an `arg()`, a spelling claimed twice
+and a field type nothing can parse - naming the class or the field, which is what the reader needs.
 Re-deriving those rules here would be a second copy of them, free to drift from the first, for a
-fault the run refuses before anything happens anyway. What is checked here is what is visible from
-here: that the argument is a dataclass class, and not an instance of one.
+fault the run refuses before anything happens anyway.
 
-**That `name` matches the entry-point key.** The registry indexes by the entry point, so the name
-here is what a workflow calls itself and the name there is what an operator types. Comparing them
-needs both, and only `api.py` holds both.
+`_check_params` used to make the first of them and went with the parameter it checked. Half of what
+it caught is now unrepresentable - `@workflow(params=FixParams())` passed an *instance* where the
+class belonged, and an annotation is a type - and the other half is `parser_for`'s own first line,
+made at the same `agl run`, against the same class, naming it. What this module could add is not an
+earlier refusal but a second one: resolution is lazy by necessity, so `@workflow` has no import-time
+moment left in which to be the earlier of the two.
 
-**Anything about the function beyond its being a coroutine function.** Its signature is mypy's
-business at the decoration site, where the annotations are. The one thing a type checker cannot see
-is that the object is an `async def` rather than a plain callable returning an awaitable, and
-`inspect.iscoroutinefunction` is the only honest form of that question - which is worth asking,
-because such a function type-checks perfectly and then never yields to the event loop.
+**That the workflow is registered under any particular key**, and since UF2.1 there is nothing here
+that could be compared with one. A `name=` used to sit on the decorator beside `version=`, and the
+comparison was never made - the registry indexes by the entry point, so the key was the name that
+decided everything and the declaration was a copy of it that nothing read. What UF2.1 removed is
+therefore not a check but the possibility of the disagreement; `Workflow` below says the rest.
+
+**Anything about the function beyond its being a coroutine function** - at the decoration itself.
+Its signature is mypy's business at the decoration site, where the annotations are. The one thing a
+type checker cannot see is that the object is an `async def` rather than a plain callable returning
+an awaitable, and `inspect.iscoroutinefunction` is the only honest form of that question - which is
+worth asking, because such a function type-checks perfectly and then never yields to the event loop.
+
+The first parameter's annotation is read later and is the one exception that proves the sentence:
+`Workflow.params` reads it because it is now the *declaration*, not because this module wants an
+opinion about signatures. It refuses exactly what stops it being one - a parameter that is not
+there, one that is not annotated, one annotated something other than a `Run`, and one naming a class
+nothing binds - and asks nothing else about the function at all.
 
 ## Three port names this module carries, for `sdk/roles.py`'s reason
 
@@ -271,10 +303,10 @@ tree, free to hand one a table or a counter that is not the run's, which is the 
 above exist to prevent.
 """
 
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field, is_dataclass
-from inspect import iscoroutinefunction
-from typing import cast
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass, field
+from inspect import iscoroutinefunction, signature
+from typing import cast, get_args, get_origin, get_type_hints
 
 from agl.ports.errors import InputError, Stop
 from agl.ports.home_layout import RunScope
@@ -353,11 +385,11 @@ class Run[P = object]:
     **`Run[object]` and not `Run[P]`, and the erasure is forced rather than chosen.** A table is a
     mutable container, so `Worktrees` is invariant in what it holds; a field of type
     `Worktrees[Run[P]]` therefore makes `Run` invariant in `P` too, and `Run` **must stay
-    covariant** - that is what lets §3.3's own `async def fix(run: Run) -> None` be decorated with
-    `@workflow(params=FixParams)`, which the module docstring names as a promise of the surface and
-    `test_workflow.py` pins. Every `Run` in one table really does share one `P` - the root's is the
-    only table there is and `_child` is the only thing that adds to it - but nothing in the type
-    system ties the two together, so `worktree()` narrows once, visibly, where it can say why."""
+    covariant** - that is what lets `worktree()` below hand this very `Run` to `_starts_at`, whose
+    parameter is a `Run[object]`, and hand `self._child` to a table that builds `Run[object]`s.
+    Every `Run` in one table really does share one `P` - the root's is the only table there is and
+    `_child` is the only thing that adds to it - but nothing in the type system ties the two
+    together, so `worktree()` narrows once, visibly, where it can say why."""
 
     leases: Leases = field(default_factory=Leases)
     """§3.4's lease per integration target, run-wide and shared down the tree.
@@ -436,10 +468,10 @@ class Run[P = object]:
     value nothing reads.
 
     **Covariant, and this one costs nothing where `worktrees` cost an erasure.** `Run` must stay
-    covariant in `P` - that is what lets §3.3's own `async def fix(run: Run) -> None` be decorated
-    with `@workflow(params=FixParams)`, which `tests/sdk/test_workflow.py` pins. `Worktrees` is a
-    mutable container and therefore invariant in what it holds, which is why that field is typed
-    `Run[object]` and `worktree()` casts. A frozen dataclass field is read-only, so `Run[P] | None`
+    covariant in `P` - that is what lets `worktree()` pass a `Run[P]` into `_starts_at`'s
+    `Run[object]` and into a table of them. `Worktrees` is a mutable container and therefore
+    invariant in what it holds, which is why that field is typed `Run[object]` and `worktree()`
+    casts. A frozen dataclass field is read-only, so `Run[P] | None`
     is a covariant position and the type may be the honest one: a child's parent really is a `Run`
     at this run's own `P`, `_child` copying `params` across unchanged.
 
@@ -664,10 +696,11 @@ class Run[P = object]:
         which is the mirror of the failure §3.6 spends a paragraph on and is why this reads
         `_steps`.
         """
-        # The one `cast` in this module, and the field docstring argues it: the table is invariant
-        # in what it holds, so holding `Run[P]` would cost `Run` the covariance §3.3's bare-`Run`
-        # workflow signature rests on. What makes the narrowing true is that `_child` below is the
-        # only thing that ever puts a `Run` in this table, and it copies `params` across unchanged.
+        # The first of this module's two `cast`s - `Workflow.params` is the other - and the field
+        # docstring argues it: the table is invariant in what it holds, so holding `Run[P]` would
+        # cost `Run` the covariance the two calls on this very line rest on. What makes the
+        # narrowing true is that `_child` below is the only thing that ever puts a `Run` in this
+        # table, and it copies `params` across unchanged.
         return cast(
             "Run[P]",
             self.worktrees.open(
@@ -847,16 +880,42 @@ type _Function[P] = Callable[[Run[P]], Awaitable[None]]
 
 
 @dataclass(frozen=True, slots=True)
+class _NoParams:
+    """What `wf.params` is for a workflow annotated with a bare `Run` - §3.3's `async def fix(run:
+    Run)`, a workflow that never reads `run.params`.
+
+    **A dataclass, because "no params" has to be a params class like any other.** `Run[P]`'s PEP 696
+    default is `object` and that is the right *static* answer - `run.params` is an `object` and
+    reading a field off it is an error - but `object` is not a dataclass, and `params.parse`,
+    `parser_for`, `to_json` and `from_json` each refuse anything that is not one. Those refusals are
+    load-bearing and UF2.2 did not relax them, so resolving a bare `Run` to `object` would have made
+    every `agl run` on a params-less workflow exit 2 on a workflow that declared itself correctly.
+
+    An empty one, so nothing is invented: `parser_for` yields a parser with no flags, which is what
+    makes `agl run w --anything` still an `InputError` rather than an ignored word; `to_json` yields
+    `{}` and `from_json` reads `{}` back, so `run.json` records the parameters this run was given
+    and they are none; and `run.params` is an instance with nothing on it, which is exactly what "no
+    params" means. It is a `type[object]`, so `Workflow[object].params` type-checks unchanged.
+
+    Private, and it is the one thing here a workflow author is not meant to be able to name: the
+    class exists so that "no params" has a shape the rest of the framework already knows how to
+    handle, not so that anyone declares it. Nothing is lost by not naming it - an author who wants
+    to say "no parameters" writes a bare `Run`, which is §3.3's own spelling and one word shorter
+    than an empty dataclass of their own.
+    """
+
+
+@dataclass(frozen=True, slots=True)
 class Workflow[P = object]:
     """What `@workflow` produces, what an entry point resolves to, and what `registry.load`
     narrows to with `isinstance`. A workflow, as the framework knows one.
 
-    Four facts and no behaviour, and every one of them is a fact about the function. Everything
-    else about running it - fingerprints, replay, worktrees, branch naming, integration, preflight,
-    exit codes, provider routing - is framework, and §3.3's table is emphatic that it stays
-    framework.
+    Two fields and one derived read, and every one of the three is a fact about the function.
+    Everything else about running it - fingerprints, replay, worktrees, branch naming,
+    integration, preflight, exit codes, provider routing - is framework, and §3.3's table is
+    emphatic that it stays framework.
 
-    **There was a fifth, and UF1.3 is where it went.** 16.1 added a `roles` field because preflight
+    **There was a `roles` field, and UF1.3 is where it went.** 16.1 added it because preflight
     had to be *told*: roles are built inside the workflow's own body - a handler role is a closure
     over its `Run` (§3.7) - so nothing at decoration time could enumerate them, and §3.2's "collect
     the providers named by the workflow's roles" had no mechanism without a second declaration for
@@ -866,23 +925,30 @@ class Workflow[P = object]:
     `sdk/_engine/preflight.py` reads the factories in the namespace `fn` was written in and asks
     this class for nothing, which is §3.11's entry for the parameter in as many words: "One
     declaration, not two."
-    """
 
-    name: str
-    """What the workflow calls itself: `tickets`, `fix`, `split`. `RunSpec.workflow` records the
-    entry-point key the run was started with, and by convention they are the same string; nothing
-    here compares them, because only `api.py` holds both. A plain `str` for `RunSpec.workflow`'s
-    reason - a key in the `agl.workflows` table is not a filename and not a git ref, so `ids.py`'s
-    types neither fit nor apply."""
+    **And there was a `name`, which UF2.1 took off for the opposite reason.** That one was not a
+    declaration of something readable elsewhere; it was a second *name* for what the entry-point
+    key already names. A workflow has one name and it is that key: §3.3's
+    `fix = "agl.workflows.fix:fix"` is what `agl workflows` lists, what `agl run` looks up, what
+    `RunSpec.workflow` records and what the resume after it asks the registry for again. A copy here
+    could only agree with the key or disagree with it, and nothing anywhere compared the two - so a
+    package registered as `hotfix` while declaring `name="fix"` ran perfectly under `hotfix`,
+    refused `fix`, and carried a declaration that read like the answer and decided nothing. Deleting
+    the field does not make the two agree: it leaves one name, in the one place that decides
+    anything, with no copy to keep in step with it.
+
+    **And `params` was a third field, which UF2.2 turned into a read.** It is below, as a property
+    over `fn`, and the class it answers with is the one the author annotated `fn`'s own first
+    parameter with. That is UF2.1's removal again rather than UF1.3's: the decorator's `params=` was
+    a second statement of something already written down and already enforced, and while there were
+    two of them a workflow could declare one class and be handed another - `@workflow(params=X)` on
+    `async def w(run: Run[Y])` type-checked as long as `Run[Y]` was assignable to `Run[X]`, which a
+    bare `Run` always is. There is now one place to say it.
+    """
 
     version: str
     """The version stamped into `RunSpec.workflow_version` at run start and compared with `==` on
     resume. Never parsed and never ordered - see the module docstring, and `ports/run.py`."""
-
-    params: type[P]
-    """The dataclass of `arg()` fields this workflow is invoked with. The *class*: `params.parse`
-    turns argv into an instance of it, and that instance is `Run.params`. Named for the decorator
-    keyword that supplies it, which is why one word covers a type here and a value there."""
 
     fn: _Function[P]
     """The `async def` itself, unwrapped and unchanged. `api.py` awaits `fn(run)`.
@@ -891,83 +957,247 @@ class Workflow[P = object]:
     this field: a function knows the module its `def` was executed in, the `@role(model=…)`
     factories a workflow can reach are the ones bound in that namespace, and a factory carries its
     model without being called. So `preflight.check(runner, wf.fn)` reads a registry rather than a
-    declaration, and this class holds four facts instead of five."""
+    declaration, and the field that used to tell it went away.
+
+    **And since UF2.2 it is the whole of what the params are read from too**, which is the same
+    move a second time: the annotation on this function's first parameter is a declaration mypy
+    already enforces, so `params` below reads it rather than asking the author to repeat it."""
+
+    @property
+    def params(self) -> type[P]:
+        """The dataclass of `arg()` fields this workflow is invoked with, read off `fn`'s own first
+        parameter. The *class*: `params.parse` turns argv into an instance of it, and that instance
+        is `Run.params`.
+
+        `async def fix(run: Run[FixParams])` says `FixParams`, and a bare `Run` - §3.3's own
+        spelling for a workflow that never reads its parameters - says `_NoParams`, which is what
+        `Run[P]`'s PEP 696 default of `object` means once something has to parse argv into it.
+
+        **A property, and never a field, because resolution has to be lazy.** A params class
+        declared *below* the workflow function is not bound when the decorator runs, and Python
+        3.14's deferred annotations make that worse rather than better: the hint is not evaluated
+        until something asks. `get_type_hints(fn)` asks, through `fn.__globals__`, so a name bound
+        after `@workflow` returned is a name this read can see and decoration time could not. That
+        is the difference between a rule with an ordering constraint nobody wrote down and one with
+        none, and `test_workflow.py` pins it with a params class declared under its own workflow.
+
+        **Every failure here is an `InputError` and none of them is a default** - `_declared` below
+        holds all five and says why each is refused rather than shrugged at. The cost of that
+        choice is that the checks `@workflow` used to make at import time now happen at the first
+        read, because a lazy resolver has no import-time moment left to make them in; what is
+        gained is that they are made against the annotation the author wrote, and not against a
+        second copy of it.
+
+        The `cast` is this module's second, and it is the decorator's own signature read back:
+        `declare` takes a `_Function[P]`, `_Function[P]` is `Callable[[Run[P]], Awaitable[None]]`,
+        and so the annotation this read returns *is* the `P` mypy solved for at the decoration site.
+        `_declared` claims nothing about what it found and hands back an `object`, which is honest
+        about a value read out of an annotation at runtime; the narrowing is asserted here, once,
+        where the argument for it can be written down.
+        """
+        return cast("type[P]", _declared(self.fn))
 
 
-def workflow[P](
-    *, name: str, version: str, params: type[P]
-) -> Callable[[_Function[P]], Workflow[P]]:
+def workflow[P](*, version: str) -> Callable[[_Function[P]], Workflow[P]]:
     """Declare an async function to be a workflow. §3.3's one line of ceremony.
 
-        @workflow(name="fix", version="1.1", params=FixParams)
+        @workflow(version="1.1")
         async def fix(run: Run[FixParams]) -> None:
             ...
 
-    Keyword-only and all three required: a positional would make `@workflow("fix", "1.1",
-    FixParams)` a thing to get in the wrong order once and be wrong about for the life of a run's
-    records. The decorated name becomes the `Workflow`, which is what the entry point points at.
+    Keyword-only and required: a positional `@workflow("1.1")` is one string with nothing beside it
+    to tell it apart from the next one. The decorated name becomes the `Workflow`, which is what the
+    entry point points at - and since UF2.1 the entry point's key is the only name this workflow
+    has.
 
-    **Three arguments and no fourth, which is UF1.3's whole content.** There is no `roles=` here.
-    16.1 put one on this line because §3.2's preflight had no other way to see a role before the
-    run started, and it was a second declaration of something the author had already written: a
-    list to keep in step by hand with the factory calls in the body below it, and wrong in the
-    quiet direction the moment the two parted. What replaced it is not a default and not an
-    inference - it is that a role became a `@role(model=…)` factory (UF1.2), the decorator binds
-    `(name, model)` to the object at import, and the module a workflow is written in is therefore
-    already a registry of every model that workflow can name. The framework no longer has to be
-    told what it can read. `sdk/_engine/preflight.py` holds what it costs, which is an
-    over-approximation this decorator would have had no way to make smaller anyway: a workflow's
-    body is what decides which of its module's roles a run reaches, and the body has not run yet.
+    **One argument, because the decorator carries only what nothing else can see.** Three went, and
+    each of them restated something the framework already had.
 
-    Refuses with `InputError` - the module docstring argues the class - an empty `name` or
-    `version`, a `params` that is not a dataclass class, and a function that is not a coroutine
-    function. All four at import time, which is where a package that cannot be invoked correctly
-    should fail.
+    There is no `roles=`, and that is UF1.3. 16.1 put one on this line because §3.2's preflight had
+    no other way to see a role before the run started, and it was a second declaration of something
+    the author had already written: a list to keep in step by hand with the factory calls in the
+    body below it, and wrong in the quiet direction the moment the two parted. What replaced it is
+    not a default and not an inference - it is that a role became a `@role(model=…)` factory
+    (UF1.2), the decorator binds `(name, model)` to the object at import, and the module a workflow
+    is written in is therefore already a registry of every model that workflow can name. The
+    framework no longer has to be told what it can read. `sdk/_engine/preflight.py` holds what it
+    costs, which is an over-approximation this decorator would have had no way to make smaller
+    anyway: a workflow's body is what decides which of its module's roles a run reaches, and the
+    body has not run yet.
+
+    There is no `name=`, which is UF2.1. That one was not a declaration of something the framework
+    could read elsewhere - it was a second *name* for the thing the entry-point key already names,
+    free to disagree with it and compared with it by nothing. `Workflow` above argues what the
+    disagreement looked like when it happened. What was deleted there is not a check: it is the pair
+    of strings that made one possible.
+
+    And there is no `params=`, which is UF2.2 and the clearest case of the three. `Run[FixParams]`
+    on the function's own first parameter is a declaration **mypy already enforces** - misspell
+    `run.params.reqest` and it is an error today - so `Workflow.params` reading it back is not
+    inference from a coincidence but a read of the same object the author already wrote. While there
+    were two of them the pair could disagree and quietly did: `Run` is covariant in `P`, so
+    `@workflow(params=FixParams)` over `async def fix(run: Run)` type-checked perfectly and handed
+    the run a `FixParams` the function had annotated itself unable to see.
+
+    **`version=` is what is left, and it is the one nothing can infer.** No annotation, no registry
+    and no namespace says *"I changed the shape of this workflow"*; only its author knows. It is
+    also the load-bearing one - `RunSpec.workflow_version` is compared with `==` on resume, and a
+    mismatch refuses the run rather than replaying a record into steps that have moved under it.
+
+    Refuses with `InputError` - the module docstring argues the class - an empty `version` and a
+    function that is not a coroutine function, both at import time, which is where a package that
+    cannot be invoked correctly should fail. What the first parameter's annotation says is refused
+    at the first read of `params` instead, and `Workflow.params` says why it cannot be sooner.
     """
-    _check_text("name", name)
     _check_text("version", version)
-    _check_params(params)
 
     def declare(fn: _Function[P]) -> Workflow[P]:
         if not iscoroutinefunction(fn):
             raise InputError(
-                f"the workflow {name!r} is declared on something that is not an `async def`: "
-                f"{fn!r}. A workflow is one async function (§3.3), the framework awaits it, and a "
-                f"plain function returning an awaitable type-checks here and then never yields"
+                f"{fn!r} is decorated as a workflow and is not an `async def`. A workflow is one "
+                f"async function (§3.3), the framework awaits it, and a plain function returning "
+                f"an awaitable type-checks here and then never yields"
             )
-        return Workflow(name=name, version=version, params=params, fn=fn)
+        return Workflow(version=version, fn=fn)
 
     return declare
 
 
 def _check_text(field: str, value: str) -> None:
     """Emptiness, and nothing else, for the same reason `RunSpec` asserts only that: what a good
-    workflow name looks like is the registry's judgement and what a good version looks like is the
-    author's. Whitespace counts as empty - a name of spaces names nothing anyone could type."""
+    version looks like is the author's judgement and this module has no opinion past there being
+    one. Whitespace counts as empty - a version of spaces stamps nothing a resume could compare."""
     if not value.strip():
         raise InputError(
             f"a workflow's {field} is required and cannot be blank: `@workflow` was given "
-            f"{value!r}. Both are written into every run record this workflow starts, and "
-            f"`RunSpec` refuses an empty `workflow` or `workflow_version` - so a run declared this "
-            f"way could not be recorded, let alone resumed"
+            f"{value!r}. It is written into every run record this workflow starts, and `RunSpec` "
+            f"refuses an empty `workflow_version` - so a run declared this way could not be "
+            f"recorded, let alone resumed"
         )
 
 
-def _check_params(params: object) -> None:
-    """That the argument is a dataclass *class*. Takes `object` so that `is_dataclass`'s type guard
-    narrows nothing in the caller, where `params` has to stay the `type[P]` it was declared."""
-    if isinstance(params, type) and is_dataclass(params):
-        return
-    raise InputError(
-        f"`@workflow(params=...)` was given {_describe(params)}, and a workflow's parameters are a "
-        f"dataclass of `arg()` fields (§3.3) - the class itself, never an instance of it. It is "
-        f"what the CLI derives this workflow's flags from and what `run.params` is an instance of"
+def _declared(fn: Callable[..., object]) -> object:
+    """The params class `fn`'s own first parameter is annotated with. UF2.2's whole mechanism.
+
+    Two spellings are accepted and they are the two §3.3 writes: `Run[FixParams]`, which names the
+    class, and a bare `Run`, which is a workflow saying it has no parameters and resolves to
+    `_NoParams`. Everything else is an `InputError` naming the function and the line its `def` is
+    on, because **the alternative to refusing here is under-approximating silently**, which is UF1's
+    own failure one level up: that registry scan quietly saw no models, so preflight asked about
+    none and the run died at its first step instead of at second zero. A resolver that answered
+    "no params" for an annotation it could not read would refuse every flag a correctly-declared
+    workflow takes, and say so at the parse, about the flag, and never about the annotation.
+
+    So: a function taking no parameters at all, a first parameter carrying **no annotation**, an
+    annotation that is not a `Run`, a `Run` subclass, and an annotation naming something that cannot
+    be resolved. Five, each with a message of its own below.
+
+    Returns `object` rather than `type[object]` and claims nothing about what it found: this is a
+    value read out of an annotation at runtime, and `Workflow.params` is where the one narrowing
+    claim is made and argued.
+    """
+    parameters, hints = _hints(fn)
+    if not parameters:
+        raise InputError(
+            f"the workflow {_written_at(fn)} takes no parameters, and a workflow is one async "
+            f"function taking a `Run` (§3.3) - which is also where it declares its own parameters, "
+            f"now that `@workflow` takes only `version=`. Write `async def {fn.__qualname__}(run: "
+            f"Run[YourParams])`, or `run: Run` for a workflow that never reads `run.params`"
+        )
+    first = parameters[0]
+    if first not in hints:
+        raise InputError(
+            f"the workflow {_written_at(fn)} annotates nothing on its first parameter {first!r}, "
+            f"and that annotation is the one place a workflow declares its parameters (§3.3). An "
+            f"unannotated parameter is **not** read as a bare `Run`: the two say different things "
+            f"and only one of them was written down. Write `{first}: Run[YourParams]`, or "
+            f"`{first}: Run` for a workflow that never reads `run.params`"
+        )
+    annotation = hints[first]
+    origin = get_origin(annotation)
+    subject = annotation if origin is None else origin
+    if subject is Run:
+        arguments = get_args(annotation)
+        return arguments[0] if arguments else _NoParams
+    raise InputError(_not_a_run(fn, first, annotation, subject))
+
+
+def _not_a_run(fn: Callable[..., object], first: str, annotation: object, subject: object) -> str:
+    """Why an annotation that is not one of §3.3's two spellings cannot be read as params.
+
+    **A `Run` subclass is refused, and it is the interesting half of this refusal.** Nothing in the
+    framework builds one, `_child` is the only thing that constructs a `Run` at all after `api.py`
+    has built the root, and so a workflow annotated `MyRun[FixParams]` would be handed the `Run`
+    this framework makes and never the class it asked for - a promise the annotation makes and the
+    run breaks. Reading `FixParams` out of it anyway is worse than refusing: it would make the
+    annotation stop being the single source, because the thing it named and the thing the workflow
+    receives would be two, and every argument UF2.2 rests on is that they are one. A subclass is
+    also free to add type parameters of its own, at which point "the first argument" stops being a
+    rule and starts being a guess about which one meant the params.
+    """
+    if isinstance(subject, type) and issubclass(subject, Run):
+        return (
+            f"the workflow {_written_at(fn)} annotates {first!r} as {_describe(annotation)}, which "
+            f"is a subclass of `Run`. A workflow is handed the `Run` the framework builds, never a "
+            f"class of its own, so the annotation would be describing an object this run cannot "
+            f"produce - and the params are read from it precisely because it and the object agree. "
+            f"§3.3 gives two spellings and they are the whole list: `Run[YourParams]`, and a bare "
+            f"`Run` for a workflow that never reads `run.params`"
+        )
+    return (
+        f"the workflow {_written_at(fn)} annotates {first!r} as {_describe(annotation)}, and a "
+        f"workflow is one async function taking a `Run` (§3.3). That annotation is also where it "
+        f"declares its parameters, now that `@workflow` takes only `version=`, so this is not a "
+        f"style note: there is nothing here to read the params class out of. Write `{first}: "
+        f"Run[YourParams]`, or `{first}: Run` for a workflow that never reads `run.params`"
     )
 
 
+def _hints(fn: Callable[..., object]) -> tuple[list[str], Mapping[str, object]]:
+    """`fn`'s parameter names in order, and every annotation on it resolved through `fn.__globals__`
+    - which is what makes a params class declared *below* the workflow function resolvable, and what
+    makes an unimportable one an `InputError` here rather than a `NameError` out of the middle of a
+    run.
+
+    **Both reads are inside one guard, and `signature` is the surprising half.** Python 3.14
+    evaluates no annotation until something asks, and `inspect.signature` asks: it builds a
+    `Parameter` per argument with the annotation on it, so a first parameter naming a class nothing
+    binds raises `NameError` out of `signature` before `get_type_hints` is ever reached. Reading the
+    parameter names through some annotation-free path instead would only move the same failure to
+    the next line, so the two are taken together and refused together.
+
+    `sdk/params.py::_hints` is the same shape for the same situation one level down, where it is a
+    params class's own fields being read; this is the workflow function's parameter. Deliberately a
+    second copy and not an import: that one is about a dataclass and words its message about fields,
+    and a message shared between two refusals is a message neither of them can reword.
+    """
+    try:
+        return list(signature(fn).parameters), get_type_hints(fn)
+    except (NameError, TypeError) as error:
+        raise InputError(
+            f"the workflow {_written_at(fn)} has an annotation that cannot be resolved: {error}. "
+            f"Its first parameter is read for the params class it names (§3.3), so that annotation "
+            f"has to name something importable where it is written - a class defined below the "
+            f"function is fine, one that is never bound at all is not"
+        ) from error
+
+
+def _written_at(fn: Callable[..., object]) -> str:
+    """The function and the line its `def` is on, for every refusal above.
+
+    The file and line rather than the name alone, because the reader's next move is to edit that
+    annotation and a workflow package's own module is not where they are standing: these refusals
+    surface through `agl run`, at the first read of `wf.params`, and the name of a function in a
+    package the operator installed is not by itself somewhere to go. `__qualname__` and not
+    `__name__`, so that a workflow declared inside something else shows the `<locals>` that says so.
+    """
+    code = fn.__code__
+    return f"`{fn.__qualname__}` at {code.co_filename}:{code.co_firstlineno}"
+
+
 def _describe(thing: object) -> str:
-    """A class as `grep` finds it; anything that is not one at its own repr, which is what shows a
-    reader they passed an instance where the class belonged. `sdk/params.py` describes the same."""
+    """A class as `grep` finds it; anything that is not one - `Run[FixParams]`, `list[str]` - at its
+    own repr, which is how an annotation reads back closest to how it was typed."""
     if not isinstance(thing, type):
         return repr(thing)
     return f"{thing.__module__}.{thing.__qualname__}"

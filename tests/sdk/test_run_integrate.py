@@ -775,7 +775,7 @@ something to work around. The one test that reads it clears it first.
 """
 
 
-@workflow(name="walks-away", version="1", params=NoParams)
+@workflow(version="1")
 async def walks_away(run: Run[NoParams]) -> None:
     """A workflow that hits a conflict and simply ends, which is the case run exit is for.
 

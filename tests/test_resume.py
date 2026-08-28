@@ -167,7 +167,7 @@ interrupt: Final[list[str]] = []
 raised: Final[list[Stop]] = []
 
 
-@workflow(name="two_steps", version="1.1", params=ResumeParams)
+@workflow(version="1.1")
 async def two_steps(run: Run[ResumeParams]) -> None:
     """Two steps, with a place between them for the process to die.
 
@@ -183,14 +183,14 @@ async def two_steps(run: Run[ResumeParams]) -> None:
     produced.append(await run.step(second()))
 
 
-@workflow(name="quiet", version="1", params=NoParams)
+@workflow(version="1")
 async def quiet(run: Run[NoParams]) -> None:
     """Takes no step at all - the run for which §3.9's "`agl/<label>` is a real ref from run start"
     is only true if something above the first step provisioned `_base`."""
     handed.append(run)
 
 
-@workflow(name="halting", version="0.1", params=NoParams)
+@workflow(version="0.1")
 async def halting(run: Run[NoParams]) -> None:
     """Ends deliberately, with a reason of its own - which the framework must not rename."""
     handed.append(run)
@@ -199,13 +199,13 @@ async def halting(run: Run[NoParams]) -> None:
     raise stop
 
 
-@workflow(name="shifting", version="1.0", params=NoParams)
+@workflow(version="1.0")
 async def shifting_before(run: Run[NoParams]) -> None:
     """The workflow the record is stamped by. Registered under `shifting`."""
     handed.append(run)
 
 
-@workflow(name="shifting", version="2.0", params=NoParams)
+@workflow(version="2.0")
 async def shifting_after(run: Run[NoParams]) -> None:
     """The same entry-point name at another version - the installation a resume meets hours later.
 
@@ -216,13 +216,13 @@ async def shifting_after(run: Run[NoParams]) -> None:
     handed.append(run)
 
 
-@workflow(name="drifting", version="1.0", params=ResumeParams)
+@workflow(version="1.0")
 async def drifting_before(run: Run[ResumeParams]) -> None:
     """The params class the record is written from. Registered under `drifting`."""
     handed.append(run)
 
 
-@workflow(name="drifting", version="1.0", params=OtherParams)
+@workflow(version="1.0")
 async def drifting_after(run: Run[OtherParams]) -> None:
     """The same name and the **same version**, with the params renamed underneath - the one way a
     record can reach `params.from_json` disagreeing with the class, and the fault it names."""

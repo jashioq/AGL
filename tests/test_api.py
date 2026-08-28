@@ -108,13 +108,13 @@ handed: Final[list[Run[ProbeParams]]] = []
 raised: Final[list[Stop]] = []
 
 
-@workflow(name="probe", version="1.1", params=ProbeParams)
+@workflow(version="1.1")
 async def probe(run: Run[ProbeParams]) -> None:
     """Returns. The wiring probe stage 10 is about, with params it can be asserted on."""
     handed.append(run)
 
 
-@workflow(name="halting", version="0.1", params=NoParams)
+@workflow(version="0.1")
 async def halting(run: Run[NoParams]) -> None:
     """Ends deliberately, with a reason of its own - which the framework must not rename."""
     stop = ReviewNotConverging("two rounds and no convergence")
@@ -122,7 +122,7 @@ async def halting(run: Run[NoParams]) -> None:
     raise stop
 
 
-@workflow(name="stepping", version="0.1", params=NoParams)
+@workflow(version="0.1")
 async def stepping(run: Run[NoParams]) -> None:
     """Takes one step, so that the checkout `api.run` provisioned is asked for a second time.
 

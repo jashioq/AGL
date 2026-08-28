@@ -1230,7 +1230,7 @@ that reads it clears it first.
 """
 
 
-@workflow(name="raises-mid-conflict", version="1", params=NoParams)
+@workflow(version="1")
 async def raises_mid_conflict(run: Run[NoParams]) -> None:
     """A workflow that hits a conflict and then gives up by raising, mid-decision.
 

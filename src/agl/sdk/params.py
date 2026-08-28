@@ -303,7 +303,9 @@ def _field_names(params: object) -> tuple[str, ...]:
 
     Takes `object` so that `is_dataclass`'s type guard narrows nothing in the caller, where
     `params` has to stay the `type[T]` it was declared or the factory above loses its return type.
-    `sdk/workflow.py::_check_params` takes the same argument for the same reason.
+    The guard narrows to a dataclass type of typeshed's own naming and not to the `T` mypy solved
+    for at the call, so this parameter type is the whole of what keeps the two apart -
+    `sdk/tools.py::_check_payload` holds a `type[P]` out of the same guard's way for that reason.
     """
     if not is_dataclass(params):
         raise InputError(f"{_describe(params)} is not a dataclass of `arg()` fields (§3.3)")

@@ -72,7 +72,7 @@ class FlaggedParams:
 flagged_with: Final[list[FlaggedParams]] = []
 
 
-@workflow(name="flagged", version="1.1", params=FlaggedParams)
+@workflow(version="1.1")
 async def flagged(run: Run[FlaggedParams]) -> None:
     """Records what it was given, which is what makes "the resume was handed the record's params"
     visible from the argv side without this module reading a store."""

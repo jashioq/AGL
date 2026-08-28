@@ -247,7 +247,7 @@ def deciding(*, on_question: QuestionHandler | None = None) -> Role[Summary]:
     return Role(name=STEP, instructions=PROMPT, tools=(REPORT,), on_question=on_question)
 
 
-@workflow(name="negotiating", version="1", params=NoParams)
+@workflow(version="1")
 async def negotiating(run: Run[NoParams]) -> None:
     """A role whose handler answers from the workflow, without showing anybody anything.
 
@@ -269,7 +269,7 @@ async def negotiating(run: Run[NoParams]) -> None:
     reported.append(await run.step(deciding(on_question=on_question)))
 
 
-@workflow(name="approving", version="1", params=NoParams)
+@workflow(version="1")
 async def approving(run: Run[NoParams]) -> None:
     """§3.7's own example, spelled out: the handler shows the question and returns what came back.
 
@@ -292,7 +292,7 @@ async def approving(run: Run[NoParams]) -> None:
     reported.append(await run.step(deciding(on_question=on_question)))
 
 
-@workflow(name="unattended", version="1", params=NoParams)
+@workflow(version="1")
 async def unattended(run: Run[NoParams]) -> None:
     """The same role with the handler left off, and nothing else changed.
 

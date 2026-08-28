@@ -17,7 +17,7 @@ from instruments.preflight import NoParams, entered
 __all__ = ["late", "latecomer"]
 
 
-@workflow(name="late", version="1.1", params=NoParams)
+@workflow(version="1.1")
 async def late(run: Run[NoParams]) -> None:
     """Declared above the only role factory in its module, and preflight finds it anyway."""
     entered.append("late")

@@ -1,6 +1,16 @@
 """What §3.3's authoring model promises at stage 10: a decorated async function, and a typed `Run`.
 
-Four properties carry this suite.
+Five properties carry this suite.
+
+**Since UF2.2 the annotation is the declaration**, and the assertions below read it back rather than
+describing it. `@workflow(version="1.1")` is the whole line, `Workflow.params` resolves
+`run: Run[TicketsParams]` through `get_type_hints`, and a bare `Run` means a workflow with no
+parameters at all. Two things are pinned that prose cannot pin: that resolution is **lazy** - a
+params class declared *below* its own workflow function resolves, which is a test that goes red the
+moment the read moves back to decoration time - and that every way of failing to declare one is an
+`InputError` naming the function and the line, never a quiet fall back to "no params". The second is
+UF1's own failure one level up, where a scan that under-approximated in silence let a run start and
+die at its first step.
 
 **The narrowing `registry.load` performs is driven end to end**, through a hand-constructed
 `EntryPoint` pointing at this module - §3.3's registration line, resolved - because that is the
@@ -17,9 +27,12 @@ these are gates and not documentation. Both spellings §3.3 writes are pinned - 
 for a workflow that reads its parameters and a bare `Run` for one that does not.
 
 **Every refusal is an `InputError`**, asserted on the class and on the part of the message a reader
-acts on next. `@workflow`'s three argument checks run when the decorator is *built*, before it is
-applied, and the async check when it is applied - both at import time, where a package that cannot
-be invoked correctly should fail.
+acts on next. Two of them are at import time, where a package that cannot be invoked correctly
+should fail: the blank `version` when the decorator is *built*, before it is applied, and the
+`async def` check when it is applied. The other five are at the first read of `wf.params`, because
+UF2.2 made resolution lazy and left no earlier moment to make them in - and each of those is
+asserted to name the function *and* the source line, which is what a reader of a workflow package
+they did not write needs in order to have somewhere to go.
 
 **`Stop` is asserted to be the same class object**, not merely a compatible one. A copy would
 satisfy `except Stop` inside a workflow, resolve to 7 through `exit_code_for`, and then fail to be
@@ -28,11 +41,11 @@ deliberate end is reported as a crash.
 """
 
 import sys
-from collections.abc import Awaitable
-from dataclasses import dataclass, fields
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, fields, is_dataclass
 from importlib.metadata import EntryPoint
 from pathlib import Path
-from typing import Final, assert_type
+from typing import Final, assert_type, cast
 
 import pytest
 
@@ -78,7 +91,7 @@ class NoParams:
 _handed: Final[list[Run[TicketsParams]]] = []
 
 
-@workflow(name="tickets", version="1.1", params=TicketsParams)
+@workflow(version="1.1")
 async def tickets(run: Run[TicketsParams]) -> None:
     """§3.3's typed spelling. The two `assert_type` calls are this suite's real subject: they are
     checked by `mypy --strict` over `tests/`, and neither survives a `Run` that erased its
@@ -88,12 +101,42 @@ async def tickets(run: Run[TicketsParams]) -> None:
     _handed.append(run)
 
 
-@workflow(name="fix", version="1.1", params=NoParams)
+@workflow(version="1.1")
 async def fix(run: Run) -> None:
     """§3.3's `fix` example writes a bare `Run`, and this is that signature literally. It compiles
     only because `Run`'s type parameter has a PEP 696 default - `disallow_any_generics` is on - and
-    the default being `object` rather than `Any` is what makes the line below an error to remove."""
+    the default being `object` rather than `Any` is what makes the line below an error to remove.
+
+    Since UF2.2 this signature is also the *declaration* that this workflow has no parameters, and
+    it is the only one: there is no `params=` to contradict it with. Before UF2.2 this line carried
+    `params=NoParams` beside a bare `Run` and was the one declaration site in the whole repository
+    where the decorator and the annotation said different things - legally, `Run` being
+    covariant."""
     assert_type(run.params, object)
+
+
+@workflow(version="1.1")
+async def deferred(run: Run[DeferredParams]) -> None:
+    """A workflow whose params class is declared **below** it, which is why the class is.
+
+    This is UF2.2's laziness asserted by construction rather than by a test that could be written to
+    pass either way: `@workflow` runs at import, `DeferredParams` is not bound yet when it does, and
+    a resolver that read the annotation there would raise `NameError` and take this module's import
+    with it. Python 3.14 evaluates no annotation until something asks, so the `def` itself is fine;
+    `Workflow.params` is what asks, and it asks through `fn.__globals__`, where the class is by
+    then.
+
+    Declaration order is not exotic - a params class reads better beside the flags it declares than
+    above the workflow that never mentions it - so this is a shape an author reaches without
+    trying."""
+    assert_type(run.params, DeferredParams)
+
+
+@dataclass(frozen=True)
+class DeferredParams:
+    """Declared under its own workflow on purpose. See `deferred` above."""
+
+    request: str = arg("-r", "--request", help="what to build")
 
 
 @dataclass(frozen=True)
@@ -127,7 +170,7 @@ def reviewer() -> Role[Findings]:
     )
 
 
-@workflow(name="staffed", version="1.1", params=NoParams)
+@workflow(version="1.1")
 async def staffed(run: Run[NoParams]) -> None:
     """A workflow written beside two role factories and declaring neither, because since UF1.3
     there is nothing to declare: the two names above are bound in this module, and the module is
@@ -144,6 +187,61 @@ def _returns_an_awaitable(run: Run[NoParams]) -> Awaitable[None]:
     event loop. It type-checks as a workflow's function exactly, which is why the check that
     refuses it has to be at runtime."""
     raise AssertionError("`@workflow` refuses this before anything can call it")
+
+
+# --- the five ways a first parameter declares no params, none of which is read as "no params" ----
+#
+# Each is refused by mypy where it is written - four at the decoration site, and the unannotated one
+# at its own `def`, `disallow_untyped_defs` being on. That is the first line of defence and not the
+# only one: `@workflow` is read by whatever a workflow package's author ran, or did not run. They
+# are declared undecorated here and decorated inside `_params_of` below, so that the one `cast` this
+# file needs sits in one place with the argument for it.
+
+
+async def _takes_nothing() -> None:
+    """A workflow function with no parameters at all - not even the `Run` §3.3 hands it."""
+
+
+async def _unannotated(run) -> None:  # type: ignore[no-untyped-def]
+    """The one that matters most. A reader sees `run` and reads "a `Run`"; the resolver sees an
+    annotation that was never written, and the two must not be treated as the same statement."""
+
+
+async def _not_a_run(run: int) -> None:
+    """An annotation that resolves perfectly and is not a `Run`."""
+
+
+class _MyRun[P = object](Run[P]):
+    """A subclass of `Run`, which nothing in AGL builds and `_declared` therefore refuses."""
+
+
+async def _a_run_subclass(run: _MyRun[NoParams]) -> None:
+    """`_MyRun` names a params class and is still refused: the framework hands a workflow the `Run`
+    it built, so the annotation would be describing an object this run cannot produce."""
+
+
+async def _unresolvable(run: Run[Undeclared]) -> None:  # type: ignore[name-defined] # noqa: F821
+    """An annotation naming something nothing binds. Python 3.14 evaluates no annotation at the
+    `def`, so this file imports; `get_type_hints` is where the `NameError` arrives."""
+
+
+def _params_of(fn: Callable[..., Awaitable[None]]) -> type[object]:
+    """`@workflow` applied to `fn`, and `wf.params` then read - UF2.2's two moments, separated.
+
+    The decoration succeeds for all five: what `@workflow` still checks at import is the `version`
+    and that the object is a coroutine function, and every one of them is an `async def`. The
+    refusal arrives at the read, because a params class declared below its own workflow cannot be
+    resolved any earlier - which is the laziness `deferred` above depends on, seen from the failing
+    side.
+
+    The `cast` is this helper's whole reason for existing. Every function above is refused by mypy
+    where it is written, so none of them can be handed to `workflow()` in typed code at all; putting
+    the assertion behind one cast keeps that first line of defence intact everywhere else in this
+    file and still drives the second, which is what a package whose author skipped mypy gets.
+    """
+    declared = cast("Callable[[Run[object]], Awaitable[None]]", fn)
+    wf: Workflow[object] = workflow(version="1.1")(declared)
+    return wf.params
 
 
 def _services(tmp_path: Path) -> Services:
@@ -180,7 +278,7 @@ def test_a_decorated_async_function_is_a_workflow_object() -> None:
     """The decorated name *is* the entry point's target, so it has to be the `Workflow` itself."""
     assert isinstance(tickets, Workflow)
     assert_type(tickets, Workflow[TicketsParams])
-    assert (tickets.name, tickets.version, tickets.params) == ("tickets", "1.1", TicketsParams)
+    assert (tickets.version, tickets.params) == ("1.1", TicketsParams)
 
 
 def test_the_decorator_holds_the_function_unwrapped() -> None:
@@ -191,8 +289,8 @@ def test_the_decorator_holds_the_function_unwrapped() -> None:
 # --- what the decorator no longer takes, and where preflight looks instead -----------------------
 
 
-def test_a_workflow_holds_four_facts_and_every_one_of_them_is_about_the_function() -> None:
-    """UF1.3's whole content, read off the class rather than off its prose.
+def test_a_workflow_holds_a_version_and_a_function_and_derives_the_rest() -> None:
+    """UF1.3's whole content, UF2.1's and UF2.2's, read off the class rather than off their prose.
 
     16.1's `roles` field was the one member here that was not a fact about `fn`, and it existed
     because §3.2's preflight had no other way to see a role before a run started: roles are built
@@ -200,9 +298,21 @@ def test_a_workflow_holds_four_facts_and_every_one_of_them_is_about_the_function
     dissolved that - a role is a `@role(model=…)` factory carrying its model on the object bound at
     import - and this is the line that says the field went with it.
 
-    Over `dataclasses.fields` and not over three `hasattr`s, so that a *fifth* member arriving here
-    fails this test rather than passing it silently."""
-    assert [held.name for held in fields(Workflow)] == ["name", "version", "params", "fn"]
+    `name` went at UF2.1 and for the opposite reason: it was not a declaration of something readable
+    elsewhere but a second name for what the entry-point key already names, agreeing with it by
+    convention and compared with it by nothing. The key is the name now, and there is no copy.
+
+    `params` went at UF2.2 and went a third way again - not deleted but **derived**. It is still
+    `wf.params` and still a `type[P]`; what changed is that no caller supplies it, because the
+    annotation on `fn`'s own first parameter already says it and mypy already enforces that. So two
+    fields are left, and the second one is what the read is over.
+
+    Over `dataclasses.fields` and not over a `hasattr` apiece, so that a *third* field arriving here
+    fails this test rather than passing it silently - and `params` is deliberately not in the list
+    that follows, a property being exactly the difference between a fact this class is told and one
+    it can work out."""
+    assert [held.name for held in fields(Workflow)] == ["version", "fn"]
+    assert isinstance(vars(Workflow)["params"], property)
 
 
 def test_the_registry_preflight_reads_is_the_module_the_function_was_written_in() -> None:
@@ -251,6 +361,11 @@ async def test_the_chain_api_py_will_write_carries_no_any(tmp_path: Path) -> Non
     generic class in `type[T]` position; passing `Workflow[object]` as `kind` instead is not
     available, `isinstance` refusing a subscripted generic. Everything downstream then follows at
     `object`, which is the honest type for "some workflow's params, and this code does not care".
+
+    The workflow is `fix`, so the chain is walked over the *bare*-`Run` end of it: `wf.params` is
+    the empty class UF2.2 resolves a bare `Run` to, and the last line is what says so without
+    naming a private class. Two parses of one params class produce equal instances, which is
+    exactly what `object` - `Run[P]`'s static default, and not a dataclass - would not do.
     """
     wf: Workflow[object] = registry.load([_point("fix", "fix")], "fix", Workflow)
     assert_type(wf.params, type[object])
@@ -259,7 +374,7 @@ async def test_the_chain_api_py_will_write_carries_no_any(tmp_path: Path) -> Non
     run = _run(params, tmp_path)
     assert_type(run, Run[object])
     await wf.fn(run)
-    assert run.params == NoParams()
+    assert run.params == parse(wf.params, [])
 
 
 # --- `run.params`, and the bundle beside it ----------------------------------------------------
@@ -392,39 +507,148 @@ def test_a_broad_except_aglerror_catches_stop_which_is_why_ordering_matters() ->
             raise
 
 
-# --- refusals, every one of them an InputError at import time ----------------------------------
+# --- the params, read off the annotation the author already wrote (UF2.2) ----------------------
 
 
-@pytest.mark.parametrize("name", ["", "   "])
-def test_a_blank_workflow_name_is_refused(name: str) -> None:
-    """Refused when the decorator is built, before it is applied to anything."""
-    with pytest.raises(InputError, match="name is required"):
-        workflow(name=name, version="1.1", params=NoParams)
+def test_a_subscripted_run_declares_the_class_it_names() -> None:
+    """`run: Run[TicketsParams]` and `wf.params is TicketsParams`, which is the whole mechanism.
+
+    The annotation was already load-bearing before UF2.2 - `run.params.concurrent` is an `int`
+    because of it, and misspelling that field is an error mypy reports today - so reading it back is
+    a read of the declaration and not an inference from a coincidence. What went away is the second
+    copy that used to sit on the decorator beside it."""
+    assert tickets.params is TicketsParams
+    assert_type(tickets.params, type[TicketsParams])
+
+
+def test_a_bare_run_means_no_params_and_not_the_absence_of_a_declaration() -> None:
+    """§3.3 writes `async def fix(run: Run) -> None` for a workflow that never reads its params, and
+    that is the one spelling that legitimately means "none" - `Run[P]`'s PEP 696 default.
+
+    What it resolves to is a params class like any other, because `params.parse`, `parser_for`,
+    `to_json` and `from_json` all require a dataclass and UF2.2 relaxed none of them. `object` is
+    `Run[P]`'s static default and is not a dataclass, so resolving to it would have made every
+    `agl run` on a params-less workflow refuse a workflow that had declared itself correctly."""
+    assert is_dataclass(fix.params)
+    assert fields(fix.params) == ()
+
+
+def test_agl_run_on_a_params_less_workflow_parses_an_empty_line_and_no_other() -> None:
+    """The half of "no params" that a `type[object]` would have got wrong in both directions.
+
+    An empty argv parses, which is what makes `agl run fix -n auth` a run rather than an exit 2; and
+    a flag nobody declared is still refused, which is what an ignored-argument reading would have
+    lost. `parse` is the very function `api.run` calls, so this is the command line and not a
+    stand-in for it."""
+    assert parse(fix.params, []) == parse(fix.params, [])
+    with pytest.raises(InputError, match="unrecognized arguments"):
+        parse(fix.params, ["--anything"])
+
+
+def test_a_params_class_declared_below_its_own_workflow_resolves() -> None:
+    """UF2.2's laziness, and the test that goes red if the read moves back to decoration time.
+
+    `DeferredParams` is declared *under* `deferred`, so it is not bound when `@workflow` runs. A
+    resolver that read the annotation there would raise `NameError` - turned into `InputError` by
+    `_hints` - and this module's import would fail, taking every test in the file with it. That is
+    the failure mode this asserts against: not a wrong answer, an unimportable package.
+
+    `get_type_hints(fn)` is what makes it work, because it resolves through `fn.__globals__` - the
+    module's namespace as it is *now*, not as it was when the decorator returned."""
+    assert deferred.params is DeferredParams
+    assert parse(deferred.params, ["-r", "add oauth"]) == DeferredParams(request="add oauth")
+
+
+# --- refusals: two at import time, and five at the first read of `params` -----------------------
+
+
+def _refused(fn: Callable[..., Awaitable[None]]) -> str:
+    """The message `wf.params` refuses `fn` with, having first checked what every one of them has to
+    say: **the function and the source line its `def` is on**.
+
+    Both, and neither is decoration. These refusals surface through `agl run`, about a package the
+    operator installed and did not write, so a name with no file beside it is a name with nowhere to
+    go - and a file with no line is a module docstring to scroll past. `co_filename` and
+    `co_firstlineno` are read off the same function the message was built from, so a test here
+    cannot drift from a source line the way a hard-coded number would.
+    """
+    with pytest.raises(InputError) as refusal:
+        _params_of(fn)
+    message = str(refusal.value)
+    assert fn.__qualname__ in message
+    assert f"{fn.__code__.co_filename}:{fn.__code__.co_firstlineno}" in message
+    return message
 
 
 @pytest.mark.parametrize("version", ["", "\t"])
 def test_a_blank_version_is_refused(version: str) -> None:
     """`RunSpec.workflow_version` refuses an empty one, so a run declared this way could not be
-    recorded - which is the argument for the field being a required keyword at all."""
+    recorded - which is the argument for the field being a required keyword at all.
+
+    Refused when the decorator is built, before it is applied to anything - and since UF2.2 it is
+    one of the two things still refused there, the other being the `async def` below. Its sibling
+    over a blank `name` went with the parameter at UF2.1: a workflow's name is the entry-point key,
+    and what a key may be is the registry's judgement rather than this decorator's. Its sibling over
+    `params=` went at UF2.2, where the checks moved to the read because the annotation they are
+    about cannot be resolved any earlier."""
     with pytest.raises(InputError, match="version is required"):
-        workflow(name="fix", version=version, params=NoParams)
-
-
-def test_a_params_type_that_is_not_a_dataclass_is_refused() -> None:
-    with pytest.raises(InputError, match="dataclass of `arg\\(\\)` fields"):
-        workflow(name="fix", version="1.1", params=str)
-
-
-def test_an_instance_where_the_params_class_belongs_is_refused() -> None:
-    """mypy refuses this at the decoration site, which is the first line of defence and not the
-    only one: `@workflow` is read by whatever a workflow package's author ran, or did not run."""
-    with pytest.raises(InputError, match="never an instance"):
-        workflow(name="fix", version="1.1", params=NoParams())  # type: ignore[arg-type]
+        workflow(version=version)
 
 
 def test_a_function_that_is_not_a_coroutine_function_is_refused() -> None:
     """No `type: ignore` here on purpose: `_returns_an_awaitable` satisfies the declared parameter
     type exactly, and mypy has nothing to say about it. That is the whole case for the check."""
-    declare = workflow(name="fix", version="1.1", params=NoParams)
+    declare = workflow(version="1.1")
     with pytest.raises(InputError, match="async def"):
         declare(_returns_an_awaitable)
+
+
+def test_a_workflow_function_taking_no_parameters_is_refused() -> None:
+    """There is nowhere for a params class to be declared, and nothing to hand a `Run` to."""
+    assert "takes no parameters" in _refused(_takes_nothing)
+
+
+def test_an_unannotated_first_parameter_is_not_read_as_a_bare_run() -> None:
+    """The refusal this deliverable exists to make, and the one a default would have swallowed.
+
+    `async def w(run)` looks like a `Run` to a reader and is not a declaration to anything else.
+    Reading it as a bare `Run` would hand the workflow an empty params class and refuse every flag
+    the author meant to declare - at the parse, about the flag, and never about the annotation. So
+    it is refused here, where the sentence can name the line to edit. It is the exact shape of UF1's
+    own failure one level up: a scan that under-approximated in silence, so preflight asked about no
+    models and the run died at its first step instead of before it started."""
+    assert "annotates nothing on its first parameter" in _refused(_unannotated)
+
+
+def test_a_first_parameter_that_is_not_a_run_is_refused() -> None:
+    """An annotation that resolves perfectly and names something a workflow is never handed."""
+    assert "async function taking a `Run`" in _refused(_not_a_run)
+
+
+def test_a_run_subclass_is_refused_rather_than_read_through() -> None:
+    """`_MyRun[NoParams]` names a params class and is still refused, which is the deliberate half.
+
+    §3.3 gives two spellings and a subclass is neither. Nothing in AGL constructs one - `api.py`
+    builds the root and `_child` cuts the rest - so the annotation would be promising an object this
+    run cannot produce, and reading the params out of it anyway would make the annotation stop being
+    the single source: the class it names and the class the workflow receives would be two things
+    again, which is the disagreement UF2.2 removed. A subclass is also free to add type parameters
+    of its own, at which point "the first argument" is a guess about which one meant the params."""
+    assert "subclass of `Run`" in _refused(_a_run_subclass)
+
+
+def test_an_annotation_naming_something_unresolvable_is_refused_as_an_input_error() -> None:
+    """`get_type_hints` raises `NameError` here, and a workflow package's typo is not a crash.
+
+    `sdk/params.py::_hints` catches the same two exceptions for the same situation one level down -
+    a params class whose own field annotations will not resolve - and this is that shape reused
+    rather than reinvented, with the original chained so the traceback still shows the name."""
+    assert "cannot be resolved" in _refused(_unresolvable)
+
+
+def test_the_original_error_is_chained_onto_the_refusal() -> None:
+    """`raise ... from error`, so `NameError: name 'Undeclared' is not defined` is still in the
+    traceback under the sentence that explains what it meant."""
+    with pytest.raises(InputError) as refusal:
+        _params_of(_unresolvable)
+    assert isinstance(refusal.value.__cause__, NameError)

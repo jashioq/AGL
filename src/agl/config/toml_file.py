@@ -77,9 +77,10 @@ repository - run `agl init`" would then be a lie told to somebody who already di
 `adapters.git`: config resolves the project *before* the container exists, so an adapter answer
 would need the object that has not been built yet - and constructing adapters is 9.4's exclusive
 privilege, enforced by import-linter contract 5. `.git` is tested for existence and not for being a
-directory, because a linked worktree or a submodule writes a `gitdir:` *file* there. Paths are
-compared resolved, so a repository reached through a symlink and the same repository reached
-directly are one project.
+directory, because a linked worktree or a submodule writes a `gitdir:` *file* there. Whether that
+root and a registered `repo` are one directory is then put to the filesystem rather than to string
+equality, so a repository reached by a second route - a symlink, or a spelling in another case on a
+case-insensitive volume - is one project; `resolve_project` argues that at length.
 
 ## The writer sits beside the reader, and the pair is one round trip (16.4)
 
@@ -505,9 +506,17 @@ def resolve_project(home: AglHome, start: Path) -> FileProject:
     answer down - the behaviour §1.10 complains about is `load_project` being called inside every
     command, and the scan below is bounded and cheap exactly once.
 
-    Both paths are resolved before they are compared, so a repository reached through a symlink and
-    the same repository reached directly are one project. Files are read in sorted order and the
-    first match wins.
+    **The two paths are compared by asking the filesystem, not by comparing text.** The question is
+    whether a registered `repo` and this git root are the same directory, and `samefile` - device
+    and inode - is what answers it; a repository reached through a symlink and the same repository
+    reached directly are one project, and so are two spellings that differ only in case on the
+    case-insensitive volume macOS formats by default. `Path.resolve()` spends symlinks and `..` but
+    leaves the spelling alone, so `==` on two resolved paths turns `cd ~/Dev/myapp` registered and
+    `cd ~/dev/myapp` typed into "no project is registered" for a repository that is. A `.lower()`
+    fold would only trade that guess for another one - wrong on a case-sensitive volume, and wrong
+    about Unicode normalisation on either - while the filesystem already knows.
+
+    Files are read in sorted order and the first match wins.
     """
     root = git_root(start)
     for candidate in _project_files(home):
@@ -515,8 +524,18 @@ def resolve_project(home: AglHome, start: Path) -> FileProject:
         if document is None:
             continue  # Deleted between the listing and the read. Not this invocation's business.
         project = _project(candidate, document)
-        if project.repo is not None and project.repo.resolve() == root:
-            return project
+        if project.repo is None:
+            continue
+        try:
+            if project.repo.samefile(root):
+                return project
+        except OSError:
+            # `samefile` stats both sides and `root` is one `git_root` just walked to, so the side
+            # that can be gone is the registered `repo`: a project whose repository was deleted or
+            # is on an unmounted volume. That is one stale registration, not a reason to refuse the
+            # rest of the listing - the same judgement `_document` makes a few lines above, and the
+            # same answer `==` gave here before anything stat'ed anything.
+            continue
     raise NotFoundError(
         f"no project is registered for the repository at {root}: AGL read every project settings "
         f"file under {home.path} and none of them names it as its repo. Run `agl init` inside "

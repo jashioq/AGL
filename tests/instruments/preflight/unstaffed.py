@@ -18,7 +18,7 @@ from instruments.preflight import NoParams, entered
 __all__ = ["unstaffed"]
 
 
-@workflow(name="unstaffed", version="1.1", params=NoParams)
+@workflow(version="1.1")
 async def unstaffed(run: Run[NoParams]) -> None:
     """Runs on a machine where no harness is installed, because its module names no model."""
     entered.append("unstaffed")

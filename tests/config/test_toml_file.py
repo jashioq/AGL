@@ -608,6 +608,52 @@ def test_a_registered_repo_spelled_through_a_symlink_still_matches(tmp_path: Pat
     assert resolve_project(home, root).name == ProjectName("myapp")
 
 
+def test_a_repository_spelled_in_another_case_is_the_same_project(tmp_path: Path) -> None:
+    """One directory reached by two spellings, and the filesystem is what says they are one.
+
+    `agl init` records the repository as the operator spelled it that day; `Dev` on Monday and `dev`
+    on Tuesday are one directory on a case-insensitive volume and two unequal strings, which is the
+    day-one failure a comparison of resolved paths hands somebody who did nothing unusual.
+
+    The probe is the truth and the platform name would be a guess - a case-sensitive volume can be
+    mounted anywhere, macOS included. Where it says the volume *is* case-sensitive there is nothing
+    to skip past: the two spellings are then two different directories, only one of them holds a
+    `.git` entry, and the collision this pins cannot arise at all.
+    """
+    (tmp_path / "Probe").mkdir()
+    if not (tmp_path / "probe").exists():
+        pytest.skip("this volume is case-sensitive, so the two spellings are two directories")
+    home = _home(tmp_path)
+    _register(home, "myapp", _repo(tmp_path, "Myapp"))
+    assert resolve_project(home, tmp_path.resolve() / "myapp").name == ProjectName("myapp")
+
+
+def test_a_project_registered_for_a_repository_that_is_gone_is_skipped(tmp_path: Path) -> None:
+    """A registration whose repository no longer exists is stale, not a refusal for everyone else.
+
+    `aaa.toml` sorts first and names a directory that was deleted or is on a volume nobody mounted
+    today, so the identity question cannot be answered about it. The scan carries on to the project
+    that *is* here - the same judgement made for a file that disappears between the listing and the
+    read, and the same answer the comparison gave when it was string equality over resolved paths.
+    """
+    home = _home(tmp_path)
+    root = _repo(tmp_path, "myapp")
+    _register(home, "aaa", tmp_path.resolve() / "deleted-last-week")
+    _register(home, "myapp", root)
+    assert resolve_project(home, root).name == ProjectName("myapp")
+
+
+def test_a_listing_of_nothing_but_stale_registrations_is_still_not_found(tmp_path: Path) -> None:
+    """And when the stale one is all there is, the operator gets the message, not an `OSError`."""
+    home = _home(tmp_path)
+    root = _repo(tmp_path, "myapp")
+    _register(home, "aaa", tmp_path.resolve() / "deleted-last-week")
+    with pytest.raises(NotFoundError) as raised:
+        resolve_project(home, root)
+    assert "no project is registered" in str(raised.value)
+    assert str(root) in str(raised.value)
+
+
 def test_a_git_repository_no_project_file_names_is_not_found(tmp_path: Path) -> None:
     """The second absence, with its own message: a repository, simply not a registered one."""
     home = _home(tmp_path)

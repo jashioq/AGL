@@ -705,8 +705,14 @@ def _item(hint: object) -> object | None:
 
 def _check_payload(payload: object, name: str) -> None:
     """That the payload is a dataclass *class*. Takes `object` so that `is_dataclass`'s type guard
-    narrows nothing in the caller, where `payload` has to stay the `type[P]` it was declared -
-    `sdk/workflow.py::_check_params` is the same check for the same reason."""
+    narrows nothing in the caller, where `payload` has to stay the `type[P]` it was declared.
+
+    **The class half is checked here because a payload is still passed**, and since UF2.2 that is
+    what tells this check apart from the one `sdk/workflow.py` used to make in the same words. A
+    params class is now read off the workflow function's own first parameter, and an annotation
+    *is* a type - an instance where the class belonged is not something an author can write there
+    any more. A payload is an ordinary argument to `reporting_tool()`, which takes either equally
+    happily, so this is the layer the mistake still lives at."""
     if isinstance(payload, type) and is_dataclass(payload):
         return
     raise InputError(

@@ -454,7 +454,7 @@ def _agent(record: _Agent) -> Script:
 # --- the workflows, reached through hand-constructed entry points ---------------------------------
 
 
-@workflow(name="deciding", version="1", params=NoParams)
+@workflow(version="1")
 async def deciding(run: Run[NoParams]) -> None:
     """§3.4's conflict snippet, run - and the middle line of it is what 15.3 is.
 
@@ -511,7 +511,7 @@ async def deciding(run: Run[NoParams]) -> None:
             await outcome.abort()
 
 
-@workflow(name="contested", version="1", params=NoParams)
+@workflow(version="1")
 async def contested(run: Run[NoParams]) -> None:
     """Two children asking, a third one landing, and the parent's own next step behind all of it.
 

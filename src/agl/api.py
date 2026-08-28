@@ -224,14 +224,25 @@ notwithstanding, so the call site writes `wf: Workflow[object]` and the `Any` st
 Everything downstream then follows at `object`, which is the honest type for "some workflow's
 params, and this module does not care which".
 
-## `RunSpec.workflow` records the name that was typed, not `wf.name`
+**And since UF2.2 `wf.params` is a read rather than a field**, which changes nothing about the type
+and adds one thing to what these functions can raise. `@workflow` takes only `version=`; the params
+class is the annotation on the workflow function's own first parameter, resolved when `wf.params` is
+asked for, because a params class declared below its own workflow is not bound any earlier. So a
+workflow package that declares its parameters wrongly - an unannotated `run`, an annotation that is
+not a `Run`, one naming a class nothing binds - is an `InputError` out of the three lines below that
+read `wf.params`, at the same exit 2 as a flag they refuse and for the same reason: a package the
+operator installed said something AGL could only read. Nothing here catches it and nothing here has
+to know the shape of it; `sdk/workflow.py` holds every one of those refusals.
 
-The two are the same string by convention and nothing here compares them, which `sdk/workflow.py`
-notes is a comparison only this module could make. It is deliberately not made, because the field's
-job settles which of the two belongs in it: `resume` reads `run.json` and asks the registry for that
-workflow again, and the registry indexes by the **entry-point key**. Storing what the workflow calls
-itself would produce a record that resumes only while the two agree, and fails with "no workflow
-named ..." on the day a package renames one of them - naming the string the operator never typed.
+## `RunSpec.workflow` records the name that was typed
+
+Which is the entry-point key, and since UF2.1 it is the only name there is: a `Workflow` used to
+carry one of its own, agreeing with this one by convention and compared with it by nothing. While
+there were two, the field's job is what settled which of them belonged in it, and that job has not
+changed. `resume` reads `run.json` and asks the registry for that workflow again, and the registry
+indexes by the **entry-point key**. Storing what a workflow called itself would have produced a
+record that resumes only while the two agree, and fails with "no workflow named ..." on the day a
+package renames one of them - naming the string the operator never typed.
 
 ## What `resume` does, in order, and the one thing it deliberately does not
 
@@ -491,7 +502,9 @@ async def run(
     line cannot see the repository, so `History` is what answers.
 
     Raises, and nothing else reports: `NotFoundError` for a name nothing registers (exit 3),
-    `InputError` for flags the workflow's params refuse (exit 2), `ConflictError` for a label that
+    `InputError` for flags the workflow's params refuse and for a workflow whose first parameter
+    does not declare a params class at all (exit 2, and since UF2.2 both come off the same line),
+    `ConflictError` for a label that
     already has a record, for a deliverable branch that already exists, and for a run of this label
     that is live in another process (exit 4), `DeniedError` for a role requiring a capability its
     backend does not offer (exit 5 - something reachable said no, and `ports/errors.py` names this
@@ -502,7 +515,10 @@ async def run(
     """
     wf: Workflow[object] = registry.load(_points(points), name, Workflow)
     # Parsed before any port is touched: a flag the workflow will not accept costs nothing to
-    # refuse here and would otherwise be discovered after a record had been written for it.
+    # refuse here and would otherwise be discovered after a record had been written for it. Since
+    # UF2.2 `wf.params` is itself a read of the workflow function's first annotation, so this is
+    # also where a package that declared its parameters wrongly is refused - one line earlier than
+    # the flags, in the same place, at the same exit code.
     given = params.parse(wf.params, argv, prog=f"agl run {name}")
 
     scope = RunScope(project, label)
@@ -696,7 +712,8 @@ async def resume(
     mirror of `run`'s refusal of one that has, and the two messages are written as a pair) and for a
     workflow the record names that nothing registers, `ConflictError` for a record whose
     `workflow_version` is not the installed workflow's (exit 4), `InputError` for a record whose
-    params that workflow's current class will not take (exit 2, `sdk/params.py`'s refusal),
+    params that workflow's current class will not take (exit 2, `sdk/params.py`'s refusal) and for a
+    workflow whose first parameter no longer declares one (exit 2, `sdk/workflow.py`'s),
     `DeniedError` and `UpstreamUnavailable` out of preflight exactly as `run` raises them, and
     whatever the workflow itself raises, untouched - a `Stop` subclass included, which is §3.1's
     ordering criterion and is as true of this function as of `run`, for the same reason: there is
@@ -724,10 +741,11 @@ async def resume(
         )
     spec = RunSpec.from_json(record)
 
-    # `spec.workflow` and never `wf.name`, which is the field's whole job: the registry indexes by
-    # the entry-point key, so a record storing what a workflow calls itself would resume only while
-    # the two agree and would fail naming a string the operator never typed. The module docstring
-    # argues it where the record is written.
+    # `spec.workflow`, which is the entry-point key `run` was given and the field's whole job: the
+    # registry indexes by that key, so a record storing what a workflow called itself would resume
+    # only while the two agreed and would fail naming a string the operator never typed. UF2.1 took
+    # the second name off `Workflow`, so there is no longer another string to reach for here. The
+    # module docstring argues it where the record is written.
     wf: Workflow[object] = registry.load(_points(points), spec.workflow, Workflow)
 
     # §3.11's schema migration in one line: "stamp the version, refuse on mismatch. Runs live
@@ -1160,7 +1178,8 @@ def workflow_help(name: str, *, points: Iterable[EntryPoint] | None = None) -> s
 
     Raises, and nothing else reports: `NotFoundError` for a name nothing registers (exit 3, listing
     what is registered), `InputError` for an entry point that will not load or loads the wrong
-    object and for a params class `parser_for` refuses (exit 2), and `ConflictError` for a name two
+    object, for a first parameter that declares no params class and for a params class `parser_for`
+    refuses (exit 2), and `ConflictError` for a name two
     installed packages both register (exit 4) - every one of them the registry's own, unwrapped.
 
     Sync, because it awaits nothing. It does import a package, which is the difference from
