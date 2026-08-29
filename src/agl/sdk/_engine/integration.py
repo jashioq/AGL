@@ -114,23 +114,33 @@ class Integration:
     def verdict(self) -> VerifierOutcome | None:
         return self._verdict
 
+    @property
+    def refused_by_the_gate(self) -> bool:
+        return self._conflict is not None and self._verdict is not None
+
     async def retry(self) -> None:
         if self._settled:
             raise InternalError(_nothing_to_retry(self._head))
-        outcome: IntegrationOutcome | None = None
         try:
-            outcome = await self._integrator.retry(self._target)
-        except InternalError:
-            outcome = None
-        if outcome is None:
-            outcome = await self._integrator.land(self._source, self._target)
-        await self._concluded(outcome, again=False)
+            outcome: IntegrationOutcome | None = None
+            try:
+                outcome = await self._integrator.retry(self._target)
+            except InternalError:
+                outcome = None
+            if outcome is None:
+                outcome = await self._integrator.land(self._source, self._target)
+            await self._concluded(outcome, again=False)
+        except BaseException:
+            self._settle()
+            raise
 
     async def abort(self) -> None:
         if self._settled:
             return
-        await self._integrator.abort(self._target)
-        self._settle()
+        try:
+            await self._integrator.abort(self._target)
+        finally:
+            self._settle()
 
     async def _concluded(self, outcome: IntegrationOutcome, *, again: bool) -> None:
         if outcome.conflicted:
@@ -214,7 +224,10 @@ def _nothing_to_retry(head: str | None) -> str:
     ended = (
         f"it landed, and the target is at {head!r}"
         if head is not None
-        else "it was aborted, and the hold was released"
+        else (
+            "nothing landed - it was aborted, or one of these two verbs raised on its way out - "
+            "and whatever the target was holding may still be there for a later landing to find"
+        )
     )
     return (
         f"this integration is over - {ended} - so there is nothing left to try again. `retry` is "

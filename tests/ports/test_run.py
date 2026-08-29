@@ -258,6 +258,53 @@ def test_a_surrogate_ids_refuses_in_a_name_is_refused_here_too_and_nothing_else_
         assert replace(_SPEC, params=one_param).params == one_param
 
 
+def test_the_ref_a_run_starts_from_is_checked_the_way_a_param_is() -> None:
+    """The third seam, and the one nothing walked: a `str` field of the record itself.
+
+    The two seams above are a *step's* inputs and a run record's `params`, and both are values
+    somebody put inside a container this module or `journal.py` walks. `base_ref` is neither. It is
+    a field of `RunSpec`, it goes into `to_json()` verbatim with nothing between it and
+    `Store.write_record`, and there `FilesystemStore._encoded` does `text.encode("utf-8")` - a
+    `UnicodeEncodeError`, which is a `ValueError`, which both stores translate into `InternalError`.
+    Exit 70 for a string a person typed, which is why the check belongs here beside `_check_sha`
+    rather than at the port that would report it as AGL's own bug.
+
+    **The path is real, and the range of the surrogate is what makes it real.** `agl run --from
+    <ref>` is read off `sys.argv`, which Python decodes with `surrogateescape`, so an undecodable
+    byte on the command line mints exactly one lone surrogate and only ever in `\\udc80`-`\\udcff`.
+    Those are precisely the ones `os.fsencode` maps back to the original byte, so `api.run` hands
+    the string to `history.resolve`, `git rev-parse` receives the bytes that were typed, and git
+    refnames permit any byte at or above `0x80` - so a repository can genuinely hold the ref, git
+    resolves it, and the surrogate rides into the record. A surrogate outside that range cannot
+    come off a command line at all: `os.fsencode` refuses it, and the subprocess never starts.
+    `resolve` runs *before* `RunSpec` is built, so nothing upstream of this line refuses it either.
+
+    **`workflow` and `workflow_version` are deliberately not checked, and this is where that is
+    written down** so it is not re-proposed as an oversight. `workflow` is whatever
+    `registry.load` matched against the installed entry points, and an unmatched name is a
+    `NotFoundError` before any record exists; entry point names are read from package metadata as
+    UTF-8 and cannot carry one. `workflow_version` is a literal in a workflow author's own source,
+    which is code being installed rather than input arriving. Neither reaches this field from
+    outside, and a check that cannot fire is a claim nobody can maintain.
+    """
+    for surrogate in ("\udcff", "weird\udcffname", "\ud800", "refs/heads/\udc80"):
+        with pytest.raises(InputError, match="surrogate") as given:
+            replace(_SPEC, base_ref=surrogate)
+        assert exit_code_for(given.value) == 2, _WRONG_EXIT
+
+    with pytest.raises(InputError, match="surrogate") as read_back:
+        RunSpec.from_json({**_WIRE, "base_ref": "weird\udcffname"})
+    assert exit_code_for(read_back.value) == 2, _WRONG_EXIT
+
+    for spelled in ("main", "refs/heads/main", "v1.0.0^{commit}", "caf\u00e9", "\U0001f34c", "a b"):
+        assert replace(_SPEC, base_ref=spelled).base_ref == spelled, (
+            "a ref git is perfectly happy with was refused. The rule here is category Cs and "
+            "nothing else - what a ref may be spelled like is git's to say, not this module's"
+        )
+    landed = json.loads(json.dumps(replace(_SPEC, base_ref="caf\u00e9").to_json()))
+    assert landed["base_ref"] == "caf\u00e9", "the field must survive the encoder it is refused for"
+
+
 # --- The pin ------------------------------------------------------------------------------------
 
 

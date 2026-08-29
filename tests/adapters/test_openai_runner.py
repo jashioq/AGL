@@ -65,6 +65,8 @@ measurement behind a variable is how a measurement stops being made.
     it cannot make a run reach a limit and has no second source for the fact).
   * **The tools and the questions**, driven against the adapter's own MCP server with no CLI - the
     round trip, the refusal, both question edge cases, and a handler that raises.
+  * **The two members preflight asks**, ending with a probe that never answers: its deadline, the
+    one exception class preflight catches, and whether the group it started is still running.
 
 Named `test_openai_runner.py`, for the module it covers: `tests/` carries no `__init__.py` (see
 `tests/conftest.py` for why it must not), so pytest's module names are the bare filenames and two
@@ -76,9 +78,12 @@ import asyncio
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
-from collections.abc import Mapping, Sequence
+import time
+from collections.abc import Iterable, Mapping, Sequence
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, Final, NoReturn
 
@@ -150,13 +155,24 @@ _RECORD: Final = "record.json"
 
 # The stub, written to disk and handed to the adapter as its CLI. It is deliberately small and
 # deliberately *not* a harness: it records, it plays back, and it can call an MCP tool.
+#
+# It can also *wedge*, which is the one thing here that is not a stand-in for the harness doing its
+# job but a stand-in for it failing to. `login status` reads a credential store, and a credential
+# store can block - a keychain prompt with nobody at the machine, an authentication agent that has
+# stopped answering - so a probe that hangs is a real state of a real machine and not a hypothesis.
+# The wedged branch starts a grandchild before it sleeps and writes both pids down, because the
+# question a deadline has to answer is not only "did the call come back" but "is anything still
+# running", and a grandchild is what tells a process signal from a group one.
+
 _STUB: Final = '''#!{python}
 """A stand-in for the harness, written by tests/adapters/test_openai_runner.py."""
 
 import json
 import os
 import pathlib
+import subprocess
 import sys
+import time
 import urllib.request
 
 PLAN = pathlib.Path({plan!r})
@@ -217,6 +233,14 @@ def main():
     try:
         if sys.argv[1:2] == ["login"]:
             login = plan["login"]
+            if login.get("wedge"):
+                held = subprocess.Popen(
+                    [sys.executable, "-c", "import time; time.sleep(" + str(login["sleep"]) + ")"]
+                )
+                pathlib.Path(login["wedge"]).write_text(
+                    json.dumps([os.getpid(), held.pid]), encoding="utf-8"
+                )
+                time.sleep(login["sleep"])
             print(login["say"])
             return login["exit"]
         record["stdin"] = sys.stdin.read()
@@ -1649,3 +1673,168 @@ async def test_check_ready_refuses_against_the_real_cli_with_no_credential() -> 
     with pytest.raises(UpstreamUnavailable) as raised:
         await OpenAiRunner().check_ready(OpenAI.LUNA)
     assert str(raised.value), "the port asks for a reason a person can act on"
+
+
+# --- The probe that never answers ----------------------------------------------------------------
+
+# The three numbers this test turns on, and the gaps between them are the assertions.
+#
+# `PROBE_DEADLINE` is what the adapter's own `_READY_SECONDS` is replaced with. Thirty seconds is
+# the shipped number and no test can afford to wait it out, so it is monkeypatched on the module the
+# way `model_slug` is above - which is also the honest consequence of that number not being a
+# constructor parameter, and the reason it does not need to be: nothing but a test has any use for
+# a different one. A second rather than a tenth because the stub has to start an interpreter, fork a
+# grandchild and write a file before it hangs, and a deadline that expired during Python's own
+# start-up would test the adapter against a probe that had not begun.
+#
+# `PROBE_BOUND` is the test's own bound and it is the whole reason this test can be run at all. A
+# `check_ready` with no deadline does not fail here - it *hangs*, and a hang reaches pytest's 60s
+# backstop as `Timeout (>60.0s)` with a traceback into the event loop's selector, which names the
+# wrong thing and stalls the run for a minute doing it. Fifteen seconds is fifteen times the
+# deadline, a quarter of the backstop, and far under the sleep below.
+#
+# `WEDGED_SLEEP` is what the stub and its grandchild sleep for. Two orders of magnitude past the
+# deadline, so that nothing asserted below can be satisfied by the probe simply finishing, and
+# short enough that a mutation run which leaves them behind does not leave them behind for an hour.
+PROBE_DEADLINE: Final = 1.0
+PROBE_BOUND: Final = 15.0
+WEDGED_SLEEP: Final = 120.0
+
+# How long a signalled process is given to be gone. The same five seconds
+# `tests/adapters/test_shell_verifier.py` allows the build it stops, and for the same reason:
+# delivery is prompt, reaping is when the system gets to it.
+GONE_WITHIN: Final = 5.0
+
+
+@pytest.mark.asyncio
+async def test_a_probe_that_never_answers_is_refused_at_its_deadline_with_nothing_left_running(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Preflight is on the path of every run, so a readiness probe with no deadline hangs every run.
+
+    This is the one member here that a person cannot work around. `run` is behind a workflow and a
+    step; `check_ready` is asked before anything at all, once per run, against a local credential
+    store - and a credential store blocks. A keychain prompt raised on a machine nobody is sitting
+    at, an authentication agent that stopped answering, a mount that went away underneath one: none
+    of these ends, and `communicate()` on a child that never writes and never exits does not either.
+    The symptom is not a slow run or a failed one. It is `agl run` printing nothing, forever, with
+    no exception, no exit code and no timeout anywhere between here and the person waiting.
+
+    **Three claims, and each needs the others to mean anything.**
+
+      * **It comes back.** Bounded by `PROBE_BOUND` rather than by pytest's backstop, because the
+        failure this test is written for is a hang, and a hang that reaches the backstop is
+        reported as `Timeout (>60.0s)` against the event loop - a sentence that names neither this
+        member nor this clause. The bound is what turns the defect into a failure that says what
+        broke, and it is also the deadline assertion: the probe cannot come back inside fifteen
+        seconds against a hundred-and-twenty-second sleep unless a deadline stopped it.
+      * **It comes back as the one exception preflight catches.** `sdk/_engine/preflight.py` catches
+        `UpstreamUnavailable` and nothing else, and `tests/contracts/_agent_preflight.py` fails any
+        other exception by name - so `pytest.raises` here is not a formality. A probe that timed out
+        is `Unavailable` and not `Unexpected` on the repo's own reading of the two: nothing was
+        misunderstood, nothing was misparsed, the far side simply did not answer, and the same call
+        succeeds the moment the prompt is dismissed. `UpstreamUnexpected` would be the claim that
+        retrying is pointless, which is the opposite of true here, and it would also escape
+        preflight's own wrapping and reach a person as a bug report request about their own
+        keychain.
+      * **Nothing is left running.** A deadline that returns while the probe keeps its cores is half
+        a fix and it is the half that shows up on the machine: this runs once per run, so the
+        orphans accumulate one per invocation. Both pids are checked - the probe itself, and a
+        grandchild it started before it hung. The grandchild is the load-bearing one. It is what
+        separates the shape this adapter uses (a session of its own, and `_session.py`'s `_signal`
+        against the whole group) from the shape `git/_runner.py` uses (no session, and a signal to
+        the process alone), which would leave it behind. It is also why the session is not
+        optional: `_signal` spells the group as `os.getpgid(child.pid)`, and a probe started
+        without `start_new_session=True` is in *AGL's own* group, so the same two lines would send
+        SIGTERM and then SIGKILL to the process running this test.
+
+    The pids are read out of a file the stub writes rather than off its output, for
+    `test_shell_verifier.py`'s reason on the same question: nothing here should depend on when a
+    buffer was flushed, and the child is killed before it flushes anything.
+    """
+    wedge = tmp_path / "wedged.json"
+    stub = Stub(
+        tmp_path,
+        login={"wedge": str(wedge), "sleep": WEDGED_SLEEP, "say": "never printed", "exit": 0},
+    )
+    monkeypatch.setattr(runner_module, "_READY_SECONDS", PROBE_DEADLINE)
+
+    try:
+        async with asyncio.timeout(PROBE_BOUND):
+            with pytest.raises(UpstreamUnavailable) as raised:
+                await OpenAiRunner(stub.path).check_ready(OpenAI.TERRA)
+    except TimeoutError:
+        _put_down(_wedged(wedge))
+        pytest.fail(
+            f"`check_ready` was still waiting {PROBE_BOUND:g}s after it was called, against a "
+            f"probe wedged for {WEDGED_SLEEP:g}s and a {PROBE_DEADLINE:g}s deadline. That is the "
+            f"defect exactly: preflight runs before every run, so a readiness probe with no "
+            f"deadline is not a slow run - it is a run that never starts and never says why"
+        )
+
+    assert f"{PROBE_DEADLINE:g}s" in str(raised.value), (
+        f"the refusal does not say how long it waited: {raised.value}. The whole of what a person "
+        f"can act on here is that the probe was given a deadline and did not meet it; a message "
+        f"that omits the number reads as the CLI having refused, which is a different thing to do "
+        f"about it"
+    )
+
+    probe, grandchild = _wedged(wedge)
+    try:
+        for pid, what in ((probe, "the probe"), (grandchild, "a process the probe started")):
+            assert not await _still_there(pid, GONE_WITHIN), (
+                f"the deadline expired and {what} (pid {pid}) was still running {GONE_WITHIN:g}s "
+                f"later. Preflight asks this once per run, so an orphan here is one more wedged "
+                f"process per `agl run` on a machine whose credential store is already wedged - "
+                f"and the grandchild is the one that says whether the whole process group was "
+                f"signalled or only the child AGL happens to hold a handle to"
+            )
+    finally:
+        _put_down((probe, grandchild))
+
+
+def _wedged(where: Path) -> tuple[int, int]:
+    """The two pids the wedged stub wrote down, or a failed assertion saying it never hung."""
+    assert where.is_file(), (
+        f"the wedged stub left no record at {where}, so it was stopped before it reached the point "
+        f"of hanging - or never started at all. Everything after this asserts about processes that "
+        f"were running when the deadline expired, and there is no evidence any of them were"
+    )
+    written = json.loads(where.read_text(encoding="utf-8"))
+    probe, grandchild = written
+    return int(probe), int(grandchild)
+
+
+async def _still_there(pid: int, seconds: float) -> bool:
+    """Is `pid` still running after up to `seconds`? Polls, and answers as soon as it knows.
+
+    A poll rather than a sleep: a signal is delivered promptly and reaped when the system gets to
+    it, so asserting on the first microsecond would be asserting about a scheduler.
+    """
+    deadline = time.monotonic() + seconds
+    while _there(pid) and time.monotonic() < deadline:
+        await asyncio.sleep(0.05)
+    return _there(pid)
+
+
+def _there(pid: int) -> bool:
+    """Signal 0: the ordinary way to ask whether a process exists without disturbing it."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _put_down(pids: Iterable[int]) -> None:
+    """Kill whatever is left, so a red run cannot leave a two-minute sleep behind it.
+
+    Every assertion above has already been made by the time this runs, and on the failing paths
+    there is nothing to preserve: a process this could still reach is one the adapter was supposed
+    to have stopped.
+    """
+    for pid in pids:
+        with suppress(ProcessLookupError, PermissionError):
+            os.kill(pid, signal.SIGKILL)

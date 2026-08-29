@@ -495,6 +495,12 @@ def test_both_surrogate_checks_in_agl_answer_one_string_with_one_exit_code() -> 
     other, because equality alone would stay green on the day both drifted together. The two
     messages are asserted to still differ, because unifying the class was never a reason to lose
     either explanation.
+
+    This is the *first* seam, which is a step's inputs and a run record's params. The second is one
+    field over - a step's **result**, which is stored rather than fingerprinted and so is refused by
+    a narrower check of its own, in `Journal.step`. It is pinned by
+    `test_journal_walk.py::test_a_steps_result_answers_a_lone_surrogate_the_way_its_inputs_do`,
+    which is where the walk that hands a worker's value to the store can be driven.
     """
     with pytest.raises(InputError, match="surrogate") as canonicalised:
         canonical_json({"summary": _LONE_SURROGATE})

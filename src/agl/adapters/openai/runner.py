@@ -1,11 +1,12 @@
 
 import asyncio
+import signal
 import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Final
 
-from agl.adapters.openai._session import outcome_of
+from agl.adapters.openai._session import _halted, _signal, outcome_of
 from agl.adapters.openai._tools import ASKING_TOOL, Asking, Supply
 from agl.adapters.openai.translate import (
     APPROVAL,
@@ -13,6 +14,7 @@ from agl.adapters.openai.translate import (
     launch_failure,
     model_slug,
     sandbox,
+    unanswered,
     unready,
 )
 from agl.ports.agent import (
@@ -40,6 +42,7 @@ _CAPABILITIES: Final = frozenset(
 )
 
 _READY: Final = ("login", "status")
+_READY_SECONDS: Final = 30.0
 
 _EXEC: Final = "exec"
 _FROM_STDIN: Final = "-"
@@ -96,10 +99,20 @@ class OpenAiRunner(AgentRunner):
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.STDOUT,
                     cwd=elsewhere,
+                    start_new_session=True,
                 )
             except OSError as error:
                 raise launch_failure(error) from error
-            said, _ = await child.communicate()
+            try:
+                async with asyncio.timeout(_READY_SECONDS):
+                    said, _ = await child.communicate()
+            except TimeoutError:
+                await _halted(child)
+                await child.wait()
+                raise unanswered(_READY_SECONDS) from None
+            except BaseException:
+                _signal(child, signal.SIGTERM)
+                raise
             status = await child.wait()
         if status != 0:
             raise unready(status, said.decode("utf-8", errors="replace").strip())

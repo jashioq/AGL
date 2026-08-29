@@ -106,6 +106,17 @@ pressed retry, the text they typed lived only in that worktree — in no git obj
 and it goes. A known cost pinned by `tests/sdk/test_integrate_acceptance.py`: the gate has to run
 on that landing too.
 
+**Every path out of a hold must settle it.** `Integration.retry` and `Integration.abort` in
+`sdk/_engine/integration.py` are the two verbs a workflow calls on a live conflict, and each reaches
+an `Integrator` that may raise — `land` refuses over unrecorded work in the target, which is exactly
+what a person editing that checkout at a refusal screen leaves behind. `integrate()` guards its own
+construction with `except BaseException: lease.release()`, and `api.run` sweeps with `finally:
+leases.release_all()`; neither covers a raise out of a verb called on an object the workflow is
+already holding. The target's lease and its namespace's step lock then stay taken for the life of
+the process, and the next landing into that parent blocks inside `Leases.claim` — a hang rather than
+a failure, with nothing raised and no predicate to ask. So both verbs settle on the way out, and the
+tests in `tests/sdk/test_run_integrate.py` bound the claim that follows rather than awaiting it.
+
 **A workflow branches only on step results.** Resume is not a continuation — `api.resume`
 re-invokes the workflow from its first line in a fresh process, so every line runs again and only
 `run.step(...)` short-circuits. It fingerprints the role, its tools, the inputs and the head the
@@ -167,11 +178,22 @@ The reasoning is the point — without it these get re-proposed.
   the same `send_signal` fallback, and differ on the one line that names the group. They agree
   because `verifier.py` was brought into line — a difference there was a defect, not a caller's
   business — and the other two follow from how they start: `git/_runner.py` gave its child no
-  session of its own and so signals the process, and `openai/runner.py`'s readiness probe stops
-  nothing at all. The helper would also have nowhere to live: the adapter-independence contract in
+  session of its own and so signals the process, and `openai/runner.py`'s readiness probe was given
+  one so that it could spend `_session.py`'s `_halted` and `_signal` unchanged rather than grow a
+  third copy of them — a sibling module inside one adapter, which is the one place a stopping
+  sequence can be shared for free. It stopped nothing at all until it was given both that session
+  and a deadline. The helper would also have nowhere to live: the adapter-independence contract in
   `.importlinter` forbids one adapter importing another.
 - **No `Integrator.revert()`.** Undoing a landing that succeeded is `Workspace.restore(head)`,
   which already exists; a second spelling would be owed by every integrator.
+- **No second `IntegrationOutcome` case for a build gate's refusal.** `Integration.conflicted` in
+  `sdk/_engine/integration.py` is one shape over two causes — a textual collision the `Integrator`
+  reported, and a landing that combined cleanly and was then reverted by `_gated` — because both
+  hold the lease and end with the same two verbs, so a workflow's conflict loop is written once. A
+  third case on the port would be a value no adapter can produce: the refusal is fabricated in the
+  engine, after `land` has already answered. `Integration.refused_by_the_gate` is what tells the two
+  apart, and it reads the verdict `_gated` sets and `_concluded` clears — never `paths == ()`, which
+  `adapters/git/_conflicts.py` also emits when git names no unmerged file.
 - **`Store` has six members and no more.** No `exists`, because a read returning `None` is that
   question already answered; no listing of entries, because replay computes the digest it wants; no
   transaction, because a batch needs a boundary and a flush would admit to a buffer.

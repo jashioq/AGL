@@ -1887,32 +1887,47 @@ def test_a_run_that_landed_replays_identically_after_being_killed(world: _World)
     )
 
 
-# --- two more paths out of an integration, neither of them specified anywhere ---------------
+# --- two more paths out of an integration, one of them now an invariant ---------------------
 
 @pytest.mark.asyncio
-async def test_a_gate_that_raises_inside_retry_leaves_the_outcome_unsettled_and_abort_frees_it(
+async def test_a_gate_that_raises_inside_retry_settles_the_outcome_and_gives_the_target_back(
     tmp_path: Path,
 ) -> None:
-    """The asymmetry between `integrate()` and `retry()`, and the recovery that makes it survivable.
+    """A raise out of `retry()` gives the target back, and does not wait to be asked.
 
-    `integrate()` wraps its body in `except BaseException: lease.release(); raise`, so a first
-    landing that blew up gives the target back. `retry()` has no such wrapper, and a gate that
-    raises inside one therefore leaves the lease **held** and the outcome **unsettled**. That is the
-    safe direction rather than a leak - the port says a failed `abort` keeps the lease for the same
-    reason, because the target may still be held and nothing else may land into it - but it is
-    silent, and its consequence is worth measuring: a workflow that catches the exception and
-    carries on without settling has stopped every later landing into that parent for the life of the
-    run, with nothing raising and no predicate to ask.
+    **This test asserted the opposite until the invariant was written down.** The old claim was that
+    `retry()`, having no `except BaseException` where `integrate()` has one, left the lease **held**
+    and the outcome **unsettled**, and that `abort()` was the way back; holding was called the safe
+    direction, because the target may still be mid-landing and nothing else may land into it. What
+    that argument never reached is the run where `abort()` is not called - the workflow caught the
+    exception and carried on, or it did not catch it and `api.run`'s `finally` swept a table this
+    integration had stopped being reachable from. The parent is then leased for the life of the
+    process and every later landing into it waits inside `Leases.claim`, with nothing raised and no
+    predicate to ask. **A hang is the worse failure**: a lease handed back early is a conflict that
+    can be found again, and a hang is a timeout somewhere else naming the wrong thing.
+
+    **And `abort()` cannot be the way back, because `abort()` is a verb that can raise too.** The
+    port has three of them and one is "give up"; if giving up can fail, and failing means keep
+    holding, then a failed give-up is unrecoverable by construction - there is no fourth verb to
+    reach for. So the rule is the one `integrate()` already followed and `api.run` already spells in
+    its `finally`, and `ARCHITECTURE.md` now carries it beside the other invariants where a mistake
+    is silent: every path out of a hold settles it.
+
+    **Releasing does not abandon what the target is holding.** A hold is durable and `land` answers
+    a pre-existing one with a `Conflict` - which is exactly the state a resumed run is required to
+    be able to walk into, and the arrangement several tests above produce on purpose. Under the old
+    rule the hold was guarded by a lease nobody was ever going to release, so it was the lease, and
+    not the hold, that made the target unreachable.
 
     Nothing in the port makes this common - `ports/verifier.py` is emphatic that a failing build is
     an outcome and not an exception, and the one thing that genuinely raises is a shell that could
     not be started at all. But that case exists, it arrives as `UpstreamUnavailable`, and a workflow
-    is entitled to catch it and offer the person the same conflict screen again.
+    is entitled to catch it and carry on.
 
-    So what is asserted is the path back: the outcome is still conflicted and still live, `abort()`
-    settles it, and the target is usable afterwards. The queued landing in the middle is what shows
-    the lease really was still held, and it is cancelled rather than awaited because waiting on it
-    is the failure this test is describing.
+    So what is asserted is the path back **with nothing else called**: the second landing completes
+    inside the bound, it lands, and the settled outcome then refuses a `retry()` while tolerating an
+    `abort()`. `tests/sdk/test_run_integrate.py` holds the same claim for a raise out of the
+    `Integrator` rather than out of the gate, which is the same defect in the other two verbs.
     """
     gate = _Gate(passed=True)
     _, run, blocked, spare = await _held(tmp_path, verifier=gate)
@@ -1926,27 +1941,28 @@ async def test_a_gate_that_raises_inside_retry_leaves_the_outcome_unsettled_and_
         await outcome.retry()
 
     queued = asyncio.create_task(spare.integrate())
-    waiting, _ = await asyncio.wait({queued}, timeout=_SERIALIZED)
-    assert not waiting, (
-        "a second landing into the target went through while an integration whose gate had raised "
-        "was still unsettled - so `retry()` gave the lease back over an outcome that is still "
-        "conflicted, and two workflows are now deciding about one target"
-    )
-    queued.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await queued
+    arrived, waiting = await asyncio.wait({queued}, timeout=_LIVENESS)
+    for stalled in waiting:
+        stalled.cancel()
 
-    assert outcome.conflicted is True, (
-        "the outcome settled itself over an exception, so a workflow catching it has nothing left "
-        "to abort and no way to release the hold the target is still carrying"
+    assert arrived, (
+        f"a second landing into the target did not finish within {_LIVENESS} seconds after a "
+        f"`retry()` whose gate raised, so that retry kept the target's lease. Nothing will give it "
+        f"back: `integrate()`'s own `except BaseException` protects the call that builds an "
+        f"`Integration` and not the verbs a workflow calls on one, and `api.run`'s `finally` does "
+        f"not run until the workflow is over"
     )
-    await outcome.abort()
-    freed = await asyncio.wait_for(spare.integrate(), timeout=_LIVENESS)
+    freed = queued.result()
 
     assert freed.conflicted is False, (
-        f"the target could not be landed into after the failed retry was aborted: {freed.conflict}"
+        f"the target could not be landed into after the failed retry: {freed.conflict}"
     )
     assert _read(target / _file(CHILDREN[1])) == _work(CHILDREN[1])
+
+    with pytest.raises(InternalError):
+        await outcome.retry()
+
+    await outcome.abort()
 
 
 @pytest.mark.asyncio

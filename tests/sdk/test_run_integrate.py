@@ -3,7 +3,7 @@ that advances.
 
 The suite over `sdk/_engine/integration.py` and over the half of `sdk/workflow.py` that reaches it.
 `tests/contracts/integration.py` holds the *port* to `land`, `retry` and `abort`; nothing here
-repeats any of that. What this file is about is the five decisions the framework makes around those
+repeats any of that. What this file is about is the six decisions the framework makes around those
 three calls, each of which fails silently or destructively rather than loudly:
 
   * **The advance.** "`integrate()` advances the parent's `last_good`. A child landing moves
@@ -28,7 +28,15 @@ three calls, each of which fails silently or destructively rather than loudly:
     already said yes to. A red one reverts with `Workspace.restore` and comes back as a `Conflict`
     with the lease still held, so its tests sit beside the textual ones rather than in a file of
     their own: the two conflicts have one shape and one pair of verbs, and the only thing that tells
-    them apart is `Integration.verdict`.
+    them apart is `Integration.verdict`, which `Integration.refused_by_the_gate` reads as a
+    predicate.
+  * **The settling.** Every path out of a hold has to give it back. `integrate()` already says so
+    with `except BaseException: lease.release(); raise`, and `api.run` says it again with `finally:
+    leases.release_all()` - but `retry()` and `abort()` are the two verbs a *workflow* calls on a
+    live conflict, and a raise out of either of them is the one exit neither of those two clauses
+    covers. The failure is not an error, it is a hang: the next landing into that parent waits on
+    `Leases.claim` for the life of the process with nothing raised, which is why the two tests at
+    the bottom bound the second claim rather than awaiting it.
 
 **Every test above the gate section runs with a green one**, because `FakeVerifier` passes a command
 nobody scripted - "a gate that failed by default would reject every landing of a run whose point was
@@ -64,11 +72,13 @@ import pytest
 from agl import api
 from agl.config import container, registry
 from agl.ports.agent import AgentTask, Claude, Restriction
-from agl.ports.errors import InputError, InternalError
+from agl.ports.errors import InputError, InternalError, UpstreamUnexpected
 from agl.ports.home_layout import RunScope
 from agl.ports.ids import Namespace, ProjectName, RunLabel
+from agl.ports.integration import IntegrationOutcome, Integrator
 from agl.ports.tree_layout import TreesRoot
 from agl.ports.verifier import Verifier, VerifierOutcome
+from agl.ports.workspace import Workspace
 from agl.sdk.roles import Role, role
 from agl.sdk.testing import Agent, Call, Reply
 from agl.sdk.tools import reporting_tool
@@ -96,6 +106,15 @@ CONTESTED: Final = "src/contested.py"
 PARENT_BODY: Final = b"parent\nparent\nparent\n"
 CHILD_BODY: Final = b"child\nchild\nchild\n"
 RESOLVED: Final = b"what a person decided\n"
+
+# What a person types into the target's checkout at a refusal screen and does not commit. It goes
+# into `FIRST`, which is the one file the landing writes, because that is what makes the next `land`
+# refuse: an integrator may not write over work in the target that nothing has recorded.
+HAND_EDITED: Final = b"the fix a person typed and did not commit\n"
+
+# What an `Integrator` whose far side has gone wrong says. `UpstreamUnexpected` and not `AglError`,
+# because a raise out of `retry` or `abort` is the adapter's own vocabulary reaching a workflow.
+BROKE: Final = "the integrator's far side failed while giving up on this landing"
 
 # The gate's vocabulary. `CONFIGURED` is a build command that is deliberately **not**
 # `container.FAKE_BUILD`, so a test asserting that the project's own command reached the port cannot
@@ -280,6 +299,21 @@ async def _tree_gated_by(harness: container.FakeServices, verifier: Verifier) ->
     return Run(
         params=None,
         services=replace(harness.services, verifier=verifier),
+        scope=SCOPE,
+        base=await _base(harness),
+    )
+
+
+async def _tree_integrated_by(harness: container.FakeServices, integrator: Integrator) -> Run[None]:
+    """One root `Run` over this bundle, with the `Integrator` swapped for the one passed.
+
+    `_tree_gated_by` for the other port, and `replace` for the same reason: every other field stays
+    the *same object* the bundle holds, so `harness.repository` and the checkouts on disk are still
+    the ones the substituted integrator is deciding about.
+    """
+    return Run(
+        params=None,
+        services=replace(harness.services, integrator=integrator),
         scope=SCOPE,
         base=await _base(harness),
     )
@@ -635,14 +669,28 @@ async def test_retry_after_abort_is_an_internal_error_where_a_second_abort_says_
     `Integrator.abort`'s own tolerance clause reaching the surface unchanged. Both are asserted
     against one outcome in one state, so the contrast is written down rather than inferred from two
     tests that sit near each other.
+
+    **The refusal's wording is read here as well as on the raising path at the bottom of this
+    file**, because widening it was the other half of that repair. `_nothing_to_retry`'s
+    `head is None` branch used to say "it was aborted, and the hold was released", which was true
+    while an abort was the only ending that could reach it. A verb that raises now settles too, and
+    both halves of that sentence are false there. So one sentence has to be true of every ending
+    that is not a landing, and this is the ending it was originally written for: it still has to
+    fit here, or widening it traded one wrong message for another.
     """
     _, _, ticket = await _hold_the_target(tmp_path)
     outcome = await ticket.integrate()
     assert outcome.conflicted is True
     await outcome.abort()
 
-    with pytest.raises(InternalError):
+    with pytest.raises(InternalError) as refused:
         await outcome.retry()
+
+    assert "nothing landed" in str(refused.value), (
+        f"the refusal does not say how this integration ended: {str(refused.value)!r}. What a "
+        f"reader is owed is which of the two endings they are looking at, and the one thing every "
+        f"ending other than a landing has in common is that nothing landed"
+    )
 
     await outcome.abort()
 
@@ -1290,3 +1338,313 @@ async def test_a_retry_that_collides_leaves_no_trace_of_the_gate_that_refused_th
         "to"
     )
     assert outcome.head is None, "the two-case outcome, and this is the case with no head in it"
+
+
+@pytest.mark.asyncio
+async def test_refused_by_the_gate_is_true_for_a_red_build_and_false_for_a_textual_collision(
+    tmp_path: Path,
+) -> None:
+    """The discriminator with a name on it: `conflicted` is one shape, and this is which cause.
+
+    **Two causes, one shape, deliberately.** A landing comes back conflicted either because the
+    work would not combine - `Integrator.land` found a textual collision and the target is holding
+    it - or because it combined cleanly and the build gate then refused it, at which point `_gated`
+    reverts with `restore(self._before)` and fabricates a `Conflict` of its own. The collapsing is
+    the design rather than an accident of the encoding: both hold the lease, hold nothing else, and
+    are ended by `retry()` or `abort()`, which is what lets the conflict loop be written once, with
+    one branch, by an author who does not have to ask which kind of "would not combine" this is.
+
+    **`verdict` is what tells them apart**, and this predicate is that reading given a name.
+    `_gated` sets the field on every refusal and `_concluded` clears it on every textual conflict,
+    so a live conflict carrying a verdict is the gate's and one carrying none is the integrator's.
+    The distinction earns a name because the two screens are different things: a list of files
+    somebody has to open, against a build log with no file in it anywhere.
+
+    **`paths == ()` is not the test.** It is true of every gate refusal - there is no such thing as
+    a semantically colliding file to name, which is why `_gate_refused` says so in its summary - but
+    it is not true of gate refusals *only*. `adapters/git/_conflicts.py` emits an empty tuple for a
+    genuine textual collision whenever git names no unmerged file, and the port's own suite in
+    `tests/ports/test_integration.py` pins that spelling as legal in as many words: a far side that
+    can only answer "these cannot be combined cleanly" is a real implementation. So a workflow
+    branching on the emptiness sends a person to a build log for a collision that has no build
+    anywhere in it, which is exactly the routing mistake the field exists to prevent.
+
+    **A second `IntegrationOutcome` case would be the other way to say this, and it is worse.** The
+    refusal is fabricated here, in the engine, after a landing the `Integrator` already reported as
+    clean - so a third case on that type would be a value no adapter can ever return, owed by every
+    implementation of the port and produced by none of them.
+
+    Two arrangements rather than one, because a claim about two causes asserted against a single one
+    of them says only that the predicate is a constant. Each is its cause in the plainest form: a
+    parent and a child that both create `CONTESTED` from a base holding neither, and a child that
+    touches nothing anybody else touched, offered into a gate scripted red. Two bundles under one
+    `tmp_path`, because each ends holding a live conflict of its own - which is the state the two
+    causes are indistinguishable in, and the whole reason the question is asked.
+    """
+    _, _, colliding = await _hold_the_target(tmp_path / "collision")
+    collision = await colliding.integrate()
+
+    refusing = _harness(tmp_path / "gated")
+    refusing.verifier.answers(container.FAKE_BUILD, passed=False, status=2, output=RED)
+    run = await _tree(refusing)
+    ticket = run.worktree("T-01")
+    await ticket.step(IMPLEMENT_FIRST, commit="implement T-01")
+    refused = await ticket.integrate()
+
+    assert (collision.conflicted, refused.conflicted) == (True, True), (
+        f"the two arrangements did not both come back conflicted: {collision.conflict!r} and "
+        f"{refused.conflict!r}. There is nothing to tell apart until both causes wear one shape, "
+        f"and that shape is the thing this predicate is written beside"
+    )
+    assert collision.verdict is None, (
+        f"the textual collision carries the verdict {collision.verdict}, and no build ran: `land` "
+        f"refused to combine the two lines of work, so the gate was never reached"
+    )
+    assert collision.refused_by_the_gate is False, (
+        "a collision the integrator reported reads as the build gate's refusal, so a workflow is "
+        "sent to a build-log screen for a conflict with no build in it. The predicate is `verdict "
+        "is not None` and nothing else - not the emptiness of `paths`, which a textual collision "
+        "is entitled to and `adapters/git/_conflicts.py` produces when git names no unmerged file"
+    )
+    assert refused.verdict is not None and refused.verdict.passed is False, (
+        "the gate refused this landing and left no failing verdict on it, so the field the "
+        "discriminator reads was never set and what follows would be asserted against nothing"
+    )
+    assert refused.refused_by_the_gate is True, (
+        "the build gate's own refusal does not say it is one. The landing combined cleanly and was "
+        "undone by `_gated`, so the only thing separating it from a textual collision is the "
+        "verdict standing beside the fabricated `Conflict` - and a workflow that cannot read that "
+        "has one shape, two causes and no way to tell which screen a person is owed"
+    )
+
+
+# --- a verb that raises: every path out of a hold has to settle it -------------------------------
+
+
+class _RaisesGivingUp(Integrator):
+    """The bundle's own integrator with one verb replaced by a failure it is entitled to have.
+
+    `land` and `retry` are delegated, so the conflict the test below holds is a real one held in the
+    real repository and everything up to the abort is the ordinary path. Only `abort` raises.
+
+    It has to be substituted rather than provoked, unlike the raise the retry test above produces
+    with nothing but a file: `FakeIntegrator.abort` reads the hold it took and puts the tree back,
+    and there is no state a test can arrange from outside that stops it. The real adapter can fail
+    there for a dozen reasons this suite has no vocabulary for - a lock file `git merge --abort`
+    meets, a checkout somebody deleted underneath the run - and what `Integrator.abort` promises is
+    tolerance of a *missing hold*, never that the call cannot raise.
+    """
+
+    def __init__(self, real: Integrator) -> None:
+        self._real = real
+
+    async def land(self, source: Workspace, target: Workspace) -> IntegrationOutcome:
+        return await self._real.land(source, target)
+
+    async def retry(self, target: Workspace) -> IntegrationOutcome:
+        return await self._real.retry(target)
+
+    async def abort(self, target: Workspace) -> None:
+        raise UpstreamUnexpected(BROKE)
+
+
+@pytest.mark.asyncio
+async def test_a_retry_whose_landing_raises_settles_it_and_gives_the_targets_lease_back(
+    tmp_path: Path,
+) -> None:
+    """A raise out of `retry()` must not strand the target's lease - and it must settle the outcome.
+
+    **The scenario is the most ordinary thing a person does at a refusal screen.** The gate said no,
+    so they open the target's checkout, put the file the build wanted back by hand, and press retry
+    without committing it. `Integrator.retry` has nothing pending - the gate's revert left no hold -
+    so the framework offers `land` again, and `land` refuses outright rather than conflicting:
+    landing would write over work in the target that nothing has recorded, which is a refusal the
+    adapter owes and `FakeIntegrator._refuse_to_overwrite` produces for the same reason git does. So
+    this raise is arranged with one `write_bytes` and no substituted port anywhere.
+
+    **What that raise costs is not the exception.** A workflow sees an `UpstreamUnexpected` and can
+    say so; what nothing sees is that `retry()` returned through neither of the two paths that give
+    the lease back, so the target stays leased. `integrate()`'s own `except BaseException:
+    lease.release(); raise` does not cover this - the object it protects was already handed to the
+    workflow - and `api.run`'s `finally: leases.release_all()` does not run until the workflow ends.
+    Every later landing into that parent, and every later step in that namespace, then waits on
+    `Leases.claim` for the life of the process. **A hang, not a failure**, which is why the second
+    landing below is bounded and asserted rather than awaited: against the defect this test has to
+    fail inside `_LIVENESS`, not sit there until `pytest-timeout` names the wrong thing.
+
+    **`abort()` is the same defect one method over**, and its test is the next one down. One method
+    is not the shape of the bug: the shape is "a verb a workflow calls on a live conflict returned
+    without settling", and there are exactly two such verbs.
+
+    **The outcome settles rather than merely releasing.** That is a decision and it is the one thing
+    here a reader could reasonably want argued, because `integrate()` picks the other answer -
+    release the lease, re-raise, leave nothing settled. It picks it correctly: the exception
+    propagates *before* any `Integration` reaches the workflow, so there is no object left holding a
+    landing and nothing that could be retried. Here the workflow **is** holding the object, and the
+    two answers differ in what its next call does:
+
+      * released but unsettled, the guard at the top of `retry()` lets a second call through, and
+        that call acts on a landing nothing is holding - the lease is gone, so that namespace's
+        step lock is gone with it. Should it succeed, `_concluded` calls `_journal.advance(head)`
+        having given the step lock back, so a step in the parent may be running against the very
+        checkout the landing is writing. That is precisely what the lease is for, and it is the
+        state `_nothing_to_retry` exists to refuse;
+      * settled, the second call raises `_nothing_to_retry` and the chain cannot be corrupted. A
+        second `abort()` stays tolerant and says nothing, which is the asymmetry the port already
+        pins for its own two verbs.
+
+    **Settling made the refusal's own wording false, so the fix had to reach it.**
+    `_nothing_to_retry` reads its `head is None` branch as one sentence, and that sentence used to
+    be "it was aborted, and the hold was released" - true while an abort was the only ending that
+    could arrive there, and false on both counts here: nothing was aborted, and the target may still
+    be holding the landing the raise interrupted. The branch was widened to say what is true of
+    **every** ending that is not a landing rather than to name which one it was. A third state on
+    `Integration` would be a field carried for the sole purpose of wording one message, and it could
+    not be honest even so: a raise out of `Integrator.abort` may have half-finished, so whether the
+    hold is still there is not a thing this object can ask. What the message may claim is therefore
+    the hedge, and the assertions below read it rather than settling for the exception's class.
+
+    So the assertions are four, in the order that matters: the raise reaches the caller, the target
+    is claimable again inside the bound, the settled object refuses a second retry while tolerating
+    a second abort, and that refusal says how this ended without promising a hold went back.
+    `Lease.release` is idempotent behind its `_released` flag, so nothing here risks the
+    `RuntimeError` a doubly-released `asyncio.Lock` raises.
+    """
+    harness = _harness(tmp_path)
+    harness.verifier.answers(container.FAKE_BUILD, passed=False, status=2, output=RED)
+    run = await _tree(harness)
+    ticket = run.worktree("T-01")
+    await ticket.step(IMPLEMENT_FIRST, commit="implement T-01")
+    chain = run._steps.last_good
+    outcome = await ticket.integrate()
+
+    assert outcome.refused_by_the_gate is True, (
+        f"this test needs a live conflict the gate refused - that is the screen a person presses "
+        f"retry at - and the landing came back as {outcome.conflict!r}"
+    )
+
+    # The person's fix, typed into the target's checkout, uncommitted. `FIRST` because a landing
+    # only refuses over a file it would itself write, and that is the one file this child writes.
+    hand = _target_dir(tmp_path) / FIRST
+    hand.parent.mkdir(parents=True, exist_ok=True)
+    hand.write_bytes(HAND_EDITED)
+
+    with pytest.raises(UpstreamUnexpected):
+        await outcome.retry()
+
+    # The person takes their uncommitted fix away again, so that what the next landing meets is the
+    # lease and nothing else. Without this the second `land` would refuse for the first one's reason
+    # and the bound below would be measuring the refusal rather than the hold.
+    hand.unlink()
+    landing = asyncio.create_task(ticket.integrate())
+    arrived, waiting = await asyncio.wait({landing}, timeout=_LIVENESS)
+    for stalled in waiting:
+        stalled.cancel()
+
+    assert arrived, (
+        f"a landing offered into the target after a `retry()` that raised did not finish within "
+        f"{_LIVENESS} seconds, so that retry kept the target's lease. Nothing will give it back: "
+        f"`integrate()`'s own `except BaseException` guards the call that builds an `Integration` "
+        f"and not the verbs a workflow calls on one, and `api.run`'s `finally` does not run until "
+        f"the workflow is over. Every later landing into this parent and every later step in this "
+        f"namespace waits for the life of the process, with nothing raised and no predicate to ask"
+    )
+    again = landing.result()
+    assert again.conflicted is True, (
+        f"the second landing passed a gate that is still scripted red: {again.head!r}. It is meant "
+        f"to reach the gate and be refused by it, which is what shows the lease came back to a "
+        f"target still in the state the first refusal left it in"
+    )
+    assert run._steps.last_good == chain, (
+        f"the parent's chain moved to {run._steps.last_good!r} over a retry that raised and a "
+        f"landing the gate then refused. Nothing landed, so there is nothing to advance to"
+    )
+
+    with pytest.raises(InternalError) as refused:
+        await outcome.retry()
+
+    said = str(refused.value)
+    assert "nothing landed" in said, (
+        f"the refusal does not say how this integration ended: {said!r}. It settled over a raise "
+        f"and not over a landing, and a reader told only that it is over cannot tell which of the "
+        f"two endings they are looking at"
+    )
+    assert "may still be there" in said, (
+        f"the refusal tells the reader what the target is holding: {said!r}. Nothing here knows "
+        f"that. This outcome settled because a verb raised, so any hold the target took is exactly "
+        f"the thing nobody released - and a raise out of `Integrator.abort` can half-finish, which "
+        f"is why the sentence hedges instead of naming an ending it cannot check"
+    )
+
+    await outcome.abort()
+    await again.abort()
+
+
+@pytest.mark.asyncio
+async def test_an_abort_whose_integrator_raises_settles_it_and_gives_the_targets_lease_back(
+    tmp_path: Path,
+) -> None:
+    """The same defect one method over, in the verb that is supposed to be the way out.
+
+    `abort()` is what a workflow calls when a person gives up on a conflict, and it is the only
+    thing between a live hold and a target nobody can land into. So a raise from
+    `Integrator.abort` reaching it is the worst version of the previous test: the call whose whole
+    purpose is to end the integration is the call that leaves it holding the lease forever. There is
+    no third verb to reach for afterwards.
+
+    The reasoning about **settling** rather than merely releasing is argued in full one test up and
+    is not repeated; what it buys here is the tolerance clause staying true. `Integrator.abort` says
+    nothing on a second call, and `Integration.abort` returns early on a settled outcome - so an
+    outcome that settled on the way out of a failed abort answers a second `abort()` with silence
+    rather than with the same exception again, which is what a `finally` cleaning up after a
+    workflow needs. Unsettled, the second call would go back to the port and raise again, over
+    whatever the workflow was already failing with.
+
+    The raise is substituted rather than provoked, for `_RaisesGivingUp`'s stated reason. Everything
+    else in the arrangement is real: a parent and a child that both create `CONTESTED` from a base
+    holding neither, which is the one shape no honest implementation combines, so the target is
+    genuinely holding a landing when the abort is called and is still holding it afterwards.
+    """
+    harness = _harness(tmp_path)
+    run = await _tree_integrated_by(harness, _RaisesGivingUp(harness.services.integrator))
+    ticket = run.worktree("T-01")
+    await run.step(PREPARE, commit="prepare the parent")
+    await ticket.step(COLLIDE, commit="implement T-01")
+    chain = run._steps.last_good
+    outcome = await ticket.integrate()
+
+    assert outcome.conflicted is True, (
+        "this test needs a target left holding a landing, and the two lines of work that both "
+        "created one file were combined anyway"
+    )
+
+    with pytest.raises(UpstreamUnexpected):
+        await outcome.abort()
+
+    landing = asyncio.create_task(ticket.integrate())
+    arrived, waiting = await asyncio.wait({landing}, timeout=_LIVENESS)
+    for stalled in waiting:
+        stalled.cancel()
+
+    assert arrived, (
+        f"a landing offered into the target after an `abort()` that raised did not finish within "
+        f"{_LIVENESS} seconds, so giving up on the conflict kept the target's lease. This is the "
+        f"worse half of the pair: `abort()` is the verb a workflow reaches for to end an "
+        f"integration it cannot finish, so there is nothing left to call, and the parent is leased "
+        f"for the life of the process with nothing raised"
+    )
+    again = landing.result()
+    assert again.conflicted is True, (
+        f"the second landing into a target still holding the first came back at {again.head!r}. "
+        f"The abort raised, so nothing was given up: the hold is durable and the next `land` must "
+        f"meet it"
+    )
+    assert run._steps.last_good == chain, (
+        f"the parent's chain moved to {run._steps.last_good!r} over two landings that both "
+        f"conflicted, and a conflict advances nothing"
+    )
+
+    await outcome.abort()
+
+    with pytest.raises(InternalError):
+        await outcome.retry()

@@ -203,16 +203,20 @@ async def _closed(
     early: bool,
 ) -> int:
     if early:
-        _signal(child, signal.SIGTERM)
-        with contextlib.suppress(TimeoutError):
-            async with asyncio.timeout(_GRACE):
-                await child.wait()
-        _signal(child, signal.SIGKILL)
+        await _halted(child)
     status = await child.wait()
     for task in aside:
         task.cancel()
     await asyncio.gather(*aside, return_exceptions=True)
     return status
+
+
+async def _halted(child: asyncio.subprocess.Process) -> None:
+    _signal(child, signal.SIGTERM)
+    with contextlib.suppress(TimeoutError):
+        async with asyncio.timeout(_GRACE):
+            await child.wait()
+    _signal(child, signal.SIGKILL)
 
 
 def _signal(child: asyncio.subprocess.Process, number: int) -> None:

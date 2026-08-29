@@ -12,6 +12,7 @@ __all__ = [
     "activity",
     "failure",
     "launch_failure",
+    "unanswered",
     "unready",
     "unreadable",
 ]
@@ -57,6 +58,17 @@ def unready(exit_code: int, output: str) -> UpstreamUnavailable:
         f"never authenticated, one whose credentials have expired, and a configuration the CLI "
         f"refuses to load all arrive this way, so the message above is the part to act on - "
         f"{_status(exit_code)}"
+    )
+
+
+def unanswered(seconds: float) -> UpstreamUnavailable:
+    return UpstreamUnavailable(
+        f"the Codex CLI was asked whether it is ready to run and had not answered {seconds:g}s "
+        f"later, so it was stopped along with everything it had started. An authentication server "
+        f"that has wedged, a keychain prompt waiting on somebody who is not at the machine, and a "
+        f"binary that never got as far as reading its own credential store all arrive this way. "
+        f"Nothing reached a model and nothing was spent, so the same call may well succeed once "
+        f"whatever the probe was waiting on is unblocked"
     )
 
 

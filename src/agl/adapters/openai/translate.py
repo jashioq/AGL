@@ -4,7 +4,14 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Final
 
-from agl.adapters.openai._reading import activity, failure, launch_failure, unreadable, unready
+from agl.adapters.openai._reading import (
+    activity,
+    failure,
+    launch_failure,
+    unanswered,
+    unreadable,
+    unready,
+)
 from agl.ports.agent import ModelId, OpenAI, Restriction
 from agl.ports.errors import InputError
 
@@ -16,8 +23,9 @@ __all__ = [
     "launch_failure",
     "model_slug",
     "sandbox",
-    "unready",
+    "unanswered",
     "unreadable",
+    "unready",
 ]
 
 

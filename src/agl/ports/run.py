@@ -55,6 +55,7 @@ class RunSpec:
             if not value:
                 raise InternalError(f"a run record's {name!r} is empty, and that names nothing")
         _check_sha(self.base_sha)
+        _checked_text(self.base_ref, "base_ref")
         object.__setattr__(self, "params", MappingProxyType(_checked_params(self.params)))
         object.__setattr__(self, "created_at", _normalised(self.created_at))
 

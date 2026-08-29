@@ -53,6 +53,12 @@ That is not a re-run and not an exception - it is work gone, and one of only two
 where a mistake costs that. So the test asserts on the *call*: what the walk after an advance asked
 its workspace to restore to.
 
+**A seventh is here because two loud failures disagreed with each other.** A lone surrogate in a
+step's inputs was refused as malformed input and the same string in its *result* reached the store
+and came back as AGL's own bug - exit 2 against exit 70, decided by which field of one step it
+arrived in. Both fields are asked in one walk at the bottom of this file, because the disagreement
+is only visible when the two answers are put beside each other.
+
 Named `test_journal_walk.py`: `tests/` carries no `__init__.py` - see `tests/conftest.py` for why
 it must not - so pytest's module names are the bare filenames and every one has to be unique.
 """
@@ -68,7 +74,7 @@ import pytest
 
 from agl.config import container
 from agl.ports.agent import Claude, Restriction, Tool, ToolResult
-from agl.ports.errors import InternalError
+from agl.ports.errors import InputError, InternalError, exit_code_for
 from agl.ports.home_layout import RunScope
 from agl.ports.ids import Namespace, ProjectName, RunLabel, StepName
 from agl.ports.run import JsonValue
@@ -1042,3 +1048,112 @@ async def _siblings(
     if replay:
         assert [worker.runs for worker in workers] == [0, 0], "a sibling re-ran on resume"
     return list(values)
+
+
+# --- a step's result is stored text too -----------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_steps_result_answers_a_lone_surrogate_the_way_its_inputs_do(
+    tmp_path: Path,
+) -> None:
+    """The second seam of the refusal `test_journal.py`'s surrogate test settled at the first.
+
+    A lone surrogate is a `str` Python admits and UTF-8 cannot encode at all, and it reaches AGL
+    from outside: `sys.argv` is decoded with `surrogateescape`, so one undecodable byte on a
+    command line mints exactly one, and an agent's tool payload - which is what a step's result
+    generally is - is the other door. That makes it malformed **input**, exit 2. Exit 70 tells
+    whoever hit it to file a bug against AGL, when what is broken is their data.
+
+    A step's inputs already answered that way: they go through `base_of` -> `_canonical` ->
+    `_checked_text`, and are refused before the worker is ever called. Its **result** did not. It
+    went into `Entry(value=result, ...)` untouched and on to `store.write_entry`, where `_encoded`'s
+    `text.encode("utf-8")` raises `UnicodeEncodeError` - a `ValueError`, which both stores translate
+    into `InternalError`. Same string, one field over, 70 instead of 2, decided by nothing but which
+    argument of one `step` call it arrived in. Both fields are asked here in one walk, because that
+    is the only place the two answers stand beside each other.
+
+    The exit code is asserted against the literal 2 on each side rather than the two sides being
+    compared to each other, for `test_journal.py`'s reason: equality alone stays green on the day
+    both drift together.
+
+    **The result is not passed through `_canonical`, and the second half of this test is why.** The
+    fingerprint's walker also carries `_checked_key`'s reservation of `__agl_type__`, and a result
+    is not fingerprinted - it is stored and handed straight back - so nothing there can collide with
+    a dataclass's tag and the reservation would refuse a mapping for a reason that is not true of
+    it. So a result carrying that key is recorded and replayed, and asserting it is what holds still
+    the thing this refusal is not about.
+
+    The refusal is in `Journal.step` and not in `Entry.__post_init__` or in `write_entry`, which is
+    why this file holds the test rather than `test_journal_entries.py`. `Entry` is also built by
+    `Entry.from_json`, from documents already on disk, and a surrogate coming back *off* a store is
+    not malformed input - it is a store that wrote something it should have refused, which is a
+    different verdict and a different exit code. `Journal.step` is the one place that knows a worker
+    just produced this value, which is the same place its inputs are refused.
+
+    The surrogate is buried under a key and an index rather than sitting at the top of the result: a
+    check that only inspected a bare string result would pass a shallow test and admit every shape
+    an agent actually returns. `chr(0xD800)` and not the escape `"\\ud800"`, and inside the function
+    body - `test_journal.py:448-459` records why a module-level `Final` holding one crashes
+    `mypy --strict` outright, with an `INTERNAL ERROR` naming no file.
+    """
+    harness, workspace, base = await _opened(tmp_path)
+    journal = _journal(harness, workspace, base)
+    lone = chr(0xD800)
+
+    refused_early = _Worker({"this must never be reached": True})
+    with pytest.raises(InputError, match="surrogate") as inputs_said:
+        await _step(journal, SPEC, refused_early, inputs={"request": lone})
+    assert refused_early.runs == 0, (
+        "the inputs are refused before the worker is called, which is the whole value of checking "
+        "them at the fingerprint - this walk paid an agent for a step it could never record"
+    )
+
+    produced = _Worker({"tickets": [{"title": lone}]})
+    with pytest.raises(InputError, match="surrogate") as result_said:
+        await _step(journal, TICKETS, produced)
+    assert produced.runs == 1, "the result is only knowable after the worker has returned it"
+
+    for field, caught in (("inputs", inputs_said), ("result", result_said)):
+        assert exit_code_for(caught.value) == 2, (
+            f"a lone surrogate in a step's {field} answered with exit "
+            f"{exit_code_for(caught.value)}. Both fields answer 2: the string came from outside - "
+            f"an undecodable byte on a command line, a value an agent produced - so it is bad "
+            f"input, and 70 sends whoever hit it to file a bug against AGL instead of fixing it"
+        )
+
+    assert "share a fingerprint" in str(inputs_said.value), (
+        "the inputs' refusal no longer says what a surrogate costs *there* - two inputs collapsing "
+        "to one canonical text, and one step replaying the other's recorded result"
+    )
+    assert "the store refuses the write" in str(result_said.value), (
+        "the result's refusal no longer says what a surrogate costs *here* - a store that cannot "
+        "encode the document, refused at the call that still knows a worker handed it over"
+    )
+    assert "step tickets's result.tickets[0].title" in str(result_said.value), (
+        "the refusal does not name the path it walked to. A result is a whole document an agent "
+        "produced, and 'somewhere in it' is not a thing anyone can go and fix"
+    )
+
+    assert await _entry_at(harness, TICKETS, _digest(base)) is None, (
+        "a refused result still left an entry on the ledger, so a resume would replay a value "
+        "AGL had just declared unwritable"
+    )
+
+    tagged: JsonValue = {"__agl_type__": "notes.Finding", "id": "T-01"}
+    assert await _step(journal, REVIEW, _Worker(tagged)) == {
+        "__agl_type__": "notes.Finding",
+        "id": "T-01",
+    }, "a result carrying the key a dataclass is tagged with was refused or rewritten"
+
+    never = _Worker({"this must never be reached": True})
+    assert await _step(_journal(harness, workspace, base), REVIEW, never) == {
+        "__agl_type__": "notes.Finding",
+        "id": "T-01",
+    }
+    assert never.runs == 0, (
+        "the reserved key did not survive the round trip through the store. `__agl_type__` is "
+        "reserved in the *fingerprint*, where a mapping spelling it would canonicalise to the same "
+        "text as some dataclass; a result is neither canonicalised nor compared, so that "
+        "reservation has no meaning here and would refuse a document for a reason untrue of it"
+    )

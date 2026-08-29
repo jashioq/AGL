@@ -237,6 +237,7 @@ class Journal:
             finally:
                 await self._ended(commit)
 
+            _check_result(result, f"step {name}'s result")
             head = await self._workspace.head()
             await write_entry(
                 self._store,
@@ -354,13 +355,45 @@ def _checked_key(key: object, where: str) -> str:
     return _checked_text(key, f"the key {key!r} in {where}")
 
 
-def _checked_text(value: str, where: str) -> str:
+def _surrogate_at(value: str) -> tuple[int, str] | None:
     for index, character in enumerate(value):
         if unicodedata.category(character) == _SURROGATE:
-            raise InputError(
-                f"{where} holds U+{ord(character):04X} at position {index}, which is a surrogate: "
-                f"UTF-8 has no encoding for one at all, and the canonical text escapes it to the "
-                f"same characters as the astral code point it stands for - so two different inputs "
-                f"would share a fingerprint, and one would replay the other's result"
-            )
+            return index, character
+    return None
+
+
+def _checked_text(value: str, where: str) -> str:
+    found = _surrogate_at(value)
+    if found is not None:
+        index, character = found
+        raise InputError(
+            f"{where} holds U+{ord(character):04X} at position {index}, which is a surrogate: "
+            f"UTF-8 has no encoding for one at all, and the canonical text escapes it to the "
+            f"same characters as the astral code point it stands for - so two different inputs "
+            f"would share a fingerprint, and one would replay the other's result"
+        )
     return value
+
+
+def _check_stored_text(value: str, where: str) -> None:
+    found = _surrogate_at(value)
+    if found is None:
+        return
+    index, character = found
+    raise InputError(
+        f"{where} holds U+{ord(character):04X} at position {index}, which is a surrogate: UTF-8 "
+        f"has no encoding for one at all, so the store refuses the write and this refuses it here, "
+        f"where the caller still knows a worker handed it over"
+    )
+
+
+def _check_result(value: object, where: str) -> None:
+    if isinstance(value, str):
+        _check_stored_text(value, where)
+    elif isinstance(value, Mapping):
+        for key, item in value.items():
+            _check_result(key, f"the key {key!r} in {where}")
+            _check_result(item, f"{where}.{key}")
+    elif isinstance(value, list | tuple):
+        for index, item in enumerate(value):
+            _check_result(item, f"{where}[{index}]")
