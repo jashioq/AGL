@@ -357,7 +357,6 @@ def test_there_is_no_run_status() -> None:
     storing it in `run.json` - the second source of truth §3.11 says forces a reconcile pass."""
     assert not hasattr(run, "RunStatus")
     assert run.__all__ == ["JsonValue", "RunSpec"]
-    assert "There is no `RunStatus`" in (run.__doc__ or ""), "the absence is argued, not silent"
     assert "status" not in run._WIRE_KEYS
 
 

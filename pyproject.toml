@@ -38,7 +38,8 @@ split = "agl.workflows.split:split"
 # never part of the distribution: nothing here reaches a `pip install agl`, no resolver sees it, and
 # adding a line below adds nothing to what an operator gets.
 #
-# `agl[all]` is the second half of that sentence, and it is not §4's asymmetry being walked back.
+# `agl[all]` is the second half of that sentence, and it is not the vendor-containment asymmetry
+# (ARCHITECTURE.md, "Vendor containment") being walked back.
 # The extras table above is still the only place a vendor SDK is declared, still the only thing a
 # user installs one through, and `container.py` still imports both vendors inside the function that
 # constructs them so a bare install works without either. What this line says is that a *developer*

@@ -25,7 +25,8 @@ TOTAL_GATES=8
 
 # Gate 5: the Codex CLI binary name, and the one directory allowed to contain it. The OpenAI
 # adapter shells out to this binary instead of importing a Python SDK, so there is no import
-# for .importlinter to contain - this grep is that contract's stand-in. See ARCHITECTURE.md §4.
+# for .importlinter to contain - this grep is that contract's stand-in. See ARCHITECTURE.md,
+# "Vendor containment".
 # Not called CODEX_HOME: that is a real environment variable naming the Codex CLI's configuration
 # and credential directory, which the paid-endpoint gate below redirects, and one file holding two
 # meanings of that name is one `export` away from pointing a real `codex` at a source directory.
@@ -160,7 +161,7 @@ record_status "lint-imports" $? ""
 #
 # The name of the binary the OpenAI adapter shells out to must not appear in any .py file
 # outside src/agl/adapters/openai/. Matching is case-insensitive, so prose mentions count too.
-# Only src/ is searched: the repo root and docs/ name the binary legitimately.
+# Only src/ is searched: the repo root and tests/ name the binary legitimately.
 # ---------------------------------------------------------------------------------------------
 
 gate_header 5 "Codex CLI binary containment" \

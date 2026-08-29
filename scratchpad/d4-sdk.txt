@@ -1,0 +1,1065 @@
+########## src/agl/sdk/roles.py ##########
+     1	
+     2	import sys
+     3	from collections.abc import Callable, Mapping, Sequence
+     4	from collections.abc import Set as AbstractSet
+     5	from dataclasses import dataclass, replace
+     6	from functools import update_wrapper
+     7	from pathlib import Path
+     8	from typing import Protocol
+     9	
+    10	from agl.ports.agent import (
+    11	    Capability,
+    12	    Claude,
+    13	    ModelId,
+    14	    OpenAI,
+    15	    QuestionHandler,
+    16	    Restriction,
+    17	    Tool,
+    18	)
+    19	from agl.ports.errors import InputError, UpstreamUnexpected
+    20	from agl.ports.ids import StepName
+    21	from agl.sdk.tools import ReportingTool
+    22	
+    23	__all__ = [
+    24	    "Capability",
+    25	    "Claude",
+    26	    "ModelId",
+    27	    "OpenAI",
+    28	    "QuestionHandler",
+    29	    "Restriction",
+    30	    "Role",
+    31	    "RoleFactory",
+    32	    "RoleIncompleteError",
+    33	    "prompt_file",
+    34	    "role",
+    35	]
+    36	
+    37	
+    38	@dataclass(frozen=True, slots=True, kw_only=True)
+    39	class Role[P = None]:
+    40	
+    41	    name: str
+    42	
+    43	    instructions: str
+    44	
+    45	    _model: ModelId | None = None
+    46	
+    47	    restrictions: AbstractSet[Restriction] = frozenset()
+    48	
+    49	    tools: Sequence[Tool | ReportingTool[P]] = ()
+    50	
+    51	    requires: AbstractSet[Capability] = frozenset()
+    52	
+    53	    on_question: QuestionHandler | None = None
+    54	
+    55	    def __post_init__(self) -> None:
+    56	        StepName(self.name)
+    57	        if not self.instructions.strip():
+    58	            raise InputError(
+    59	                f"a role's instructions are the whole of what its agent is asked to do, and this "
+    60	                f"one was declared with {self.instructions!r}. `AgentTask` refuses an empty prompt "
+    61	                f"too, at the dispatch - refused here, the line that needs fixing is on screen"
+    62	            )
+    63	        tools = tuple(self.tools)
+    64	        reporting = [declared.name for declared in tools if isinstance(declared, ReportingTool)]
+    65	        if len(reporting) > 1:
+    66	            raise InputError(
+    67	                f"this role declares more than one reporting tool: {reporting}. A reporting step's "
+    68	                f"result is that tool's payload (§3.3), singular - with two, `run.step` would have "
+    69	                f"to pick one, and whichever it picked would be a rule living in the framework "
+    70	                f"about a decision the workflow made. A role reports through one tool or none"
+    71	            )
+    72	        names = [declared.name for declared in tools]
+    73	        duplicates = sorted({name for name in names if names.count(name) > 1})
+    74	        if duplicates:
+    75	            raise InputError(
+    76	                f"this role declares these tools more than once: {duplicates}. A model names the "
+    77	                f"tool it is calling, so a duplicate is a call no backend can resolve to one "
+    78	                f"handler - `AgentTask` refuses it too, one layer down and one run later"
+    79	            )
+    80	        requires = frozenset(self.requires)
+    81	        if self.on_question is not None:
+    82	            requires |= {Capability.MID_RUN_QUESTIONS}
+    83	        if tools:
+    84	            requires |= {Capability.TOOL_CALLING}
+    85	        object.__setattr__(self, "restrictions", frozenset(self.restrictions))
+    86	        object.__setattr__(self, "tools", tools)
+    87	        object.__setattr__(self, "requires", requires)
+    88	
+    89	    @property
+    90	    def model(self) -> ModelId:
+    91	        if self._model is None:
+    92	            raise InputError(
+    93	                f"the role named {self.name!r} has no model, so nothing can say which provider "
+    94	                f"runs it, fingerprint it or check what its backend can do. A role's model is "
+    95	                f"declared on its factory - `@role(model=Claude.OPUS)` above the function that "
+    96	                f"returns this `Role` (§3.2, §3.3) - and is deliberately not a field of `Role` "
+    97	                f"itself, so that preflight can read it without calling the factory. This value "
+    98	                f"came from a bare `Role(...)`, which builds one nothing has bound a model to"
+    99	            )
+   100	        return self._model
+   101	
+   102	
+   103	class RoleFactory[**P, R]:
+   104	
+   105	    __name__: str
+   106	    __qualname__: str
+   107	
+   108	    name: str
+   109	
+   110	    model: ModelId
+   111	
+   112	    def __init__(self, declaration: Callable[P, Role[R]], model: ModelId) -> None:
+   113	        update_wrapper(self, declaration)
+   114	        self._declaration = declaration
+   115	        self.name = declaration.__name__
+   116	        self.model = model
+   117	
+   118	    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> Role[R]:
+   119	        return replace(self._declaration(*args, **kwargs), _model=self.model)
+   120	
+   121	
+   122	class _RoleDecorator(Protocol):
+   123	
+   124	    def __call__[**P, R](self, declaration: Callable[P, Role[R]], /) -> RoleFactory[P, R]: ...
+   125	
+   126	
+   127	def role(*, model: ModelId) -> _RoleDecorator:
+   128	
+   129	    def decorate[**P, R](declaration: Callable[P, Role[R]]) -> RoleFactory[P, R]:
+   130	        return RoleFactory(declaration, model)
+   131	
+   132	    return decorate
+   133	
+   134	
+   135	def prompt_file(path: str | Path) -> str:
+   136	    asked = Path(path)
+   137	    where = asked if asked.is_absolute() else _beside_the_caller(sys._getframe(1).f_globals, asked)
+   138	    try:
+   139	        text = where.read_text(encoding="utf-8")
+   140	    except FileNotFoundError as missing:
+   141	        raise InputError(
+   142	            f"there is no prompt file at {where}, so the role declared with it would have nothing "
+   143	            f"to ask its agent. A relative path is resolved against the directory of the module "
+   144	            f"that called `prompt_file` - never against the current directory - so this is the "
+   145	            f"path {asked!r} names from where it was written"
+   146	        ) from missing
+   147	    except IsADirectoryError as directory:
+   148	        raise InputError(
+   149	            f"{where} is a directory, and a role's instructions are one prompt. Name the file "
+   150	            f"inside it that this role is asking its agent to read"
+   151	        ) from directory
+   152	    except UnicodeDecodeError as undecodable:
+   153	        raise InputError(
+   154	            f"{where} is not UTF-8 text: {undecodable}. A prompt is read as UTF-8 and nothing "
+   155	            f"here repairs one - a prompt read with replacement characters in it is a prompt "
+   156	            f"nobody wrote, fingerprinted as though somebody had, and handed to a model that "
+   157	            f"would answer it anyway"
+   158	        ) from undecodable
+   159	    except OSError as unreadable:
+   160	        raise InputError(
+   161	            f"{where} could not be read: {unreadable}. The prompt is read where the role is "
+   162	            f"declared, so this is the role's factory failing rather than the step it was for"
+   163	        ) from unreadable
+   164	    if not text.strip():
+   165	        raise InputError(
+   166	            f"the prompt file {where} is empty, and a role's instructions are the whole of what "
+   167	            f"its agent is asked to do. `Role` refuses an empty prompt too, one line later, and "
+   168	            f"`AgentTask` refuses it again at the dispatch"
+   169	        )
+   170	    return text
+   171	
+   172	
+   173	class RoleIncompleteError(UpstreamUnexpected):
+   174	    ...
+   175	
+   176	
+   177	def _beside_the_caller(caller: Mapping[str, object], asked: Path) -> Path:
+   178	    declared = caller.get("__file__")
+   179	    if not isinstance(declared, str):
+   180	        raise InputError(
+   181	            f"`prompt_file({str(asked)!r})` was called from something with no `__file__` - a REPL, "
+   182	            f"an `exec`, or a frozen import - so there is no module directory for a relative path "
+   183	            f"to be relative to. Pass an absolute path. AGL will not fall back to the current "
+   184	            f"directory: a workflow is read from wherever it was installed, and the directory this "
+   185	            f"process happens to have started in is the one place its prompts are certainly not"
+   186	        )
+   187	    return Path(declared).resolve().parent / asked
+########## src/agl/sdk/tools.py ##########
+     1	
+     2	from collections.abc import Callable, Mapping
+     3	from dataclasses import MISSING, Field, dataclass, field, fields, is_dataclass
+     4	from math import isfinite
+     5	from types import MappingProxyType, UnionType
+     6	from typing import Any, Final, get_args, get_origin, get_type_hints, overload
+     7	
+     8	from agl.ports.agent import Tool, ToolResult
+     9	from agl.ports.errors import InputError, InternalError
+    10	from agl.ports.run import JsonValue
+    11	
+    12	__all__ = ["ReportingTool", "Tool", "ToolResult", "describe", "reporting_tool"]
+    13	
+    14	_SCALARS: Final[Mapping[object, tuple[str, str]]] = MappingProxyType(
+    15	    {
+    16	        str: ("string", "a string"),
+    17	        bool: ("boolean", "true or false"),
+    18	        int: ("integer", "a whole number"),
+    19	        float: ("number", "a finite number"),
+    20	    }
+    21	)
+    22	
+    23	_SUPPORTED: Final = (
+    24	    "a payload field is a str, a bool, an int, a float, another payload dataclass, a `list[X]` or "
+    25	    "`tuple[X, ...]` of any of those, or `X | None`"
+    26	)
+    27	
+    28	_SHOWN = 80
+    29	
+    30	_METADATA_KEY: Final = "agl.sdk.tools"
+    31	
+    32	
+    33	@dataclass(frozen=True, slots=True)
+    34	class ReportingTool[P]:
+    35	
+    36	    name: str
+    37	
+    38	    description: str
+    39	
+    40	    payload: type[P]
+    41	
+    42	    payload_schema: Mapping[str, JsonValue] = field(init=False)
+    43	
+    44	    def __post_init__(self) -> None:
+    45	        if not self.name:
+    46	            raise InputError("a tool with an empty name cannot be named by anything calling it")
+    47	        if not self.description:
+    48	            raise InputError(
+    49	                f"tool {self.name!r} has an empty description, and the description is the whole of "
+    50	                f"what the model reads to decide whether this tool is the one it wants"
+    51	            )
+    52	        _check_payload(self.payload, self.name)
+    53	        object.__setattr__(
+    54	            self, "payload_schema", MappingProxyType(_object_schema(self.payload, self.name, ()))
+    55	        )
+    56	
+    57	    def rejection(self, payload: Mapping[str, JsonValue]) -> str | None:
+    58	        _, problems = self._read(payload)
+    59	        return None if not problems else _refusal(self.name, problems)
+    60	
+    61	    def read(self, value: object) -> P:
+    62	        instance, problems = self._read(value)
+    63	        if instance is None:
+    64	            raise InternalError(
+    65	                f"a recorded {self.name} payload does not fit {_describe(self.payload)}: "
+    66	                f"{_refusal(self.name, problems)}. AGL wrote this value and AGL is reading it, so "
+    67	                f"the ledger and the payload type have come apart - §3.6 expects the fingerprint "
+    68	                f"to have discarded this entry, and `sdk/tools.py` records why it may not have"
+    69	            )
+    70	        return instance
+    71	
+    72	    def _read(self, value: object) -> tuple[P | None, tuple[str, ...]]:
+    73	        problems: list[str] = []
+    74	        built = _instance(self.payload, value, self.name, problems)
+    75	        if not isinstance(built, self.payload):
+    76	            return None, tuple(problems)
+    77	        return built, ()
+    78	
+    79	
+    80	def reporting_tool[P](name: str, description: str, payload: type[P]) -> ReportingTool[P]:
+    81	    return ReportingTool(name=name, description=description, payload=payload)
+    82	
+    83	
+    84	@overload
+    85	def describe[T](text: str, *, default: T) -> T: ...
+    86	@overload
+    87	def describe(text: str) -> Any: ...
+    88	def describe(text: str, *, default: Any = MISSING) -> Any:
+    89	    if not text.strip():
+    90	        raise InputError(
+    91	            f"a field was described with {text!r}, and a description is what the model reads "
+    92	            f"beside the field name to know what belongs in it. Give it a sentence or leave the "
+    93	            f"field undescribed - an empty one is a term in every digest this payload writes and "
+    94	            f"is nothing at all to the model"
+    95	        )
+    96	    described = {_METADATA_KEY: text}
+    97	    if default is MISSING:
+    98	        return field(metadata=described)
+    99	    return field(default=default, metadata=described)
+   100	
+   101	
+   102	def _object_schema(
+   103	    kind: type[Any], where: str, inside: tuple[type[Any], ...]
+   104	) -> dict[str, JsonValue]:
+   105	    if kind in inside:
+   106	        raise InputError(
+   107	            f"{where} is {_describe(kind)}, which is already being derived - a payload dataclass "
+   108	            f"that contains itself has no finite schema, and a model has no way to know when to "
+   109	            f"stop nesting one"
+   110	        )
+   111	    hints = _hints(kind)
+   112	    nested = (*inside, kind)
+   113	    properties: dict[str, JsonValue] = {}
+   114	    required: list[JsonValue] = []
+   115	    for spec in fields(kind):
+   116	        schema = _schema_for(hints.get(spec.name), _at(where, spec.name), nested)
+   117	        described = _description(spec)
+   118	        if described is not None:
+   119	            schema["description"] = described
+   120	        properties[spec.name] = schema
+   121	        if _required(spec.default, spec.default_factory):
+   122	            required.append(spec.name)
+   123	    return {
+   124	        "type": "object",
+   125	        "title": f"{kind.__module__}.{kind.__qualname__}",
+   126	        "properties": properties,
+   127	        "required": sorted(required, key=str),
+   128	        "additionalProperties": False,
+   129	    }
+   130	
+   131	
+   132	def _schema_for(hint: object, where: str, inside: tuple[type[Any], ...]) -> dict[str, JsonValue]:
+   133	    optional = _optional(hint)
+   134	    if optional is not None:
+   135	        return {"anyOf": [_schema_for(optional, where, inside), {"type": "null"}]}
+   136	    scalar = _SCALARS.get(hint)
+   137	    if scalar is not None:
+   138	        return {"type": scalar[0]}
+   139	    item = _item(hint)
+   140	    if item is not None:
+   141	        return {"type": "array", "items": _schema_for(item, f"{where}[]", inside)}
+   142	    if isinstance(hint, type) and is_dataclass(hint):
+   143	        return _object_schema(hint, where, inside)
+   144	    raise InputError(
+   145	        f"{where} is a {_describe(hint)}, which a reporting tool cannot carry: {_SUPPORTED}. A "
+   146	        f"payload is stored as the step's result and read back as this dataclass, so a field type "
+   147	        f"that does not survive JSON unchanged is one the ledger could not return"
+   148	    )
+   149	
+   150	
+   151	def _instance(kind: type[Any], value: object, where: str, problems: list[str]) -> object:
+   152	    before = len(problems)
+   153	    given = _given(kind, value, where, problems)
+   154	    if len(problems) != before:
+   155	        return None
+   156	    factory: Callable[..., object] = kind
+   157	    try:
+   158	        return factory(**given)
+   159	    except Exception as raised:
+   160	        problems.append(f"`{where}` is not a valid {_describe(kind)}: {raised}")
+   161	        return None
+   162	
+   163	
+   164	def _given(kind: type[Any], value: object, where: str, problems: list[str]) -> dict[str, object]:
+   165	    if not isinstance(value, Mapping):
+   166	        problems.append(f"`{where}` should be an object and {_shown(value)} arrived")
+   167	        return {}
+   168	    hints = _hints(kind)
+   169	    declared = {spec.name: spec for spec in fields(kind)}
+   170	    for key in value:
+   171	        if key not in declared:
+   172	            problems.append(
+   173	                f"`{_at(where, key)}` is not one of this payload's fields. They are: "
+   174	                f"{', '.join(declared) or '(none)'}"
+   175	            )
+   176	    given: dict[str, object] = {}
+   177	    for name, spec in declared.items():
+   178	        hint, at = hints.get(name), _at(where, name)
+   179	        if name in value:
+   180	            given[name] = _converted(hint, value[name], at, problems)
+   181	        elif _required(spec.default, spec.default_factory):
+   182	            problems.append(f"`{at}` is missing, and it is required: {_wording(hint)}")
+   183	    return given
+   184	
+   185	
+   186	def _converted(hint: object, value: object, where: str, problems: list[str]) -> object:
+   187	    optional = _optional(hint)
+   188	    if optional is not None:
+   189	        return None if value is None else _converted(optional, value, where, problems)
+   190	    if hint in _SCALARS:
+   191	        return _scalar(hint, value, where, problems)
+   192	    item = _item(hint)
+   193	    if item is not None:
+   194	        if not isinstance(value, list):
+   195	            _wrong(hint, value, where, problems)
+   196	            return None
+   197	        built = [
+   198	            _converted(item, element, f"{where}[{index}]", problems)
+   199	            for index, element in enumerate(value)
+   200	        ]
+   201	        return tuple(built) if get_origin(hint) is tuple else built
+   202	    if isinstance(hint, type) and is_dataclass(hint):
+   203	        return _instance(hint, value, where, problems)
+   204	    _wrong(hint, value, where, problems)
+   205	    return None
+   206	
+   207	
+   208	def _scalar(hint: object, value: object, where: str, problems: list[str]) -> object:
+   209	    if hint is str and isinstance(value, str):
+   210	        return value
+   211	    if hint is bool and isinstance(value, bool):
+   212	        return value
+   213	    if hint is int and isinstance(value, int) and not isinstance(value, bool):
+   214	        return value
+   215	    if (
+   216	        hint is float
+   217	        and isinstance(value, int | float)
+   218	        and not isinstance(value, bool)
+   219	        and isfinite(value)
+   220	    ):
+   221	        return float(value)
+   222	    _wrong(hint, value, where, problems)
+   223	    return None
+   224	
+   225	
+   226	def _wrong(hint: object, value: object, where: str, problems: list[str]) -> None:
+   227	    problems.append(f"`{where}` should be {_wording(hint)} and {_shown(value)} arrived")
+   228	
+   229	
+   230	def _wording(hint: object) -> str:
+   231	    optional = _optional(hint)
+   232	    if optional is not None:
+   233	        return f"{_wording(optional)} or null"
+   234	    scalar = _SCALARS.get(hint)
+   235	    if scalar is not None:
+   236	        return scalar[1]
+   237	    item = _item(hint)
+   238	    if item is not None:
+   239	        return f"an array of {_wording(item)}"
+   240	    if isinstance(hint, type) and is_dataclass(hint):
+   241	        return f"an object with the fields of {hint.__qualname__}"
+   242	    return f"a {_describe(hint)}, which is not a payload type at all"
+   243	
+   244	
+   245	def _optional(hint: object) -> object | None:
+   246	    if get_origin(hint) is not UnionType:
+   247	        return None
+   248	    args: tuple[object, ...] = get_args(hint)
+   249	    real = [arg for arg in args if arg is not type(None)]
+   250	    return real[0] if len(args) == 2 and len(real) == 1 else None
+   251	
+   252	
+   253	def _item(hint: object) -> object | None:
+   254	    origin = get_origin(hint)
+   255	    args: tuple[object, ...] = get_args(hint)
+   256	    if origin is list and len(args) == 1:
+   257	        return args[0]
+   258	    if origin is tuple and len(args) == 2 and args[1] is Ellipsis:
+   259	        return args[0]
+   260	    return None
+   261	
+   262	
+   263	def _check_payload(payload: object, name: str) -> None:
+   264	    if isinstance(payload, type) and is_dataclass(payload):
+   265	        return
+   266	    raise InputError(
+   267	        f"the reporting tool {name!r} was declared with {_describe(payload)}, and a payload is a "
+   268	        f"dataclass (§3.3) - the class itself, never an instance of it. Its fields are what the "
+   269	        f"schema is derived from and what the agent is asked to fill in"
+   270	    )
+   271	
+   272	
+   273	def _hints(kind: type[Any]) -> Mapping[str, object]:
+   274	    try:
+   275	        return get_type_hints(kind)
+   276	    except (NameError, TypeError) as error:
+   277	        raise InputError(
+   278	            f"{_describe(kind)} has an annotation that cannot be resolved: {error}. Its fields are "
+   279	            f"read for their types, so each has to name something importable where it is"
+   280	        ) from error
+   281	
+   282	
+   283	def _refusal(name: str, problems: tuple[str, ...]) -> str:
+   284	    listed = "\n".join(f"  - {problem}" for problem in problems)
+   285	    return (
+   286	        f"{name} was not given a payload it can accept, and nothing has been recorded. Fix all of "
+   287	        f"these and call it again:\n{listed}"
+   288	    )
+   289	
+   290	
+   291	def _required(default: object, factory: object) -> bool:
+   292	    return default is MISSING and factory is MISSING
+   293	
+   294	
+   295	def _description(spec: Field[Any]) -> str | None:
+   296	    held = spec.metadata.get(_METADATA_KEY)
+   297	    return held if isinstance(held, str) else None
+   298	
+   299	
+   300	def _at(where: str, name: object) -> str:
+   301	    return f"{where}.{name}"
+   302	
+   303	
+   304	def _shown(value: object) -> str:
+   305	    text = repr(value)
+   306	    return text if len(text) <= _SHOWN else f"{text[:_SHOWN]}..."
+   307	
+   308	
+   309	def _describe(thing: object) -> str:
+   310	    if not isinstance(thing, type):
+   311	        return repr(thing)
+   312	    return f"{thing.__module__}.{thing.__qualname__}"
+########## src/agl/sdk/workflow.py ##########
+     1	
+     2	from collections.abc import Awaitable, Callable, Mapping
+     3	from dataclasses import dataclass, field
+     4	from inspect import iscoroutinefunction, signature
+     5	from typing import cast, get_args, get_origin, get_type_hints
+     6	
+     7	from agl.ports.errors import InputError, Stop
+     8	from agl.ports.home_layout import RunScope
+     9	from agl.ports.ids import Namespace
+    10	from agl.ports.integration import Conflict
+    11	from agl.ports.terminal import Terminal
+    12	from agl.ports.verifier import VerifierOutcome
+    13	from agl.sdk._engine.integration import Integration, Leases
+    14	from agl.sdk._engine.integration import integrate as _integrate
+    15	from agl.sdk._engine.journal import Fingerprints
+    16	from agl.sdk._engine.preflight import Capabilities
+    17	from agl.sdk._engine.services import Services
+    18	from agl.sdk._engine.steps import Steps
+    19	from agl.sdk._engine.worktrees import Worktrees
+    20	from agl.sdk.roles import Role
+    21	
+    22	__all__ = ["Conflict", "Namespace", "Run", "Stop", "VerifierOutcome", "Workflow", "workflow"]
+    23	
+    24	
+    25	@dataclass(frozen=True, slots=True)
+    26	class Run[P = object]:
+    27	
+    28	    params: P
+    29	
+    30	    services: Services
+    31	
+    32	    scope: RunScope
+    33	
+    34	    base: str
+    35	
+    36	    fingerprints: Fingerprints = field(default_factory=Fingerprints)
+    37	
+    38	    worktrees: Worktrees[Run[object]] = field(default_factory=Worktrees)
+    39	
+    40	    leases: Leases = field(default_factory=Leases)
+    41	
+    42	    capabilities: Capabilities = field(default_factory=Capabilities)
+    43	
+    44	    _parent: Run[P] | None = field(default=None, repr=False, compare=False)
+    45	
+    46	    _steps: Steps = field(init=False, repr=False, compare=False)
+    47	
+    48	    def __post_init__(self) -> None:
+    49	        object.__setattr__(
+    50	            self,
+    51	            "_steps",
+    52	            Steps(self.services, self.scope, self.base, self.fingerprints, self.capabilities),
+    53	        )
+    54	
+    55	    @property
+    56	    def activity(self) -> str | None:
+    57	        return self._steps.activity
+    58	
+    59	    @property
+    60	    def terminal(self) -> Terminal:
+    61	        return self.services.terminal
+    62	
+    63	    async def step[R](self, role: Role[R], *, commit: str | None = None, **inputs: object) -> R:
+    64	        return await self._steps.step(role, commit=commit, inputs=inputs)
+    65	
+    66	    def worktree(self, name: str, base: Run[object] | str | None = None) -> Run[P]:
+    67	        return cast(
+    68	            "Run[P]",
+    69	            self.worktrees.open(
+    70	                name, scope=self.scope, base=_starts_at(self, base), build=self._child
+    71	            ),
+    72	        )
+    73	
+    74	    async def integrate(self) -> Integration:
+    75	        if self._parent is None:
+    76	            raise InputError(_unaddressable(self.scope))
+    77	        return await _integrate(
+    78	            source=self._steps,
+    79	            target=self._parent._steps,
+    80	            address=self._parent.scope,
+    81	            services=self.services,
+    82	            leases=self.leases,
+    83	        )
+    84	
+    85	    def _child(self, scope: RunScope, base: str) -> Run[P]:
+    86	        return Run(
+    87	            params=self.params,
+    88	            services=self.services,
+    89	            scope=scope,
+    90	            base=base,
+    91	            fingerprints=self.fingerprints,
+    92	            worktrees=self.worktrees,
+    93	            leases=self.leases,
+    94	            capabilities=self.capabilities,
+    95	            _parent=self,
+    96	        )
+    97	
+    98	
+    99	def _starts_at(run: Run[object], base: Run[object] | str | None) -> str:
+   100	    if base is None:
+   101	        return run._steps.last_good
+   102	    if isinstance(base, str):
+   103	        return base
+   104	    return base._steps.last_good
+   105	
+   106	
+   107	def _unaddressable(scope: RunScope) -> str:
+   108	    return (
+   109	        f"there is no parent to integrate into: {_where(scope)} called `run.integrate()`, and a "
+   110	        f"landing goes into the worktree of the `Run` that cut this one (§3.3). Only a child "
+   111	        f"opened with `run.worktree(name)` has one. There is no argument to point it elsewhere, "
+   112	        f"and that is not a policy: AGL never checks out or writes to any ref outside `agl/*` "
+   113	        f"(§3.9), so `main` and every branch of yours is unaddressable rather than protected - "
+   114	        f"there is no rule here that could be relaxed and no spelling that would name one"
+   115	    )
+   116	
+   117	
+   118	def _where(scope: RunScope) -> str:
+   119	    if not scope.namespaces:
+   120	        return "the run itself"
+   121	    return "the worktree " + " -> ".join(str(name) for name in scope.namespaces)
+   122	
+   123	
+   124	type _Function[P] = Callable[[Run[P]], Awaitable[None]]
+   125	
+   126	
+   127	@dataclass(frozen=True, slots=True)
+   128	class _NoParams:
+   129	    ...
+   130	
+   131	
+   132	@dataclass(frozen=True, slots=True)
+   133	class Workflow[P = object]:
+   134	
+   135	    version: str
+   136	
+   137	    fn: _Function[P]
+   138	
+   139	    @property
+   140	    def params(self) -> type[P]:
+   141	        return cast("type[P]", _declared(self.fn))
+   142	
+   143	
+   144	def workflow[P](*, version: str) -> Callable[[_Function[P]], Workflow[P]]:
+   145	    _check_text("version", version)
+   146	
+   147	    def declare(fn: _Function[P]) -> Workflow[P]:
+   148	        if not iscoroutinefunction(fn):
+   149	            raise InputError(
+   150	                f"{fn!r} is decorated as a workflow and is not an `async def`. A workflow is one "
+   151	                f"async function (§3.3), the framework awaits it, and a plain function returning "
+   152	                f"an awaitable type-checks here and then never yields"
+   153	            )
+   154	        return Workflow(version=version, fn=fn)
+   155	
+   156	    return declare
+   157	
+   158	
+   159	def _check_text(field: str, value: str) -> None:
+   160	    if not value.strip():
+   161	        raise InputError(
+   162	            f"a workflow's {field} is required and cannot be blank: `@workflow` was given "
+   163	            f"{value!r}. It is written into every run record this workflow starts, and `RunSpec` "
+   164	            f"refuses an empty `workflow_version` - so a run declared this way could not be "
+   165	            f"recorded, let alone resumed"
+   166	        )
+   167	
+   168	
+   169	def _declared(fn: Callable[..., object]) -> object:
+   170	    parameters, hints = _hints(fn)
+   171	    if not parameters:
+   172	        raise InputError(
+   173	            f"the workflow {_written_at(fn)} takes no parameters, and a workflow is one async "
+   174	            f"function taking a `Run` (§3.3) - which is also where it declares its own parameters, "
+   175	            f"now that `@workflow` takes only `version=`. Write `async def {fn.__qualname__}(run: "
+   176	            f"Run[YourParams])`, or `run: Run` for a workflow that never reads `run.params`"
+   177	        )
+   178	    first = parameters[0]
+   179	    if first not in hints:
+   180	        raise InputError(
+   181	            f"the workflow {_written_at(fn)} annotates nothing on its first parameter {first!r}, "
+   182	            f"and that annotation is the one place a workflow declares its parameters (§3.3). An "
+   183	            f"unannotated parameter is **not** read as a bare `Run`: the two say different things "
+   184	            f"and only one of them was written down. Write `{first}: Run[YourParams]`, or "
+   185	            f"`{first}: Run` for a workflow that never reads `run.params`"
+   186	        )
+   187	    annotation = hints[first]
+   188	    origin = get_origin(annotation)
+   189	    subject = annotation if origin is None else origin
+   190	    if subject is Run:
+   191	        arguments = get_args(annotation)
+   192	        return arguments[0] if arguments else _NoParams
+   193	    raise InputError(_not_a_run(fn, first, annotation, subject))
+   194	
+   195	
+   196	def _not_a_run(fn: Callable[..., object], first: str, annotation: object, subject: object) -> str:
+   197	    if isinstance(subject, type) and issubclass(subject, Run):
+   198	        return (
+   199	            f"the workflow {_written_at(fn)} annotates {first!r} as {_describe(annotation)}, which "
+   200	            f"is a subclass of `Run`. A workflow is handed the `Run` the framework builds, never a "
+   201	            f"class of its own, so the annotation would be describing an object this run cannot "
+   202	            f"produce - and the params are read from it precisely because it and the object agree. "
+   203	            f"§3.3 gives two spellings and they are the whole list: `Run[YourParams]`, and a bare "
+   204	            f"`Run` for a workflow that never reads `run.params`"
+   205	        )
+   206	    return (
+   207	        f"the workflow {_written_at(fn)} annotates {first!r} as {_describe(annotation)}, and a "
+   208	        f"workflow is one async function taking a `Run` (§3.3). That annotation is also where it "
+   209	        f"declares its parameters, now that `@workflow` takes only `version=`, so this is not a "
+   210	        f"style note: there is nothing here to read the params class out of. Write `{first}: "
+   211	        f"Run[YourParams]`, or `{first}: Run` for a workflow that never reads `run.params`"
+   212	    )
+   213	
+   214	
+   215	def _hints(fn: Callable[..., object]) -> tuple[list[str], Mapping[str, object]]:
+   216	    try:
+   217	        return list(signature(fn).parameters), get_type_hints(fn)
+   218	    except (NameError, TypeError) as error:
+   219	        raise InputError(
+   220	            f"the workflow {_written_at(fn)} has an annotation that cannot be resolved: {error}. "
+   221	            f"Its first parameter is read for the params class it names (§3.3), so that annotation "
+   222	            f"has to name something importable where it is written - a class defined below the "
+   223	            f"function is fine, one that is never bound at all is not"
+   224	        ) from error
+   225	
+   226	
+   227	def _written_at(fn: Callable[..., object]) -> str:
+   228	    code = fn.__code__
+   229	    return f"`{fn.__qualname__}` at {code.co_filename}:{code.co_firstlineno}"
+   230	
+   231	
+   232	def _describe(thing: object) -> str:
+   233	    if not isinstance(thing, type):
+   234	        return repr(thing)
+   235	    return f"{thing.__module__}.{thing.__qualname__}"
+########## src/agl/sdk/terminal.py ##########
+     1	
+     2	from agl.ports.terminal import (
+     3	    Choice,
+     4	    Component,
+     5	    Response,
+     6	    Row,
+     7	    Rows,
+     8	    Screen,
+     9	    Terminal,
+    10	    Text,
+    11	    TextInput,
+    12	)
+    13	
+    14	__all__ = [
+    15	    "Choice",
+    16	    "Component",
+    17	    "Response",
+    18	    "Row",
+    19	    "Rows",
+    20	    "Screen",
+    21	    "Terminal",
+    22	    "Text",
+    23	    "TextInput",
+    24	]
+########## src/agl/sdk/questions.py ##########
+     1	
+     2	from agl.ports.questions import Answer, Question
+     3	
+     4	__all__ = ["Answer", "Question"]
+########## src/agl/sdk/errors.py ##########
+     1	
+     2	from agl.ports.errors import (
+     3	    AglError,
+     4	    ConflictError,
+     5	    DeniedError,
+     6	    InputError,
+     7	    InternalError,
+     8	    NotFoundError,
+     9	    UpstreamError,
+    10	    UpstreamUnavailable,
+    11	    UpstreamUnexpected,
+    12	)
+    13	
+    14	__all__ = [
+    15	    "AglError",
+    16	    "ConflictError",
+    17	    "DeniedError",
+    18	    "InputError",
+    19	    "InternalError",
+    20	    "NotFoundError",
+    21	    "UpstreamError",
+    22	    "UpstreamUnavailable",
+    23	    "UpstreamUnexpected",
+    24	]
+########## src/agl/sdk/params.py ##########
+     1	
+     2	import argparse
+     3	from collections.abc import Callable, Mapping, Sequence
+     4	from dataclasses import MISSING, dataclass, field, fields, is_dataclass
+     5	from math import isfinite
+     6	from string import ascii_letters, digits
+     7	from types import MappingProxyType
+     8	from typing import Any, Final, NoReturn, get_type_hints, overload
+     9	
+    10	from agl.ports.errors import InputError
+    11	from agl.ports.run import JsonValue
+    12	
+    13	__all__ = ["RefusingParser", "arg", "from_json", "parse", "parser_for", "to_json"]
+    14	
+    15	_METADATA_KEY: Final = "agl.sdk.params"
+    16	
+    17	_FLAG_CHARACTERS: Final = frozenset(ascii_letters + digits + "-_")
+    18	
+    19	_PARSEABLE: Final = (str, int, float)
+    20	
+    21	_ADMITTED: Final = ((bool, (bool,)), (int, (int,)), (float, (int, float)), (str, (str,)))
+    22	
+    23	
+    24	@dataclass(frozen=True, slots=True)
+    25	class _Declared:
+    26	    flags: tuple[str, ...]
+    27	    help: str
+    28	
+    29	
+    30	class RefusingParser(argparse.ArgumentParser):
+    31	
+    32	    def error(self, message: str) -> NoReturn:
+    33	        raise InputError(f"{self.format_usage().strip()}\n{message}")
+    34	
+    35	
+    36	@overload
+    37	def arg[T](*flags: str, default: T, help: str = "") -> T: ...
+    38	@overload
+    39	def arg(*flags: str, help: str = "") -> Any: ...
+    40	def arg(*flags: str, default: Any = MISSING, help: str = "") -> Any:
+    41	    if not flags:
+    42	        raise InputError(
+    43	            "a parameter is declared with at least one flag - `arg('-r', '--request')`. A field "
+    44	            "with none could only be filled by position, and §3.3 gives a workflow no such way"
+    45	        )
+    46	    for flag in flags:
+    47	        reason = _unusable_flag(flag)
+    48	        if reason is not None:
+    49	            raise InputError(f"{flag!r} cannot be a workflow's flag: {reason}")
+    50	    declared = {_METADATA_KEY: _Declared(flags=flags, help=help)}
+    51	    if default is MISSING:
+    52	        return field(metadata=declared)
+    53	    if not isinstance(default, bool | int | float | str):
+    54	        raise InputError(
+    55	            f"the default {default!r} for {'/'.join(flags)} is a {type(default).__name__}, and a "
+    56	            f"parameter is a str, an int, a float or a bool - what a shell hands over as text"
+    57	        )
+    58	    return field(default=default, metadata=declared)
+    59	
+    60	
+    61	def parser_for(params: type[object], *, prog: str | None = None) -> RefusingParser:
+    62	    if not is_dataclass(params):
+    63	        raise InputError(f"{_describe(params)} is not a dataclass of `arg()` fields (§3.3)")
+    64	    parser = RefusingParser(prog=prog, add_help=False, allow_abbrev=False)
+    65	    hints = _hints(params)
+    66	    claimed: dict[str, str] = {}
+    67	    for spec in fields(params):
+    68	        where = f"{_describe(params)}.{spec.name}"
+    69	        declared = spec.metadata.get(_METADATA_KEY)
+    70	        if not isinstance(declared, _Declared):
+    71	            raise InputError(
+    72	                f"{where} is not declared with `arg()`, and every field of a params dataclass is a "
+    73	                f"flag: a field without one could never be given a value on the command line"
+    74	            )
+    75	        for flag in declared.flags:
+    76	            if claimed.setdefault(flag, spec.name) != spec.name:
+    77	                raise InputError(
+    78	                    f"{where} and its sibling {claimed[flag]!r} both declare {flag!r}, so one of "
+    79	                    f"the two could never receive a value"
+    80	                )
+    81	        parser.add_argument(
+    82	            *declared.flags, dest=spec.name, required=spec.default is MISSING,
+    83	            default=argparse.SUPPRESS, help=declared.help or None,
+    84	            **_consumes(where, hints.get(spec.name), spec.default),
+    85	        )
+    86	    return parser
+    87	
+    88	
+    89	def parse[T](params: type[T], argv: Sequence[str], *, prog: str | None = None) -> T:
+    90	    parsed = parser_for(params, prog=prog).parse_args(argv)
+    91	    factory: Callable[..., T] = params
+    92	    return factory(**vars(parsed))
+    93	
+    94	
+    95	def to_json(instance: object) -> Mapping[str, JsonValue]:
+    96	    if isinstance(instance, type) or not is_dataclass(instance):
+    97	        raise InputError(
+    98	            f"{_describe(instance)} is not an instance of a params dataclass: a run record stores "
+    99	            f"the parameters a workflow was given, not the class describing them"
+   100	        )
+   101	    kind = _describe(type(instance))
+   102	    return MappingProxyType({
+   103	        spec.name: _storable(f"{kind}.{spec.name}", getattr(instance, spec.name))
+   104	        for spec in fields(instance)
+   105	    })
+   106	
+   107	
+   108	def from_json[T](params: type[T], data: Mapping[str, JsonValue]) -> T:
+   109	    kind = _describe(params)
+   110	    declared = _field_names(params)
+   111	    hints = _hints(params)
+   112	    missing = [name for name in declared if name not in data]
+   113	    unknown = sorted(repr(key) for key in data if key not in declared)
+   114	    if missing or unknown:
+   115	        raise InputError(
+   116	            f"the stored parameters are not {kind}'s: missing {missing}, unexpected {unknown}. A "
+   117	            f"record carries the parameters the run was started with, and `agl resume` compares "
+   118	            f"`workflow_version` before it reads them - so a record whose keys are not this "
+   119	            f"class's was written by a workflow that changed its params and kept its version. "
+   120	            f"Bump the version, or `agl clear` the run and start it again"
+   121	        )
+   122	    factory: Callable[..., T] = params
+   123	    return factory(
+   124	        **{name: _restored(f"{kind}.{name}", hints.get(name), data[name]) for name in declared}
+   125	    )
+   126	
+   127	
+   128	def _field_names(params: object) -> tuple[str, ...]:
+   129	    if not is_dataclass(params):
+   130	        raise InputError(f"{_describe(params)} is not a dataclass of `arg()` fields (§3.3)")
+   131	    return tuple(spec.name for spec in fields(params))
+   132	
+   133	
+   134	def _restored(where: str, hint: object, value: JsonValue) -> JsonValue:
+   135	    for declared, admitted in _ADMITTED:
+   136	        if hint is declared:
+   137	            if isinstance(value, admitted):
+   138	                return value
+   139	            raise InputError(
+   140	                f"{where} is declared a {_describe(hint)} and the record holds {value!r}. A run's "
+   141	                f"parameters are read back exactly as they were stored and never converted into "
+   142	                f"what a field now says it holds, so this is the workflow's params class having "
+   143	                f"moved under a version that did not"
+   144	            )
+   145	    raise InputError(
+   146	        f"{where} is a {_describe(hint)}, and a parameter is a str, an int, a float or a bool: "
+   147	        f"what a shell hands over as text and what `run.json` holds unchanged. This record was "
+   148	        f"written when the field was one of the four, and reading it back needs it to still be"
+   149	    )
+   150	
+   151	
+   152	def _storable(where: str, value: object) -> JsonValue:
+   153	    try:
+   154	        if isinstance(value, bool | int) or (isinstance(value, float) and isfinite(value)):
+   155	            return value
+   156	        if isinstance(value, str):
+   157	            value.encode()
+   158	            return value
+   159	    except UnicodeEncodeError:
+   160	        pass
+   161	    raise InputError(
+   162	        f"{where} holds {value!r}, which `run.json` cannot: a parameter is a bool, an int, a "
+   163	        f"finite float, or a str that UTF-8 can encode"
+   164	    )
+   165	
+   166	
+   167	def _consumes(where: str, hint: object, default: object) -> dict[str, Any]:
+   168	    if hint is bool:
+   169	        if default is not False:
+   170	            raise InputError(
+   171	                f"{where} is a bool, so it is a switch and must be declared `default=False`: with "
+   172	                f"no default the flag is required and only ever True, and `default=True` it cannot "
+   173	                f"turn off"
+   174	            )
+   175	        return {"action": "store_true"}
+   176	    for kind in _PARSEABLE:
+   177	        if hint is kind:
+   178	            return {"type": kind}
+   179	    raise InputError(
+   180	        f"{where} is a {_describe(hint)}, and a parameter is a str, an int, a float or a bool: "
+   181	        f"what a shell hands over as text and what `run.json` holds unchanged"
+   182	    )
+   183	
+   184	
+   185	def _hints(params: type[object]) -> Mapping[str, object]:
+   186	    try:
+   187	        return get_type_hints(params)
+   188	    except (NameError, TypeError) as error:
+   189	        raise InputError(
+   190	            f"{_describe(params)} has an annotation that cannot be resolved: {error}. Its fields "
+   191	            f"are read for their types, so each has to name something importable where it is"
+   192	        ) from error
+   193	
+   194	
+   195	def _unusable_flag(flag: str) -> str | None:
+   196	    if not flag.startswith("-"):
+   197	        return "it is a positional, and `agl run <workflow>` already occupies that position (§3.3)"
+   198	    name = flag.removeprefix("--") if flag.startswith("--") else flag[1:]
+   199	    if not name:
+   200	        return "it is dashes and nothing else"
+   201	    if not flag.startswith("--") and len(name) != 1:
+   202	        return f"a single dash introduces a one-character flag - write '--{name}' for a longer name"
+   203	    if name[0] not in ascii_letters:
+   204	        return "a flag's name starts with an ASCII letter"
+   205	    for index, character in enumerate(name):
+   206	        if character not in _FLAG_CHARACTERS:
+   207	            return (
+   208	                f"it holds {character!r} at position {index}, and a flag may hold only letters "
+   209	                f"A-Z a-z, digits, '-' and '_'"
+   210	            )
+   211	    return None
+   212	
+   213	
+   214	def _describe(thing: object) -> str:
+   215	    if not isinstance(thing, type):
+   216	        return repr(thing)
+   217	    return f"{thing.__module__}.{thing.__qualname__}"
+########## src/agl/sdk/testing.py ##########
+     1	
+     2	from collections.abc import Awaitable, Callable, Mapping, Sequence
+     3	from dataclasses import dataclass
+     4	from types import MappingProxyType
+     5	from typing import Final
+     6	
+     7	from agl.ports.agent import AgentTask, StopReason
+     8	from agl.ports.errors import InputError
+     9	from agl.ports.questions import Question
+    10	from agl.ports.run import JsonValue
+    11	
+    12	__all__ = ["Agent", "Call", "Reply"]
+    13	
+    14	_NO_PAYLOAD: Final[Mapping[str, JsonValue]] = MappingProxyType({})
+    15	
+    16	
+    17	@dataclass(frozen=True, slots=True)
+    18	class Call:
+    19	
+    20	    tool: str
+    21	
+    22	    payload: Mapping[str, JsonValue] = _NO_PAYLOAD
+    23	
+    24	    def __post_init__(self) -> None:
+    25	        if not self.tool:
+    26	            raise InputError(
+    27	                "a `Call` with an empty tool name names nothing a session could route: a model "
+    28	                "calls a tool by the name the role declared it under, and both agent fakes refuse "
+    29	                "a call to a tool the task does not declare - refused here, the line that needs "
+    30	                "fixing is the one on screen rather than one inside a run"
+    31	            )
+    32	        object.__setattr__(self, "payload", dict(self.payload))
+    33	
+    34	
+    35	@dataclass(frozen=True, slots=True)
+    36	class Reply:
+    37	
+    38	    calls: Sequence[Call] = ()
+    39	
+    40	    asks: Sequence[Question] = ()
+    41	
+    42	    activity: Sequence[str] = ()
+    43	
+    44	    says: str = ""
+    45	
+    46	    stop_reason: StopReason | None = StopReason.COMPLETED
+    47	
+    48	    def __post_init__(self) -> None:
+    49	        object.__setattr__(self, "calls", tuple(self.calls))
+    50	        object.__setattr__(self, "asks", tuple(self.asks))
+    51	        object.__setattr__(self, "activity", tuple(self.activity))
+    52	
+    53	
+    54	type Agent = Callable[[AgentTask], Reply | Awaitable[Reply]]

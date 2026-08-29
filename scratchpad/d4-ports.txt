@@ -1,0 +1,753 @@
+########## src/agl/ports/agent.py ##########
+     1	
+     2	from abc import ABC, abstractmethod
+     3	from collections.abc import Awaitable, Callable, Mapping
+     4	from dataclasses import dataclass
+     5	from enum import StrEnum
+     6	from pathlib import Path
+     7	from types import MappingProxyType
+     8	
+     9	from agl.ports.errors import InputError, InternalError
+    10	from agl.ports.questions import Answer, Question
+    11	from agl.ports.run import JsonValue
+    12	
+    13	__all__ = [
+    14	    "ActivityReporter",
+    15	    "AgentOutcome",
+    16	    "AgentRunner",
+    17	    "AgentTask",
+    18	    "Capability",
+    19	    "Claude",
+    20	    "ModelId",
+    21	    "OpenAI",
+    22	    "Provider",
+    23	    "QuestionHandler",
+    24	    "Restriction",
+    25	    "StopReason",
+    26	    "Tool",
+    27	    "ToolResult",
+    28	]
+    29	
+    30	
+    31	class Provider(StrEnum):
+    32	
+    33	    CLAUDE = "claude"
+    34	    OPENAI = "openai"
+    35	
+    36	
+    37	class ModelId(StrEnum):
+    38	
+    39	    @property
+    40	    def provider(self) -> Provider:
+    41	        prefix = self.value.partition(":")[0]
+    42	        try:
+    43	            return Provider(prefix)
+    44	        except ValueError as error:
+    45	            known = sorted(str(member) for member in Provider)
+    46	            raise InternalError(
+    47	                f"the model id {self.value!r} does not begin with a provider AGL knows: expected "
+    48	                f"one of {known} before a ':'. Model ids are this module's own enum members and "
+    49	                f"nobody types one, so a malformed id was written here, not passed in"
+    50	            ) from error
+    51	
+    52	
+    53	class Claude(ModelId):
+    54	
+    55	    OPUS = "claude:opus"
+    56	    SONNET = "claude:sonnet"
+    57	    HAIKU = "claude:haiku"
+    58	
+    59	
+    60	class OpenAI(ModelId):
+    61	
+    62	    SOL = "openai:sol"
+    63	    TERRA = "openai:terra"
+    64	    LUNA = "openai:luna"
+    65	
+    66	
+    67	class Restriction(StrEnum):
+    68	
+    69	    NO_VCS_WRITES = "no_vcs_writes"
+    70	    NO_FILE_WRITES = "no_file_writes"
+    71	    NO_SHELL = "no_shell"
+    72	    NO_NETWORK = "no_network"
+    73	
+    74	
+    75	class Capability(StrEnum):
+    76	
+    77	    FILE_EDIT = "file_edit"
+    78	    SHELL = "shell"
+    79	    MID_RUN_QUESTIONS = "mid_run_questions"
+    80	    TOOL_CALLING = "tool_calling"
+    81	
+    82	
+    83	@dataclass(frozen=True, slots=True)
+    84	class ToolResult:
+    85	
+    86	    text: str
+    87	
+    88	    rejected: bool = False
+    89	
+    90	
+    91	@dataclass(frozen=True, slots=True)
+    92	class Tool:
+    93	
+    94	    name: str
+    95	
+    96	    description: str
+    97	
+    98	    payload_schema: Mapping[str, JsonValue]
+    99	
+   100	    handler: Callable[[Mapping[str, JsonValue]], Awaitable[ToolResult]]
+   101	
+   102	    def __post_init__(self) -> None:
+   103	        if not self.name:
+   104	            raise InputError("a tool with an empty name cannot be named by anything calling it")
+   105	        if not self.description:
+   106	            raise InputError(
+   107	                f"tool {self.name!r} has an empty description, and the description is the whole of "
+   108	                f"what the model reads to decide whether this tool is the one it wants"
+   109	            )
+   110	        object.__setattr__(self, "payload_schema", MappingProxyType(dict(self.payload_schema)))
+   111	
+   112	
+   113	@dataclass(frozen=True, slots=True)
+   114	class AgentTask:
+   115	
+   116	    instructions: str
+   117	
+   118	    workspace: Path
+   119	
+   120	    model: ModelId
+   121	
+   122	    restrictions: frozenset[Restriction]
+   123	
+   124	    tools: tuple[Tool, ...]
+   125	
+   126	    context: str | None = None
+   127	
+   128	    plan_only: bool = False
+   129	
+   130	    def __post_init__(self) -> None:
+   131	        if not self.instructions:
+   132	            raise InputError("an agent task with empty instructions asks the agent for nothing")
+   133	        if not self.workspace.is_absolute():
+   134	            raise InputError(
+   135	                f"workspace {str(self.workspace)!r} cannot be used: it is a relative path, and a "
+   136	                f"relative workspace resolves against whatever directory the adapter happens to "
+   137	                f"start its work in - a task carries a place, not a way of finding one"
+   138	            )
+   139	        names = [tool.name for tool in self.tools]
+   140	        duplicates = sorted({name for name in names if names.count(name) > 1})
+   141	        if duplicates:
+   142	            raise InputError(
+   143	                f"these tools are declared more than once: {duplicates}. A model names the tool it "
+   144	                f"is calling, so a duplicate is a call no backend can resolve to one handler"
+   145	            )
+   146	
+   147	
+   148	class StopReason(StrEnum):
+   149	
+   150	    COMPLETED = "completed"
+   151	
+   152	    LIMIT = "limit"
+   153	
+   154	
+   155	@dataclass(frozen=True, slots=True)
+   156	class AgentOutcome:
+   157	
+   158	    stop_reason: StopReason | None
+   159	
+   160	    text: str
+   161	
+   162	
+   163	type QuestionHandler = Callable[[Question], Awaitable[Answer]]
+   164	
+   165	type ActivityReporter = Callable[[str], None]
+   166	
+   167	
+   168	class AgentRunner(ABC):
+   169	
+   170	    @abstractmethod
+   171	    async def capabilities(self, model: ModelId) -> frozenset[Capability]:
+   172	        ...
+   173	
+   174	    @abstractmethod
+   175	    async def check_ready(self, model: ModelId) -> None:
+   176	        ...
+   177	
+   178	    @abstractmethod
+   179	    async def run(
+   180	        self,
+   181	        task: AgentTask,
+   182	        *,
+   183	        on_question: QuestionHandler | None = None,
+   184	        on_activity: ActivityReporter | None = None,
+   185	    ) -> AgentOutcome:
+   186	        ...
+########## src/agl/ports/questions.py ##########
+     1	
+     2	from dataclasses import dataclass
+     3	
+     4	from agl.ports.errors import InternalError
+     5	
+     6	__all__ = ["Answer", "Question"]
+     7	
+     8	
+     9	@dataclass(frozen=True, slots=True)
+    10	class Question:
+    11	
+    12	    prompt: str
+    13	
+    14	    options: tuple[str, ...] = ()
+    15	
+    16	    allow_free_text: bool = True
+    17	
+    18	    def __post_init__(self) -> None:
+    19	        if not self.prompt:
+    20	            raise InternalError("a question with an empty prompt asks nothing and shows nothing")
+    21	        for index, option in enumerate(self.options):
+    22	            if not option:
+    23	                raise InternalError(
+    24	                    f"option {index} is the empty string, and an option is the exact text that "
+    25	                    f"goes back as the answer - an empty one is indistinguishable from saying "
+    26	                    f"nothing at all, and unpickable in any view that shows it"
+    27	                )
+    28	        if not self.options and not self.allow_free_text:
+    29	            raise InternalError(
+    30	                "this question offers no options and forbids free text, so there is no answer "
+    31	                "anyone could give it: an adapter mapping a payload with no choices in it leaves "
+    32	                "free text allowed, or raises for the payload it could not read"
+    33	            )
+    34	
+    35	
+    36	@dataclass(frozen=True, slots=True)
+    37	class Answer:
+    38	
+    39	    text: str
+########## src/agl/ports/errors.py ##########
+     1	
+     2	from collections.abc import Mapping
+     3	from types import MappingProxyType
+     4	from typing import Final
+     5	
+     6	__all__ = [
+     7	    "EXIT_CODES",
+     8	    "AglError",
+     9	    "ConflictError",
+    10	    "DeniedError",
+    11	    "InputError",
+    12	    "InternalError",
+    13	    "NotFoundError",
+    14	    "Stop",
+    15	    "UpstreamError",
+    16	    "UpstreamUnavailable",
+    17	    "UpstreamUnexpected",
+    18	    "exit_code_for",
+    19	]
+    20	
+    21	
+    22	class AglError(Exception):
+    23	    ...
+    24	
+    25	
+    26	class InputError(AglError):
+    27	    ...
+    28	
+    29	
+    30	class NotFoundError(AglError):
+    31	    ...
+    32	
+    33	
+    34	class ConflictError(AglError):
+    35	    ...
+    36	
+    37	
+    38	class DeniedError(AglError):
+    39	    ...
+    40	
+    41	
+    42	class UpstreamError(AglError):
+    43	    ...
+    44	
+    45	
+    46	class UpstreamUnavailable(UpstreamError):
+    47	    ...
+    48	
+    49	
+    50	class UpstreamUnexpected(UpstreamError):
+    51	    ...
+    52	
+    53	
+    54	class Stop(AglError):
+    55	    ...
+    56	
+    57	
+    58	class InternalError(AglError):
+    59	    ...
+    60	
+    61	
+    62	EXIT_CODES: Final[Mapping[type[AglError], int]] = MappingProxyType(
+    63	    {
+    64	        InputError: 2,
+    65	        NotFoundError: 3,
+    66	        ConflictError: 4,
+    67	        DeniedError: 5,
+    68	        UpstreamError: 6,
+    69	        Stop: 7,
+    70	        InternalError: 70,
+    71	    }
+    72	)
+    73	
+    74	
+    75	def exit_code_for(error: AglError | type[AglError]) -> int:
+    76	    cls = error if isinstance(error, type) else type(error)
+    77	    for ancestor in cls.__mro__:
+    78	        code = EXIT_CODES.get(ancestor)
+    79	        if code is not None:
+    80	            return code
+    81	    return EXIT_CODES[InternalError]
+########## src/agl/ports/terminal.py ##########
+     1	
+     2	from abc import ABC, abstractmethod
+     3	from collections.abc import Callable, Mapping, Sequence
+     4	from dataclasses import dataclass, field
+     5	from types import TracebackType
+     6	from typing import Self
+     7	
+     8	__all__ = [
+     9	    "Choice",
+    10	    "Component",
+    11	    "Response",
+    12	    "Row",
+    13	    "Rows",
+    14	    "Screen",
+    15	    "Terminal",
+    16	    "Text",
+    17	    "TextInput",
+    18	]
+    19	
+    20	
+    21	@dataclass(frozen=True, slots=True)
+    22	class Text:
+    23	
+    24	    value: str
+    25	
+    26	
+    27	@dataclass(frozen=True, slots=True, init=False)
+    28	class Row:
+    29	
+    30	    cells: tuple[Text, ...]
+    31	
+    32	    def __init__(self, *cells: str | Text) -> None:
+    33	        object.__setattr__(self, "cells", tuple(_coerced(cell) for cell in cells))
+    34	
+    35	
+    36	@dataclass(frozen=True, slots=True, init=False)
+    37	class Rows:
+    38	
+    39	    rows: tuple[Row, ...]
+    40	
+    41	    def __init__(self, rows: Sequence[Row]) -> None:
+    42	        object.__setattr__(self, "rows", tuple(rows))
+    43	
+    44	
+    45	type Component = Text | Row | Rows
+    46	
+    47	
+    48	@dataclass(frozen=True, slots=True)
+    49	class Choice[T]:
+    50	
+    51	    label: str
+    52	
+    53	    value: T
+    54	
+    55	
+    56	@dataclass(frozen=True, slots=True)
+    57	class TextInput[T]:
+    58	
+    59	    label: str
+    60	
+    61	    maps: Callable[[str], T] = field(compare=False, repr=False)
+    62	
+    63	
+    64	type Response[T] = Choice[T] | TextInput[T]
+    65	
+    66	
+    67	@dataclass(frozen=True, slots=True, init=False)
+    68	class Screen[T = None]:
+    69	
+    70	    body: Component
+    71	
+    72	    responses: tuple[Response[T], ...]
+    73	
+    74	    def __init__(self, body: str | Component, responses: Sequence[Response[T]] = ()) -> None:
+    75	        object.__setattr__(self, "body", _coerced(body))
+    76	        object.__setattr__(self, "responses", tuple(responses))
+    77	
+    78	
+    79	def _coerced[C: Component](value: str | C) -> Text | C:
+    80	    return Text(value) if isinstance(value, str) else value
+    81	
+    82	
+    83	class Terminal(ABC):
+    84	
+    85	    @abstractmethod
+    86	    async def show[T](
+    87	        self,
+    88	        view: Callable[..., Screen[T]],
+    89	        /,
+    90	        *,
+    91	        priority: int = 0,
+    92	        **params: object,
+    93	    ) -> T:
+    94	        ...
+    95	
+    96	    @property
+    97	    @abstractmethod
+    98	    def pending(self) -> Mapping[int, int]:
+    99	        ...
+   100	
+   101	    @abstractmethod
+   102	    async def __aenter__(self) -> Self:
+   103	        ...
+   104	
+   105	    @abstractmethod
+   106	    async def __aexit__(
+   107	        self,
+   108	        exc_type: type[BaseException] | None,
+   109	        exc: BaseException | None,
+   110	        tb: TracebackType | None,
+   111	    ) -> None:
+   112	        ...
+########## src/agl/ports/ids.py ##########
+     1	
+     2	import string
+     3	import unicodedata
+     4	from collections.abc import Mapping
+     5	from dataclasses import dataclass
+     6	from typing import ClassVar, Final
+     7	
+     8	from agl.ports.errors import InputError
+     9	
+    10	__all__ = ["Namespace", "ProjectName", "RunLabel", "StepName"]
+    11	
+    12	
+    13	_ALLOWED_CHARACTERS: Final = frozenset(string.ascii_letters + string.digits + "._-")
+    14	
+    15	_PATH_SEPARATORS: Final = frozenset("/\\")
+    16	
+    17	_INVISIBLE_CATEGORIES: Final = frozenset("CZ")
+    18	
+    19	_MAX_BYTES: Final = 255
+    20	
+    21	_RESERVED_DEVICE_NAMES: Final = frozenset(
+    22	    {"CON", "PRN", "AUX", "NUL"}
+    23	    | {f"COM{digit}" for digit in range(1, 10)}
+    24	    | {f"LPT{digit}" for digit in range(1, 10)}
+    25	)
+    26	
+    27	_BASE_WORKTREE_DIRNAME: Final = "_base"
+    28	_CHILD_BRANCH_INFIX: Final = "_work"
+    29	
+    30	
+    31	def _describe(character: str) -> str:
+    32	    name = unicodedata.name(character, "")
+    33	    return f"{character!r} ({name})" if name else f"{character!r} (U+{ord(character):04X})"
+    34	
+    35	
+    36	def _collision_key(value: str) -> str:
+    37	    return unicodedata.normalize("NFC", value.casefold())
+    38	
+    39	
+    40	def _unusable(value: str) -> str | None:
+    41	    if not value:
+    42	        return "it is empty"
+    43	    if value in {".", ".."}:
+    44	        return "it is a path traversal segment, not a name"
+    45	
+    46	    for index, character in enumerate(value):
+    47	        if character in _PATH_SEPARATORS:
+    48	            return (
+    49	                f"it contains {character!r} at position {index}, and a name is one path "
+    50	                f"segment and one git ref component - never a path"
+    51	            )
+    52	        if unicodedata.category(character)[0] in _INVISIBLE_CATEGORIES:
+    53	            return (
+    54	                f"it contains {_describe(character)} at position {index}, and a name carries "
+    55	                f"no spaces, control characters or other invisible characters"
+    56	            )
+    57	        if character not in _ALLOWED_CHARACTERS:
+    58	            return (
+    59	                f"it contains {_describe(character)} at position {index}, and a name may hold "
+    60	                f"only letters A-Z a-z, digits, and '.', '_' or '-'"
+    61	            )
+    62	
+    63	    length = len(value.encode("utf-8"))
+    64	    if length > _MAX_BYTES:
+    65	        return f"it is {length} bytes long, and a path segment may not exceed {_MAX_BYTES}"
+    66	
+    67	    if value.startswith("-"):
+    68	        return "it starts with '-', which any command taking it as an argument reads as a flag"
+    69	    if value.endswith("-"):
+    70	        return "it ends with '-', which reads as a truncated name and is no use to anyone"
+    71	    if ".." in value:
+    72	        return "it contains '..', which git ref names may not, and which means a parent directory"
+    73	    if value.startswith("."):
+    74	        return "it starts with '.', which git ref components may not, and which hides it on disk"
+    75	    if value.endswith("."):
+    76	        return "it ends with '.', which git ref names may not, and which Windows silently strips"
+    77	    if value.lower().endswith(".lock"):
+    78	        return "it ends with '.lock', which git reserves for its own lock files"
+    79	
+    80	    stem = value.split(".", 1)[0]
+    81	    if stem.upper() in _RESERVED_DEVICE_NAMES:
+    82	        return (
+    83	            f"its first component {stem!r} is a reserved device name on Windows, where opening "
+    84	            f"the file opens the device instead"
+    85	        )
+    86	    return None
+    87	
+    88	
+    89	@dataclass(frozen=True, slots=True)
+    90	class _Name:
+    91	
+    92	    _KIND: ClassVar[str] = "name"
+    93	    _RESERVED: ClassVar[Mapping[str, str]] = {}
+    94	
+    95	    value: str
+    96	
+    97	    def __post_init__(self) -> None:
+    98	        reason = _unusable(self.value) or self._RESERVED.get(self.collision_key)
+    99	        if reason is not None:
+   100	            raise InputError(f"{self._KIND} {self.value!r} cannot be used: {reason}")
+   101	
+   102	    def __str__(self) -> str:
+   103	        return self.value
+   104	
+   105	    @property
+   106	    def collision_key(self) -> str:
+   107	        return _collision_key(self.value)
+   108	
+   109	
+   110	@dataclass(frozen=True, slots=True)
+   111	class RunLabel(_Name):
+   112	
+   113	    _KIND: ClassVar[str] = "run label"
+   114	    _RESERVED: ClassVar[Mapping[str, str]] = {
+   115	        _collision_key(_CHILD_BRANCH_INFIX): (
+   116	            f"{_CHILD_BRANCH_INFIX!r} is the infix every child branch is created under, so a "
+   117	            f"run of that name would need refs/heads/agl/{_CHILD_BRANCH_INFIX} to be its own "
+   118	            f"branch and the directory holding every run's children at once - and on a "
+   119	            f"case-insensitive filesystem, so would any spelling of it"
+   120	        ),
+   121	    }
+   122	
+   123	
+   124	@dataclass(frozen=True, slots=True)
+   125	class Namespace(_Name):
+   126	
+   127	    _KIND: ClassVar[str] = "namespace"
+   128	    _RESERVED: ClassVar[Mapping[str, str]] = {
+   129	        _collision_key(_BASE_WORKTREE_DIRNAME): (
+   130	            f"{_BASE_WORKTREE_DIRNAME!r} is the run's own base worktree in the trees layout, so "
+   131	            f"a child worktree of that name would be the same directory - and on a "
+   132	            f"case-insensitive filesystem, so is any spelling of it"
+   133	        ),
+   134	    }
+   135	
+   136	
+   137	@dataclass(frozen=True, slots=True)
+   138	class ProjectName(_Name):
+   139	
+   140	    _KIND: ClassVar[str] = "project name"
+   141	
+   142	
+   143	@dataclass(frozen=True, slots=True)
+   144	class StepName(_Name):
+   145	
+   146	    _KIND: ClassVar[str] = "step name"
+########## src/agl/ports/run.py ##########
+     1	
+     2	import unicodedata
+     3	from collections.abc import Mapping
+     4	from dataclasses import dataclass
+     5	from datetime import UTC, datetime, timedelta
+     6	from math import isfinite
+     7	from types import MappingProxyType
+     8	from typing import Final
+     9	
+    10	from agl.ports.errors import InputError, InternalError
+    11	from agl.ports.ids import RunLabel
+    12	
+    13	__all__ = ["JsonValue", "RunSpec"]
+    14	
+    15	
+    16	type JsonValue = None | bool | int | float | str | list[JsonValue] | dict[str, JsonValue]
+    17	
+    18	_WIRE_KEYS: Final = (
+    19	    "workflow", "workflow_version", "label", "base_ref", "base_sha", "branch", "params",
+    20	    "created_at",
+    21	)
+    22	
+    23	_WIRE_TIME: Final = "%Y-%m-%dT%H:%M:%SZ"
+    24	
+    25	_SHA_CHARACTERS: Final = frozenset("0123456789abcdef")
+    26	_SHA_LENGTHS: Final = frozenset({40, 64})
+    27	
+    28	_SURROGATE: Final = "Cs"
+    29	
+    30	
+    31	@dataclass(frozen=True, slots=True)
+    32	class RunSpec:
+    33	
+    34	    workflow: str
+    35	
+    36	    workflow_version: str
+    37	
+    38	    label: RunLabel
+    39	
+    40	    base_ref: str
+    41	
+    42	    base_sha: str
+    43	
+    44	    branch: str
+    45	
+    46	    params: Mapping[str, JsonValue]
+    47	
+    48	    created_at: datetime
+    49	
+    50	    def __post_init__(self) -> None:
+    51	        for name, value in (
+    52	            ("workflow", self.workflow), ("workflow_version", self.workflow_version),
+    53	            ("base_ref", self.base_ref), ("branch", self.branch),
+    54	        ):
+    55	            if not value:
+    56	                raise InternalError(f"a run record's {name!r} is empty, and that names nothing")
+    57	        _check_sha(self.base_sha)
+    58	        object.__setattr__(self, "params", MappingProxyType(_checked_params(self.params)))
+    59	        object.__setattr__(self, "created_at", _normalised(self.created_at))
+    60	
+    61	    def to_json(self) -> dict[str, JsonValue]:
+    62	        return {
+    63	            "workflow": self.workflow,
+    64	            "workflow_version": self.workflow_version,
+    65	            "label": str(self.label),
+    66	            "base_ref": self.base_ref,
+    67	            "base_sha": self.base_sha,
+    68	            "branch": self.branch,
+    69	            "params": _checked_params(self.params),
+    70	            "created_at": format(self.created_at, _WIRE_TIME),
+    71	        }
+    72	
+    73	    @classmethod
+    74	    def from_json(cls, data: object) -> RunSpec:
+    75	        if not isinstance(data, Mapping):
+    76	            raise InternalError(f"a run record is a JSON object, not a {type(data).__name__}")
+    77	        missing = [key for key in _WIRE_KEYS if key not in data]
+    78	        unknown = sorted(repr(key) for key in data if key not in _WIRE_KEYS)
+    79	        if missing or unknown:
+    80	            raise InternalError(
+    81	                f"run.json's keys are not a run record's: missing {missing}, unexpected "
+    82	                f"{unknown}. A record carrying keys AGL does not know was written by another "
+    83	                f"version of it, and this module refuses records rather than migrating them"
+    84	            )
+    85	        params = data["params"]
+    86	        if not isinstance(params, Mapping):
+    87	            raise InternalError(
+    88	                f"run.json's 'params' is a {type(params).__name__}, and a workflow's params are a "
+    89	                f"JSON object - whatever the workflow chose to put in it"
+    90	            )
+    91	        try:
+    92	            label = RunLabel(_wire_text(data, "label"))
+    93	            created_at = datetime.fromisoformat(_wire_text(data, "created_at"))
+    94	        except (InputError, ValueError) as error:
+    95	            raise InternalError(f"run.json holds a value AGL cannot read back: {error}") from error
+    96	        return cls(
+    97	            workflow=_wire_text(data, "workflow"),
+    98	            workflow_version=_wire_text(data, "workflow_version"),
+    99	            label=label,
+   100	            base_ref=_wire_text(data, "base_ref"),
+   101	            base_sha=_wire_text(data, "base_sha"),
+   102	            branch=_wire_text(data, "branch"),
+   103	            params=params,
+   104	            created_at=created_at,
+   105	        )
+   106	
+   107	
+   108	def _wire_text(data: Mapping[str, object], key: str) -> str:
+   109	    value = data[key]
+   110	    if not isinstance(value, str):
+   111	        raise InternalError(
+   112	            f"run.json's {key!r} is a {type(value).__name__}, and a record's {key} is a string"
+   113	        )
+   114	    return value
+   115	
+   116	
+   117	def _check_sha(value: str) -> None:
+   118	    if len(value) not in _SHA_LENGTHS or not _SHA_CHARACTERS.issuperset(value):
+   119	        raise InternalError(
+   120	            f"base_sha {value!r} is not a resolved commit: expected 40 characters of lowercase "
+   121	            f"hexadecimal (sha1) or 64 (sha256) - a full object id, because an abbreviated one "
+   122	            f"stops being unique as the repository grows and so pins nothing"
+   123	        )
+   124	
+   125	
+   126	def _normalised(moment: datetime) -> datetime:
+   127	    if moment.tzinfo is None or moment.utcoffset() is None:
+   128	        raise InternalError(
+   129	            f"created_at {moment!r} has no timezone, and a wall-clock reading with no place is "
+   130	            f"not a moment - a run record carries an instant, written as UTC"
+   131	        )
+   132	    utc = moment.astimezone(UTC)
+   133	    return utc - timedelta(microseconds=utc.microsecond)
+   134	
+   135	
+   136	def _checked_params(params: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
+   137	    return {
+   138	        _checked_key(key): _checked_json(value, f"params.{key}") for key, value in params.items()
+   139	    }
+   140	
+   141	
+   142	def _checked_key(key: object) -> str:
+   143	    if not isinstance(key, str):
+   144	        raise InternalError(
+   145	            f"the param key {key!r} is a {type(key).__name__}, and a JSON object is keyed by "
+   146	            f"strings - writing this record would silently rename it"
+   147	        )
+   148	    return _checked_text(key, f"the param key {key!r}")
+   149	
+   150	
+   151	def _checked_text(value: str, where: str) -> str:
+   152	    for index, character in enumerate(value):
+   153	        if unicodedata.category(character) == _SURROGATE:
+   154	            raise InternalError(
+   155	                f"{where} holds U+{ord(character):04X} at position {index}, which is a surrogate: "
+   156	                f"UTF-8 has no encoding for one at all, so the store refuses the write and this "
+   157	                f"refuses it here, where the caller still knows what it handed over"
+   158	            )
+   159	    return value
+   160	
+   161	
+   162	def _checked_json(value: object, where: str) -> JsonValue:
+   163	    if value is None or isinstance(value, bool | int):
+   164	        return value
+   165	    if isinstance(value, str):
+   166	        return _checked_text(value, where)
+   167	    if isinstance(value, float):
+   168	        if not isfinite(value):
+   169	            raise InternalError(
+   170	                f"{where} is {value!r}, which JSON has no spelling for: it would be written as a "
+   171	                f"bare token no reader accepts, and NaN does not even equal itself"
+   172	            )
+   173	        return value
+   174	    if isinstance(value, Mapping):
+   175	        return {
+   176	            _checked_key(key): _checked_json(item, f"{where}.{key}") for key, item in value.items()
+   177	        }
+   178	    if isinstance(value, list | tuple):
+   179	        return [_checked_json(item, f"{where}[{index}]") for index, item in enumerate(value)]
+   180	    raise InternalError(
+   181	        f"{where} is a {type(value).__name__}, which is not a JSON value: a workflow's params are "
+   182	        f"stored exactly as given and read back the same, so they have to be writable"
+   183	    )

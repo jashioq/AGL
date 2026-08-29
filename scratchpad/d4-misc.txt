@@ -1,0 +1,997 @@
+########## src/agl/testing.py ##########
+     1	
+     2	from collections.abc import Iterator, Mapping, Sequence
+     3	from contextlib import contextmanager
+     4	from dataclasses import dataclass, field
+     5	from importlib.metadata import EntryPoint
+     6	from pathlib import Path
+     7	from typing import Final
+     8	
+     9	from agl import api
+    10	from agl.config import container, registry
+    11	from agl.config.container import Press, ScriptedTerminal
+    12	from agl.ports.agent import AgentTask, StopReason
+    13	from agl.ports.errors import InputError
+    14	from agl.ports.home_layout import RunScope
+    15	from agl.ports.ids import Namespace, ProjectName, RunLabel, StepName
+    16	from agl.ports.run import JsonValue
+    17	from agl.ports.store import Store
+    18	from agl.ports.terminal import Terminal
+    19	from agl.ports.tree_layout import TreesRoot
+    20	from agl.sdk._engine.journal import Entry
+    21	from agl.sdk.testing import Agent, Call, Reply
+    22	from agl.sdk.workflow import Run, Workflow
+    23	
+    24	__all__ = [
+    25	    "Agent",
+    26	    "AgentTask",
+    27	    "Call",
+    28	    "Harness",
+    29	    "Press",
+    30	    "Recorded",
+    31	    "Reply",
+    32	    "ScriptedTerminal",
+    33	    "StopReason",
+    34	    "a_run",
+    35	    "answering",
+    36	    "harness",
+    37	    "over",
+    38	    "reports",
+    39	]
+    40	
+    41	_PROJECT: Final = "project"
+    42	_LABEL: Final = "test"
+    43	
+    44	_TREES: Final = "trees"
+    45	
+    46	_BASE: Final = "4a91c07f2b3e8d15c6a0f31d8e2b47c9a6013f5e"
+    47	
+    48	
+    49	class _Interrupted(BaseException):
+    50	    ...
+    51	
+    52	
+    53	@dataclass(frozen=True, slots=True)
+    54	class Recorded:
+    55	
+    56	    step: str
+    57	
+    58	    namespace: str | None
+    59	
+    60	    value: JsonValue
+    61	
+    62	
+    63	class _Ledger(Store):
+    64	
+    65	    def __init__(self, store: Store) -> None:
+    66	        self._store = store
+    67	        self.recorded: list[Recorded] = []
+    68	
+    69	        self._after: int | None = None
+    70	        self._written = 0
+    71	
+    72	    def interrupt_after(self, steps: int | None) -> None:
+    73	        self._after = steps
+    74	        self._written = 0
+    75	
+    76	    async def read_record(self, scope: RunScope) -> dict[str, JsonValue] | None:
+    77	        return await self._store.read_record(scope)
+    78	
+    79	    async def write_record(self, scope: RunScope, value: Mapping[str, JsonValue]) -> None:
+    80	        await self._store.write_record(scope, value)
+    81	
+    82	    async def read_entry(
+    83	        self, scope: RunScope, step: StepName, digest: str
+    84	    ) -> dict[str, JsonValue] | None:
+    85	        return await self._store.read_entry(scope, step, digest)
+    86	
+    87	    async def write_entry(
+    88	        self, scope: RunScope, step: StepName, digest: str, value: Mapping[str, JsonValue]
+    89	    ) -> None:
+    90	        await self._store.write_entry(scope, step, digest, value)
+    91	        self.recorded.append(
+    92	            Recorded(
+    93	                step=str(step),
+    94	                namespace=_innermost(scope.namespaces),
+    95	                value=Entry.from_json(value).value,
+    96	            )
+    97	        )
+    98	        self._written += 1
+    99	        if self._after is not None and self._written >= self._after:
+   100	            raise _Interrupted(
+   101	                f"the harness interrupted this run after {self._written} step(s) recorded, which "
+   102	                f"is what `interrupt_after={self._after}` asked for"
+   103	            )
+   104	
+   105	    async def namespaces(self, scope: RunScope) -> tuple[Namespace, ...]:
+   106	        return await self._store.namespaces(scope)
+   107	
+   108	    async def remove(self, scope: RunScope) -> None:
+   109	        await self._store.remove(scope)
+   110	
+   111	
+   112	@dataclass(frozen=True, slots=True)
+   113	class Harness:
+   114	
+   115	    fakes: container.FakeServices
+   116	
+   117	    scope: RunScope
+   118	
+   119	    _ledger: _Ledger = field(repr=False, compare=False)
+   120	
+   121	    @property
+   122	    def recorded(self) -> tuple[Recorded, ...]:
+   123	        return tuple(self._ledger.recorded)
+   124	
+   125	    async def run[P](
+   126	        self,
+   127	        workflow: Workflow[P],
+   128	        *flags: str,
+   129	        base_ref: str | None = None,
+   130	        interrupt_after: int | None = None,
+   131	    ) -> None:
+   132	        point = _resolvable(workflow)
+   133	        with self._interrupting(interrupt_after):
+   134	            await api.run(
+   135	                self.fakes.services,
+   136	                self.scope.project,
+   137	                point.name,
+   138	                self.scope.label,
+   139	                flags,
+   140	                base_ref=base_ref,
+   141	                points=(point,),
+   142	            )
+   143	
+   144	    async def resume[P](
+   145	        self, workflow: Workflow[P], *, interrupt_after: int | None = None
+   146	    ) -> None:
+   147	        point = _resolvable(workflow)
+   148	        with self._interrupting(interrupt_after):
+   149	            await api.resume(
+   150	                self.fakes.services, self.scope.project, self.scope.label, points=(point,)
+   151	            )
+   152	
+   153	    @contextmanager
+   154	    def _interrupting(self, after: int | None) -> Iterator[None]:
+   155	        if after is not None and after < 1:
+   156	            raise InputError(
+   157	                f"`interrupt_after={after}` asks for a run interrupted before its first step has "
+   158	                f"recorded anything, which is a run that did nothing - there would be no entry to "
+   159	                f"replay and a resume would walk the whole workflow again. The smallest one that "
+   160	                f"leaves something on the ledger is 1"
+   161	            )
+   162	        self._ledger.interrupt_after(after)
+   163	        try:
+   164	            yield
+   165	        except _Interrupted:
+   166	            return
+   167	        except BaseExceptionGroup as group:
+   168	            _, rest = group.split(_Interrupted)
+   169	            if rest is not None:
+   170	                raise rest from group
+   171	        finally:
+   172	            self._ledger.interrupt_after(None)
+   173	
+   174	
+   175	def harness(
+   176	    where: Path,
+   177	    *,
+   178	    agent: Agent | None = None,
+   179	    files: Mapping[str, bytes] | None = None,
+   180	    build: str = container.FAKE_BUILD,
+   181	    terminal: Terminal | None = None,
+   182	    project: str = _PROJECT,
+   183	    label: str = _LABEL,
+   184	) -> Harness:
+   185	    fakes = container.fakes(TreesRoot(where / _TREES), files=files, build=build, agent=agent)
+   186	    if terminal is not None:
+   187	        fakes = fakes.with_terminal(terminal)
+   188	    return over(fakes, project=project, label=label)
+   189	
+   190	
+   191	def over(
+   192	    fakes: container.FakeServices,
+   193	    *,
+   194	    project: str = _PROJECT,
+   195	    label: str = _LABEL,
+   196	) -> Harness:
+   197	    ledger = _Ledger(fakes.store)
+   198	    return Harness(
+   199	        fakes=fakes.with_store(ledger),
+   200	        scope=RunScope(ProjectName(project), RunLabel(label)),
+   201	        _ledger=ledger,
+   202	    )
+   203	
+   204	
+   205	def answering(responses: Sequence[Press | int] = ()) -> ScriptedTerminal:
+   206	    return container.answering(responses)
+   207	
+   208	
+   209	def a_run[P](
+   210	    harness: Harness,
+   211	    params: P,
+   212	    *,
+   213	    base: str = _BASE,
+   214	    activity: str | None = None,
+   215	) -> Run[P]:
+   216	    run: Run[P] = Run(
+   217	        params=params, services=harness.fakes.services, scope=harness.scope, base=base
+   218	    )
+   219	    reports(run, activity)
+   220	    return run
+   221	
+   222	
+   223	def reports(run: Run[object], activity: str | None) -> None:
+   224	    run._steps._activity = activity
+   225	
+   226	
+   227	def _innermost(namespaces: Sequence[Namespace]) -> str | None:
+   228	    if not namespaces:
+   229	        return None
+   230	    return str(namespaces[-1])
+   231	
+   232	
+   233	def _resolvable[P](workflow: Workflow[P]) -> EntryPoint:
+   234	    where = workflow.fn.__module__
+   235	    named = workflow.fn.__qualname__
+   236	    if "." in named:
+   237	        raise InputError(
+   238	            f"the workflow declared as {named!r} is inside something else, so there is no module "
+   239	            f"attribute for an entry point to name. A workflow is registered as "
+   240	            f"`<module>:<name>` (§3.3) and the harness resolves it the way an installed one is "
+   241	            f"resolved, so declare it at the top level of its module"
+   242	        )
+   243	    point = EntryPoint(name=named, value=f"{where}:{named}", group=registry.GROUP)
+   244	    resolved: Workflow[object] = registry.load((point,), named, Workflow)
+   245	    if resolved is not workflow:
+   246	        raise InputError(
+   247	            f"the workflow handed to the harness is not what {point.value!r} resolves to, and that "
+   248	            f"is the entry point its own module and function name compose. `@workflow` returns the "
+   249	            f"`Workflow` and the decorated name is what an entry point points at, so this happens "
+   250	            f"when the decorated function is bound to a name other than its own. Register it as "
+   251	            f"`{where}:<the attribute it is bound to>` and give the harness that same object"
+   252	        )
+   253	    return point
+########## src/agl/api.py ##########
+     1	
+     2	from collections.abc import Callable, Iterable, Sequence
+     3	from importlib.metadata import EntryPoint
+     4	from pathlib import Path
+     5	from typing import Final
+     6	
+     7	from agl.config import registry, sources, toml_file
+     8	from agl.config.schema import Settings
+     9	from agl.ports.errors import ConflictError, InputError, NotFoundError
+    10	from agl.ports.history import History
+    11	from agl.ports.home_layout import RunScope
+    12	from agl.ports.ids import Namespace, ProjectName, RunLabel
+    13	from agl.ports.run import RunSpec
+    14	from agl.ports.store import Store
+    15	from agl.ports.tree_layout import TreesRoot, run_branch
+    16	from agl.sdk import params
+    17	from agl.sdk._engine import preflight
+    18	from agl.sdk._engine.integration import Leases
+    19	from agl.sdk._engine.services import Services
+    20	from agl.sdk.workflow import Run, Workflow
+    21	
+    22	__all__ = ["Ask", "clear", "init", "list_workflows", "resume", "run", "workflow_help"]
+    23	
+    24	_TREES_DIRNAME: Final = ".agl-trees"
+    25	
+    26	_BUILD_PROMPT: Final = (
+    27	    "What command builds and tests this project? AGL runs it at the merge gate, through a shell, "
+    28	    "in a worktree of its own - `./gradlew build`, `make test`, `npm run build`.\n"
+    29	    "build command: "
+    30	)
+    31	
+    32	
+    33	type Ask = Callable[[str], str]
+    34	
+    35	
+    36	async def run(
+    37	    services: Services,
+    38	    project: ProjectName,
+    39	    name: str,
+    40	    label: RunLabel,
+    41	    argv: Sequence[str] = (),
+    42	    *,
+    43	    base_ref: str | None = None,
+    44	    points: Iterable[EntryPoint] | None = None,
+    45	) -> None:
+    46	    wf: Workflow[object] = registry.load(_points(points), name, Workflow)
+    47	    given = params.parse(wf.params, argv, prog=f"agl run {name}")
+    48	
+    49	    scope = RunScope(project, label)
+    50	    if await services.store.read_record(scope) is not None:
+    51	        raise ConflictError(
+    52	            f"run {str(label)!r} already exists - `agl resume {label}` or `agl clear {label}`."
+    53	        )
+    54	
+    55	    branch = run_branch(label)
+    56	    if await services.history.exists(branch):
+    57	        raise ConflictError(
+    58	            f"the branch {branch!r} already exists, so run {str(label)!r} cannot start: AGL would "
+    59	            f"attach this run to that line of work and carry on from wherever it got to, with "
+    60	            f"whatever `--from` said ignored (§3.10). This is what an unfinished run leaves - "
+    61	            f"`clear` keeps a branch whose work is not yet in the base ref, and takes that run's "
+    62	            f"records away with everything else, so there is nothing left here for `agl clear "
+    63	            f"{label} -f` to address. `git log {branch}` is what is on it, `git branch -D "
+    64	            f"{branch}` frees the label, and any other label starts a run of its own."
+    65	        )
+    66	
+    67	    await preflight.check(services.agents, wf.fn)
+    68	
+    69	    ref = await services.history.default_ref() if base_ref is None else base_ref
+    70	    spec = RunSpec(
+    71	        workflow=name,
+    72	        workflow_version=wf.version,
+    73	        label=label,
+    74	        base_ref=ref,
+    75	        base_sha=await services.history.resolve(ref),
+    76	        branch=branch,
+    77	        params=params.to_json(given),
+    78	        created_at=services.clock.now(),
+    79	    )
+    80	
+    81	    async with services.workspaces.hold(label):
+    82	        await services.store.write_record(scope, spec.to_json())
+    83	
+    84	        await services.workspaces.open(label, None, spec.base_sha)
+    85	
+    86	        leases = Leases()
+    87	        try:
+    88	            async with services.terminal:
+    89	                await wf.fn(
+    90	                    Run(
+    91	                        params=given,
+    92	                        services=services,
+    93	                        scope=scope,
+    94	                        base=spec.base_sha,
+    95	                        leases=leases,
+    96	                    )
+    97	                )
+    98	        finally:
+    99	            leases.release_all()
+   100	
+   101	
+   102	async def resume(
+   103	    services: Services,
+   104	    project: ProjectName,
+   105	    label: RunLabel,
+   106	    *,
+   107	    points: Iterable[EntryPoint] | None = None,
+   108	) -> None:
+   109	    scope = RunScope(project, label)
+   110	    record = await services.store.read_record(scope)
+   111	    if record is None:
+   112	        raise NotFoundError(
+   113	            f"run {str(label)!r} does not exist - `agl run <workflow> -n {label}` starts one."
+   114	        )
+   115	    spec = RunSpec.from_json(record)
+   116	
+   117	    wf: Workflow[object] = registry.load(_points(points), spec.workflow, Workflow)
+   118	
+   119	    if wf.version != spec.workflow_version:
+   120	        raise ConflictError(
+   121	            f"run {str(label)!r} was started by {spec.workflow!r} version "
+   122	            f"{spec.workflow_version!r} and the installed {spec.workflow!r} is version "
+   123	            f"{wf.version!r}. A run stamps its workflow's version and AGL refuses a mismatch "
+   124	            f"rather than migrating one (§3.11): every step already on this run's ledger was "
+   125	            f"produced by the workflow as it was then. Install {spec.workflow_version!r} to finish "
+   126	            f"this run, or `agl clear {label} -f` and start it again on {wf.version!r}."
+   127	        )
+   128	
+   129	    given = params.from_json(wf.params, spec.params)
+   130	
+   131	    await preflight.check(services.agents, wf.fn)
+   132	
+   133	    async with services.workspaces.hold(label):
+   134	        await services.workspaces.open(label, None, spec.base_sha)
+   135	
+   136	        leases = Leases()
+   137	        try:
+   138	            async with services.terminal:
+   139	                await wf.fn(
+   140	                    Run(
+   141	                        params=given,
+   142	                        services=services,
+   143	                        scope=scope,
+   144	                        base=spec.base_sha,
+   145	                        leases=leases,
+   146	                    )
+   147	                )
+   148	        finally:
+   149	            leases.release_all()
+   150	
+   151	
+   152	async def clear(
+   153	    services: Services, project: ProjectName, label: RunLabel, *, force: bool = False
+   154	) -> str | None:
+   155	    scope = RunScope(project, label)
+   156	    record = await services.store.read_record(scope)
+   157	    if record is None:
+   158	        raise NotFoundError(f"run {str(label)!r} does not exist - there is nothing to clear.")
+   159	
+   160	    async with services.workspaces.hold(label):
+   161	        for namespace in await _under(services.store, scope):
+   162	            await services.workspaces.remove(label, namespace)
+   163	            await services.workspaces.discard(label, namespace)
+   164	
+   165	        await services.workspaces.remove(label, None)
+   166	
+   167	        branch = run_branch(label)
+   168	        kept = (
+   169	            None
+   170	            if force
+   171	            else await _kept(services.history, label, branch, RunSpec.from_json(record).base_ref)
+   172	        )
+   173	        if kept is None:
+   174	            await services.workspaces.discard(label, None)
+   175	
+   176	        await services.store.remove(scope)
+   177	        return kept
+   178	
+   179	
+   180	def init(settings: Settings, cwd: Path, ask: Ask) -> Path:
+   181	    root = toml_file.git_root(cwd)
+   182	    name = ProjectName(root.name)
+   183	
+   184	    destination = toml_file.check_unregistered(settings.home, name)
+   185	
+   186	    trees = TreesRoot(root.parent / _TREES_DIRNAME / str(name))
+   187	    toml_file.check_trees_root(destination, root, trees.path)
+   188	
+   189	    build = ask(_BUILD_PROMPT).strip()
+   190	    if not build:
+   191	        raise InputError(
+   192	            "a build command is what AGL runs at the merge gate before a run's work is landed "
+   193	            "(§3.10), so an empty one would make every gate pass without building anything. "
+   194	            "Nothing has been written - run `agl init` again and give the command this project is "
+   195	            "built and tested with. If it genuinely has none, that is a decision to make in the "
+   196	            "project's settings file rather than a value that arrives here empty"
+   197	        )
+   198	    return toml_file.write_project(
+   199	        settings.home, name, root, trees, build, sources.DEFAULT_BUILD_TIMEOUT
+   200	    )
+   201	
+   202	
+   203	def list_workflows(*, points: Iterable[EntryPoint] | None = None) -> tuple[str, ...]:
+   204	    return registry.names(_points(points))
+   205	
+   206	
+   207	def workflow_help(name: str, *, points: Iterable[EntryPoint] | None = None) -> str:
+   208	    wf: Workflow[object] = registry.load(_points(points), name, Workflow)
+   209	    return params.parser_for(wf.params, prog=f"agl run {name}").format_help()
+   210	
+   211	
+   212	async def _under(store: Store, scope: RunScope) -> tuple[Namespace, ...]:
+   213	    found: list[Namespace] = []
+   214	    for namespace in await store.namespaces(scope):
+   215	        found.append(namespace)
+   216	        found.extend(await _under(store, scope.inside(namespace)))
+   217	    return tuple(found)
+   218	
+   219	
+   220	async def _kept(history: History, label: RunLabel, branch: str, base_ref: str) -> str | None:
+   221	    if await history.contains(branch, base_ref):
+   222	        return None
+   223	    return (
+   224	        f"the branch {branch!r} was kept: it is not yet in {base_ref!r}, and everything else this "
+   225	        f"run held has been taken away, its records included. Until that branch goes, `agl run "
+   226	        f"... -n {label}` is refused rather than started from the wrong place - so `git log "
+   227	        f"{branch}` is what is still there, and `git branch -D {branch}` is what frees the label "
+   228	        f"now. `agl clear {label} -f` is what would have deleted it in this call."
+   229	    )
+   230	
+   231	
+   232	def _points(points: Iterable[EntryPoint] | None) -> Iterable[EntryPoint]:
+   233	    return registry.installed() if points is None else points
+########## src/agl/adapters/routing.py ##########
+     1	
+     2	from collections.abc import Mapping
+     3	from typing import Final
+     4	
+     5	from agl.ports.agent import (
+     6	    ActivityReporter,
+     7	    AgentOutcome,
+     8	    AgentRunner,
+     9	    AgentTask,
+    10	    Capability,
+    11	    ModelId,
+    12	    Provider,
+    13	    QuestionHandler,
+    14	)
+    15	from agl.ports.errors import InputError
+    16	
+    17	__all__ = ["RoutingAgentRunner"]
+    18	
+    19	
+    20	class RoutingAgentRunner(AgentRunner):
+    21	
+    22	    def __init__(self, runners: Mapping[Provider, AgentRunner]) -> None:
+    23	        if not runners:
+    24	            raise InputError(
+    25	                "a routing agent runner was built with no adapters at all, and one holding no "
+    26	                "adapter serves no model: every step of every workflow would fail at the step it "
+    27	                "reached, naming the provider it wanted, when the fact worth reporting is that "
+    28	                "this run was assembled with no agent backend. Configure at least one provider and "
+    29	                "install the harness it names"
+    30	            )
+    31	        self._runners: Final = dict(runners)
+    32	
+    33	    async def capabilities(self, model: ModelId) -> frozenset[Capability]:
+    34	        return await self._serving(model).capabilities(model)
+    35	
+    36	    async def check_ready(self, model: ModelId) -> None:
+    37	        await self._serving(model).check_ready(model)
+    38	
+    39	    async def run(
+    40	        self,
+    41	        task: AgentTask,
+    42	        *,
+    43	        on_question: QuestionHandler | None = None,
+    44	        on_activity: ActivityReporter | None = None,
+    45	    ) -> AgentOutcome:
+    46	        return await self._serving(task.model).run(
+    47	            task, on_question=on_question, on_activity=on_activity
+    48	        )
+    49	
+    50	    def _serving(self, model: ModelId) -> AgentRunner:
+    51	        provider = model.provider
+    52	        runner = self._runners.get(provider)
+    53	        if runner is None:
+    54	            held = sorted(str(member) for member in self._runners)
+    55	            raise InputError(
+    56	                f"nothing here can run {str(model)!r}: it is served by {str(provider)!r}, and this "
+    57	                f"run was assembled with an adapter for {held} and nothing else. A provider "
+    58	                f"arrives with an adapter, so either that provider is not configured or its "
+    59	                f"harness is not installed on this machine. No other model is substituted for this "
+    60	                f"one - the model was named beside the prompt because the choice was semantic, and "
+    61	                f"answering with a different one answers a different question than the one asked"
+    62	            )
+    63	        return runner
+########## src/agl/adapters/system_clock.py ##########
+     1	
+     2	from datetime import UTC, datetime, timedelta
+     3	from typing import Final
+     4	
+     5	from agl.ports.clock import Clock
+     6	from agl.ports.errors import InputError
+     7	
+     8	__all__ = ["ManualClock", "SystemClock"]
+     9	
+    10	
+    11	_DEFAULT_MOMENT: Final = datetime(2026, 8, 18, 9, 14, 2, tzinfo=UTC)
+    12	
+    13	
+    14	class SystemClock(Clock):
+    15	
+    16	    def now(self) -> datetime:
+    17	        return datetime.now(UTC)
+    18	
+    19	
+    20	class ManualClock(Clock):
+    21	
+    22	    def __init__(self, moment: datetime = _DEFAULT_MOMENT) -> None:
+    23	        self._moment = _aware(moment, "a clock is constructed with")
+    24	
+    25	    def now(self) -> datetime:
+    26	        return self._moment
+    27	
+    28	    def advance(self, by: timedelta) -> None:
+    29	        if by < timedelta(0):
+    30	            raise InputError(
+    31	                f"a clock cannot advance by {by}, which is backwards. Nothing was moved. A moment "
+    32	                f"earlier than the current one is what `set_to` is for - the port allows a clock "
+    33	                f"to step backwards, and `advance` is the member whose name promises it will not"
+    34	            )
+    35	        self._moment += by
+    36	
+    37	    def set_to(self, moment: datetime) -> None:
+    38	        self._moment = _aware(moment, "a clock is set to")
+    39	
+    40	
+    41	def _aware(moment: datetime, what: str) -> datetime:
+    42	    if moment.tzinfo is None or moment.utcoffset() is None:
+    43	        raise InputError(
+    44	            f"{what} {moment!r}, which has no timezone. A wall-clock reading with no place is not "
+    45	            f"a moment: a clock hands its reading to a run record, and that record refuses one"
+    46	        )
+    47	    return moment
+########## src/agl/adapters/shell/fake.py ##########
+     1	
+     2	from pathlib import Path
+     3	from typing import Final
+     4	
+     5	from agl.ports.verifier import Verifier, VerifierOutcome
+     6	
+     7	__all__ = ["FakeVerifier"]
+     8	
+     9	_AGREES_PASSED: Final = 0
+    10	_AGREES_FAILED: Final = 1
+    11	
+    12	_UNSCRIPTED_PASS: Final = VerifierOutcome(passed=True, status=_AGREES_PASSED, output="")
+    13	_UNSCRIPTED_FAIL: Final = VerifierOutcome(passed=False, status=_AGREES_FAILED, output="")
+    14	
+    15	
+    16	class FakeVerifier(Verifier):
+    17	
+    18	    def __init__(self, *, unscripted_passes: bool = True) -> None:
+    19	        self._scripted: dict[str, VerifierOutcome] = {}
+    20	        self._unscripted = _UNSCRIPTED_PASS if unscripted_passes else _UNSCRIPTED_FAIL
+    21	
+    22	    def answers(
+    23	        self, command: str, *, passed: bool, status: int | None = None, output: str = ""
+    24	    ) -> None:
+    25	        reported = status if status is not None else (_AGREES_PASSED if passed else _AGREES_FAILED)
+    26	        self._scripted[command] = VerifierOutcome(passed=passed, status=reported, output=output)
+    27	
+    28	    async def verify(self, command: str, workdir: Path) -> VerifierOutcome:
+    29	        return self._scripted.get(command, self._unscripted)
+########## src/agl/adapters/shell/verifier.py ##########
+     1	
+     2	import asyncio
+     3	import os
+     4	import signal
+     5	from collections.abc import Sequence
+     6	from contextlib import suppress
+     7	from pathlib import Path
+     8	from typing import Final
+     9	
+    10	from agl.ports.errors import UpstreamUnavailable, UpstreamUnexpected
+    11	from agl.ports.verifier import Verifier, VerifierOutcome
+    12	
+    13	__all__ = ["ShellVerifier"]
+    14	
+    15	_DEFAULT_BUILD_TIMEOUT: Final = 1800.0
+    16	
+    17	_GRACE: Final = 5.0
+    18	
+    19	_ENCODING: Final = "utf-8"
+    20	_UNDECODABLE: Final = "replace"
+    21	
+    22	_CHUNK: Final = 65536
+    23	
+    24	_PASSED: Final = 0
+    25	
+    26	
+    27	class ShellVerifier(Verifier):
+    28	
+    29	    def __init__(self, build_timeout: float = _DEFAULT_BUILD_TIMEOUT) -> None:
+    30	        self._build_timeout = build_timeout
+    31	
+    32	    async def verify(self, command: str, workdir: Path) -> VerifierOutcome:
+    33	        process = await _started(command, workdir)
+    34	        captured: list[bytes] = []
+    35	        try:
+    36	            async with asyncio.timeout(self._build_timeout):
+    37	                await _drained(process, captured)
+    38	                finished = await process.wait()
+    39	        except TimeoutError:
+    40	            stopped = await _halted(process)
+    41	            return VerifierOutcome(
+    42	                passed=False,
+    43	                status=stopped,
+    44	                output=_text(captured) + _expired(self._build_timeout),
+    45	            )
+    46	        except BaseException:
+    47	            _signalled(process, signal.SIGTERM)
+    48	            raise
+    49	        return VerifierOutcome(passed=finished == _PASSED, status=finished, output=_text(captured))
+    50	
+    51	
+    52	async def _started(command: str, workdir: Path) -> asyncio.subprocess.Process:
+    53	    try:
+    54	        return await asyncio.create_subprocess_shell(
+    55	            command,
+    56	            cwd=workdir,
+    57	            stdin=asyncio.subprocess.DEVNULL,
+    58	            stdout=asyncio.subprocess.PIPE,
+    59	            stderr=asyncio.subprocess.STDOUT,
+    60	            start_new_session=True,
+    61	        )
+    62	    except OSError as error:
+    63	        raise UpstreamUnavailable(
+    64	            f"the project's build command could not be started in {workdir}: {error}. Nothing "
+    65	            f"ran, so this is not a failed build - the same call may well succeed once that "
+    66	            f"directory is there and a shell can be started in it"
+    67	        ) from error
+    68	
+    69	
+    70	async def _drained(process: asyncio.subprocess.Process, captured: list[bytes]) -> None:
+    71	    if process.stdout is None:
+    72	        raise UpstreamUnexpected(
+    73	            "the build was started with its output on a pipe and there is no pipe to read. "
+    74	            "Nothing can be reported about a build whose output cannot be reached, and the same "
+    75	            "call would answer the same way"
+    76	        )
+    77	    while chunk := await process.stdout.read(_CHUNK):
+    78	        captured.append(chunk)
+    79	
+    80	
+    81	async def _halted(process: asyncio.subprocess.Process) -> int:
+    82	    _signalled(process, signal.SIGTERM)
+    83	    with suppress(TimeoutError):
+    84	        async with asyncio.timeout(_GRACE):
+    85	            await process.wait()
+    86	    _signalled(process, signal.SIGKILL)
+    87	    return await process.wait()
+    88	
+    89	
+    90	def _signalled(process: asyncio.subprocess.Process, sign: signal.Signals) -> None:
+    91	    with suppress(ProcessLookupError, PermissionError):
+    92	        os.killpg(process.pid, sign)
+    93	
+    94	
+    95	def _text(captured: Sequence[bytes]) -> str:
+    96	    return b"".join(captured).decode(_ENCODING, errors=_UNDECODABLE)
+    97	
+    98	
+    99	def _expired(seconds: float) -> str:
+   100	    return (
+   101	        f"\n[agl] The build did not finish within {seconds:g}s and was stopped, along with "
+   102	        f"everything it had started. What is above is what it had printed by then.\n"
+   103	    )
+########## src/agl/adapters/filesystem/memory_store.py ##########
+     1	
+     2	import json
+     3	from collections.abc import Mapping
+     4	from typing import Final
+     5	
+     6	from agl.ports.errors import InternalError
+     7	from agl.ports.home_layout import RunScope
+     8	from agl.ports.ids import Namespace, StepName
+     9	from agl.ports.run import JsonValue
+    10	from agl.ports.store import Store
+    11	
+    12	__all__ = ["MemoryStore"]
+    13	
+    14	
+    15	_ENCODING: Final = "utf-8"
+    16	
+    17	
+    18	type _EntryAddress = tuple[RunScope, StepName, str]
+    19	
+    20	
+    21	class MemoryStore(Store):
+    22	
+    23	    def __init__(self) -> None:
+    24	        self._records: dict[RunScope, bytes] = {}
+    25	        self._entries: dict[_EntryAddress, bytes] = {}
+    26	
+    27	    async def read_record(self, scope: RunScope) -> dict[str, JsonValue] | None:
+    28	        return _decoded(self._records.get(scope.run))
+    29	
+    30	    async def write_record(self, scope: RunScope, value: Mapping[str, JsonValue]) -> None:
+    31	        payload = _encoded(value, _record_address(scope))
+    32	        self._records[scope.run] = payload
+    33	
+    34	    async def read_entry(
+    35	        self, scope: RunScope, step: StepName, digest: str
+    36	    ) -> dict[str, JsonValue] | None:
+    37	        return _decoded(self._entries.get((scope, step, digest)))
+    38	
+    39	    async def write_entry(
+    40	        self, scope: RunScope, step: StepName, digest: str, value: Mapping[str, JsonValue]
+    41	    ) -> None:
+    42	        payload = _encoded(value, _entry_address(scope, step, digest))
+    43	        self._entries[(scope, step, digest)] = payload
+    44	
+    45	    async def namespaces(self, scope: RunScope) -> tuple[Namespace, ...]:
+    46	        depth = len(scope.namespaces)
+    47	        found = {
+    48	            recorded.namespaces[depth]
+    49	            for recorded, _, _ in self._entries
+    50	            if _within(recorded, scope) and len(recorded.namespaces) > depth
+    51	        }
+    52	        return tuple(sorted(found, key=str))
+    53	
+    54	    async def remove(self, scope: RunScope) -> None:
+    55	        if not scope.namespaces:
+    56	            self._records.pop(scope.run, None)
+    57	        for address in [address for address in self._entries if _within(address[0], scope)]:
+    58	            del self._entries[address]
+    59	
+    60	
+    61	def _within(address: RunScope, scope: RunScope) -> bool:
+    62	    return (
+    63	        address.project == scope.project
+    64	        and address.label == scope.label
+    65	        and address.namespaces[: len(scope.namespaces)] == scope.namespaces
+    66	    )
+    67	
+    68	
+    69	def _encoded(value: Mapping[str, JsonValue], address: str) -> bytes:
+    70	    try:
+    71	        return json.dumps(dict(value), ensure_ascii=False, allow_nan=False).encode(_ENCODING)
+    72	    except (TypeError, ValueError) as error:
+    73	        raise InternalError(
+    74	            f"{address} holds a value AGL cannot write down: {error}. A stored document is JSON, "
+    75	            f"and something above this port handed it one that is not"
+    76	        ) from error
+    77	
+    78	
+    79	def _decoded(payload: bytes | None) -> dict[str, JsonValue] | None:
+    80	    if payload is None:
+    81	        return None
+    82	    document: dict[str, JsonValue] = json.loads(payload.decode(_ENCODING))
+    83	    return document
+    84	
+    85	
+    86	def _scope_address(scope: RunScope) -> str:
+    87	    nesting = "/".join(str(namespace) for namespace in scope.namespaces)
+    88	    inside = f", inside {nesting}" if nesting else ""
+    89	    return f"project {str(scope.project)!r}, run {str(scope.label)!r}{inside}"
+    90	
+    91	
+    92	def _record_address(scope: RunScope) -> str:
+    93	    return f"the run record for {_scope_address(scope.run)}"
+    94	
+    95	
+    96	def _entry_address(scope: RunScope, step: StepName, digest: str) -> str:
+    97	    return f"the entry for step {str(step)!r} at digest {digest!r} in {_scope_address(scope)}"
+########## src/agl/adapters/filesystem/store.py ##########
+     1	
+     2	import json
+     3	import os
+     4	import shutil
+     5	import tempfile
+     6	from collections.abc import Mapping
+     7	from contextlib import suppress
+     8	from pathlib import Path
+     9	from typing import Final
+    10	
+    11	from agl.ports.errors import (
+    12	    AglError,
+    13	    DeniedError,
+    14	    InputError,
+    15	    InternalError,
+    16	    UpstreamUnavailable,
+    17	    UpstreamUnexpected,
+    18	)
+    19	from agl.ports.home_layout import AglHome, RunScope, run_record, scope_dir, step_entry
+    20	from agl.ports.ids import Namespace, StepName
+    21	from agl.ports.run import JsonValue
+    22	from agl.ports.store import Store
+    23	
+    24	__all__ = ["FilesystemStore"]
+    25	
+    26	
+    27	_ENCODING: Final = "utf-8"
+    28	
+    29	_PARTIAL_PREFIX: Final = "partial-"
+    30	
+    31	_INDENT: Final = 2
+    32	
+    33	_PROBE: Final = Namespace("probe")
+    34	
+    35	
+    36	class FilesystemStore(Store):
+    37	
+    38	    def __init__(self, home: AglHome) -> None:
+    39	        self._home = home
+    40	
+    41	    async def read_record(self, scope: RunScope) -> dict[str, JsonValue] | None:
+    42	        return _read(run_record(self._home, scope), _record_address(scope))
+    43	
+    44	    async def write_record(self, scope: RunScope, value: Mapping[str, JsonValue]) -> None:
+    45	        address = _record_address(scope)
+    46	        payload = _encoded(value, address)
+    47	        _write_atomically(run_record(self._home, scope), payload, address)
+    48	
+    49	    async def read_entry(
+    50	        self, scope: RunScope, step: StepName, digest: str
+    51	    ) -> dict[str, JsonValue] | None:
+    52	        address = _entry_address(scope, step, digest)
+    53	        return _read(step_entry(self._home, scope, step, digest), address)
+    54	
+    55	    async def write_entry(
+    56	        self, scope: RunScope, step: StepName, digest: str, value: Mapping[str, JsonValue]
+    57	    ) -> None:
+    58	        address = _entry_address(scope, step, digest)
+    59	        payload = _encoded(value, address)
+    60	        _write_atomically(step_entry(self._home, scope, step, digest), payload, address)
+    61	
+    62	    async def namespaces(self, scope: RunScope) -> tuple[Namespace, ...]:
+    63	        container = _worktrees_container(self._home, scope)
+    64	        try:
+    65	            names = sorted(child.name for child in container.iterdir() if child.is_dir())
+    66	        except (FileNotFoundError, NotADirectoryError):
+    67	            return ()
+    68	        except OSError as error:
+    69	            raise _translated(error, f"the namespaces of {_scope_address(scope)}") from error
+    70	        found: list[Namespace] = []
+    71	        for name in names:
+    72	            try:
+    73	                found.append(Namespace(name))
+    74	            except InputError:
+    75	                continue
+    76	        return tuple(found)
+    77	
+    78	    async def remove(self, scope: RunScope) -> None:
+    79	        try:
+    80	            shutil.rmtree(scope_dir(self._home, scope))
+    81	        except (FileNotFoundError, NotADirectoryError):
+    82	            return
+    83	        except OSError as error:
+    84	            raise _translated(error, f"the removal of {_scope_address(scope)}") from error
+    85	
+    86	
+    87	def _worktrees_container(home: AglHome, scope: RunScope) -> Path:
+    88	    return scope_dir(home, scope.inside(_PROBE)).parent
+    89	
+    90	
+    91	def _encoded(value: Mapping[str, JsonValue], address: str) -> bytes:
+    92	    try:
+    93	        text = json.dumps(dict(value), ensure_ascii=False, allow_nan=False, indent=_INDENT)
+    94	        return text.encode(_ENCODING)
+    95	    except (TypeError, ValueError) as error:
+    96	        raise InternalError(
+    97	            f"{address} holds a value AGL cannot write down: {error}. A stored document is JSON, "
+    98	            f"and something above this port handed it one that is not"
+    99	        ) from error
+   100	
+   101	
+   102	def _write_atomically(destination: Path, payload: bytes, address: str) -> None:
+   103	    try:
+   104	        destination.parent.mkdir(parents=True, exist_ok=True)
+   105	        handle, partial = tempfile.mkstemp(dir=destination.parent, prefix=_PARTIAL_PREFIX)
+   106	    except OSError as error:
+   107	        raise _translated(error, address) from error
+   108	    try:
+   109	        with os.fdopen(handle, "wb") as opened:
+   110	            opened.write(payload)
+   111	            opened.flush()
+   112	            os.fsync(opened.fileno())
+   113	        os.replace(partial, destination)
+   114	    except OSError as error:
+   115	        with suppress(OSError):
+   116	            os.unlink(partial)
+   117	        raise _translated(error, address) from error
+   118	
+   119	
+   120	def _read(path: Path, address: str) -> dict[str, JsonValue] | None:
+   121	    try:
+   122	        text = path.read_text(encoding=_ENCODING)
+   123	    except (FileNotFoundError, NotADirectoryError):
+   124	        return None
+   125	    except UnicodeDecodeError as error:
+   126	        raise UpstreamUnexpected(
+   127	            f"{address} is not {_ENCODING}: AGL writes these files whole and writes them as "
+   128	            f"{_ENCODING}, so this one did not come from AGL. {error}"
+   129	        ) from error
+   130	    except OSError as error:
+   131	        raise _translated(error, address) from error
+   132	    try:
+   133	        document: object = json.loads(text)
+   134	    except json.JSONDecodeError as error:
+   135	        raise UpstreamUnexpected(
+   136	            f"{address} is not JSON: {error}. AGL publishes these files with one atomic rename, "
+   137	            f"so a half-written one is not a state this store can produce"
+   138	        ) from error
+   139	    if not isinstance(document, dict):
+   140	        raise UpstreamUnexpected(
+   141	            f"{address} holds a {type(document).__name__}, and both kinds of document AGL stores "
+   142	            f"are JSON objects"
+   143	        )
+   144	    return document
+   145	
+   146	
+   147	def _translated(error: OSError, address: str) -> AglError:
+   148	    if isinstance(error, PermissionError):
+   149	        return DeniedError(f"the filesystem refused {address}: {error}")
+   150	    return UpstreamUnavailable(f"the filesystem could not reach {address}: {error}")
+   151	
+   152	
+   153	def _scope_address(scope: RunScope) -> str:
+   154	    nesting = "/".join(str(namespace) for namespace in scope.namespaces)
+   155	    inside = f", inside {nesting}" if nesting else ""
+   156	    return f"project {str(scope.project)!r}, run {str(scope.label)!r}{inside}"
+   157	
+   158	
+   159	def _record_address(scope: RunScope) -> str:
+   160	    return f"the run record for {_scope_address(scope.run)}"
+   161	
+   162	
+   163	def _entry_address(scope: RunScope, step: StepName, digest: str) -> str:
+   164	    return f"the entry for step {str(step)!r} at digest {digest!r} in {_scope_address(scope)}"

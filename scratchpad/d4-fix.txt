@@ -1,0 +1,158 @@
+########## src/agl/workflows/fix/__init__.py ##########
+     1	
+     2	from dataclasses import dataclass
+     3	
+     4	from agl.sdk import Answer, Question, Run, arg, workflow
+     5	from agl.workflows.fix import views
+     6	from agl.workflows.fix.roles import implementer, reviewer
+     7	
+     8	__all__ = ["FixParams", "fix"]
+     9	
+    10	
+    11	@dataclass(frozen=True)
+    12	class FixParams:
+    13	
+    14	    request: str = arg("-r", "--request", help="what to fix, in your own words")
+    15	
+    16	
+    17	@workflow(version="1.1")
+    18	async def fix(run: Run[FixParams]) -> None:
+    19	
+    20	    async def answer(question: Question) -> Answer:
+    21	        return await run.terminal.show(views.agent_question, question=question)
+    22	
+    23	    asking = implementer(on_question=answer)
+    24	    await run.terminal.show(views.board, run=run, request=run.params.request)
+    25	    await run.step(asking, request=run.params.request, commit="implement fix")
+    26	    findings = await run.step(reviewer())
+    27	    if findings.high():
+    28	        await run.step(asking, findings=findings.high(), commit="address review findings")
+########## src/agl/workflows/fix/findings.py ##########
+     1	
+     2	from dataclasses import dataclass
+     3	from typing import Final
+     4	
+     5	from agl.sdk import describe, reporting_tool
+     6	
+     7	__all__ = ["HIGH", "SEVERITIES", "Finding", "Findings", "report_findings"]
+     8	
+     9	HIGH: Final = "high"
+    10	
+    11	SEVERITIES: Final = (HIGH, "medium", "low")
+    12	
+    13	
+    14	@dataclass(frozen=True, slots=True)
+    15	class Finding:
+    16	
+    17	    severity: str = describe(
+    18	        f"One of {', '.join(SEVERITIES)}. Use {HIGH!r} only for something that must be fixed "
+    19	        f"before this change can ship: that is the one value that sends the change back to be "
+    20	        f"repaired, and every finding marked with it is another agent run."
+    21	    )
+    22	
+    23	    file: str = describe("Where it is, as a path relative to the root of the repository.")
+    24	
+    25	    summary: str = describe(
+    26	        "One or two sentences naming what is wrong and why it matters, written so that somebody "
+    27	        "repairing it without the diff in front of them knows what to do."
+    28	    )
+    29	
+    30	    def __post_init__(self) -> None:
+    31	        if self.severity not in SEVERITIES:
+    32	            raise ValueError(
+    33	                f"severity is {self.severity!r}, and a finding's severity is one of "
+    34	                f"{', '.join(SEVERITIES)}. The workflow decides whether to run a repair pass by "
+    35	                f"comparing this field, so a severity outside that list is a finding it would "
+    36	                f"silently skip rather than one it would fail to understand"
+    37	            )
+    38	
+    39	
+    40	@dataclass(frozen=True, slots=True)
+    41	class Findings:
+    42	
+    43	    findings: tuple[Finding, ...] = describe(
+    44	        "Every problem this review found, one entry per defect. Report an empty list when the "
+    45	        "change is sound: that is a result, not a failure to find anything."
+    46	    )
+    47	
+    48	    def high(self) -> tuple[Finding, ...]:
+    49	        return tuple(finding for finding in self.findings if finding.severity == HIGH)
+    50	
+    51	
+    52	report_findings: Final = reporting_tool(
+    53	    "report_findings",
+    54	    "Report everything this review found, and end the review. Call this exactly once, when you "
+    55	    "have finished reading the change: it is the only way to record a result, and a review that "
+    56	    "ends without calling it has produced nothing and will be run again.",
+    57	    Findings,
+    58	)
+########## src/agl/workflows/fix/roles.py ##########
+     1	
+     2	from agl.sdk import (
+     3	    Capability,
+     4	    Claude,
+     5	    OpenAI,
+     6	    QuestionHandler,
+     7	    Restriction,
+     8	    Role,
+     9	    prompt_file,
+    10	    role,
+    11	)
+    12	from agl.workflows.fix.findings import Findings, report_findings
+    13	
+    14	__all__ = ["implementer", "reviewer"]
+    15	
+    16	
+    17	@role(model=Claude.OPUS)
+    18	def implementer(*, on_question: QuestionHandler | None = None) -> Role:
+    19	    return Role(
+    20	        name="implement",
+    21	        instructions=prompt_file("prompts/implement.md"),
+    22	        restrictions={Restriction.NO_VCS_WRITES},
+    23	        requires={Capability.FILE_EDIT, Capability.SHELL, Capability.MID_RUN_QUESTIONS},
+    24	        on_question=on_question,
+    25	    )
+    26	
+    27	
+    28	@role(model=OpenAI.SOL)
+    29	def reviewer() -> Role[Findings]:
+    30	    return Role(
+    31	        name="review",
+    32	        instructions=prompt_file("prompts/review.md"),
+    33	        restrictions={Restriction.NO_VCS_WRITES, Restriction.NO_FILE_WRITES},
+    34	        tools=[report_findings],
+    35	        requires={Capability.SHELL, Capability.TOOL_CALLING},
+    36	    )
+########## src/agl/workflows/fix/views/__init__.py ##########
+     1	
+     2	from agl.workflows.fix.views.board import board
+     3	from agl.workflows.fix.views.question import agent_question
+     4	
+     5	__all__ = ["agent_question", "board"]
+########## src/agl/workflows/fix/views/board.py ##########
+     1	
+     2	from agl.sdk import Row, Rows, Run, Screen
+     3	
+     4	__all__ = ["board"]
+     5	
+     6	
+     7	def board(run: Run, request: str) -> Screen:
+     8	    return Screen(Rows([Row("request", request), Row("agent", run.activity or "")]))
+########## src/agl/workflows/fix/views/question.py ##########
+     1	
+     2	from typing import Final
+     3	
+     4	from agl.sdk import Answer, Choice, Question, Response, Screen, TextInput
+     5	
+     6	__all__ = ["FREE_TEXT", "agent_question"]
+     7	
+     8	FREE_TEXT: Final = "Answer in your own words"
+     9	
+    10	
+    11	def agent_question(question: Question) -> Screen[Answer]:
+    12	    responses: list[Response[Answer]] = [
+    13	        Choice(option, value=Answer(option)) for option in question.options
+    14	    ]
+    15	    if question.allow_free_text:
+    16	        responses.append(TextInput(FREE_TEXT, maps=Answer))
+    17	    return Screen(question.prompt, responses)

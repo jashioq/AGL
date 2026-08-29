@@ -1,0 +1,559 @@
+########## src/agl/cli/main.py ##########
+     1	
+     2	import argparse
+     3	import sys
+     4	from collections.abc import Callable, Iterable, Sequence
+     5	from dataclasses import dataclass
+     6	from importlib.metadata import EntryPoint
+     7	from pathlib import Path
+     8	from traceback import print_exception
+     9	from typing import Final
+    10	
+    11	from agl.api import Ask
+    12	from agl.cli import commands
+    13	from agl.cli.commands import clear as clear_command
+    14	from agl.cli.commands import init as init_command
+    15	from agl.cli.commands import resume as resume_command
+    16	from agl.cli.commands import run as run_command
+    17	from agl.cli.commands import workflows as workflows_command
+    18	from agl.cli.exit_codes import exit_status, leaves
+    19	from agl.config import container, sources
+    20	from agl.config.schema import Settings
+    21	from agl.ports.errors import AglError, InputError, InternalError, Stop
+    22	from agl.ports.ids import ProjectName
+    23	from agl.sdk._engine.services import Services
+    24	from agl.sdk.params import RefusingParser
+    25	
+    26	__all__ = ["Compose", "Invocation", "main", "parser"]
+    27	
+    28	_PROGRAM: Final = "agl"
+    29	
+    30	_COMMAND: Final = "command"
+    31	
+    32	_DESCRIPTION: Final = "Run AI agent workflows against a code repository."
+    33	
+    34	_OUR_BUG: Final = (
+    35	    "that traceback is AGL's own bug and not something you did wrong. An adapter is meant to "
+    36	    "translate what it catches into an `agl.ports.errors` class at its boundary, and one did not - "
+    37	    "so nothing above it could report the failure in words. Please report it with the lines above"
+    38	)
+    39	
+    40	
+    41	@dataclass(frozen=True, slots=True)
+    42	class Invocation:
+    43	
+    44	    registered: commands.Registered
+    45	
+    46	    settings: Settings
+    47	
+    48	    cwd: Path
+    49	
+    50	    points: Iterable[EntryPoint] | None = None
+    51	
+    52	    ask: Ask = input
+    53	
+    54	
+    55	type Compose = Callable[[], Invocation]
+    56	
+    57	
+    58	def main(argv: Sequence[str] | None = None, *, compose: Compose | None = None) -> int:
+    59	    try:
+    60	        parsed, tail = parser().parse_known_args(argv)
+    61	        invocation = _compose() if compose is None else compose()
+    62	        return _dispatch(invocation, parsed, tail)
+    63	    except Stop as stop:
+    64	        print(f"stopped: {stop}")
+    65	        return exit_status(stop)
+    66	    except AglError as refusal:
+    67	        print(f"{_PROGRAM}: {refusal}", file=sys.stderr)
+    68	        return exit_status(refusal)
+    69	    except ExceptionGroup as concurrent:
+    70	        return _concurrent(concurrent)
+    71	    except Exception as bug:
+    72	        print_exception(bug, file=sys.stderr)
+    73	        print(f"{_PROGRAM}: {_OUR_BUG}", file=sys.stderr)
+    74	        return exit_status(bug)
+    75	
+    76	
+    77	def parser() -> RefusingParser:
+    78	    root = RefusingParser(prog=_PROGRAM, description=_DESCRIPTION, allow_abbrev=False)
+    79	    declared = root.add_subparsers(
+    80	        dest=_COMMAND, metavar="<command>", required=True, parser_class=RefusingParser
+    81	    )
+    82	    run_command.declare(declared)
+    83	    resume_command.declare(declared)
+    84	    clear_command.declare(declared)
+    85	    init_command.declare(declared)
+    86	    workflows_command.declare(declared)
+    87	    return root
+    88	
+    89	
+    90	def _compose() -> Invocation:
+    91	    resolved = sources.resolve(sources.Overrides())
+    92	    cwd = Path.cwd()
+    93	    return Invocation(
+    94	        registered=lambda: _registered(resolved, cwd), settings=resolved.settings, cwd=cwd
+    95	    )
+    96	
+    97	
+    98	def _registered(resolved: sources.Resolved, cwd: Path) -> tuple[ProjectName, Services]:
+    99	    project = resolved.project(cwd)
+   100	    return project.name, container.real(resolved.settings, project)
+   101	
+   102	
+   103	def _dispatch(invocation: Invocation, parsed: argparse.Namespace, tail: Sequence[str]) -> int:
+   104	    command = getattr(parsed, _COMMAND)
+   105	    if command == run_command.NAME:
+   106	        return run_command.execute(invocation.registered, parsed, tail, points=invocation.points)
+   107	    if command == resume_command.NAME:
+   108	        _no_tail(command, tail)
+   109	        return resume_command.execute(invocation.registered, parsed, points=invocation.points)
+   110	    if command == clear_command.NAME:
+   111	        _no_tail(command, tail)
+   112	        return clear_command.execute(invocation.registered, parsed)
+   113	    if command == init_command.NAME:
+   114	        _no_tail(command, tail)
+   115	        return init_command.execute(invocation.settings, invocation.cwd, invocation.ask)
+   116	    if command == workflows_command.NAME:
+   117	        _no_tail(command, tail)
+   118	        return workflows_command.execute(parsed, points=invocation.points)
+   119	    raise InternalError(
+   120	        f"`{_PROGRAM} {command}` reached the dispatch and there is no command by that name. The "
+   121	        f"parser admits only the subcommands declared in this module, so this is AGL's own bug "
+   122	        f"rather than anything you typed - a command was declared and never given a clause here"
+   123	    )
+   124	
+   125	
+   126	def _no_tail(command: str, tail: Sequence[str]) -> None:
+   127	    if tail:
+   128	        raise InputError(
+   129	            f"`{_PROGRAM} {command}` does not take {list(tail)}: the arguments on this line are "
+   130	            f"the ones `{_PROGRAM} {command} -h` lists and no others. `{_PROGRAM} run` is the one "
+   131	            f"command that carries arguments AGL does not understand, because it is the one that "
+   132	            f"names a workflow to hand them to - a run's own workflow, its base ref and its "
+   133	            f"parameters are read back afterwards from the record `{_PROGRAM} run` wrote, and the "
+   134	            f"rest of AGL's commands either address a run that already has one or address no run "
+   135	            f"at all. To run a workflow with parameters, start a run: `{_PROGRAM} run <workflow> "
+   136	            f"-n <label> [workflow flags]`; `{_PROGRAM} workflows <workflow>` lists the flags one "
+   137	            f"takes"
+   138	        )
+   139	
+   140	
+   141	def _concurrent(group: ExceptionGroup[Exception]) -> int:
+   142	    deliberate, failed = group.split(Stop)
+   143	    if deliberate is not None:
+   144	        for stop in leaves(deliberate):
+   145	            print(f"stopped: {stop}")
+   146	    if failed is not None:
+   147	        _, untranslated = failed.split(AglError)
+   148	        if untranslated is not None:
+   149	            print_exception(untranslated, file=sys.stderr)
+   150	            print(f"{_PROGRAM}: {_OUR_BUG}", file=sys.stderr)
+   151	        print(f"{_PROGRAM}: {_severally(group)}", file=sys.stderr)
+   152	    return exit_status(group)
+   153	
+   154	
+   155	def _severally(group: ExceptionGroup[Exception]) -> str:
+   156	    held = tuple(leaves(group))
+   157	    status = exit_status(group)
+   158	    named = "\n".join(f"    {exit_status(one)}  {type(one).__name__}: {one}" for one in held)
+   159	    if {exit_status(one) for one in held} == {status}:
+   160	        return (
+   161	            f"this run's concurrent children raised, and every one of them below is exit {status} "
+   162	            f"- so that is what the run exits with, exactly as any one of them raised on its own "
+   163	            f"would have:\n{named}"
+   164	        )
+   165	    return (
+   166	        f"this run's concurrent children raised, and they do not resolve to one exit status - so "
+   167	        f"the run exits {status}. A run that failed several different ways is not attributable to "
+   168	        f"one code (§3.1), and `InternalError`'s is the honest answer rather than a guess at which "
+   169	        f"of them was the real one, so read this {status} as 'these disagreed' and not as its "
+   170	        f"usual 'file a bug'. All of them, with the status each resolves to on its own:\n{named}"
+   171	    )
+########## src/agl/cli/commands/run.py ##########
+     1	
+     2	import argparse
+     3	import asyncio
+     4	from collections.abc import Iterable, Sequence
+     5	from importlib.metadata import EntryPoint
+     6	from typing import Final
+     7	
+     8	from agl import api
+     9	from agl.cli.commands import Registered
+    10	from agl.ports.errors import InternalError
+    11	from agl.ports.ids import RunLabel
+    12	from agl.sdk.params import RefusingParser
+    13	
+    14	__all__ = ["NAME", "declare", "execute"]
+    15	
+    16	NAME: Final = "run"
+    17	
+    18	_WORKFLOW: Final = "workflow"
+    19	_LABEL: Final = "label"
+    20	_BASE_REF: Final = "base_ref"
+    21	
+    22	_LABEL_FLAGS: Final = ("-n", "--name")
+    23	_BASE_REF_FLAGS: Final = ("--from",)
+    24	
+    25	_NOTHING_TO_REPORT: Final = 0
+    26	
+    27	type _Commands = argparse._SubParsersAction[RefusingParser]
+    28	
+    29	
+    30	def declare(commands: _Commands) -> RefusingParser:
+    31	    parser = commands.add_parser(
+    32	        NAME,
+    33	        help="start a run",
+    34	        description=(
+    35	            "Start a run of a workflow. Flags this parser does not recognise belong to the "
+    36	            "workflow and are passed to it, so this help lists AGL's own and no workflow's: "
+    37	            "`agl workflows` lists what is installed, and `agl workflows <workflow>` prints the "
+    38	            "flags one of them takes."
+    39	        ),
+    40	        allow_abbrev=False,
+    41	    )
+    42	    parser.add_argument(
+    43	        _WORKFLOW,
+    44	        metavar="<workflow>",
+    45	        help="the workflow to run, named as the agl.workflows entry point registers it",
+    46	    )
+    47	    parser.add_argument(
+    48	        *_LABEL_FLAGS,
+    49	        dest=_LABEL,
+    50	        metavar="<label>",
+    51	        required=True,
+    52	        help="this run's name: its record under AGL_HOME and the branch agl/<label>",
+    53	    )
+    54	    parser.add_argument(
+    55	        *_BASE_REF_FLAGS,
+    56	        dest=_BASE_REF,
+    57	        metavar="<ref>",
+    58	        help="the ref this run's work starts from (default: the repository's own default branch)",
+    59	    )
+    60	    return parser
+    61	
+    62	
+    63	def execute(
+    64	    registered: Registered,
+    65	    parsed: argparse.Namespace,
+    66	    argv: Sequence[str],
+    67	    *,
+    68	    points: Iterable[EntryPoint] | None = None,
+    69	) -> int:
+    70	    name = _said(parsed, _WORKFLOW)
+    71	    label = RunLabel(_said(parsed, _LABEL))
+    72	    project, services = registered()
+    73	    asyncio.run(
+    74	        api.run(
+    75	            services,
+    76	            project,
+    77	            name,
+    78	            label,
+    79	            argv,
+    80	            base_ref=_perhaps(parsed, _BASE_REF),
+    81	            points=points,
+    82	        )
+    83	    )
+    84	    print(f"run {str(label)!r} finished")
+    85	    return _NOTHING_TO_REPORT
+    86	
+    87	
+    88	def _said(parsed: argparse.Namespace, dest: str) -> str:
+    89	    value = getattr(parsed, dest)
+    90	    if isinstance(value, str):
+    91	        return value
+    92	    raise InternalError(
+    93	        f"the `{NAME}` parser produced {value!r} for {dest!r}, and every argument this module "
+    94	        f"declares is a string it took off the command line. That is AGL's own bug: the parser and "
+    95	        f"the reader are in one file and they disagree"
+    96	    )
+    97	
+    98	
+    99	def _perhaps(parsed: argparse.Namespace, dest: str) -> str | None:
+   100	    value = getattr(parsed, dest)
+   101	    return None if value is None else _said(parsed, dest)
+########## src/agl/cli/commands/resume.py ##########
+     1	
+     2	import argparse
+     3	import asyncio
+     4	from collections.abc import Iterable
+     5	from importlib.metadata import EntryPoint
+     6	from typing import Final
+     7	
+     8	from agl import api
+     9	from agl.cli.commands import Registered
+    10	from agl.ports.errors import InternalError
+    11	from agl.ports.ids import RunLabel
+    12	from agl.sdk.params import RefusingParser
+    13	
+    14	__all__ = ["NAME", "declare", "execute"]
+    15	
+    16	NAME: Final = "resume"
+    17	
+    18	_LABEL: Final = "label"
+    19	
+    20	_NOTHING_TO_REPORT: Final = 0
+    21	
+    22	type _Commands = argparse._SubParsersAction[RefusingParser]
+    23	
+    24	
+    25	def declare(commands: _Commands) -> RefusingParser:
+    26	    parser = commands.add_parser(
+    27	        NAME,
+    28	        help="continue a run from its record",
+    29	        description=(
+    30	            "Continue a run that already exists. It takes the label and nothing else: the "
+    31	            "workflow, the base ref and the parameters are read back from the run's own record, "
+    32	            "which is what `agl run` wrote them there for."
+    33	        ),
+    34	        allow_abbrev=False,
+    35	    )
+    36	    parser.add_argument(
+    37	        _LABEL,
+    38	        metavar="<label>",
+    39	        help="the run to continue: the name `agl run -n <label>` gave it",
+    40	    )
+    41	    return parser
+    42	
+    43	
+    44	def execute(
+    45	    registered: Registered,
+    46	    parsed: argparse.Namespace,
+    47	    *,
+    48	    points: Iterable[EntryPoint] | None = None,
+    49	) -> int:
+    50	    label = RunLabel(_said(parsed, _LABEL))
+    51	    project, services = registered()
+    52	    asyncio.run(api.resume(services, project, label, points=points))
+    53	    print(f"resume {str(label)!r} finished")
+    54	    return _NOTHING_TO_REPORT
+    55	
+    56	
+    57	def _said(parsed: argparse.Namespace, dest: str) -> str:
+    58	    value = getattr(parsed, dest)
+    59	    if isinstance(value, str):
+    60	        return value
+    61	    raise InternalError(
+    62	        f"the `{NAME}` parser produced {value!r} for {dest!r}, and every argument this module "
+    63	        f"declares is a string it took off the command line. That is AGL's own bug: the parser and "
+    64	        f"the reader are in one file and they disagree"
+    65	    )
+########## src/agl/cli/commands/clear.py ##########
+     1	
+     2	import argparse
+     3	import asyncio
+     4	import sys
+     5	from typing import Final
+     6	
+     7	from agl import api
+     8	from agl.cli.commands import Registered
+     9	from agl.ports.errors import InternalError
+    10	from agl.ports.ids import RunLabel
+    11	from agl.sdk.params import RefusingParser
+    12	
+    13	__all__ = ["NAME", "declare", "execute"]
+    14	
+    15	NAME: Final = "clear"
+    16	
+    17	_LABEL: Final = "label"
+    18	_FORCE: Final = "force"
+    19	
+    20	_FORCE_FLAGS: Final = ("-f", "--force")
+    21	
+    22	_NOTHING_TO_REPORT: Final = 0
+    23	
+    24	type _Commands = argparse._SubParsersAction[RefusingParser]
+    25	
+    26	
+    27	def declare(commands: _Commands) -> RefusingParser:
+    28	    parser = commands.add_parser(
+    29	        NAME,
+    30	        help="take a run away",
+    31	        description=(
+    32	            "Take a run away: its checkouts, its child branches and its records. The run's own "
+    33	            "branch is deleted only if the base ref already contains it, and otherwise kept with "
+    34	            "a warning - `-f` deletes it regardless."
+    35	        ),
+    36	        allow_abbrev=False,
+    37	    )
+    38	    parser.add_argument(
+    39	        _LABEL,
+    40	        metavar="<label>",
+    41	        help="the run to take away: the name `agl run -n <label>` gave it",
+    42	    )
+    43	    parser.add_argument(
+    44	        *_FORCE_FLAGS,
+    45	        dest=_FORCE,
+    46	        action="store_true",
+    47	        help="delete the run's own branch even if the base ref does not contain it yet",
+    48	    )
+    49	    return parser
+    50	
+    51	
+    52	def execute(registered: Registered, parsed: argparse.Namespace) -> int:
+    53	    label = RunLabel(_said(parsed, _LABEL))
+    54	    force = _flagged(parsed, _FORCE)
+    55	    project, services = registered()
+    56	    kept = asyncio.run(api.clear(services, project, label, force=force))
+    57	    print(f"clear {str(label)!r} finished")
+    58	    if kept is not None:
+    59	        print(kept, file=sys.stderr)
+    60	    return _NOTHING_TO_REPORT
+    61	
+    62	
+    63	def _said(parsed: argparse.Namespace, dest: str) -> str:
+    64	    value = getattr(parsed, dest)
+    65	    if isinstance(value, str):
+    66	        return value
+    67	    raise InternalError(_disagreeing(value, dest))
+    68	
+    69	
+    70	def _flagged(parsed: argparse.Namespace, dest: str) -> bool:
+    71	    value = getattr(parsed, dest)
+    72	    if isinstance(value, bool):
+    73	        return value
+    74	    raise InternalError(_disagreeing(value, dest))
+    75	
+    76	
+    77	def _disagreeing(value: object, dest: str) -> str:
+    78	    return (
+    79	        f"the `{NAME}` parser produced {value!r} for {dest!r}, and every argument this module "
+    80	        f"declares is either a string it took off the command line or a flag that is on or off. "
+    81	        f"That is AGL's own bug: the parser and the reader are in one file and they disagree"
+    82	    )
+########## src/agl/cli/commands/workflows.py ##########
+     1	
+     2	import argparse
+     3	import sys
+     4	from collections.abc import Iterable
+     5	from importlib.metadata import EntryPoint
+     6	from typing import Final
+     7	
+     8	from agl import api
+     9	from agl.ports.errors import InternalError
+    10	from agl.sdk.params import RefusingParser
+    11	
+    12	__all__ = ["NAME", "declare", "execute"]
+    13	
+    14	NAME: Final = "workflows"
+    15	
+    16	_WORKFLOW: Final = "workflow"
+    17	
+    18	_NOTHING_TO_REPORT: Final = 0
+    19	
+    20	_NOTHING_INSTALLED: Final = (
+    21	    "no workflow is installed: the agl.workflows entry point group is empty in this environment. A "
+    22	    "workflow arrives as a package that declares one line in that group - nothing is registered "
+    23	    "here, and there is no central list in AGL to add one to."
+    24	)
+    25	
+    26	type _Commands = argparse._SubParsersAction[RefusingParser]
+    27	
+    28	
+    29	def declare(commands: _Commands) -> RefusingParser:
+    30	    parser = commands.add_parser(
+    31	        NAME,
+    32	        help="list installed workflows, or print one workflow's flags",
+    33	        description=(
+    34	            "List every workflow installed in this environment. Nothing is imported to answer "
+    35	            "that, so a package that will not load still appears in the list. Naming one loads it "
+    36	            "and prints the flags `agl run <workflow>` takes for it."
+    37	        ),
+    38	        allow_abbrev=False,
+    39	    )
+    40	    parser.add_argument(
+    41	        _WORKFLOW,
+    42	        metavar="<workflow>",
+    43	        nargs="?",
+    44	        help="a workflow to describe: prints the flags it declares, and loads it to read them",
+    45	    )
+    46	    return parser
+    47	
+    48	
+    49	def execute(parsed: argparse.Namespace, *, points: Iterable[EntryPoint] | None = None) -> int:
+    50	    named = _perhaps(parsed, _WORKFLOW)
+    51	    if named is not None:
+    52	        print(api.workflow_help(named, points=points).rstrip("\n"))
+    53	        return _NOTHING_TO_REPORT
+    54	    installed = api.list_workflows(points=points)
+    55	    if not installed:
+    56	        print(_NOTHING_INSTALLED, file=sys.stderr)
+    57	        return _NOTHING_TO_REPORT
+    58	    for name in installed:
+    59	        print(name)
+    60	    return _NOTHING_TO_REPORT
+    61	
+    62	
+    63	def _perhaps(parsed: argparse.Namespace, dest: str) -> str | None:
+    64	    value = getattr(parsed, dest)
+    65	    if value is None or isinstance(value, str):
+    66	        return value
+    67	    raise InternalError(
+    68	        f"the `{NAME}` parser produced {value!r} for {dest!r}, and the one argument this module "
+    69	        f"declares is a string it took off the command line or nothing at all. That is AGL's own "
+    70	        f"bug: the parser and the reader are in one file and they disagree"
+    71	    )
+########## src/agl/cli/commands/init.py ##########
+     1	
+     2	import argparse
+     3	from pathlib import Path
+     4	from typing import Final
+     5	
+     6	from agl import api
+     7	from agl.api import Ask
+     8	from agl.config.schema import Settings
+     9	from agl.sdk.params import RefusingParser
+    10	
+    11	__all__ = ["NAME", "declare", "execute"]
+    12	
+    13	NAME: Final = "init"
+    14	
+    15	_NOTHING_TO_REPORT: Final = 0
+    16	
+    17	type _Commands = argparse._SubParsersAction[RefusingParser]
+    18	
+    19	
+    20	def declare(commands: _Commands) -> RefusingParser:
+    21	    return commands.add_parser(
+    22	        NAME,
+    23	        help="register this repository as a project",
+    24	        description=(
+    25	            "Register the repository you are in. AGL finds its git root, asks for the command "
+    26	            "that builds and tests it, picks a place beside it for the working checkouts, and "
+    27	            "writes the project's settings under AGL_HOME - never into the repository, so AGL "
+    28	            "never appears in `git status`. Run it once per repository."
+    29	        ),
+    30	        allow_abbrev=False,
+    31	    )
+    32	
+    33	
+    34	def execute(settings: Settings, cwd: Path, ask: Ask) -> int:
+    35	    written = api.init(settings, cwd, ask)
+    36	    print(f"init wrote {written}")
+    37	    return _NOTHING_TO_REPORT
+########## src/agl/cli/exit_codes.py ##########
+     1	
+     2	from collections.abc import Iterator
+     3	
+     4	from agl.ports.errors import EXIT_CODES, AglError, InternalError, exit_code_for
+     5	
+     6	__all__ = ["EXIT_CODES", "exit_code_for", "exit_status", "leaves"]
+     7	
+     8	
+     9	def exit_status(error: Exception) -> int:
+    10	    agreed, *disagreeing = {_resolved(leaf) for leaf in leaves(error)}
+    11	    return exit_code_for(InternalError) if disagreeing else agreed
+    12	
+    13	
+    14	def leaves(error: Exception) -> Iterator[Exception]:
+    15	    if not isinstance(error, ExceptionGroup):
+    16	        yield error
+    17	        return
+    18	    for held in error.exceptions:
+    19	        yield from leaves(held)
+    20	
+    21	
+    22	def _resolved(leaf: Exception) -> int:
+    23	    if isinstance(leaf, AglError):
+    24	        return exit_code_for(leaf)
+    25	    return exit_code_for(InternalError)

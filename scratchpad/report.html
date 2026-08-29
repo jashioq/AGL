@@ -1,0 +1,536 @@
+<title>AGL Cleanup and Survey</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+:root{
+  --paper:#F6F7F9; --surface:#FFFFFF; --sunk:#EDF0F3;
+  --ink:#17202A; --ink-soft:#59656F; --ink-faint:#8A939C;
+  --rule:#DCE1E7; --rule-soft:#E9EDF1;
+  --accent:#1F6F78; --accent-soft:#E2EFF0;
+  --flag:#A63D2B; --flag-soft:#F7E9E5;
+  --pass:#3D6B4E; --pass-soft:#E6F0E9;
+  --shadow:0 1px 2px rgba(23,32,42,.05), 0 8px 24px -12px rgba(23,32,42,.14);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#10151A; --surface:#171E25; --sunk:#1D252D;
+    --ink:#DBE3EA; --ink-soft:#95A2AE; --ink-faint:#6B7883;
+    --rule:#28313A; --rule-soft:#212A32;
+    --accent:#62AEB5; --accent-soft:#173234;
+    --flag:#DC806A; --flag-soft:#33211C;
+    --pass:#77AC87; --pass-soft:#1B2A20;
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 24px -12px rgba(0,0,0,.6);
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#10151A; --surface:#171E25; --sunk:#1D252D;
+  --ink:#DBE3EA; --ink-soft:#95A2AE; --ink-faint:#6B7883;
+  --rule:#28313A; --rule-soft:#212A32;
+  --accent:#62AEB5; --accent-soft:#173234;
+  --flag:#DC806A; --flag-soft:#33211C;
+  --pass:#77AC87; --pass-soft:#1B2A20;
+  --shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 24px -12px rgba(0,0,0,.6);
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  font-size:16px; line-height:1.62; -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1080px; margin:0 auto; padding:0 28px 120px}
+.col{max-width:70ch}
+
+/* ---- masthead ---- */
+header.mast{padding:72px 0 0}
+.eyebrow{
+  font-family:"IBM Plex Mono",monospace; font-size:11.5px; font-weight:500;
+  letter-spacing:.14em; text-transform:uppercase; color:var(--accent); margin:0 0 18px;
+}
+h1{
+  font-family:Newsreader,Georgia,serif; font-weight:500; font-size:clamp(38px,5.2vw,58px);
+  line-height:1.06; letter-spacing:-.018em; margin:0 0 20px; text-wrap:balance;
+}
+.standfirst{
+  font-family:Newsreader,Georgia,serif; font-size:20px; line-height:1.5;
+  color:var(--ink-soft); margin:0; max-width:60ch;
+}
+.standfirst em{color:var(--ink); font-style:italic}
+
+/* ---- ledger strip ---- */
+.ledger{
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(148px,1fr));
+  gap:1px; background:var(--rule); border:1px solid var(--rule);
+  border-radius:3px; overflow:hidden; margin:44px 0 0;
+}
+.cell{background:var(--surface); padding:16px 18px}
+.cell .k{
+  font-family:"IBM Plex Mono",monospace; font-size:10.5px; letter-spacing:.1em;
+  text-transform:uppercase; color:var(--ink-faint); margin:0 0 7px;
+}
+.cell .v{
+  font-family:"IBM Plex Mono",monospace; font-size:23px; font-weight:500;
+  font-variant-numeric:tabular-nums; letter-spacing:-.02em; margin:0; line-height:1.1;
+}
+.cell .sub{font-size:12px; color:var(--ink-soft); margin:5px 0 0; line-height:1.35}
+.cell .v.down{color:var(--flag)}
+.cell .v.ok{color:var(--pass)}
+
+/* ---- sections ---- */
+section{margin:76px 0 0; scroll-margin-top:20px}
+.shead{display:flex; gap:16px; align-items:baseline; margin:0 0 8px; border-top:2px solid var(--ink); padding-top:14px}
+.snum{
+  font-family:"IBM Plex Mono",monospace; font-size:12px; font-weight:600;
+  color:var(--accent); letter-spacing:.06em; flex:none; padding-top:7px;
+}
+h2{
+  font-family:Newsreader,Georgia,serif; font-weight:500; font-size:clamp(26px,3.2vw,34px);
+  line-height:1.16; letter-spacing:-.014em; margin:0; text-wrap:balance;
+}
+.deck{color:var(--ink-soft); font-size:15px; margin:2px 0 26px 0; max-width:64ch}
+h3{
+  font-family:"IBM Plex Sans",sans-serif; font-weight:600; font-size:14px;
+  letter-spacing:.03em; text-transform:uppercase; color:var(--ink-soft);
+  margin:38px 0 12px; padding-bottom:7px; border-bottom:1px solid var(--rule-soft);
+}
+h4{font-family:Newsreader,Georgia,serif; font-weight:600; font-size:19px; margin:28px 0 6px; letter-spacing:-.005em}
+p{margin:0 0 15px; max-width:70ch}
+ul,ol{margin:0 0 15px; padding-left:22px; max-width:70ch}
+li{margin:0 0 8px}
+li::marker{color:var(--ink-faint)}
+strong{font-weight:600}
+a{color:var(--accent)}
+
+code{
+  font-family:"IBM Plex Mono",monospace; font-size:.875em;
+  background:var(--sunk); padding:1.5px 5px; border-radius:2.5px;
+  border:1px solid var(--rule-soft); white-space:nowrap;
+}
+.q{font-family:Newsreader,Georgia,serif; font-style:italic; color:var(--ink-soft)}
+
+/* ---- callouts ---- */
+.note{
+  background:var(--surface); border:1px solid var(--rule);
+  border-left:3px solid var(--accent); border-radius:0 3px 3px 0;
+  padding:18px 22px; margin:24px 0; box-shadow:var(--shadow);
+}
+.note.warn{border-left-color:var(--flag)}
+.note.good{border-left-color:var(--pass)}
+.note > :last-child{margin-bottom:0}
+.note .lab{
+  font-family:"IBM Plex Mono",monospace; font-size:10.5px; letter-spacing:.12em;
+  text-transform:uppercase; color:var(--accent); margin:0 0 8px; font-weight:500;
+}
+.note.warn .lab{color:var(--flag)}
+.note.good .lab{color:var(--pass)}
+
+/* ---- tables ---- */
+.scroll{overflow-x:auto; margin:20px 0; border:1px solid var(--rule); border-radius:3px; background:var(--surface)}
+table{border-collapse:collapse; width:100%; font-size:14px; min-width:520px}
+th{
+  text-align:left; font-family:"IBM Plex Mono",monospace; font-size:10.5px;
+  letter-spacing:.1em; text-transform:uppercase; color:var(--ink-faint);
+  font-weight:500; padding:11px 16px; border-bottom:1px solid var(--rule); white-space:nowrap;
+}
+td{padding:11px 16px; border-bottom:1px solid var(--rule-soft); vertical-align:top; line-height:1.5}
+tbody tr:last-child td{border-bottom:none}
+td.n,th.n{text-align:right; font-family:"IBM Plex Mono",monospace; font-variant-numeric:tabular-nums; white-space:nowrap}
+td.mono{font-family:"IBM Plex Mono",monospace; font-size:12.5px}
+tbody tr:hover{background:var(--sunk)}
+
+/* ---- trace ---- */
+.trace{list-style:none; padding:0; margin:20px 0; max-width:none; counter-reset:hop}
+.trace li{
+  position:relative; padding:0 0 20px 46px; margin:0;
+  border-left:1px solid var(--rule); counter-increment:hop;
+}
+.trace li:last-child{border-left-color:transparent; padding-bottom:0}
+.trace li::before{
+  content:counter(hop); position:absolute; left:-11px; top:0;
+  width:22px; height:22px; border-radius:50%; background:var(--surface);
+  border:1px solid var(--rule); color:var(--ink-faint);
+  font-family:"IBM Plex Mono",monospace; font-size:10.5px; font-weight:500;
+  display:grid; place-items:center;
+}
+.trace li.fog::before{background:var(--flag-soft); border-color:var(--flag); color:var(--flag)}
+.trace .where{font-family:"IBM Plex Mono",monospace; font-size:12.5px; color:var(--accent); display:block; margin-bottom:3px}
+.trace .what{margin:0; font-size:15px; max-width:66ch}
+.trace .fogmark{
+  display:inline-block; font-family:"IBM Plex Mono",monospace; font-size:10px;
+  letter-spacing:.08em; text-transform:uppercase; color:var(--flag);
+  background:var(--flag-soft); border-radius:2px; padding:1px 6px; margin-left:8px;
+  vertical-align:1px; white-space:nowrap;
+}
+
+/* ---- convention block ---- */
+.conv{
+  background:var(--surface); border:1px solid var(--rule); border-radius:3px;
+  padding:28px 30px; margin:24px 0; box-shadow:var(--shadow);
+}
+.conv h4{margin-top:0; font-family:"IBM Plex Mono",monospace; font-size:12px;
+  letter-spacing:.1em; text-transform:uppercase; color:var(--ink-faint); font-weight:500}
+.rule{display:grid; grid-template-columns:38px 1fr; gap:14px; padding:13px 0; border-top:1px solid var(--rule-soft)}
+.rule:first-of-type{border-top:none; padding-top:4px}
+.rid{font-family:"IBM Plex Mono",monospace; font-size:12px; font-weight:600; color:var(--accent); padding-top:2px}
+.rule p{margin:0; font-size:15px}
+.rule p + p{margin-top:6px; font-size:13.5px; color:var(--ink-soft)}
+
+.verdict{
+  font-family:Newsreader,Georgia,serif; font-size:21px; line-height:1.45;
+  margin:0 0 14px; max-width:62ch; letter-spacing:-.005em;
+}
+footer{margin:88px 0 0; padding-top:22px; border-top:1px solid var(--rule); color:var(--ink-faint); font-size:13px}
+@media (max-width:640px){
+  .wrap{padding:0 18px 80px}
+  header.mast{padding-top:44px}
+  .rule{grid-template-columns:32px 1fr; gap:10px}
+  .trace li{padding-left:34px}
+}
+</style>
+
+<div class="wrap">
+
+<header class="mast">
+  <p class="eyebrow">AGL · cleanup and survey · 29 Aug 2026</p>
+  <h1>Twenty-two thousand lines of prose, removed</h1>
+  <p class="standfirst">Every comment and docstring is gone from <code>src/</code>. <code>docs/</code> is gone. What follows was found by reading the code with <em>none of its own explanations available</em> — a view nobody has had of this codebase before.</p>
+
+  <div class="ledger">
+    <div class="cell"><p class="k">Prose removed</p><p class="v down">22,666</p><p class="sub">lines, across 105 files</p></div>
+    <div class="cell"><p class="k">src/ physical</p><p class="v">33,475 → 10,809</p><p class="sub">two-thirds was prose</p></div>
+    <div class="cell"><p class="k">Code lines</p><p class="v ok">8,541 → 8,599</p><p class="sub">+58, all of them <code>...</code></p></div>
+    <div class="cell"><p class="k">Gates</p><p class="v ok">8 / 8</p><p class="sub">pass, unchanged</p></div>
+    <div class="cell"><p class="k">Prose-asserting tests</p><p class="v">1</p><p class="sub">of 2,166 collected</p></div>
+  </div>
+</header>
+
+<div class="note warn">
+  <p class="lab">Three things need your decision — nothing here was fixed</p>
+  <p><strong>1. Deleting <code>docs/</code> orphaned 34 references inside live error messages.</strong> <code>src/</code> still tells users things like <span class="q">“§3.3 gives a workflow no such way”</span> (<code>sdk/params.py:44</code>) and <span class="q">“rather than migrating one (§3.11)”</span> (<code>api.py:124</code>) across 15 files. These are runtime strings, not comments, so the strip correctly left them — and they now cite a document that does not exist. <code>tests/</code> carries 1,402 more, plus 11 citing <code>ARCHITECTURE.md</code> sections that no longer have numbers.</p>
+  <p><strong>2. One invariant lost its only guard.</strong> <code>api.py</code>’s docstring said <span class="q">“there is no <code>except</code> in this file, and there never may be.”</span> The behavioural half is pinned by identity in <code>tests/test_api.py:433</code>; the structural half is now recorded nowhere. The property still holds — <code>grep -c except src/agl/api.py</code> returns 0 — but nothing enforces it. A ~15-line AST test fixes this, and the repo already has five tests of exactly that shape.</p>
+  <p><strong>3. <code>scripts/check</code> lints your scratch directory.</strong> Ruff’s <code>extend-exclude</code> covers only <code>reference/</code>, and <code>.gitignore</code> does not mention <code>scratchpad/</code>, so throwaway scripts placed there fail gate 3. This bit two of the four investigations. One line in either file fixes it permanently.</p>
+</div>
+
+<!-- 1 -->
+<section id="s1">
+  <div class="shead"><span class="snum">01</span><h2>The strip</h2></div>
+  <p class="deck">What came out, what went in, and the one test that was measuring prose.</p>
+
+  <p>105 files, 1,500 recorded removals. The dump is at <code>scratchpad/stripped-comments.md</code> — 1.7 MB, verbatim, one section per file, every entry tagged by kind and line span. The strip is reversible from it.</p>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Kind</th><th class="n">Count</th><th>Note</th></tr></thead>
+      <tbody>
+        <tr><td>Module docstrings</td><td class="n">105</td><td>one per file; 38 of them exceeded 100 lines</td></tr>
+        <tr><td>Function docstrings</td><td class="n">659</td><td>longest was 105 lines</td></tr>
+        <tr><td>Attribute docstrings</td><td class="n">194</td><td>bare strings after dataclass fields</td></tr>
+        <tr><td>Class docstrings</td><td class="n">149</td><td>13 over 20 lines</td></tr>
+        <tr><td>Free-standing strings</td><td class="n">13</td><td>mid-body notes</td></tr>
+        <tr><td><code>#</code> comment lines</td><td class="n">1,533</td><td>378 contiguous blocks</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>The <strong>code-line count rose by 58</strong>, and that is the cleanest available proof the strip removed prose only: the module-size gate already discounts docstrings and comments, so a pure prose deletion cannot move it down. The 58 are <code>...</code> bodies — functions and classes, mostly abstract methods in <code>ports/</code>, whose entire body was a docstring. 13 <code>__init__.py</code> files became 0 bytes. One <code>#&nbsp;noqa: BLE001</code> survived as a bare directive, stripped of its trailing prose; it was the only tool directive in the whole of <code>src/</code>.</p>
+
+  <p>The strip was verified structurally, not by eye: for all 105 files, the AST with string-statements and <code>Ellipsis</code>-statements removed is byte-identical before and after. <code>git diff</code> reads <strong>61 insertions, 22,727 deletions</strong> — the 61 being 58&nbsp;<code>...</code>, the rewritten <code>noqa</code>, one <code>continue</code> that lost a trailing comment, and one blank line git renders as a swap.</p>
+
+  <h3>Tests that were asserting on prose</h3>
+  <div class="note good">
+    <p class="lab">One, out of 2,166</p>
+    <p><code>tests/ports/test_run.py:360</code>, in <code>test_there_is_no_run_status</code>:</p>
+    <p><code>assert "There is no `RunStatus`" in (run.__doc__ or ""), "the absence is argued, not silent"</code></p>
+    <p>That single line was deleted. The test’s other three assertions are behavioural — <code>not hasattr(run, "RunStatus")</code>, the <code>__all__</code> contents, <code>"status" not in run._WIRE_KEYS</code> — and still pin that no <code>RunStatus</code> exists. It no longer pins that the module <em>argues</em> about it.</p>
+  </div>
+  <p>This is the finding the exercise was designed to produce, and the answer is genuinely reassuring: <strong>this suite was measuring behaviour, not narration.</strong> A second candidate turned out to be a false alarm — <code>tests/sdk/test_roles.py:363</code> asserts a docstring survives <code>update_wrapper</code>, but the docstring in question is declared in <code>tests/</code>, which was never touched. It passes unchanged, and the mechanism it tests is intact.</p>
+</section>
+
+<!-- 2 -->
+<section id="s2">
+  <div class="shead"><span class="snum">02</span><h2>The two documents</h2></div>
+  <p class="deck">Four stage artefacts deleted. 210 lines written to replace 209 lines plus 290,000 words.</p>
+
+  <p>Deleted: <code>agl-refactor-plan.md</code>, <code>agl-build-stages.md</code>, <code>manual-qa.md</code>, <code>codex-cli-findings.md</code>. <code>docs/</code> no longer exists. None of the four was read while writing the replacements — everything was derived from <code>src/</code>, <code>tests/</code>, <code>scripts/check</code>, <code>.importlinter</code> and <code>pyproject.toml</code>, and every claim carried over from the old <code>ARCHITECTURE.md</code> was re-verified against code.</p>
+
+  <p><strong><code>CLAUDE.md</code> (46 lines)</strong> is now instructions to whoever works here: verify with <code>./scripts/check</code> and read its output rather than the source; <code>reference/</code> is read-only and must not be browsed; report ambiguity rather than resolving it; <code>src/</code> carries no prose by choice. Plus the eight gates, one line each, with the note that gate 6 is a warning and that gates are referred to by name because numbering shifts.</p>
+
+  <p><strong><code>ARCHITECTURE.md</code> (164 lines)</strong> is the map: a paragraph per layer, the dependency rule and the six contracts that enforce it, the one clause that cannot be a contract and is a test instead, vendor containment, then the two sections that carry the weight.</p>
+
+  <h3>What was judged worth keeping</h3>
+  <p>Two things, and they are the two the plan is actually missed for.</p>
+
+  <p><strong>The invariants where a mistake is silent.</strong> Seven, each located in code and stated with its file. Three of them destroy work rather than costing a re-run, and the repo names its own three — the prompt’s guesses were wrong on two of the three, which is itself worth knowing:</p>
+  <ul>
+    <li><strong>A step with no <code>commit=</code> wipes its worktree.</strong> <code>Journal._ending</code> (<code>sdk/_engine/journal.py:270</code>) ends every step by committing everything or calling <code>Workspace.restore</code> — <code>reset --hard</code> then <code>clean -ffd</code>. Nothing checks the pairing. The only two steps that omit <code>commit=</code> are <code>fix</code>’s reviewer and <code>split</code>’s planner, and both roles declare <code>NO_FILE_WRITES</code>. <em>Not <code>steps.py</code>, where it was expected to be.</em></li>
+    <li><strong>A landing must be handed back to the parent’s chain.</strong> <code>Integration._concluded</code> (<code>sdk/_engine/integration.py:158</code>). Skip <code>journal.advance(head)</code> and the parent believes it is where its last step ended; the next fingerprint miss resets past every landing at once.</li>
+    <li><strong>A red build gate discards a hand-resolved conflict.</strong> <code>Integration._gated</code> (<code>sdk/_engine/integration.py:168</code>). Text a person typed into a merge lives in no git object and on no entry. A known cost, pinned by <code>tests/sdk/test_integrate_acceptance.py</code>.</li>
+  </ul>
+  <p>Operator verbs that also destroy data — <code>clear -f</code>, worktree teardown — are <em>not</em> among the three. The criterion is an author mistake that silently deletes paid-for work, not a deliberate destructive command. A sweep for <code>rmtree</code>, <code>unlink</code>, <code>--force</code>, <code>reset</code>, <code>clean</code> and <code>prune</code> found no fourth.</p>
+
+  <p><strong>The list of things deliberately not built</strong> — twelve, each with one line of reasoning, recovered from the code and the stripped corpus rather than from the plan. No <code>RunStatus</code>; no <code>presentation/</code> layer; no config-level model override; no CLI positionals; <code>@workflow</code> takes <code>version</code> and nothing else; <strong>no fan-out or parallelism helper</strong> (zero hits for <code>gather</code>/<code>TaskGroup</code>/<code>parallel</code> under <code>sdk/</code> — real concurrency is more worktrees); no general subprocess helper; no <code>Integrator.revert()</code>; <code>Store</code> has six members and no more; no retry cleverness on the build gate; no <code>auto()</code> on any enum; no lock in <code>adapters/filesystem/</code>.</p>
+
+  <h3>Claims in the old ARCHITECTURE.md that were false</h3>
+  <ul>
+    <li><code>config/registry.py</code> was described as using <strong>“no <code>importlib</code>”</strong>. It opens with <code>from importlib.metadata import entry_points</code>. The <code>getattr</code> half was true; the literal claim was not carried.</li>
+    <li><code>cli/exit_codes.py</code> — “this module’s only decision” was one of two. It also flattens an <code>ExceptionGroup</code> and resolves disagreeing leaves to <code>InternalError</code>.</li>
+    <li>Measured numbers had rotted: “31 files over the ceiling, one <code>src/</code> module” is now 34 and two. Numbers in prose were dropped rather than updated.</li>
+    <li>The document was threaded with §-references into the deleted plan and with build-history markers (19.2, UF1.5, 16.5). None is checkable; all were dropped.</li>
+  </ul>
+  <p>Two comment-only edits outside <code>src/</code> were needed to stop references dangling: <code>scripts/check:28</code> and <code>pyproject.toml:41</code> now cite <code>ARCHITECTURE.md</code> by section <em>name</em>. The new document has no section numbers at all, for the reason <code>scripts/check</code> itself already gives about gates: numbering shifts under any cross-reference that names one.</p>
+</section>
+
+<!-- 3 -->
+<section id="s3">
+  <div class="shead"><span class="snum">03</span><h2>How a tool’s payload becomes a local variable</h2></div>
+  <p class="deck"><code>findings = await run.step(reviewer())</code> — fourteen hops, and four places a reader falls off.</p>
+
+  <p>The spine, compressed. Types in hand at each step; the flagged hops are where the code stops explaining itself.</p>
+
+  <ol class="trace">
+    <li><span class="where">sdk/workflow.py:63</span><p class="what"><code>Run.step</code> forwards to <code>Steps.step</code> and does nothing else.</p></li>
+    <li><span class="where">sdk/_engine/steps.py:59</span><p class="what">Capability gate first — <code>frozenset(role.requires) - held</code> → <code>DeniedError</code>. Before any workspace exists, so a refusal costs no checkout.</p></li>
+    <li class="fog"><span class="where">sdk/_engine/steps.py:62–70</span><p class="what">Each <code>ReportingTool</code> becomes a <code>_Capture</code> whose <code>.tool</code> is a plain <code>ports.agent.Tool</code>. <strong><code>ReportingTool</code> does not exist below this line</strong> — no adapter, no fake, no vendor ever sees one.<span class="fogmark">seam</span></p></li>
+    <li><span class="where">ports/agent.py:113</span><p class="what"><code>AgentTask</code> is built: composed instructions, workspace path, model, restrictions, <code>tools: tuple[Tool, ...]</code>.</p></li>
+    <li><span class="where">adapters/routing.py:39</span><p class="what">Dispatch on <code>task.model.provider</code>.</p></li>
+    <li><span class="where">claude_code/_tools.py:74</span><p class="what"><strong>Claude:</strong> two in-process MCP servers. The vendor SDK runs <code>jsonschema.validate</code> <em>before</em> the handler.</p></li>
+    <li><span class="where">openai/_tools.py:167</span><p class="what"><strong>OpenAI:</strong> a loopback HTTP JSON-RPC listener. <strong>No schema validation at all</strong> — the divergence is masked for reporting tools, which re-validate, but an ordinary workflow tool receives arbitrary unvalidated JSON here.</p></li>
+    <li><span class="where">sdk/_engine/steps.py:147</span><p class="what"><code>_Capture._called</code>: trial-constructs the dataclass, throws it away, keeps the raw JSON mapping. Bad payload → rejection text back into the same conversation. Second call → first wins.</p></li>
+    <li class="fog"><span class="where">sdk/_engine/steps.py:87</span><p class="what"><strong>The payload travels out-of-band.</strong> <code>AgentRunner.run</code> returns <code>AgentOutcome(stop_reason, text)</code> — nothing about payloads. The value arrives only by mutation of a cell the framework installed into the <code>Tool</code> it handed over.<span class="fogmark">where it breaks</span></p></li>
+    <li><span class="where">sdk/_engine/journal.py:219</span><p class="what">Fingerprint: <code>instructions</code>, <code>str(model)</code>, restrictions, and each tool’s name / description / schema — then an ordinal for repeats, then SHA-256.</p></li>
+    <li><span class="where">sdk/_engine/journal.py:228</span><p class="what">Replay lookup. A hit returns the recorded value without calling the worker. <strong>A miss is not an error</strong> — it is the definition of a new step.</p></li>
+    <li><span class="where">adapters/filesystem/store.py:55</span><p class="what"><code>json.dumps</code> → tempfile → fsync → <code>os.replace</code>, at <code>runs/&lt;label&gt;/steps/&lt;name&gt;/&lt;digest&gt;.json</code>.</p></li>
+    <li><span class="where">api.py:102</span><p class="what">On resume, the workflow is re-invoked from line one in a fresh process. Only <code>run.step</code> short-circuits.</p></li>
+    <li class="fog"><span class="where">sdk/tools.py:61</span><p class="what"><code>ReportingTool.read</code> rebuilds the dataclass from stored JSON. <code>capture is None</code> → <code>return cast(R, None)</code>.<span class="fogmark">silent None</span></p></li>
+  </ol>
+
+  <div class="note good">
+    <p class="lab">The round trip is type-stable, and structurally so</p>
+    <p>Measured live and after <code>interrupt_after=1</code> + resume, with a payload carrying <code>tuple</code>, <code>list</code>, nested dataclasses, <code>int</code>, <code>float</code>, <code>bool</code> and <code>str | None</code>: replay is byte-identical to live. Nothing degrades — <strong>because the dataclass never crosses the store.</strong> The raw JSON is what is persisted, and <code>ReportingTool.read</code> reconstructs identically on both paths. <code>tuple</code> is re-made, <code>float</code> is re-made. This is not luck.</p>
+  </div>
+
+  <h3>Where it stops being obvious</h3>
+  <p>Four places, in descending order of how badly a reader is stranded.</p>
+
+  <h4>The payload does not travel through any return value</h4>
+  <p><code>sdk/_engine/steps.py:87</code>. From <code>Steps.step</code> the value appears out of an <code>AgentOutcome</code> that does not contain it. From <code>AgentRunner.run</code>’s signature there is no payload at all. You must hold three files open — <code>steps.py</code>, <code>ports/agent.py</code>, and whichever adapter — to see the mutable cell. <code>Steps._activity</code> is a second, undocumented instance of the same trick.</p>
+
+  <h4>A payload class’s identity travels only inside its schema’s <code>title</code></h4>
+  <p><code>sdk/tools.py:125</code> writes <code>"title": f"{kind.__module__}.{kind.__qualname__}"</code>. Measured: two dataclasses with identical field names, types and descriptions produce different digests <em>only</em> because of that key — strip <code>title</code> from both and the digests are equal. So the payload type <em>is</em> a fingerprint term, and nothing at either end says so. A reader asking “would two payload types replay each other?” has to guess.</p>
+
+  <h4>A role that declares no reporting tool returns <code>None</code> typed as its payload</h4>
+  <p><code>sdk/_engine/steps.py:100</code>. <code>Role[Findings]</code> with an empty <code>tools</code> passes <code>mypy --strict</code> clean and hands the workflow <code>None</code>. The <em>wrong</em>-payload case is caught statically; the <em>missing</em>-payload case is not, because an empty sequence binds <code>P</code> to anything. The ledger stores <code>null</code>, so a resume replays it and fails at the same line.</p>
+
+  <h4>Two <code>setdefault</code>s that steer a branch inside a third-party function</h4>
+  <p><code>claude_code/_tools.py:147</code> adds <code>"type"</code> and <code>"properties"</code> if absent. The reason is in the vendor package: without both, the SDK re-reads the whole dict as a <code>{name: python-type}</code> shorthand and produces a schema nobody could call. You must open <code>claude_agent_sdk</code> to understand two lines of AGL.</p>
+
+  <p>Two smaller ones worth recording. The instructions an agent reads (<code>_composed</code>) and the instructions that are fingerprinted (<code>role.instructions</code>) are different strings, so <strong>upgrading AGL can change the prompt without changing any digest</strong>. And <code>canonical_json</code> does double duty as fingerprint canonicaliser and prompt renderer, so the journal’s reserved <code>__agl_type__</code> key is rendered into the prompt and read by the model.</p>
+
+  <div class="note warn">
+    <p class="lab">A gap in the version-bump story, reproduced</p>
+    <p>An edit to a payload dataclass’s <code>__post_init__</code> reaches <strong>no</strong> fingerprint term. It does not re-run, and it is not silent: on resume it raises <code>InternalError</code> from <code>sdk/tools.py:63</code>. The error text says <span class="q">“<code>sdk/tools.py</code> records why it may not have”</span> — and <code>sdk/tools.py</code> now records nothing. The message is also <code>_refusal()</code>, text written for a model (<span class="q">“Fix all of these and call it again”</span>), surfaced to a person who cannot.</p>
+  </div>
+</section>
+
+<!-- 4 -->
+<section id="s4">
+  <div class="shead"><span class="snum">04</span><h2>Two questions about tools</h2></div>
+  <p class="deck">Whether the reporting tool earns a second concept, and whether a mid-run question can be an ordinary one.</p>
+
+  <h3>Does the reporting tool earn its keep?</h3>
+  <p class="verdict">The <em>capability</em> is load-bearing. The second <em>class</em> is not — except for one static check that is real.</p>
+
+  <p>Exactly one thing distinguishes a reporting tool at runtime: <strong>its payload is the only value a tool call can put on the journal.</strong> This was tested rather than assumed. A workflow that captures a payload in its own closure from an ordinary tool’s handler works on a fresh run and <strong>breaks on resume</strong> — the capture runs inside <code>worker()</code>, which a replayed step never calls. Everything else the reporting tool does (deriving the schema, validating and rejecting in-session, supplying the handler, once-only, turning silence into <code>RoleIncompleteError</code>) an author could write by hand.</p>
+
+  <p>One concept would do at runtime: <code>Tool</code> gains an optional <code>payload: type[P] | None</code> and an optional <code>handler</code>. No handler → the framework captures and the payload becomes the step result. That is <em>strictly more expressive</em> than today, because you currently cannot get a derived schema for a tool you also want to handle yourself — which is exactly what the next question needs.</p>
+
+  <p><strong>What breaks is <code>Role[P]</code>’s type parameter.</strong> Today <code>tools: Sequence[Tool | ReportingTool[P]]</code> binds <code>P</code> from the one member that carries it, and <code>mypy --strict</code> rejects a <code>Role[Findings]</code> declared with a <code>ReportingTool[Other]</code>. Verified: it fires. Under one parametrised class the element type cannot single out the reporting one, and that check is lost. Recovering it needs a second static spelling — which is the present design with extra steps. <strong>That is the honest reason two classes exist</strong>, and it is a mechanism, not a preference.</p>
+
+  <p>Arity, measured: never called → <code>RoleIncompleteError</code>, exit code 6, <strong>no entry written</strong> — but if <code>commit=</code> was passed the work is committed anyway. Called twice → first wins, second gets a rejection. Bad payload then good → the good one lands, one entry.</p>
+
+  <h3>Can a mid-run question be an ordinary tool?</h3>
+  <p class="verdict">Yes — it works, and it costs one thing that matters: <em>the failure mode inverts.</em></p>
+
+  <p>Three of the four expected breakages do not happen. Built and run against both fakes as a throwaway probe (no repo change), a workflow-supplied <code>Tool</code> whose handler calls <code>run.terminal.show</code> works end to end, with no framework change and no layering violation.</p>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Expected cost</th><th>What is actually true</th></tr></thead>
+      <tbody>
+        <tr><td><strong>The capability check</strong></td><td>Moves, does not vanish — <code>TOOL_CALLING</code> folds in instead, at the same line, before the workspace opens. And today it distinguishes nothing: <strong>all four backends declare all four capabilities.</strong> <code>requires=</code> is already workflow-writable and <code>fix/roles.py:23</code> already writes <code>MID_RUN_QUESTIONS</code> by hand.</td></tr>
+        <tr><td><strong>Preflight</strong></td><td>No regression, because preflight cannot see <em>either</em> mechanism. It never calls a factory, so it cannot see <code>tools</code> or <code>on_question</code> today.</td></tr>
+        <tr><td><strong>Vendor payload → <code>Question</code></strong></td><td>No vendor-shaped data reaches <code>workflows/</code>. <code>Tool.handler</code>’s parameter is <code>Mapping[str, JsonValue]</code> and all four backends normalise before calling it. The schema is the workflow’s own. One real gap: <code>JsonValue</code> is <strong>not on the SDK front door</strong>, so a typed handler must import from <code>agl.ports.run</code>.</td></tr>
+        <tr><td><strong><code>Answer</code> back into the session</strong></td><td>Works on the same wire. On the OpenAI side the asking tool <em>literally is</em> an ordinary <code>Tool</code> routed through the same <code>_Route</code>. The day-long tool timeout that makes human latency survivable is set per server for all tools.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note warn">
+    <p class="lab">The real cost</p>
+    <p><strong>A question that cannot be answered is fatal today and silent as a tool.</strong> <code>Asking</code> captures the handler’s exception, the session loop breaks at the next message, and it is re-raised into the framework. An ordinary tool handler’s exception is absorbed <em>everywhere</em> — by the vendor SDK on one side, by <code>_tools.py:189</code> on the other, and by both fakes. The model reads “ask failed” and carries on with its own judgement.</p>
+    <p>Measured side by side: <code>on_question</code> with a raising handler → <code>run()</code> raises, ledger empty. The same handler as a tool → <code>run()</code> returns normally, step recorded. That is <strong>the approval gate silently absent and the step reporting a result anyway</strong> — which is the exact outcome <code>preflight.py</code> was written to warn about.</p>
+    <p>So the fold is real but not free. It needs one new mechanism: a way for a tool handler’s exception to abort the session — a <code>ToolResult</code> variant or a sentinel the adapters re-raise. Two adapters and two fakes. Not optional.</p>
+  </div>
+
+  <p>Replay survives either way. A question is recorded nowhere — <code>Entry</code> holds fingerprint, value, head and time. A replayed step never asks, because the agent never runs; a step that <em>misses</em> re-asks with no memory. One difference: <code>on_question</code> is not a fingerprint term, but a tool <em>is</em>, so adding an asking tool would change that step’s digest. Arguably more correct — the agent was offered a different tool set — but it is a behaviour change.</p>
+</section>
+
+<!-- 5 -->
+<section id="s5">
+  <div class="shead"><span class="snum">05</span><h2>What else collapses</h2></div>
+  <p class="deck">Ranked by code lines removed. The test applied throughout: does a consumer exist <em>today</em>?</p>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th class="n">≈ lines</th><th>Candidate</th><th>Verdict</th></tr></thead>
+      <tbody>
+        <tr><td class="n">160</td><td><strong>The two vendor agent fakes are one file written twice.</strong> <code>claude_code/fake.py</code> and <code>openai/fake.py</code> — same eight symbols, same <code>__all__</code>; <code>diff</code> is 24 lines, and <code>Conversation</code> (39 lines), <code>_payload</code>, <code>_value</code>, <code>_said</code> are byte-identical.</td><td><strong>Fold.</strong> Neither file touches a vendor SDK, so this is <em>not</em> vendor-forced. Both are live (18 and 5 consumers) and both answer the same <code>AgentContract</code>. Needs a new peer package — contract 4 forbids one adapter importing the other. Costs: two ~900-line test suites merge; two routing tests lose their second type.</td></tr>
+        <tr><td class="n">90</td><td><strong>Fourteen identical private helpers scattered across the tree.</strong> <code>_describe</code> ×3, <code>_where</code> ×2, <code>_place</code>/<code>_Place</code> ×2, the filesystem address trio ×2, <code>_encoded</code> ×2, <code>_said</code> ×2, <code>_hints</code> ×2, the <code>api.run</code>/<code>api.resume</code> tails (17 of 19 lines identical), and more.</td><td><strong>Fold the intra-package ones</strong> — no contract argument at all. <strong>Leave <code>_translated</code> and <code>_shortened</code> split</strong>: those are contract-forced across adapter packages, and folding them means putting error formatting into <code>ports</code>.</td></tr>
+        <tr><td class="n">55</td><td><strong>The mid-run asking vocabulary, written twice.</strong> <code>_ASK_SCHEMA</code> byte-identical modulo indentation; <code>_NOBODY_LISTENING</code> and <code>_SAID_NOTHING</code> byte-identical; <code>_question</code> byte-identical; <code>_NO_QUESTION</code> the same validation with different error text.</td><td><strong>Fold the schema, strings and <code>_question</code>; leave the two result shapes.</strong> Sequence this <em>after</em> §4 — if the asking tool becomes an ordinary tool, the candidate disappears rather than folds.</td></tr>
+        <tr><td class="n">55</td><td><strong><code>ports/run.py</code> and <code>journal.py</code> hold the same JSON-record machinery.</strong> <code>_WIRE_TIME</code>, <code>_SURROGATE</code>, <code>_wire_text</code>, <code>_normalised</code>, <code>_checked_key</code>, the missing/unknown-key block — differing only in error prose.</td><td><strong>Fold, and settle a real inconsistency while doing it:</strong> the identical surrogate-codepoint condition raises <code>InternalError</code> in one file and <code>InputError</code> in the other, so the same malformed string exits with 70 or 2 depending on which wrote it.</td></tr>
+        <tr><td class="n">10</td><td><strong><code>openai/_reading.py</code> has exactly one consumer</strong> — <code>openai/translate.py</code>, which re-exports five of its names purely to pass them on. The Claude adapter holds both jobs in one file.</td><td><strong>Fold.</strong> Combined ≈200 code lines, under the ceiling, and the ceiling is a warning anyway. Nothing breaks.</td></tr>
+        <tr><td class="n">8</td><td><strong><code>Tool</code> and <code>ReportingTool</code> validate name and description identically</strong> — byte-identical, error prose included.</td><td><strong>Fold that one.</strong> But <em>keep</em> the duplicate-tool-name check: that pair is deliberate double-entry, catching at declaration and again at dispatch, and the code says so.</td></tr>
+        <tr><td class="n">0</td><td><strong><code>conflicted</code> means two different things.</strong> <code>Integration._gated</code> <em>fabricates</em> a <code>Conflict(paths=(), …)</code> when the <em>build</em> fails after a clean merge — so <code>Integration.conflicted</code> is true in a case <code>IntegrationOutcome.conflicted</code> never reports.</td><td><strong>The clearest same-word-two-concepts in the codebase.</strong> Also the best example of “three files to understand one behaviour”: the fabrication, the loop that cannot distinguish, and the view that renders both the same. What no single file shows is that <code>retry()</code> after a build refusal re-runs a merge that already succeeded.</td></tr>
+        <tr><td class="n">0</td><td><strong>Three copies of terminate-then-kill, and two disagree.</strong> <code>openai/_session.py</code> guards on <code>returncode</code> and falls back to <code>send_signal</code> on <code>PermissionError</code>; <code>shell/verifier.py</code> does neither and gives up. Both start their child with <code>start_new_session=True</code>.</td><td><strong>Do not fold</strong> — contract 4 and the “no general subprocess helper” argument both say no, and that argument is sound for <em>starting</em> a child. <strong>Do reconcile the divergence.</strong> It is a bug, not a style difference.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Taking the six foldable candidates removes <strong>≈380 code lines, about 4.4% of the tree</strong>, and six duplicated concepts.</p>
+
+  <h3>The <code>__init__.py</code> files</h3>
+  <p>Nineteen under <code>src/</code>. Thirteen are now <strong>zero bytes</strong> and the gates pass — but that proves less than it looks like, because the gates are passing on files that still <em>exist</em>. The deletion was run properly, in a scratch copy:</p>
+  <ul>
+    <li><strong>Imports: fine.</strong> Everything resolves as PEP-420 namespace packages.</li>
+    <li><strong><code>lint-imports</code>: fine.</strong> All six contracts kept, including the <code>exhaustive</code> one. Grimp resolves namespace packages.</li>
+    <li><strong><code>mypy --strict</code>: fails.</strong> <code>Duplicate module named "fake"</code> — 17 basenames collide across the tree. Adding <code>explicit_package_bases = True</code> makes it pass clean.</li>
+  </ul>
+  <p>So <strong>the only load-bearing consumer is mypy’s module resolution under the current config</strong>, and it is a two-word config change from evaporating. Beyond that: gate 7 hard-requires <code>src/agl/__init__.py</code> specifically, and <code>tests/test_tree.py:62</code> asserts every package directory carries one — a test that exists <em>only</em> to assert the mechanism is present, exercising nothing. Whether the wheel needs them could not be determined; <code>hatchling</code> is not in the <code>.venv</code>.</p>
+  <p>Six do something and should stay: <code>sdk/__init__.py</code> (42 names, 8 <code>src</code> consumers, held mechanically by <code>test_front_door.py</code>), <code>cli/commands/__init__.py</code> (one type alias, 4 consumers), and the two <code>views/</code> files (2 re-exports each, 1 consumer each — but the file must exist anyway, so it is 2 lines, not a module).</p>
+
+  <h3>Looked at, and should stay</h3>
+  <p>Real-versus-fake port implementations share almost no code, because one shells out and one holds dicts — the shared part already lives in <code>tests/contracts/</code>. <code>Worktrees[R]</code> has one instantiation but the generic exists to avoid an import cycle, which is structural, not speculative. The two workflows’ <code>roles.py</code> look alike but are meant to be independent packages, and <code>prompt_file</code> resolves against the calling module’s directory. <code>ports/ids.py</code>’s four <code>_Name</code> subclasses look gratuitous, but the type distinction is what stops a <code>StepName</code> being passed where a <code>RunLabel</code> goes.</p>
+  <p>One borderline case, recorded honestly: <code>sdk/questions.py</code>, <code>sdk/errors.py</code> and <code>sdk/terminal.py</code> each have <strong>exactly one <code>src</code> consumer</strong> — <code>sdk/__init__.py</code>. They stay for one reason: <code>test_front_door.py</code> uses each submodule’s own <code>__all__</code> as its drift check, so deleting them replaces a mechanical check with a hardcoded list. That is a one-consumer indirection kept for a test’s convenience, and worth knowing as such.</p>
+
+  <h3>Two more claims in the new ARCHITECTURE.md that do not survive contact</h3>
+  <p>Both are mine, written yesterday, and both are wrong in the same direction — a tidy sentence about a tree that is not tidy.</p>
+  <ul>
+    <li><span class="q">“Each package ships a real implementation and a fake beside it.”</span> Two of seven do not. <code>adapters/system_clock.py</code> holds both in one module with no <code>fake.py</code>. <code>rich_terminal/</code> ships <em>three</em> implementations, and <code>HeadlessTerminal</code> is a production class the composition root builds, not a fake. And <code>openai/fake.py</code> is not a fake of the Codex CLI in any sense — it never reaches the session, the HTTP layer or the binary.</li>
+    <li><span class="q">“No general subprocess helper. Three modules run children.”</span> Four do. The seven-axes argument holds for <em>starting</em> a child; it does not describe the stopping code, where two of three agree on every axis and differ only by a missing fallback.</li>
+  </ul>
+</section>
+
+<!-- 6 -->
+<section id="s6">
+  <div class="shead"><span class="snum">06</span><h2>The two conventions</h2></div>
+  <p class="deck">To be applied later, not now. Both derived from a scan of all 1,500 removed entries and 14,625 named things.</p>
+
+  <h3>Where the prose actually went wrong</h3>
+  <p>The failure mode is not the one usually assumed. <strong>Restating the signature is not a genre here</strong> — of 98 single-line function docstrings, only 11 repeat every content word of their own name, and all 11 still add a fact. This codebase never had that problem.</p>
+  <p>The dominant failure is <strong>citation into a document that could be deleted</strong>: 518 entries, 35% of the corpus, cite a <code>§</code>, a stage number, a <code>UF</code> marker or a <code>docs/</code> path. It is worst where prose was densest — <strong>82% of module docstrings</strong> carry a dead anchor, against 23% of inline comments.</p>
+  <div class="note good">
+    <p class="lab">The repo already found the answer and only half-applied it</p>
+    <p><code>.importlinter:164</code> and <code>scripts/check:445</code> both say it out loud: <span class="q">“Named, not numbered: gates get inserted, and the numbers move.”</span> Those two files have <strong>zero</strong> dangling section references between them. <code>tests/</code>, which did not adopt the rule, has <strong>1,434</strong>.</p>
+  </div>
+  <p>The second genre is prose written in the future tense about a plan that changed. The clearest instance: <code>cli/exit_codes.py:45</code> promised <span class="q">“<code>split</code> is written that way and tickets will be”</span>. <code>workflows/tickets/</code> never existed — and <code>tests/test_measurable_targets.py:1577</code> is literally <code>def test_target_twelve_is_unverifiable_because_tickets_does_not_exist()</code>. A test recorded the death of that workflow while a 100-line docstring still promised its future.</p>
+  <p>Length is bimodal and one tail carries everything: <strong>116 entries over 40 lines are 7.7% of entries but 52% of all removed prose.</strong> The median inline comment is 3 lines. A ceiling does not squeeze the ordinary case at all.</p>
+
+  <div class="conv">
+    <h4>Comment convention</h4>
+    <p style="margin-bottom:18px"><strong>The test:</strong> if it can be figured out by looking at the code for thirty seconds, it does not get a comment. What survives is what a reader cannot derive — non-obvious usage requirements, what a thing does in one line, the meaning of an input or output where it is not evident.</p>
+    <div class="rule"><span class="rid">C1</span><div><p>Say what the code cannot say. Never restate it.</p><p>A comment earns its place only by carrying a fact from outside the file: vendor behaviour, an OS or protocol guarantee, a measured number, a units or lifetime fact the type does not encode.</p></div></div>
+    <div class="rule"><span class="rid">C2</span><div><p>Module docstring: one line. Two at the outside.</p></div></div>
+    <div class="rule"><span class="rid">C3</span><div><p>Class docstring: one line, shaped “what this is: its parts.” A second paragraph only for a usage requirement a caller must obey.</p></div></div>
+    <div class="rule"><span class="rid">C4</span><div><p>Function docstring: one line, and only when the signature does not already say it.</p></div></div>
+    <div class="rule"><span class="rid">C5</span><div><p>Attribute docstring: one line, and only where the field’s type under-describes it. Say what the value means <em>to a reader</em>.</p></div></div>
+    <div class="rule"><span class="rid">C6</span><div><p>Inline <code>#</code>: for the line beneath it, at most four lines.</p></div></div>
+    <div class="rule"><span class="rid">C7</span><div><p>Ceiling: 10 lines for any comment, 2 for a module docstring. Anything longer is one of three things, and each has a home — a <strong>requirement</strong> becomes a test; an <strong>architectural rule</strong> becomes an <code>ARCHITECTURE.md</code> section or an <code>.importlinter</code> contract; a <strong>design narrative</strong> goes to documentation outside <code>src/</code>. Workflows never get large explanatory comments.</p></div></div>
+    <div class="rule"><span class="rid">C8</span><div><p>Named, not numbered. Cite nothing that can be deleted without breaking a build — no <code>§3.6</code>, no <code>19.2</code>, no <code>UF2.2</code>, no <code>docs/*.md</code>.</p></div></div>
+    <div class="rule"><span class="rid">C9</span><div><p>Record the outcome, not the history, and never the future. Git holds the history.</p></div></div>
+    <div class="rule"><span class="rid">C10</span><div><p>State no fact you cannot check, in a place that cannot check it. If a sentence is load-bearing it belongs in a test, an assertion or a type. A comment may <em>summarise</em> the guard and name it; it may not <em>be</em> the guard.</p></div></div>
+  </div>
+
+  <h4>What should have survived</h4>
+  <ul>
+    <li><code>adapters/git/_runner.py:149</code> — <span class="q">“git installs handlers that unlink its own <code>*.lock</code> files on a fatal signal, so SIGTERM plus a moment is the difference between a repository the next command can use and one holding a stale <code>index.lock</code>.”</span> Nothing in the code says why the constant is not zero.</li>
+    <li><code>adapters/filesystem/store.py:345</code> — <span class="q">“<code>dir=</code> is load-bearing … <code>os.replace</code> is atomic within one filesystem and raises <code>EXDEV</code> across two.”</span> Delete <code>dir=</code> in a cleanup and atomicity breaks on some machines and not others.</li>
+    <li><code>adapters/claude_code/translate.py:355</code> — <span class="q">“<code>Monitor</code> is here because the PowerShell tool’s own refusal message says ‘Monitor runs bash’ — nothing in the permission reference mentions it.”</span> An undocumented vendor fact found by observation; it will not survive re-derivation.</li>
+    <li><code>scripts/check:76</code> — <span class="q">“Parallel arrays: bash 3.2 (the system bash on macOS) has no associative arrays.”</span> One line, an external fact, explaining an otherwise-odd data structure. The model comment for the whole repo.</li>
+  </ul>
+  <h4>What should not have</h4>
+  <ul>
+    <li><code>api.py:1–440</code> — a 440-line module docstring above 233 lines of code, 1.9× the length of its own module, opening with an argument with a deleted document about code that no longer exists, and containing a sentence in which the comment amends itself in public.</li>
+    <li><code>sdk/workflow.py:440</code> — 47 lines of design argument on one <em>private</em> attribute. Its first sentence is a perfect attribute docstring; the other 46 are C7’s third case.</li>
+    <li><code>api.py:536</code> — a 24-line inline comment that quotes a deleted document twice and narrates a deliverable number.</li>
+  </ul>
+
+  <h4>The three load-bearing cases</h4>
+  <p>These resolve differently, and together they are the argument for C10.</p>
+  <ul>
+    <li><strong><code>store.py</code>’s global-lock prophecy — recovered, and correctly.</strong> The prose said <span class="q">“Nothing below the suite can catch its return, so this paragraph is what guards it.”</span> Someone then wrote <code>tests/adapters/test_filesystem_no_lock.py</code>, which parses the source and refuses a closed set of primitives. Its own docstring opens <span class="q">“<code>store.py</code> predicts this file.”</span> That is exactly what C10 asks for: a comment saying “nothing below can catch this” is a specification for a test. The residual exposure — a bespoke scheme under another name — was covered only by the paragraph, and is now unguarded.</li>
+    <li><strong><code>_tools.py</code>’s named cost — recorded three times over.</strong> In code (the session loop breaks at the next message), in a test asserting identity <em>and</em> ask-count, and in a test comment that reuses the original phrase. The fake <em>does</em> diverge from the real adapter, and the test names the divergence rather than hiding it. Not drift.</li>
+    <li><strong><code>api.py</code>’s invariant — half-recorded. This is the hole.</strong> The behavioural half is pinned by identity, and pinned well. The structural half — <span class="q">“there is no <code>except</code> in this file, and there never may be”</span> — is now written nowhere. An <code>except</code> added tomorrow inside <code>resume</code>, or one that re-raises the same object, passes the existing test.</li>
+  </ul>
+
+  <h3>Naming</h3>
+  <p>Four things are already uniform and need only writing down: 272 of 272 module constants are <code>SCREAMING_SNAKE</code>, 270 annotated <code>Final</code>; 149 of 149 classes are <code>CamelCase</code>; all 23 type aliases likewise; and abbreviation discipline is strong — <strong>exactly one single-letter name in all of <code>src/</code></strong>.</p>
+
+  <div class="note good">
+    <p class="lab">The apparent inconsistency is real signal, not noise</p>
+    <p>The past-participle-versus-verb split <em>tracks something</em>. The cleanest evidence is a pair that splits perfectly: <strong><code>_check_*</code> — 4 functions, all <code>-> None</code>, all raise. <code>_checked_*</code> — 8 functions, all return a value.</strong> Twelve functions, zero exceptions. Across all 247 private helpers, 87% of participle-named ones are transformations. <strong>The convention should keep the grammar and treat the nine violations as bugs</strong> — <code>_written</code>, <code>_emptied</code>, <code>_removed</code>, <code>_drained</code>, <code>_signalled</code>, <code>_stopped</code>, <code>_served</code>, <code>_claimed</code>, <code>_held</code>, every one of which returns <code>None</code> and performs an action.</p>
+  </div>
+
+  <p>Test names are similarly consistent and were nearly mis-diagnosed: 81% begin with a determiner, median 11 words, 90% are eight words or longer, <strong>none is three words or shorter</strong>. The remaining 19% are the same shape with a noun or gerund subject. The <code>test_&lt;what&gt;_&lt;condition&gt;</code> pattern is <em>not in use anywhere</em>.</p>
+  <p>Module underscores mean two different things, consistently within each half: in <code>adapters/</code>, 16 of 16 underscored modules are package-private with zero leaks; in <code>sdk/_engine/</code>, 7 of 7 leak by design — <code>services</code> alone is imported by four top-level packages. Both rules are defensible; using one mark for both without saying so is not, and the one line that said so was inside <code>src/</code>.</p>
+  <p>British spelling is settled in prose (<code>behaviour</code> 99 / <code>behavior</code> 0; <code>recognise</code> 39 / <code>recognize</code> 0). The one apparent clash is not one: <code>_initialize</code> mirrors the MCP wire method dispatched three lines above it.</p>
+
+  <div class="conv">
+    <h4>Naming convention</h4>
+    <div class="rule"><span class="rid">N1</span><div><p>Grammar states the contract. <code>_verb() -> None</code> is an action; <code>_participle() -> X</code> is a transformation; <code>_noun() -> X</code> is a derivation; <code>_sentence_fragment() -> str</code> builds a message.</p><p><strong>A past participle must never name a function that returns <code>None</code>.</strong></p></div></div>
+    <div class="rule"><span class="rid">N2</span><div><p><code>_check_x</code> raises; <code>_checked_x</code> returns.</p></div></div>
+    <div class="rule"><span class="rid">N3</span><div><p>A leading underscore on a module means “not on the surface this package promises” — and the package must say <em>which</em> surface.</p></div></div>
+    <div class="rule"><span class="rid">N4</span><div><p>British English in prose and in AGL’s own identifiers. Where a vendor or protocol spells it American, mirror the vendor exactly and never translate.</p></div></div>
+    <div class="rule"><span class="rid">N5</span><div><p>One name per concept, and never one name for two. A type defined in <code>ports/</code> may not be redefined anywhere else.</p></div></div>
+    <div class="rule"><span class="rid">N6</span><div><p>Parallel siblings share names deliberately. Two adapters implementing one port should use the same internal names — that is not duplication.</p></div></div>
+    <div class="rule"><span class="rid">N7</span><div><p>Spell words out. Domain-standard short forms are fine (<code>ref</code>, <code>sha</code>, <code>repo</code>, <code>json</code>, <code>http</code>). No single-letter names outside a comprehension.</p></div></div>
+    <div class="rule"><span class="rid">N8</span><div><p>Test names are sentences — subject, verb, object, 8–14 words, reading as a claim that is true when the test passes.</p></div></div>
+    <div class="rule"><span class="rid">N9</span><div><p>Constants <code>SCREAMING_SNAKE</code> + <code>Final</code>; classes and type aliases <code>CamelCase</code>; private of either takes one leading underscore.</p></div></div>
+  </div>
+
+  <p><strong>How each is checked.</strong> N9 and most of N7 come free by adding <code>"N"</code> to <code>[tool.ruff.lint] select</code> (currently <code>["E","F","I","UP","B"]</code>) — <em>not</em> <code>"D"</code>, which mandates docstrings that C4 and C5 deliberately do not want. N1, N2, N5 and N8 are AST tests, and the repo already has five tests of exactly that shape. N3’s adapter half is an <code>.importlinter</code> contract; its <code>_engine</code> half cannot be, and must be stated. N4 and N6 are reviewer judgement, with a stated procedure.</p>
+
+  <h4>Renames worth making — a list, not a change</h4>
+  <ol>
+    <li><strong><code>Answer</code> → <code>RpcAnswer</code></strong> in <code>adapters/openai/_http.py:12</code>. It collides with <code>ports.questions.Answer</code>, and both are in scope in the same package — one module imports each. 4 sites. Cheapest high-value fix in the list.</li>
+    <li><strong><code>_wrong</code> → <code>_note_wrong</code></strong> in <code>sdk/tools.py:226</code>. Two other <code>_wrong</code>s are <code>-> InputError</code> factories; this one returns <code>None</code> and appends to a list. The name says “make an error”; the behaviour is “record one”.</li>
+    <li><strong><code>_written</code> → <code>_write</code></strong> in <code>adapters/git/_working.py:67</code>, and the eight other N1 violations. Worst of the nine because <code>_write</code> already exists elsewhere as the correct spelling.</li>
+    <li>Cosmetic: the lone <code>w</code> in <code>workflows/split/__init__.py:31</code>; <code>Entry</code> in <code>rich_terminal/queues.py</code> → <code>Queued</code>; and <code>worktree(name=)</code> → <code>worktree(namespace=)</code>, which is last because the nominal call-site count is high and the real ambiguity is low.</li>
+  </ol>
+</section>
+
+<!-- 7 -->
+<section id="s7">
+  <div class="shead"><span class="snum">07</span><h2>Reading this codebase cold</h2></div>
+  <p class="deck">What I would tell someone handed it today, with none of its prose.</p>
+
+  <p class="verdict">The structure is better than the prose was. Stripping 22,666 lines of explanation broke one test, and that test was measuring a sentence.</p>
+
+  <p>That is the headline, and it should be reassuring rather than damning. A codebase where two-thirds of the lines are commentary usually has the commentary load-bearing — remove it and things fall over, or nobody can navigate. Here, the layering is enforced by six machine-checked contracts, the ports are small, the fakes are held to the same contract suites as the real implementations, and the test suite asserts behaviour. <strong>The prose was a parallel artifact, not scaffolding.</strong> It was also, by volume, the least reliable thing in the repo — 35% of it cited a document that could be deleted, and then was.</p>
+
+  <p><strong>The architecture is genuinely legible from the tree alone.</strong> Eight layers, one arrow, one composition root. Ten minutes with <code>.importlinter</code> and <code>ARCHITECTURE.md</code> and you can place any new file correctly. That is rare and it survived the strip completely, because it was never in the comments — it was in the contracts.</p>
+
+  <p><strong>What you cannot see is the ledger.</strong> Every hard thing in this system is one idea: a step is a fingerprint, a value and a head, and resume re-runs the workflow from line one, short-circuiting only at recorded fingerprints. Once you hold that, the invariants stop being a list and become consequences — why a workflow may branch only on step results, why canonicalisation must be order-stable, why effects must land inside the workspace, why <code>version</code> must be bumped. <strong>Read <code>sdk/_engine/journal.py</code> first.</strong> Not <code>api.py</code>, not the workflows. Everything else is arrangement around that file.</p>
+
+  <p><strong>The one thing that will actually catch you</strong> is that a fingerprint miss is not an error. It is the definition of a new step. There is no assertion divergence can fail and no exception it can raise — the run simply re-does paid-for work, or, where an off-branch digest happens to match, hands back a result for a call that never produced it. Everything else in AGL fails loudly. This one does not, and it is the reason three of the seven invariants exist.</p>
+
+  <p><strong>Two habits are worth copying.</strong> The first is the structural test: five files in <code>tests/</code> parse source and assert on its shape rather than its behaviour — no lock in the filesystem adapter, <code>--end-of-options</code> on every git call. That is the right home for a rule a comment can only assert. The second is fakes held to contract suites, which is why the fakes are trustworthy enough that four investigations this session ran real experiments against them in seconds.</p>
+
+  <p><strong>Two habits are not.</strong> The framework passes a step’s payload back by mutating a cell it installed into an object it handed away — invisible from either end of the call. And the same word means two things in two places often enough that it is worth a rule: <code>Answer</code>, <code>Entry</code>, and <code>conflicted</code>, the last of which fabricates a merge conflict to report a build failure.</p>
+
+  <p><strong>The most valuable thing lost with the prose</strong> was not explanation. It was the handful of external facts nobody can re-derive: that git unlinks its own lock files on SIGTERM; that <code>os.replace</code> needs <code>dir=</code> to stay atomic; that the Claude SDK reinterprets a schema without both <code>type</code> and <code>properties</code>; that a vendor tool’s refusal message named a tool the permission reference does not. Four facts, roughly, worth about twelve lines. They are in <code>scratchpad/stripped-comments.md</code> and should come back under C1. Almost everything else in those 22,666 lines was the build explaining itself to itself.</p>
+</section>
+
+<footer>
+  <p>All 8 gates pass. <code>src/</code> contains no comments and no docstrings — one <code>#&nbsp;noqa: BLE001</code> directive excepted. <code>git diff --stat</code>: 105 files, 61 insertions, 22,727 deletions. <code>CLAUDE.md</code> and <code>ARCHITECTURE.md</code> kept at the repo root rather than moved under <code>docs/</code>, so the harness still discovers <code>CLAUDE.md</code>. Nothing was committed. The stripped corpus is at <code>scratchpad/stripped-comments.md</code>, untracked, alongside <code>strip_comments.py</code>, which reproduces the strip.</p>
+</footer>
+
+</div>

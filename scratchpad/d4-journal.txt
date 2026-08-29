@@ -1,0 +1,614 @@
+     1	
+     2	import asyncio
+     3	import dataclasses
+     4	import json
+     5	import unicodedata
+     6	from collections.abc import Awaitable, Callable, Mapping, Sequence
+     7	from collections.abc import Set as AbstractSet
+     8	from datetime import UTC, datetime, timedelta
+     9	from hashlib import sha256
+    10	from math import isfinite
+    11	from typing import Final
+    12	
+    13	from agl.ports.agent import ModelId, Restriction, Tool
+    14	from agl.ports.clock import Clock
+    15	from agl.ports.errors import InputError, InternalError
+    16	from agl.ports.home_layout import RunScope
+    17	from agl.ports.ids import StepName
+    18	from agl.ports.run import JsonValue
+    19	from agl.ports.store import Store
+    20	from agl.ports.workspace import Workspace
+    21	
+    22	__all__ = [
+    23	    "Entry",
+    24	    "Fingerprints",
+    25	    "Journal",
+    26	    "base_of",
+    27	    "canonical_json",
+    28	    "read_entry",
+    29	    "write_entry",
+    30	]
+    31	
+    32	
+    33	_SEPARATORS: Final = (",", ":")
+    34	
+    35	_TYPE_KEY: Final = "__agl_type__"
+    36	
+    37	_WIRE_KEYS: Final = ("fingerprint", "value", "head", "at")
+    38	
+    39	_WIRE_TIME: Final = "%Y-%m-%dT%H:%M:%SZ"
+    40	
+    41	_SURROGATE: Final = "Cs"
+    42	
+    43	
+    44	def canonical_json(value: object) -> str:
+    45	    return _dumps(_canonical(value, "value"))
+    46	
+    47	
+    48	def base_of(
+    49	    *,
+    50	    instructions: str,
+    51	    model: ModelId,
+    52	    restrictions: AbstractSet[Restriction],
+    53	    tools: Sequence[Tool],
+    54	    inputs: Mapping[str, object],
+    55	    head: str,
+    56	) -> str:
+    57	    role: JsonValue = {
+    58	        "instructions": _canonical(instructions, "role.instructions"),
+    59	        "model": str(model),
+    60	        "restrictions": _canonical(restrictions, "role.restrictions"),
+    61	        "tools": [
+    62	            {
+    63	                "name": _canonical(tool.name, f"role.tools[{index}].name"),
+    64	                "description": _canonical(tool.description, f"role.tools[{index}].description"),
+    65	                "payload_schema": _canonical(
+    66	                    tool.payload_schema, f"role.tools[{index}].payload_schema"
+    67	                ),
+    68	            }
+    69	            for index, tool in enumerate(tools)
+    70	        ],
+    71	    }
+    72	    fingerprinted: JsonValue = {
+    73	        "role": role,
+    74	        "inputs": _canonical(inputs, "inputs"),
+    75	        "head": _canonical(head, "head"),
+    76	    }
+    77	    return sha256(_dumps(fingerprinted).encode("utf-8")).hexdigest()
+    78	
+    79	
+    80	def _counter_key(scope: RunScope, step: StepName, base: str) -> tuple[RunScope, str, str]:
+    81	    return (scope, step.collision_key, base)
+    82	
+    83	
+    84	class Fingerprints:
+    85	
+    86	    def __init__(self) -> None:
+    87	        self._counts: dict[tuple[RunScope, str, str], int] = {}
+    88	
+    89	    def digest(self, scope: RunScope, step: StepName, base: str) -> str:
+    90	        count = self._counts.get(_counter_key(scope, step, base), 0)
+    91	        return sha256(f"{base}:{count}".encode()).hexdigest()
+    92	
+    93	    def claimed(self, scope: RunScope, step: StepName, base: str) -> None:
+    94	        key = _counter_key(scope, step, base)
+    95	        self._counts[key] = self._counts.get(key, 0) + 1
+    96	
+    97	
+    98	@dataclasses.dataclass(frozen=True, slots=True)
+    99	class Entry:
+   100	
+   101	    fingerprint: str
+   102	
+   103	    value: JsonValue
+   104	
+   105	    head: str
+   106	
+   107	    at: datetime
+   108	
+   109	    def __post_init__(self) -> None:
+   110	        for name, value in (("fingerprint", self.fingerprint), ("head", self.head)):
+   111	            if not value:
+   112	                raise InternalError(f"a step entry's {name!r} is empty, and that names nothing")
+   113	        object.__setattr__(self, "at", _normalised(self.at))
+   114	
+   115	    def to_json(self) -> dict[str, JsonValue]:
+   116	        return {
+   117	            "fingerprint": self.fingerprint,
+   118	            "value": self.value,
+   119	            "head": self.head,
+   120	            "at": format(self.at, _WIRE_TIME),
+   121	        }
+   122	
+   123	    @classmethod
+   124	    def from_json(cls, data: object) -> Entry:
+   125	        if not isinstance(data, Mapping):
+   126	            raise InternalError(f"a step entry is a JSON object, not a {type(data).__name__}")
+   127	        missing = [key for key in _WIRE_KEYS if key not in data]
+   128	        unknown = sorted(repr(key) for key in data if key not in _WIRE_KEYS)
+   129	        if missing or unknown:
+   130	            raise InternalError(
+   131	                f"a step entry's keys are not an entry's: missing {missing}, unexpected {unknown}. "
+   132	                f"An entry carrying keys AGL does not know was written by another version of it, "
+   133	                f"and this module refuses entries rather than migrating them"
+   134	            )
+   135	        try:
+   136	            at = datetime.fromisoformat(_wire_text(data, "at"))
+   137	        except ValueError as error:
+   138	            raise InternalError(
+   139	                f"a step entry holds an 'at' AGL cannot read back: {error}"
+   140	            ) from error
+   141	        return cls(
+   142	            fingerprint=_wire_text(data, "fingerprint"),
+   143	            value=data["value"],
+   144	            head=_wire_text(data, "head"),
+   145	            at=at,
+   146	        )
+   147	
+   148	
+   149	async def read_entry(store: Store, scope: RunScope, step: StepName, digest: str) -> Entry | None:
+   150	    document = await store.read_entry(scope, step, digest)
+   151	    if document is None:
+   152	        return None
+   153	    entry = Entry.from_json(document)
+   154	    if entry.fingerprint != digest:
+   155	        return None
+   156	    return entry
+   157	
+   158	
+   159	async def write_entry(
+   160	    store: Store, scope: RunScope, step: StepName, digest: str, entry: Entry
+   161	) -> None:
+   162	    await store.write_entry(scope, step, digest, entry.to_json())
+   163	
+   164	
+   165	class Journal:
+   166	
+   167	    def __init__(
+   168	        self,
+   169	        store: Store,
+   170	        scope: RunScope,
+   171	        workspace: Workspace,
+   172	        clock: Clock,
+   173	        fingerprints: Fingerprints,
+   174	        base: str,
+   175	    ) -> None:
+   176	        self._store = store
+   177	        self._scope = scope
+   178	        self._workspace = workspace
+   179	        self._clock = clock
+   180	        self._fingerprints = fingerprints
+   181	        if not base:
+   182	            raise InternalError(
+   183	                "a journal was opened at an empty base, and a namespace's starting head names the "
+   184	                "commit it was opened from - there is no state in which a walk has no head yet"
+   185	            )
+   186	        self._last_good = base
+   187	        self._running = asyncio.Lock()
+   188	
+   189	    @property
+   190	    def last_good(self) -> str:
+   191	        return self._last_good
+   192	
+   193	    def advance(self, head: str) -> None:
+   194	        if not head:
+   195	            raise InternalError(
+   196	                "an integration tried to advance a namespace's chain to an empty head, and an "
+   197	                "empty string names no commit - a landing that went in reports where the target is "
+   198	                "now, and one that did not carries a conflict instead of a head"
+   199	            )
+   200	        self._last_good = head
+   201	
+   202	    async def exclude_steps(self) -> Callable[[], None]:
+   203	        await self._running.acquire()
+   204	        return self._running.release
+   205	
+   206	    async def step(
+   207	        self,
+   208	        name: StepName,
+   209	        *,
+   210	        instructions: str,
+   211	        model: ModelId,
+   212	        restrictions: AbstractSet[Restriction],
+   213	        tools: Sequence[Tool],
+   214	        inputs: Mapping[str, object],
+   215	        worker: Callable[[], Awaitable[JsonValue]],
+   216	        commit: str | None = None,
+   217	    ) -> JsonValue:
+   218	        async with self._running:
+   219	            base = base_of(
+   220	                instructions=instructions,
+   221	                model=model,
+   222	                restrictions=restrictions,
+   223	                tools=tools,
+   224	                inputs=inputs,
+   225	                head=self._last_good,
+   226	            )
+   227	            digest = self._fingerprints.digest(self._scope, name, base)
+   228	            entry = await read_entry(self._store, self._scope, name, digest)
+   229	            if entry is not None:
+   230	                self._fingerprints.claimed(self._scope, name, base)
+   231	                self._last_good = entry.head
+   232	                return entry.value
+   233	
+   234	            await self._workspace.restore(self._last_good)
+   235	            try:
+   236	                result = await worker()
+   237	            finally:
+   238	                await self._ended(commit)
+   239	
+   240	            head = await self._workspace.head()
+   241	            await write_entry(
+   242	                self._store,
+   243	                self._scope,
+   244	                name,
+   245	                digest,
+   246	                Entry(fingerprint=digest, value=result, head=head, at=self._clock.now()),
+   247	            )
+   248	            self._fingerprints.claimed(self._scope, name, base)
+   249	            self._last_good = head
+   250	            return result
+   251	
+   252	    async def _ended(self, commit: str | None) -> None:
+   253	        ending = asyncio.create_task(self._ending(commit))
+   254	        cancellation: asyncio.CancelledError | None = None
+   255	        while not ending.done():
+   256	            try:
+   257	                await asyncio.shield(ending)
+   258	            except asyncio.CancelledError as raised:
+   259	                cancellation = raised
+   260	            except Exception:
+   261	                break
+   262	        failed = ending.exception()
+   263	        if cancellation is not None:
+   264	            if failed is not None:
+   265	                raise cancellation from failed
+   266	            raise cancellation
+   267	        if failed is not None:
+   268	            raise failed
+   269	
+   270	    async def _ending(self, commit: str | None) -> None:
+   271	        if commit is not None:
+   272	            await self._workspace.commit_all(commit)
+   273	        else:
+   274	            await self._workspace.restore(self._last_good)
+   275	
+   276	
+   277	def _dumps(value: JsonValue) -> str:
+   278	    return json.dumps(value, sort_keys=True, separators=_SEPARATORS, ensure_ascii=True)
+   279	
+   280	
+   281	def _canonical(value: object, where: str) -> JsonValue:
+   282	    if value is None or isinstance(value, bool | int):
+   283	        return value
+   284	    if isinstance(value, str):
+   285	        return _checked_text(value, where)
+   286	    if isinstance(value, float):
+   287	        if not isfinite(value):
+   288	            raise InputError(
+   289	                f"{where} is {value!r}, which JSON has no spelling for: it would be written as a "
+   290	                f"bare token no reader accepts, and NaN does not even equal itself - so a step "
+   291	                f"fingerprinted with one could never match the entry it wrote"
+   292	            )
+   293	        return value
+   294	    if isinstance(value, Mapping):
+   295	        return {
+   296	            _checked_key(key, where): _canonical(item, f"{where}.{key}")
+   297	            for key, item in value.items()
+   298	        }
+   299	    if isinstance(value, AbstractSet):
+   300	        return sorted((_canonical(item, f"{where}[]") for item in value), key=_dumps)
+   301	    if isinstance(value, list | tuple):
+   302	        return [_canonical(item, f"{where}[{index}]") for index, item in enumerate(value)]
+   303	    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+   304	        kind = type(value)
+   305	        tagged: dict[str, JsonValue] = {
+   306	            _TYPE_KEY: _checked_text(f"{kind.__module__}.{kind.__qualname__}", f"{where}'s type")
+   307	        }
+   308	        for field in dataclasses.fields(value):
+   309	            tagged[_checked_key(field.name, where)] = _canonical(
+   310	                getattr(value, field.name), f"{where}.{field.name}"
+   311	            )
+   312	        return tagged
+   313	    raise InputError(
+   314	        f"{where} is a {type(value).__name__}, which cannot be canonicalised: a step's inputs are "
+   315	        f"fingerprinted, and a fingerprint is what a resume compares to decide whether to replay "
+   316	        f"this step or pay for it again. Pass a dataclass, a mapping, a sequence, a set, a string, "
+   317	        f"a number, a bool or None"
+   318	    )
+   319	
+   320	
+   321	def _wire_text(data: Mapping[str, object], key: str) -> str:
+   322	    value = data[key]
+   323	    if not isinstance(value, str):
+   324	        raise InternalError(
+   325	            f"a step entry's {key!r} is a {type(value).__name__}, and an entry's {key} is a string"
+   326	        )
+   327	    return value
+   328	
+   329	
+   330	def _normalised(moment: datetime) -> datetime:
+   331	    if moment.tzinfo is None or moment.utcoffset() is None:
+   332	        raise InternalError(
+   333	            f"a step entry's 'at' {moment!r} has no timezone, and a wall-clock reading with no "
+   334	            f"place is not a moment - an entry carries an instant, written as UTC"
+   335	        )
+   336	    utc = moment.astimezone(UTC)
+   337	    return utc - timedelta(microseconds=utc.microsecond)
+   338	
+   339	
+   340	def _checked_key(key: object, where: str) -> str:
+   341	    if not isinstance(key, str):
+   342	        raise InputError(
+   343	            f"{where} is keyed by {key!r}, a {type(key).__name__}, and a JSON object is keyed by "
+   344	            f"strings - canonicalising this would silently rename the key, and a renamed key is a "
+   345	            f"different fingerprint from the one this step's entry was written under"
+   346	        )
+   347	    if key == _TYPE_KEY:
+   348	        raise InputError(
+   349	            f"{where} is keyed by {_TYPE_KEY!r}, which AGL reserves: it is the key a dataclass "
+   350	            f"writes its qualified type name under, so a mapping carrying it would canonicalise to "
+   351	            f"the same text as some dataclass and one of the two would replay the other's recorded "
+   352	            f"result. Spell the key some other way"
+   353	        )
+   354	    return _checked_text(key, f"the key {key!r} in {where}")
+   355	
+   356	
+   357	def _checked_text(value: str, where: str) -> str:
+   358	    for index, character in enumerate(value):
+   359	        if unicodedata.category(character) == _SURROGATE:
+   360	            raise InputError(
+   361	                f"{where} holds U+{ord(character):04X} at position {index}, which is a surrogate: "
+   362	                f"UTF-8 has no encoding for one at all, and the canonical text escapes it to the "
+   363	                f"same characters as the astral code point it stands for - so two different inputs "
+   364	                f"would share a fingerprint, and one would replay the other's result"
+   365	            )
+   366	    return value
+     1	
+     2	import asyncio
+     3	from collections.abc import Callable
+     4	
+     5	from agl.ports.errors import InternalError
+     6	from agl.ports.history import History
+     7	from agl.ports.home_layout import RunScope
+     8	from agl.ports.integration import Conflict, IntegrationOutcome, Integrator
+     9	from agl.ports.verifier import Verifier, VerifierOutcome
+    10	from agl.ports.workspace import Workspace
+    11	from agl.sdk._engine.journal import Journal
+    12	from agl.sdk._engine.services import Services
+    13	from agl.sdk._engine.steps import Steps
+    14	
+    15	__all__ = ["Integration", "Leases", "integrate"]
+    16	
+    17	
+    18	class Leases:
+    19	
+    20	    def __init__(self) -> None:
+    21	        self._locks: dict[RunScope, asyncio.Lock] = {}
+    22	        self._live: dict[RunScope, Lease] = {}
+    23	
+    24	    async def claim(self, target: RunScope, journal: Journal) -> Lease:
+    25	        lock = self._locks.get(target)
+    26	        if lock is None:
+    27	            lock = asyncio.Lock()
+    28	            self._locks[target] = lock
+    29	        await lock.acquire()
+    30	        try:
+    31	            admit = await journal.exclude_steps()
+    32	        except BaseException:
+    33	            lock.release()
+    34	            raise
+    35	        lease = Lease(target, lock, admit, self._returned)
+    36	        self._live[target] = lease
+    37	        return lease
+    38	
+    39	    def release_all(self) -> None:
+    40	        for lease in tuple(self._live.values()):
+    41	            lease.release()
+    42	
+    43	    def _returned(self, lease: Lease) -> None:
+    44	        if self._live.get(lease.target) is lease:
+    45	            del self._live[lease.target]
+    46	
+    47	
+    48	class Lease:
+    49	
+    50	    def __init__(
+    51	        self,
+    52	        target: RunScope,
+    53	        lease: asyncio.Lock,
+    54	        admit: Callable[[], None],
+    55	        returned: Callable[[Lease], None],
+    56	    ) -> None:
+    57	        self.target = target
+    58	        self._lease = lease
+    59	        self._admit = admit
+    60	        self._returned = returned
+    61	        self._released = False
+    62	
+    63	    def release(self) -> None:
+    64	        if self._released:
+    65	            return
+    66	        self._released = True
+    67	        self._admit()
+    68	        self._lease.release()
+    69	        self._returned(self)
+    70	
+    71	
+    72	class Integration:
+    73	
+    74	    def __init__(
+    75	        self,
+    76	        *,
+    77	        source: Workspace,
+    78	        target: Workspace,
+    79	        journal: Journal,
+    80	        integrator: Integrator,
+    81	        history: History,
+    82	        verifier: Verifier,
+    83	        build: str,
+    84	        before: str,
+    85	        lease: Lease,
+    86	    ) -> None:
+    87	        self._source = source
+    88	        self._target = target
+    89	        self._journal = journal
+    90	        self._integrator = integrator
+    91	        self._history = history
+    92	        self._verifier = verifier
+    93	        self._build = build
+    94	        self._before = before
+    95	        self._lease = lease
+    96	        self._head: str | None = None
+    97	        self._conflict: Conflict | None = None
+    98	        self._verdict: VerifierOutcome | None = None
+    99	        self._settled = False
+   100	
+   101	    @property
+   102	    def head(self) -> str | None:
+   103	        return self._head
+   104	
+   105	    @property
+   106	    def conflict(self) -> Conflict | None:
+   107	        return self._conflict
+   108	
+   109	    @property
+   110	    def conflicted(self) -> bool:
+   111	        return self._conflict is not None
+   112	
+   113	    @property
+   114	    def verdict(self) -> VerifierOutcome | None:
+   115	        return self._verdict
+   116	
+   117	    async def retry(self) -> None:
+   118	        if self._settled:
+   119	            raise InternalError(_nothing_to_retry(self._head))
+   120	        outcome: IntegrationOutcome | None = None
+   121	        try:
+   122	            outcome = await self._integrator.retry(self._target)
+   123	        except InternalError:
+   124	            outcome = None
+   125	        if outcome is None:
+   126	            outcome = await self._integrator.land(self._source, self._target)
+   127	        await self._concluded(outcome, again=False)
+   128	
+   129	    async def abort(self) -> None:
+   130	        if self._settled:
+   131	            return
+   132	        await self._integrator.abort(self._target)
+   133	        self._settle()
+   134	
+   135	    async def _concluded(self, outcome: IntegrationOutcome, *, again: bool) -> None:
+   136	        if outcome.conflicted:
+   137	            self._conflict = outcome.conflict
+   138	            self._head = None
+   139	            self._verdict = None
+   140	            return
+   141	        head = outcome.head
+   142	        if head is None:
+   143	            raise InternalError(
+   144	                "an integration outcome reports neither a landing nor a conflict, which the type "
+   145	                "refuses to be constructed as - so this is not an adapter's answer, it is ours"
+   146	            )
+   147	        if not await self._history.contains(await self._source.head(), head):
+   148	            if again:
+   149	                raise InternalError(_still_not_in(self._source.branch, self._target.branch, head))
+   150	            await self._concluded(
+   151	                await self._integrator.land(self._source, self._target), again=True
+   152	            )
+   153	            return
+   154	
+   155	        if not await self._gated():
+   156	            return
+   157	
+   158	        self._journal.advance(head)
+   159	        self._head = head
+   160	        self._conflict = None
+   161	        self._settle()
+   162	
+   163	    async def _gated(self) -> bool:
+   164	        verdict = await self._verifier.verify(self._build, self._target.path)
+   165	        self._verdict = verdict
+   166	        if verdict.passed:
+   167	            return True
+   168	        await self._target.restore(self._before)
+   169	        self._conflict = Conflict(
+   170	            paths=(),
+   171	            summary=_gate_refused(self._build, verdict.status, self._target.branch, self._before),
+   172	        )
+   173	        self._head = None
+   174	        return False
+   175	
+   176	    def _settle(self) -> None:
+   177	        self._settled = True
+   178	        self._lease.release()
+   179	
+   180	
+   181	async def integrate(
+   182	    *,
+   183	    source: Steps,
+   184	    target: Steps,
+   185	    address: RunScope,
+   186	    services: Services,
+   187	    leases: Leases,
+   188	) -> Integration:
+   189	    _, child = await source.landing()
+   190	    journal, parent = await target.landing()
+   191	    lease = await leases.claim(address, journal)
+   192	    try:
+   193	        integration = Integration(
+   194	            source=child,
+   195	            target=parent,
+   196	            journal=journal,
+   197	            integrator=services.integrator,
+   198	            history=services.history,
+   199	            verifier=services.verifier,
+   200	            build=services.build,
+   201	            before=await parent.head(),
+   202	            lease=lease,
+   203	        )
+   204	        await integration._concluded(
+   205	            await services.integrator.land(child, parent), again=False
+   206	        )
+   207	    except BaseException:
+   208	        lease.release()
+   209	        raise
+   210	    return integration
+   211	
+   212	
+   213	def _nothing_to_retry(head: str | None) -> str:
+   214	    ended = (
+   215	        f"it landed, and the target is at {head!r}"
+   216	        if head is not None
+   217	        else "it was aborted, and the hold was released"
+   218	    )
+   219	    return (
+   220	        f"this integration is over - {ended} - so there is nothing left to try again. `retry` is "
+   221	        f"for an outcome that is still conflicted and still holding its lease; once one has "
+   222	        f"settled, the lease is back, the parent's chain has been decided, and a retry would be "
+   223	        f"acting on a landing nothing is holding. A second `abort` is the tolerant one and says "
+   224	        f"nothing; this is the asymmetry `ports/integration.py` pins for its own two verbs"
+   225	    )
+   226	
+   227	
+   228	def _gate_refused(command: str, status: int, target: str, before: str) -> str:
+   229	    return (
+   230	        f"the build gate refused this landing. {target!r} took the work with no textual collision, "
+   231	        f"and then {command!r} ran in that tree and ended with status {status}, so the landing was "
+   232	        f"undone: {target!r} is back at {before!r} and its working tree holds nothing the build "
+   233	        f"left behind. There is no list of colliding files because there is nothing to list - what "
+   234	        f"failed is the combination rather than any one file, which is the semantic conflict this "
+   235	        f"gate exists to catch and the reason two pieces of work that each build alone can still "
+   236	        f"be refused together. The build's own output is on the outcome, beside this conflict"
+   237	    )
+   238	
+   239	
+   240	def _still_not_in(source: str, target: str, head: str) -> str:
+   241	    return (
+   242	        f"{target!r} is at {head!r} after landing {source!r} into it a second time, and that state "
+   243	        f"still does not contain {source!r}. The first answer was somebody else's landing being "
+   244	        f"concluded (§3.4: a resumed run finds a hold it did not take), which this re-landing is "
+   245	        f"the answer to - so a second one that still leaves the work out is not a case to try "
+   246	        f"again through, it is AGL and the integrator disagreeing about what landed. Nothing has "
+   247	        f"been advanced: the parent's chain still names the state it did before this integration"
+   248	    )
