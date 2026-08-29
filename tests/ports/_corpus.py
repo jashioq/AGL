@@ -7,13 +7,13 @@ Shared between the suites rather than copied into each, because the property the
 property - *no value `ids.py` accepts can produce a path outside the root it was joined onto* -
 and two corpora are two coverages, of which only one ever gets read.
 
-§3.3 made the character set an allowlist, which changed what a corpus is for here. Under a
-blocklist the interesting values were the ones that got through; under an allowlist almost
-nothing gets through, so the corpus has to be built from both ends. It carries the traps that
-must be refused - shell metacharacters, non-ASCII, the invisibles, the reserved words in
-several spellings - and, because a fuzz over a mixed alphabet now produces an accepted name
-about one time in twenty, a second fuzz drawn only from characters the allowlist permits. A
-corpus that accepted almost nothing would pass every containment property without checking one.
+The character set is an allowlist, which changed what a corpus is for here. Under a blocklist
+the interesting values were the ones that got through; under an allowlist almost nothing gets
+through, so the corpus has to be built from both ends. It carries the traps that must be
+refused - shell metacharacters, non-ASCII, the invisibles, the reserved words in several
+spellings - and, because a fuzz over a mixed alphabet now produces an accepted name about one
+time in twenty, a second fuzz drawn only from characters the allowlist permits. A corpus that
+accepted almost nothing would pass every containment property without checking one.
 
 The invisible characters are written as escapes rather than as themselves: a case that reads
 `assert "a b" == "a b"` in a diff is worse than no case at all.
@@ -47,7 +47,8 @@ _NON_ASCII: Final = [
 
 # Everything the rules turn on, plus a few that must stay legal, placed in every position below.
 # The second row is the shell: every one of these is legal in a ref and in a POSIX filename, and
-# `decompose` invents the names that become namespaces, which is the whole argument for §3.3.
+# `decompose` invents the names that become namespaces, which is the whole argument for the
+# allowlist.
 _INTERESTING: Final = [
     *"/\\~^:?*[ .-@{}_+", "..", "//", "@{", ".lock", "\x00", "\t",
     *"$`;|&><()!#'\"", "\n", "$(", "${", "&&", "||", ";;",
@@ -60,7 +61,7 @@ _SHELL_NAMES: Final = [
 ]
 
 # The names this layout spends on itself. None of them may become path depth or vanish, and the
-# first two are the words §3.3 reserves - `_base` for a namespace, `_work` for a label - which
+# first two are the reserved words - `_base` for a namespace, `_work` for a label - which
 # is why every spelling of each is here.
 _LAYOUT_WORDS: Final = [
     "projects", "runs", "steps", "worktrees", "run.json", "agl", "main", "HEAD",
@@ -113,7 +114,7 @@ def _structured() -> list[str]:
 def _accepted(values: Sequence[str]) -> list[str]:
     """The subset every one of the four types takes.
 
-    All four accept the same *language* from one validator, but §3.3 reserves one word per type
+    All four accept the same *language* from one validator, but one word per type is reserved
     - `_base` for a namespace, `_work` for a label - so a value that is a perfectly good
     `Namespace` need not be a `RunLabel`. Every consumer of this list builds several types from
     one value, so the list has to be the intersection rather than any one type's answer.

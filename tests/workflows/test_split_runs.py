@@ -1,8 +1,8 @@
 """`split` as a run: N children at once, a merge train, and the one screen it asks a person for.
 
-18.3, and the second half of `tests/workflows/test_split.py` - the half that needs a run to exist
-before it can be seen at all. The line between the two files is that file's own: a view is a pure
-function and reading one is a call and a comparison, so the screens stay cheap and stay there; the
+The second half of `tests/workflows/test_split.py` - the half that needs a run to exist before it
+can be seen at all. The line between the two files is that file's own: a view is a pure function
+and reading one is a call and a comparison, so the screens stay cheap and stay there; the
 concurrency, the child worktrees, the integration queue, the build gate and the conflict path are
 arguments to calls, and nothing imports an argument.
 
@@ -12,7 +12,7 @@ layer down against hand-built `Run`s in `tests/sdk/` and never through a workflo
 have written:
 
   * **children that genuinely overlap**, not two coroutines a `gather` collected;
-  * **landings serialized into one target**, which is §3.4's merge train;
+  * **landings serialized into one target**, which is the merge train;
   * **the conflict path**, driven through `views.conflict` by a scripted gesture - which no test in
     this repository has ever reached from a workflow;
   * **the red gate**, and what it leaves behind.
@@ -36,11 +36,11 @@ microseconds whatever the machine is doing, and one they cannot reach is not rea
 bounds below only decide how long a broken build takes to say so, and - in the two tests that prove
 a negative - how long a passing one spends proving it.
 
-**Every await is bounded and the expiry is the failure.** §3.7 has no timeouts anywhere and
-`answering` idles when its script runs out, so an honest mistake in any of these tests is a hang
-rather than a failure. Nothing below is awaited outside a bound.
+**Every await is bounded and the expiry is the failure.** The terminal has no timeouts anywhere
+and `answering` idles when its script runs out, so an honest mistake in any of these tests is a
+hang rather than a failure. Nothing below is awaited outside a bound.
 
-## Two findings this file reported at 18.3, both closed at 19.2, and what closing them changed here
+## Two findings this file reported, both since closed, and what closing them changed here
 
 **`testing.Agent` was synchronous - `(AgentTask) -> Reply` - so an agent written in the harness's
 own vocabulary could not take part in a rendezvous.** It could not await a barrier, an event or
@@ -49,7 +49,7 @@ ruled out the one arrangement that distinguishes real concurrency from a framewo
 everything - which is precisely the property `split` exists to demonstrate - so every test here that
 needs two agents to meet was written on a raw per-provider `Script` through
 `container.fakes(claude=...)`, and the door an author actually uses could not express the claim its
-workflow is for. 19.2 widened the return to `Reply | Awaitable[Reply]`, so `_agent` below is an
+workflow is for. The return was widened to `Reply | Awaitable[Reply]`, so `_agent` below is an
 `async def` that awaits a barrier and every one of those tests goes through `agent=`. The
 synchronous spelling is untouched: `testing.Agent` still admits a one-line lambda, which is what
 `sdk/testing.py` argues the type is for.
@@ -65,7 +65,7 @@ uses for exactly that arrangement and nothing else.
 hook inside a landing, and reaching it was `dataclasses.replace(fakes, services=replace(fakes
 .services, verifier=...))` in `_over` below - which left `fakes.verifier` naming an object the
 bundle no longer used, the two-views-of-one-bundle defect `with_terminal`'s own docstring exists to
-close, reproduced by hand at the one call site that wanted it. 19.2 added the third verb and `_over`
+close, reproduced by hand at the one call site that wanted it. The third verb was added and `_over`
 calls it. Its argument is a `FakeVerifier` rather than a `Verifier`, so the two gates below extend
 the fake instead of replacing it - which costs them nothing and leaves them scriptable, `super()
 .verify` being the verdict.
@@ -81,7 +81,7 @@ and not this one's.
 
 ## What is not observable from here, said rather than worked around
 
-§3.4 holds the target namespace's **step lock** behind the lease, so a parent's own `run.step`
+A landing holds the target namespace's **step lock** behind the lease, so a parent's own `run.step`
 queues behind every child's gate. That is real and it is unobservable from any test of *this*
 workflow: `split` takes exactly one step on the root, `plan`, and it happens before the first
 worktree is opened, so no landing is ever in flight while the root wants to step. Seeing it would
@@ -210,7 +210,7 @@ class _Dispatches:
     `entered` is what a barrier's failure message is written out of, `left` separates an agent that
     was paid for from one that was dispatched and torn down when a bound expired, and `where` is the
     checkout the framework handed each chunk - which is how the assertions below reach a worktree
-    without composing a path out of §3.9's layout and then agreeing with themselves about it.
+    without composing a path out of the trees layout and then agreeing with themselves about it.
 
     The planner is in `entered` and `left` under `PLANNING`, and not left out as "not a chunk": what
     these two lists are is **every agent this run paid for**, and a test that could not see a second
@@ -229,9 +229,9 @@ def _whose(task: AgentTask, work: Mapping[str, tuple[str, bytes]]) -> str:
     """Which chunk this dispatch is for, read off the prompt the framework composed.
 
     **The inputs and not the checkout's name.** `AgentTask` carries no namespace and no step name,
-    deliberately (§3.3), and the two handles it does carry are the tools and the prompt; every
-    implementer here shares one role, one model and one empty tools tuple, so what tells them apart
-    is the only thing that differs - `chunk=`, appended as canonical JSON under `## Inputs`, where
+    deliberately, and the two handles it does carry are the tools and the prompt; every implementer
+    here shares one role, one model and one empty tools tuple, so what tells them apart is the only
+    thing that differs - `chunk=`, appended as canonical JSON under `## Inputs`, where
     `"id":"parser"` is a key and its value. Keying on `task.workspace.name` would work and would
     make the assertion that a chunk's worktree is named after the chunk circular, since the name
     would then be what the test used to decide which chunk it was looking at.
@@ -254,7 +254,7 @@ def _agent(
 ) -> testing.Agent:
     """One agent's conduct for a whole run of `split`: report the plan, or implement one chunk.
 
-    **In the harness's own vocabulary, rendezvous and all**, which is what 19.2 widened `Agent` for
+    **In the harness's own vocabulary, rendezvous and all**, which is what `Agent` was widened for
     and what every test below except one is now driven on. It is an `async def` returning a `Reply`,
     which `testing.Agent` admits beside the plain `def` and the one-line lambda: `container.fakes`
     awaits what the call produced when there is something to await, so `await barrier.wait()` is a
@@ -300,13 +300,13 @@ def _correcting(
 ) -> Script:
     """The same conduct as a raw per-provider `Script`, for the arrangement that reads an answer.
 
-    `refused` is a plan reported **first** and expected to come back refused, which is the one thing
-    a `Reply` cannot express at all and which awaiting an `Agent` does not change: a `Reply` is a
-    value computed before the run, so an agent written in the harness's vocabulary can make a bad
-    call and a good one but can never *read* the answer to the first - an `async def` one has
-    already returned by the time the call is made. Reading it is the whole claim here - §3.3's
-    rejection goes back to the model inside the same conversation, and what a script does with it is
-    what a model would do with it.
+    `refused` is a plan reported **first** and expected to come back refused, which is the one
+    thing a `Reply` cannot express at all and which awaiting an `Agent` does not change: a `Reply`
+    is a value computed before the run, so an agent written in the harness's vocabulary can make a
+    bad call and a good one but can never *read* the answer to the first - an `async def` one has
+    already returned by the time the call is made. Reading it is the whole claim here - a rejection
+    goes back to the model inside the same conversation, and what a script does with it is what a
+    model would do with it.
 
     This is the escape hatch `sdk/testing.py` names, used for exactly what it is named for, and the
     one place in this file that still needs it.
@@ -352,8 +352,8 @@ def _over(
     of either serves a whole run.
 
     `verifier=` and `terminal=` both go in through `FakeServices`' own verbs, so each lands in the
-    port-typed bundle and the sibling field at once. `with_verifier` is 19.2's and this file is why
-    it exists: substituting the gate used to be `replace(fakes, services=replace(fakes.services,
+    port-typed bundle and the sibling field at once. `with_verifier` exists because of this file:
+    substituting the gate used to be `replace(fakes, services=replace(fakes.services,
     verifier=...))` here, which left `fakes.verifier` naming an object the bundle no longer used -
     the two-views defect `with_terminal` was written to close, reproduced by hand at the one call
     site that wanted a hook inside a landing.
@@ -402,7 +402,7 @@ async def _ended(running: asyncio.Task[None], seen: _Dispatches, why: str) -> No
 async def _record(harness: testing.Harness) -> Mapping[str, JsonValue]:
     """This run's `run.json`, through the store the harness wrapped - which `agl/testing.py`
     sanctions in as many words, and which is where the branch name and the base commit come from.
-    Composing either here would mean this file holding its own copy of §3.9's naming scheme."""
+    Composing either here would mean this file holding its own copy of the naming scheme."""
     record = await harness.fakes.store.read_record(harness.scope)
     assert record is not None, "the run wrote no run.json, so it never started"
     return record
@@ -418,9 +418,9 @@ def _text(record: Mapping[str, JsonValue], key: str) -> str:
 def _target(seen: _Dispatches) -> Path:
     """The run's own checkout, found beside a child's rather than composed out of the layout.
 
-    §3.9 flattens the trees root, so `_base` is every child's own sibling - which is the one fact
-    about the layout this file spends, and it spends it because the alternative is asking
-    `tree_layout` where a checkout should be and then agreeing with whatever it said.
+    The trees root is flat, so `_base` is every child's own sibling - which is the one fact about
+    the layout this file spends, and it spends it because the alternative is asking `tree_layout`
+    where a checkout should be and then agreeing with whatever it said.
     """
     return next(iter(seen.where.values())).parent / "_base"
 
@@ -445,13 +445,13 @@ def _committed(
     it was made on top of, and **what the workflow called it**. Without it a workflow that dropped
     the `commit=` entirely would leave a chain nothing here could tell from the right one.
 
-    **19.2 gave `History` a `message` member and this is still a recomputation, which is worth
-    saying rather than leaving to be wondered about.** That member answers about a commit the
-    caller *names*, and the commit this function is about is not one this test can name: it is a
-    chunk's own commit, sitting inside `_base`'s line of work behind however many landings followed
-    it, and no port hands back an id for it - §3.10 forbids the listing that would be the general
-    form of asking. `tests/workflows/test_fix.py` converted its own version of this because there
-    the commit in question is a *tip*, which is a name a test already holds.
+    **`History` has a `message` member and this is still a recomputation, which is worth saying
+    rather than leaving to be wondered about.** That member answers about a commit the caller
+    *names*, and the commit this function is about is not one this test can name: it is a chunk's
+    own commit, sitting inside `_base`'s line of work behind however many landings followed it, and
+    no port hands back an id for it, there being no listing that would be the general form of
+    asking. `tests/workflows/test_fix.py` converted its own version of this because there the
+    commit in question is a *tip*, which is a name a test already holds.
     """
     path, body = work[chunk]
     return harness.fakes.repository.record({**SEED, path: body}, (base,), f"implement {chunk}")
@@ -478,13 +478,13 @@ async def test_no_chunk_can_finish_until_every_other_has_started_and_all_of_them
     The rest is what a run of `split` is, and each part fails on its own:
 
     * **the ledger** is one `plan` in the run's own namespace and one `implement` per chunk in a
-      namespace of its own, which is §3.6's flat trees root and §3.3's `run.worktree(chunk.id)`
-      arriving together. Compared sorted, because the order three concurrent children record in is
-      asyncio's business and no part of the claim;
+      namespace of its own, which is the flat trees root and `run.worktree(chunk.id)` arriving
+      together. Compared sorted, because the order three concurrent children record in is asyncio's
+      business and no part of the claim;
     * **the base branch carries every chunk's commit under the message the workflow composed**,
       recomputed by `_committed` from the tree and the message rather than read back, which is the
       only way a commit message is assertable at all;
-    * **no child could see another's work**, which is what §3.9 cuts a checkout per child for. Two
+    * **no child could see another's work**, which is what a checkout per child is cut for. Two
       agents sharing one tree would each be editing the other's files with nothing raising, and the
       commit each of them made would carry the other's edits.
     """
@@ -494,8 +494,8 @@ async def test_no_chunk_can_finish_until_every_other_has_started_and_all_of_them
     await _ended(
         _started(harness, len(PLAN)),
         seen,
-        "three chunks of one run could not all be inside a step at once. §3.6 serializes steps "
-        "within a namespace and nothing across them - a lock spanning namespaces leaves the second "
+        "three chunks of one run could not all be inside a step at once. Steps serialize "
+        "within a namespace and not across them - a lock spanning namespaces leaves the second "
         "child waiting for a first child that is waiting for the second, which is the only real "
         "concurrency AGL has, deadlocked.",
     )
@@ -504,7 +504,7 @@ async def test_no_chunk_can_finish_until_every_other_has_started_and_all_of_them
     assert harness.recorded[0].namespace is None, "the plan step did not run in the run's own tree"
     assert sorted(str(entry.namespace) for entry in harness.recorded[1:]) == sorted(PLAN), (
         f"the chunks recorded their work under {[e.namespace for e in harness.recorded[1:]]}, and "
-        f"§3.3 files a child's ledger under the name `run.worktree(chunk.id)` was given"
+        f"a child's ledger is filed under the name `run.worktree(chunk.id)` was given"
     )
 
     record = await _record(harness)
@@ -528,7 +528,7 @@ async def test_no_chunk_can_finish_until_every_other_has_started_and_all_of_them
             present = (checkout / SEPARATE[other][0]).is_file()
             assert present is (other == chunk), (
                 f"{chunk!r}'s checkout {'holds' if present else 'is missing'} {other!r}'s file, so "
-                f"the children are not working in one checkout each (§3.9) - and two agents in one "
+                f"the children are not working in one checkout each - and two agents in one "
                 f"tree each commit the other's edits under their own message"
             )
 
@@ -549,10 +549,10 @@ async def test_a_plan_the_payload_type_refuses_is_corrected_inside_the_planners_
     plan that will do. Four things follow and each of them is the claim:
 
     * the first call was **rejected** rather than raised - `ToolResult.rejected`, which is the
-      channel §3.3 puts the answer on;
+      channel the answer goes back on;
     * the text it carries names the rule, because that text is the only place a model that guessed
-      wrong is told what it may write - a derived schema renders a `str` field as
-      `{"type": "string"}` and cannot carry a word of it;
+      wrong is told what it may write - a derived schema renders a `str` field as `{"type":
+      "string"}` and cannot carry a word of it;
     * **nothing was recorded for the rejected call.** One `plan` entry, holding the good plan. A
       refusal that had written an entry would be a run whose ledger holds a plan the framework
       refuses to open worktrees for, replayed as a cache hit by every resume;
@@ -615,9 +615,9 @@ class _Rendezvous(FakeVerifier):
     """A merge gate two landings would meet inside, if two landings could ever be inside one.
 
     The mirror of the barrier above and the reason it has to be one: "landings into one target are
-    serialised" (§3.4) is a negative, and a test that watched two children land and found both of
-    them in the target afterwards would be green against an implementation that ran the two gates at
-    the same moment over the same checkout. What can fail is a rendezvous **in the gate**: if two
+    serialised" is a negative, and a test that watched two children land and found both of them in
+    the target afterwards would be green against an implementation that ran the two gates at the
+    same moment over the same checkout. What can fail is a rendezvous **in the gate**: if two
     landings overlap the barrier is passed and `together` is not empty; if they cannot, the first
     landing waits until its bound expires and no gate ever meets another.
 
@@ -667,7 +667,7 @@ class _Rendezvous(FakeVerifier):
 async def test_a_siblings_landing_waits_rather_than_meeting_another_inside_the_gate(
     tmp_path: Path,
 ) -> None:
-    """§3.4's merge train: two children that overlap everywhere except in the target.
+    """The merge train: two children that overlap everywhere except in the target.
 
     The same two children as the test above - dispatched together, held at a barrier neither can
     pass alone, so both are provably finished and both are offering a landing at the same moment -
@@ -676,11 +676,11 @@ async def test_a_siblings_landing_waits_rather_than_meeting_another_inside_the_g
     door. A test with only the second could be green over a framework that never ran two children at
     once at all.
 
-    What a failure looks like is worth naming, because §3.4 names it: `FakeIntegrator.land` reads
-    the target's head, combines against it and records, so two landings interleaved at that
-    suspension both compute a combination from the same head and whichever records second replaces
-    the first one's landing with one that never saw it. Nothing raises. The child that lost is
-    simply not in the target and its `integrate()` returned a head saying it was.
+    What a failure looks like is worth naming: `FakeIntegrator.land` reads the target's head,
+    combines against it and records, so two landings interleaved at that suspension both compute a
+    combination from the same head and whichever records second replaces the first one's landing
+    with one that never saw it. Nothing raises. The child that lost is simply not in the target and
+    its `integrate()` returned a head saying it was.
 
     So both are asserted: no two gates met, **and** both children are in the target's line of work
     afterwards - the second being what turns "one at a time" from a claim about exclusion into a
@@ -703,14 +703,14 @@ async def test_a_siblings_landing_waits_rather_than_meeting_another_inside_the_g
 
     assert gate.together == [], (
         f"two landings into one target were inside the build gate at the same moment: "
-        f"{gate.together}. §3.4 serialises landings into one target behind a lease and the target "
+        f"{gate.together}. Landings into one target are serialised behind a lease and the target "
         f"namespace's own step lock, and two that overlap both combine against the head the other "
         f"has already moved past - the child that loses is not in the target, its `integrate()` "
         f"reported a head saying it is, and nothing raises"
     )
     assert len(gate.entered) == len(plan), (
         f"the gate ran {len(gate.entered)} times for {len(plan)} landings. The framework runs "
-        f"exactly one build (§3.4), the merge gate, and it runs it once per landing"
+        f"exactly one build, the merge gate, and it runs it once per landing"
     )
     assert set(gate.entered) == {_target(seen)}, (
         "a gate ran somewhere other than the target's own checkout, which is the only place the "
@@ -735,9 +735,9 @@ async def test_a_siblings_landing_waits_rather_than_meeting_another_inside_the_g
 class _Held(FakeVerifier):
     """A green gate that says when it has been reached - which is a moment the lease is held.
 
-    The ordering instrument for everything below. §3.4 holds the target's lease from the start of a
-    landing until its outcome settles, and the gate runs inside that, so a child released **here**
-    is a child whose own landing cannot possibly get in front of the one that is running: it has to
+    The ordering instrument for everything below. A landing holds the target's lease from its start
+    until its outcome settles, and the gate runs inside that, so a child released **here** is a
+    child whose own landing cannot possibly get in front of the one that is running: it has to
     queue for a lease somebody else is holding. That is what makes the merge train's order this
     file's rather than asyncio's, without a sleep anywhere and without a poll.
 
@@ -775,15 +775,15 @@ class _Watched(Terminal):
     **The priority is kept because nothing else in this run can see it.** `split` declares no
     `on_question` on either role, so no agent question is ever queued, so nothing else is ever in
     the queues for a conflict screen to preempt and the number does not discriminate: `priority=10`
-    and `priority=0` produce identical runs. §3.7's reason for the number is not about `split`'s
+    and `priority=0` produce identical runs. The reason for the number is not about `split`'s
     current roles, though - a conflict screen queued behind two agent questions stalls the merge
     queue on something unrelated, which is the entire justification for having one level of
     preemption at all - so what a test can hold is the number the workflow asked for, which is what
-    would make the preemption happen the day anything else queues.
-    Everything a terminal actually decides is the delegate's: the queues, the priorities, the slot
-    and the script are `adapters/rich_terminal/scripted.py`'s, which is a conforming implementation
-    under `tests/contracts/terminal.py`'s eye, so a workflow driven through this queues and preempts
-    the way it will in front of a person.
+    would make the preemption happen the day anything else queues. Everything a terminal actually
+    decides is the delegate's: the queues, the priorities, the slot and the script are
+    `adapters/rich_terminal/scripted.py`'s, which is a conforming implementation under
+    `tests/contracts/terminal.py`'s eye, so a workflow driven through this queues and preempts the
+    way it will in front of a person.
 
     **It exists for a moment rather than for a value.** `watching()` is called while the landing
     that produced this screen holds the target's lease and is about to block on it, which is the one
@@ -849,22 +849,22 @@ class _Watched(Terminal):
 async def test_the_target_is_held_across_the_decision_and_a_sibling_waits_behind_it(
     tmp_path: Path,
 ) -> None:
-    """§3.4's conflict, driven through the workflow, with a third chunk queued behind the screen.
+    """The conflict path, driven through the workflow, with a third chunk behind the screen.
 
-    Three chunks and a plan drawn wrong: `parser` and `api` both create one file from a base holding
-    neither, which is the one shape no honest integrator can combine, and `docs` was independent all
-    along. `parser` lands first - it is the only child whose agent is not waiting for anything -
-    and the gate it runs releases `api`, which cannot get in front of it because the lease is
-    held for the whole of that landing. So `api` collides, and `views.conflict` goes up.
+    Three chunks and a plan drawn wrong: `parser` and `api` both create one file from a base
+    holding neither, which is the one shape no honest integrator can combine, and `docs` was
+    independent all along. `parser` lands first - it is the only child whose agent is not waiting
+    for anything - and the gate it runs releases `api`, which cannot get in front of it because the
+    lease is held for the whole of that landing. So `api` collides, and `views.conflict` goes up.
 
     **The screen is where `docs` is released**, which is the arrangement's centre: it is dispatched,
     finishes, records its entry and offers its landing while a person is still reading. Then nothing
     happens, and the nothing is the assertion - the entry is on the ledger, so the child is between
     its step and its landing and there is nowhere else for it to be; the gate has run exactly once,
     so `docs` never reached the build; and one screen has gone up, so its landing was not answered
-    with a conflict of its own either. §3.4 holds the lease and the target namespace's step lock
-    until the outcome settles, and this is the whole reason `views.conflict` is shown at priority
-    10: every other chunk's landing is stopped behind it.
+    with a conflict of its own either. A landing holds the lease and the target namespace's step
+    lock until the outcome settles, and this is the whole reason `views.conflict` is shown at
+    priority 10: every other chunk's landing is stopped behind it.
 
     **What this cannot separate, said rather than claimed.** A target mid-landing is held by the
     *integrator* as well as leased by the framework, and `land` answers a pre-existing hold with a
@@ -877,16 +877,16 @@ async def test_the_target_is_held_across_the_decision_and_a_sibling_waits_behind
 
     **`retry()` and `abort()` are what release it, and not run exit.** The proof is that `docs`
     lands *inside this run* - after the abort, with the workflow still going. If the lease were
-    given back only when the run exits, §3.4's own words, "that would serialise every landing in a
-    run behind the first one forever", and there would be no run left to land in.
+    given back only when the run exits, that would serialise every landing in a run behind the
+    first one forever, and there would be no run left to land in.
 
-    And the screen comes up twice, which is 18.2's `while` doing what an `if` cannot: the retry
-    fixes nothing, the landing comes back conflicted, and the same screen goes up again. The test
-    below makes that the difference between a pass and a failure on its own; here it is one more
-    thing this arrangement gets to see for free.
+    And the screen comes up twice, which is the `while` doing what an `if` cannot: the retry fixes
+    nothing, the landing comes back conflicted, and the same screen goes up again. The test below
+    makes that the difference between a pass and a failure on its own; here it is one more thing
+    this arrangement gets to see for free.
 
     The board is asserted too, in the slot behind the question, because a passive screen keeps being
-    written under a queued one (§3.7): three rows, in the planner's own order, with nothing running.
+    written under a queued one: three rows, in the planner's own order, with nothing running.
     """
     seen = _Dispatches()
     gate = _Held()
@@ -912,8 +912,8 @@ async def test_the_target_is_held_across_the_decision_and_a_sibling_waits_behind
     )
     assert gate.entered == [_target(seen)], (
         f"the gate has run {len(gate.entered)} times, so a sibling's landing went through while a "
-        f"conflict nobody has decided is holding the target. §3.4 holds the lease **and** the "
-        f"target namespace's step lock until the outcome settles, which is exactly what a person "
+        f"conflict nobody has decided is holding the target. A landing holds the lease **and** "
+        f"the target namespace's step lock until the outcome settles, which is what a person "
         f"deliberating in front of `views.conflict` is doing to the merge queue"
     )
     assert len(watched.questions) == 1, (
@@ -923,9 +923,9 @@ async def test_the_target_is_held_across_the_decision_and_a_sibling_waits_behind
         f"there is no gesture in front of it and no timeout anywhere to end it"
     )
     assert term.slot() == Screen(Rows([Row(chunk, "") for chunk in PLAN])), (
-        "the board is not in the slot behind the conflict screen. §3.7 keeps writing a passive "
-        "screen under a queued one, so a run whose board is missing here either never put it up or "
-        "put it up as something that had to be answered"
+        "the board is not in the slot behind the conflict screen. The terminal keeps writing a "
+        "passive screen under a queued one, so a run whose board is missing here either never put "
+        "it up or " "put it up as something that had to be answered"
     )
     displayed = term.displayed()
     assert displayed is not None and displayed.responses, "no question is in front of the terminal"
@@ -937,14 +937,14 @@ async def test_the_target_is_held_across_the_decision_and_a_sibling_waits_behind
         seen,
         "the run did not finish once the conflict had been given up on. The lease and the step "
         "lock are released by `retry()` and `abort()`, so a sibling still waiting here is a "
-        "sibling waiting for the run to exit - which is the reading §3.4 refuses, because it "
-        "serialises every landing in a run behind the first one forever.",
+        "sibling waiting for the run to exit - which is the reading the design refuses, because "
+        "it serialises every landing in a run behind the first one forever.",
     )
 
     assert term.remaining == (), (
         "a gesture was never spent, so the conflict screen came up fewer times than twice: a retry "
         "that fixed nothing has to come back conflicted and put the same screen up again, and the "
-        "`if` spelling §3.4 names as a bug falls out of the branch instead, holding the lease"
+        "`if` spelling that is a bug falls out of the branch instead, holding the lease"
     )
     assert len(watched.questions) == 2, (
         f"{len(watched.questions)} conflict screen(s) went up where two were due - retry, then "
@@ -952,16 +952,17 @@ async def test_the_target_is_held_across_the_decision_and_a_sibling_waits_behind
     )
     assert watched.boards == [(0, Screen(Rows([Row(chunk, "") for chunk in PLAN])))], (
         f"the board was shown {len(watched.boards)} time(s), at "
-        f"{[priority for priority, _screen in watched.boards]}. §3.3 shows it once, passively, at "
+        f"{[priority for priority, _screen in watched.boards]}. It is shown once, passively, at "
         f"the default priority - a second `show` would only ever mean putting a different view on "
         f"screen, and a board that had to be answered would block before the first chunk was "
         f"dispatched"
     )
     assert [priority for priority, _screen in watched.questions] == [10, 10], (
-        f"the conflict screen was shown at {[p for p, _ in watched.questions]} where §3.4 shows it "
-        f"at 10, above the board's own {watched.boards[0][0]}. Nothing in *this* run discriminates "
-        f"on it - `split` declares no `on_question`, so no agent question is ever queued for a "
-        f"conflict to preempt - and the number is what §3.7 gives one level of preemption for: "
+        f"the conflict screen was shown at {[p for p, _ in watched.questions]} where the workflow "
+        f"shows it at 10, above the board's own {watched.boards[0][0]}. Nothing in *this* run "
+        f"discriminates on it - `split` declares no `on_question`, so no agent question is ever "
+        f"queued for a "
+        f"conflict to preempt - and the number is what one level of preemption exists for: "
         f"`integrate()` holds the target's lease and step lock until this screen is answered, so a "
         f"conflict queued behind an agent question stalls every other chunk's landing on something "
         f"unrelated. A workflow that shipped the default here would look identical until the day a "
@@ -986,7 +987,7 @@ async def test_giving_up_puts_the_target_back_and_leaves_the_chunks_own_branch_a
     """The other half of the decision: what a person who gives up gets, and what they keep.
 
     Two chunks over one file, `parser` landing and `api` colliding, and the script is **retry then
-    give up** - the two gestures §3.4's loop is written for. What the run leaves behind is the whole
+    give up** - the two gestures the loop is written for. What the run leaves behind is the whole
     of the policy `views.conflict`'s `ABORT` label promises and `split`'s own docstring argues:
 
     * the target is back where the landing found it - `parser`'s landing and not the run's base, so
@@ -1002,10 +1003,10 @@ async def test_giving_up_puts_the_target_back_and_leaves_the_chunks_own_branch_a
 
     **The `while` is what this test can fail on.** Two gestures are scripted and `remaining` is
     asserted empty: a retry that fixed nothing comes back conflicted and the screen goes up a second
-    time, so under the `if` §3.4 names as a bug the second gesture is never spent - and that run
+    time, so under the `if` spelling that is a bug the second gesture is never spent - and that run
     also falls out of the branch still holding the lease and the target's step lock, which is what
     the `if` costs in a run with anything else left to land. Without this assertion the two
-    spellings are indistinguishable and 18.2's `continue` is unproven.
+    spellings are indistinguishable and the `continue` is unproven.
     """
     seen = _Dispatches()
     gate = _Held()
@@ -1018,9 +1019,9 @@ async def test_giving_up_puts_the_target_back_and_leaves_the_chunks_own_branch_a
     await _ended(
         _started(harness, len(plan)),
         seen,
-        "the run never finished. A conflict screen with no gesture left waits forever - §3.7 has "
-        "no timeouts anywhere - so a run that hangs here put up more screens than the two this "
-        "script answers, or is holding a lease nobody is going to release.",
+        "the run never finished. A conflict screen with no gesture left waits forever - the "
+        "terminal has no timeouts anywhere - so a run that hangs here put up more screens than "
+        "the two this script answers, or is holding a lease nobody is going to release.",
     )
 
     assert term.remaining == (), (
@@ -1064,7 +1065,7 @@ async def test_giving_up_puts_the_target_back_and_leaves_the_chunks_own_branch_a
 
 @pytest.mark.asyncio
 async def test_a_red_gate_leaves_the_branch_unmerged_and_the_target_clean(tmp_path: Path) -> None:
-    """§3.4's one build, answered no, twice - and the honest limit of what that answer means.
+    """The one build, answered no, twice - and the honest limit of what that answer means.
 
     **A red gate does not say this child broke anything, because the gate has no baseline.** It says
     the *combined* tree is broken, and the framework reverts the landing either way. The two chunks
@@ -1074,8 +1075,9 @@ async def test_a_red_gate_leaves_the_branch_unmerged_and_the_target_clean(tmp_pa
     would say so. That is the difference between "your work was wrong" and "your work was thrown
     away", and `prompts/implement.md` tells an implementer as much because nothing else will.
 
-    What is asserted is the revert, which is §3.4's `Workspace.restore(before)` - `reset --hard`
-    **and** `clean -fd` - in the two halves that fail separately:
+    What is asserted is the revert - `Workspace.restore(before)`, which is `reset --hard` **and**
+    `clean -fd`, and which `ARCHITECTURE.md`'s "Invariants where a mistake is silent" names as what
+    discards a hand-resolved conflict - in the two halves that fail separately:
 
     * **the branch is left unmerged.** The run's branch is exactly where it was cut, so neither
       child's line of work is in it. A revert that moved the tree back and left the branch where the
@@ -1113,9 +1115,10 @@ async def test_a_red_gate_leaves_the_branch_unmerged_and_the_target_clean(tmp_pa
     )
     record = await _record(harness)
     assert harness.fakes.repository.tip(_text(record, "branch")) == _text(record, "base_sha"), (
-        "the run's branch moved over landings the gate rejected. §3.4 runs the build gate and "
-        "reverts on failure, and the criterion is that a failing gate leaves the branch unmerged - "
-        "a branch that still holds the rejected work is one the next landing builds on top of"
+        "the run's branch moved over landings the gate rejected. The framework runs the build "
+        "gate and reverts on failure, and the criterion is that a failing gate leaves the branch "
+        "unmerged - a branch that still holds the rejected work is one the next landing builds "
+        "on top of"
     )
     assert _files(_target(seen)) == SEED, (
         f"the target's checkout holds {sorted(_files(_target(seen)))} after two rejected landings, "

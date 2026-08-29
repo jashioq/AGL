@@ -1,9 +1,10 @@
 """`GitRunner` against real git, in real repositories, because that is the only thing it claims.
 
 There is no contract suite here and there is not meant to be: the suites in `tests/contracts/` test
-ports, and `_runner.py` is not one - it is private plumbing behind three of them (§3.4), reached
-only from inside `agl/adapters/git/`. What it promises is instead a set of claims about one
-program, and every test below provokes the real program into making them true or false.
+ports, and `_runner.py` is not one - it is private plumbing behind three of them, `Workspace`,
+`Integrator` and `History`, reached only from inside `agl/adapters/git/`. What it promises is
+instead a set of claims about one program, and every test below provokes the real program into
+making them true or false.
 
 **Nothing here mocks a subprocess.** A fabricated exit status would assert that this file and
 `_runner.py` remember the same numbers, which is a fact about two files rather than about git: the
@@ -200,7 +201,8 @@ async def test_a_conflict_git_states_is_the_refusal_a_worktree_provider_will_dec
 ) -> None:
     """`ConflictError` provoked by git actually refusing to overwrite something that exists.
 
-    The shape 5.2 meets: a line of work under a name already taken. `errors.py` calls this "the
+    The shape a workspace provider meets: a line of work under a name already taken.
+    `errors.py` calls this "the
     world already holds something this operation would have to take or overwrite", and nothing has
     been changed when it is raised, which is what the assertion after it checks.
     """
@@ -308,9 +310,9 @@ async def test_the_timeout_can_be_named_per_call_as_well_as_per_runner(
 ) -> None:
     """A checkout is not a `rev-parse`, and the call that knows that says so.
 
-    The runner's own default is a backstop sized for a `worktree add` on a large repository
-    (§3.9), which makes it useless as a guard on anything small. So a call site that knows its
-    operation's shape passes its own, and this is the parameter 5.2 will reach for first.
+    The runner's own default is a backstop sized for a `worktree add` on a large repository, which
+    makes it useless as a guard on anything small. So a call site that knows its operation's shape
+    passes its own.
     """
     with pytest.raises(UpstreamUnavailable):
         await runner.run(*SLOW, refusal=ConflictError, timeout=0.2)
@@ -319,7 +321,8 @@ async def test_the_timeout_can_be_named_per_call_as_well_as_per_runner(
 async def test_a_cancelled_call_raises_cancellation_and_not_an_agl_error(
     runner: GitRunner, repository: Path
 ) -> None:
-    """§3.9 runs several children at once, so a `TaskGroup` unwinding is an ordinary afternoon.
+    """A workflow runs several children at once, so a `TaskGroup` unwinding is an ordinary
+    afternoon.
 
     One claim, and it is the one that matters: `CancelledError` passes through untouched. A runner
     that caught it into an `UpstreamUnavailable` would make a cancelled task look like a failed
@@ -343,8 +346,9 @@ async def test_a_cancelled_call_raises_cancellation_and_not_an_agl_error(
 async def test_a_command_runs_where_the_caller_said_and_not_where_the_runner_lives(
     runner: GitRunner, repository: Path
 ) -> None:
-    """`cwd=` is how 5.2 commits inside one worktree rather than in the repository it was built
-    with, so a runner that quietly ignored it would record every step's work in the wrong tree.
+    """`cwd=` is how `Workspace.commit_all` commits inside one worktree rather than in the
+    repository the runner was built with, so a runner that quietly ignored it would record every
+    step's work in the wrong tree.
 
     Asserted with `rev-parse --show-prefix`, whose whole output is where git thinks it is.
     """
@@ -386,7 +390,8 @@ async def test_an_argument_that_would_be_dangerous_in_a_shell_arrives_literally_
     would have mangled the argument into something naming no file - and none of the three marks
     those commands would leave exists afterwards, which is the *harmless* half.
 
-    §3.3's `[A-Za-z0-9._-]` allowlist would refuse this name as a namespace, and that is the point
+    The `[A-Za-z0-9._-]` allowlist in `src/agl/ports/ids.py` would refuse this name as a namespace,
+    and that is the point
     of asserting it here: the charset is defence in depth and this is the guarantee underneath it,
     so it has to hold for a value the charset would never have let through.
     """

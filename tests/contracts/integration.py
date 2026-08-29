@@ -16,13 +16,14 @@ Subclass it once per implementation, override the three fixtures, and add nothin
             return "..."
 
 The real adapter and the fake both run this class, which is the whole mechanism keeping a fake from
-drifting into fiction (§1.9). It is written here, at stage 3, before either exists, because a
-subagent that writes its own tests writes tests that pass - and stage 5 ends with "the contract
-suite passes", a sentence worth something only when the suite had no stake in the implementation.
+drifting into fiction. It is written against the port alone, before either implementation exists,
+because a subagent that writes its own tests writes tests that pass - and an adapter ships only
+once "the contract suite passes", a sentence worth something only when the suite had no stake in
+the implementation.
 
 `IntegratorContract` is one class assembled from two modules, and only this name is public. Its own
 tests are `land` - the two shapes of a landing that worked, the conflict that is an answer rather
-than an exception, and the cross-port property §3.4 needs when a gate says no.
+than an exception, and the cross-port property the framework needs when a gate says no.
 `_integration_protocol` is the hold a conflict leaves and the two verbs that end it, which the port
 itself sets apart as "a protocol they share". `_integration_targets` under both builds the merge
 train every test is made of, out of `_workspace_files`' names.
@@ -43,12 +44,13 @@ built before asking about it, so a failure says which side of that line it came 
 
 ## Written against the port, never against one tool
 
-§1.3's charge was a single port speaking git's merge state machine, and §3.4's answer is that the
-state machine stays inside `adapters/git/integrator.py`. **So there is no porcelain anywhere in
-this suite.** Nothing here runs a command, reads a status line, parses a marker out of a file,
-knows what a half-resolved path looks like, or asks whether something is in progress. A commit id
-is an opaque string that came out of `head()`; a conflict is a value with a sentence in it; a hold
-is a thing that can be retried or released and has no other observable properties at all.
+The charge this port answers was a single port speaking git's merge state machine; the answer is
+that the state machine stays inside `adapters/git/integrator.py`. **So there is no porcelain
+anywhere in this suite.** Nothing here runs a command, reads a status line, parses a marker out of
+a file, knows what a half-resolved path looks like, or asks whether something is in progress. A
+commit id is an opaque string that came out of `head()`; a conflict is a value with a sentence in
+it; a hold is a thing that can be retried or released and has no other observable properties at
+all.
 
 The implementation held against every test is the one the port names: an integrator that lands by
 opening a change request against the target and never touches a local checkout. It reads `branch`
@@ -56,11 +58,12 @@ on both sides and never `path`, and nothing below asks it for anything else.
 
 ## Where the revert-on-gate-failure test lives, and why there is no `Verifier` fixture
 
-§3.4 has the framework undo a landing whose build gate then failed, and that is the property this
-suite would be most missed for. It is **not** a fourth method on this port: §3.11 records that
-`Integrator.revert()` was deliberately not built, because undoing a landing that *succeeded* is
-`Workspace.restore(head)` - the same primitive §3.3 and §3.6 already use before re-running a step
-and on the way out of a read-only one. This is the third moment, not a third operation.
+The framework undoes a landing whose build gate then failed, and that is the property this suite
+would be most missed for. It is **not** a fourth method on this port: `ARCHITECTURE.md`'s
+"Deliberately not built" records `Integrator.revert()` as one of the things there is no reason to
+have, because undoing a landing that *succeeded* is `Workspace.restore(head)` - the same primitive
+the framework already uses before re-running a step and on the way out of a read-only one. This is
+the third moment, not a third operation.
 
 So the test asserts the outcome and not which primitive got there: land, put the target back at the
 head it was read at, and assert the target is indistinguishable from before. It sits in this class
@@ -70,11 +73,10 @@ should find it here, in the same place the port's own docstring sends them.
 
 **A `Verifier` is not among the fixtures, and that is a decision rather than an omission.** The gate
 contributes exactly one `bool` to this sequence and no observable state: whether the framework takes
-the undo branch is `sdk/_engine/integration.py`'s to decide and stage 14's to test, and the property
-here is true of every path that reaches it. Requiring one would also make the integrator half of
-this suite unrunnable at the stage it is written for - stage 5 ships the git adapters and stage 6
-ships the first `Verifier`, and the build stages split this deliverable's acceptance across exactly
-that line.
+the undo branch is `sdk/_engine/integration.py`'s to decide and
+`tests/sdk/test_integrate_acceptance.py`'s to test, and the property here is true of every path
+that reaches it. Requiring one would also make the integrator half of this suite unrunnable until a
+`Verifier` existed, and the git adapters were written before one did.
 
 ## What this suite does NOT prove
 
@@ -85,8 +87,8 @@ not entitle anybody to believe.
    `land`, and only the conflicted case is exercised here. A retry that succeeds needs the
    collision resolved in the held target between the two calls, and resolving one means putting
    that target into a state this suite would have to know the shape of - which is the one piece of
-   knowledge §3.4 removed from this port on purpose. So the landed branch of `retry` is exercised
-   by nothing here, and an implementation whose `retry` can only ever conflict passes.
+   knowledge the split removed from this port on purpose. So the landed branch of `retry` is
+   exercised by nothing here, and an implementation whose `retry` can only ever conflict passes.
 
 2. **What a held target looks like.** Nothing inspects one: no marker, no half-resolved path, no
    in-progress predicate, no ref. The hold is observed only as `retry` not raising and, once
@@ -108,9 +110,9 @@ not entitle anybody to believe.
    afterwards, so nothing here asserts one - including the case where an implementation records
    something on the source's line of work as part of landing.
 
-7. **Anything about the lease, or about two runs.** §3.4 gives the framework a lease per
-   integration target and `sdk/_engine/integration.py` owns it; the port deliberately does not
-   model it. This suite drives one integrator in one process and cannot start a second.
+7. **Anything about the lease, or about two runs.** The framework holds a lease per integration
+   target and `sdk/_engine/integration.py` owns it; the port deliberately does not model it. This
+   suite drives one integrator in one process and cannot start a second.
 
 8. **That a landing is atomic, or what a crash mid-landing leaves behind.** Nothing here can kill a
    process. What is asserted is that an `abort` after a conflict puts the target back, which is the
@@ -129,7 +131,7 @@ not entitle anybody to believe.
 **That a successful landing leaves the target's own checkout holding the combined work, at the head
 the outcome names.** The port says `land` puts what the source holds into the target and reports
 "the target's state after the work landed", and does not spell out that the target `Workspace` is
-then at that state. Two things in §3.4 force the reading: the build gate runs in the target's
+then at that state. Two things force the reading: the build gate runs in the target's
 workspace, so a target whose tree does not hold the combination would have the gate deciding about
 a tree the outcome does not name; and the undo is `Workspace.restore(head)` on that same workspace,
 which can only put back something that moved. An implementation whose far side lands elsewhere owes
@@ -253,8 +255,8 @@ class IntegratorContract(IntegrationProtocolContract):
         off them is its own business, and nothing here asks.
 
         Three assertions, and the second is the one an implementation can pass weakly without.
-        The outcome says it landed; **the target's own tree holds the work**, because §3.4 runs the
-        build gate in that tree and a gate testing a tree the outcome does not name is a gate
+        The outcome says it landed; **the target's own tree holds the work**, because the build
+        gate runs in that tree and a gate testing a tree the outcome does not name is a gate
         deciding about nothing; and the head the outcome reports is the head the target is now at,
         which is the same claim from the other side. This module's docstring argues that reading
         where the port is silent about it.
@@ -297,7 +299,7 @@ class IntegratorContract(IntegrationProtocolContract):
     ) -> None:
         """A landing that changed nothing is still a landing, and the port says so by hand.
 
-        This is the ordinary shape of a replayed run (§3.6): a resume walks the same workflow
+        This is the ordinary shape of a replayed run: a resume walks the same workflow
         again, reaches the same integration, and the child's work is already in. It is also what a
         step that produced nothing looks like from here. Neither is a failure, neither is a
         conflict, and neither is a third case - `head` names where the target is now, which is the
@@ -391,12 +393,13 @@ class IntegratorContract(IntegrationProtocolContract):
     async def test_a_landing_undone_after_a_gate_failed_leaves_the_target_as_if_it_never_happened(
         self, integrator: Integrator, provider: WorkspaceProvider, base: str
     ) -> None:
-        """§3.4's undo, asserted as the outcome it has to reach rather than as the call that
+        """The undo, asserted as the outcome it has to reach rather than as the call that
         reaches it.
 
         The framework reads the target's head before it calls `land`, runs the build gate on what
         landed, and on failure hands that same value back to `Workspace.restore`. There is no
-        `Integrator.revert()` and §3.11 says why: undoing a landing that succeeded leaves no
+        `Integrator.revert()`, and `ARCHITECTURE.md`'s "Deliberately not built" says why:
+        undoing a landing that succeeded leaves no
         pending state to consult, so it is not this port's knowledge that is needed - the target
         simply has to be put back where it was, which `Workspace.restore` already does at two other
         moments. This module's docstring argues why the test for that lives here and why no

@@ -11,7 +11,7 @@ the function *and its arguments* and invokes it again every frame, so a suite wh
 their own data would exercise the registration and never the arguments - and two tests here turn on
 an argument being mutated long after `show` was called.
 
-**The interactive view offers both kinds of response**, as §3.7's own approval screen does. `Choice`
+**The interactive view offers both kinds of response**, as a real approval screen does. `Choice`
 carries the value that picking it produces and `TextInput` carries the function that turns what was
 typed into one, and those are two routes to a single `T`. A terminal that handles one and not the
 other is a terminal half the framework's screens cannot use.
@@ -21,10 +21,10 @@ what makes two independently built frames of one interactive view compare equal,
 depends on it out loud: "two `show` calls are two registrations" is only worth asserting because two
 identical calls produce screens nothing can tell apart.
 
-`5` and `10` are §3.7's own numbers - an agent question and a merge conflict - and they are here as
-two integers that differ, never as a vocabulary. The port refuses named levels because `MEDIUM` and
-`HIGH` would encode one workflow's concepts; this suite refuses them for the same reason and would
-pass just as well on `1` and `2`.
+`5` and `10` are the framework's own two priorities - an agent question and a merge conflict - and
+they are here as two integers that differ, never as a vocabulary. The port refuses named levels
+because `MEDIUM` and `HIGH` would encode one workflow's concepts; this suite refuses them for the
+same reason and would pass just as well on `1` and `2`.
 """
 
 from collections.abc import Mapping, Sequence
@@ -36,7 +36,7 @@ from agl.ports.terminal import Choice, Row, Rows, Screen, Text, TextInput
 
 @dataclass(frozen=True, slots=True)
 class Approval:
-    """§3.7's own answer type, in shape: what responding to one of these screens produces.
+    """An approval, in shape: what responding to one of these screens produces.
 
     Frozen, so two of them built from the same parts compare equal and a test can say *which*
     answer came back rather than only that something did. `label` is the question it came from -
@@ -77,19 +77,19 @@ URGENT: Final = "the conflict holding the merge queue"
 RUNNING: Final = "two children running"
 LANDED: Final = "one child landed, one still running"
 
-# §3.7's board, and the activity lines its own example shows.
+# A ticket board, and the activity lines a real one shows.
 TICKET: Final = "T-01"
 OTHER: Final = "T-02"
 READING: Final = "Read: connectors/api/backend.ts"
 EDITING: Final = "Edit: domain/usecase.kt"
 
-# §3.7's two priorities: an agent question and a merge conflict.
+# The framework's two priorities: an agent question and a merge conflict.
 AGENT: Final = 5
 CONFLICT: Final = 10
 
 
 def dashboard(line: str) -> Screen:
-    """A passive screen with one line on it, annotated the way §3.7 annotates a dashboard.
+    """A passive screen with one line on it, annotated the way a dashboard is.
 
     `Screen` and not `Screen[None]`: PEP 696's default is what makes the bare spelling mean "returns
     nothing", and a suite that wrote the parameter out would be exercising a spelling no workflow
@@ -100,14 +100,14 @@ def dashboard(line: str) -> Screen:
 
 
 def board(rows: Mapping[str, str]) -> Screen:
-    """§3.7's own board, over a mapping the caller keeps a reference to.
+    """A ticket board, over a mapping the caller keeps a reference to.
 
     This exists for one test: `show` registers the function and its arguments, so mutating the
     mapping afterwards reaches the screen with no second `show` and no notification of any kind.
     `dashboard` could not show that - a `str` argument cannot be mutated - and a view that took a
     mapping and did not read it every time would not either.
 
-    Rows in the mapping's own order, because sorting is the view's business and §3.7's purity rule
+    Rows in the mapping's own order, because sorting is the view's business and the purity rule
     is about how much of it there is. An empty activity is an ordinary cell: `Text`'s docstring says
     a blank one is the honest thing to show for a ticket with no run behind it yet.
     """
@@ -115,12 +115,12 @@ def board(rows: Mapping[str, str]) -> Screen:
 
 
 def question(label: str) -> Screen[Approval]:
-    """§3.7's approval screen: a body to read, a choice to pick, and a field to type into.
+    """An approval screen: a body to read, a choice to pick, and a field to type into.
 
-    Both response kinds on one screen, because that is what §3.7's example does and because they
-    are the two ways a `T` is produced. The `maps` lambda closes over `label`, so the answer names
-    the question it came from however it was given - which is how a test tells an answer that
-    reached the right `show` call from one that reached any other.
+    Both response kinds on one screen, because that is what a real one does and because they are
+    the two ways a `T` is produced. The `maps` lambda closes over `label`, so the answer names the
+    question it came from however it was given - which is how a test tells an answer that reached
+    the right `show` call from one that reached any other.
 
     A fresh lambda is built here on every invocation, and `TextInput.maps` is excluded from
     comparison, so two invocations with the same `label` compare equal. That is not incidental: it

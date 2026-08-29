@@ -10,7 +10,7 @@ thread that a person's keystrokes go through.
 
 **Why it is here rather than in the file that first needed it.** It was written for
 `tests/adapters/test_rich_terminal.py` and promoted unchanged when a second caller arrived:
-§3.7's mid-run question path ends at `run.terminal.show`, and a test of that path has to answer an
+the mid-run question path ends at `run.terminal.show`, and a test of that path has to answer an
 interactive screen, which needs somebody at a keyboard. The alternative was a second terminal
 implementation living in a test - which `adapters/rich_terminal/headless.py` argues against at
 length, because a hand-rolled queueing terminal would be under no contract suite and so free to
@@ -44,10 +44,10 @@ __all__ = ["DEADLINE", "TICK", "Typing"]
 DEADLINE: Final = 10.0
 """How long anything here waits before calling it a hang.
 
-§3.7 has no timeouts anywhere - "an unanswered question blocks its step indefinitely" - so a test
-that drives a question and gets it wrong hangs by design. This is what turns that into a failure
-with a message on it, and it is deliberately enormous against the microseconds the wait really
-takes."""
+The question path has no timeouts anywhere - an unanswered question blocks its step indefinitely -
+so a test that drives a question and gets it wrong hangs by design. This is what turns that into a
+failure with a message on it, and it is deliberately enormous against the microseconds the wait
+really takes."""
 
 TICK: Final = 0.005
 """How often a wait looks again. Small against a redraw loop, large enough not to spin the loop

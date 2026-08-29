@@ -7,7 +7,7 @@ would let that change through. **Every refused field type is pinned by its messa
 field, since the reader of an `InputError` is a workflow author looking for the line they wrote -
 `tests/sdk/test_params.py` pins the same module's other refusals the same way. **A malformed
 payload does not raise**, which is asserted by there being no `pytest.raises` around any of it:
-§3.3 rejects one back to the agent inside the same conversation, and a suite that accepted an
+the tool rejects one back to the agent inside the same conversation, and a suite that accepted an
 exception would pass against exactly the design this module exists to implement. And **the round
 trip is measured through `json.dumps`**, not asserted about, because "survives JSON unchanged" is
 the rule the supported field list is derived from.
@@ -15,12 +15,12 @@ the rule the supported field list is derived from.
 The fingerprint half is measured against `journal.base_of` rather than restated:
 `tests/sdk/test_journal.py` already pins that a hand-built `Tool`'s handler is not a term, and what
 is new here is that a tool *derived* from a declaration behaves the same way - and that its
-description is a term, which is §3.6's own example of a change that must re-run a step.
+description is a term, which is the standing example of a change that must re-run a step.
 
 **One test in that half carries a claim the others do not.**
 `test_editing_a_fields_description_changes_the_steps_base` is what makes a `describe()` on a payload
-field worth having: §3.6 rule 6's one open hole is that a `__post_init__` is invisible to a derived
-schema, and a rule interpolated into a field's description is not, because a description is schema
+field worth having: `test_journal.py`'s rule 6 has one open hole, a `__post_init__` being invisible
+to a derived schema, and a rule interpolated into a field's description is not, because it is schema
 and schema is fingerprint. Everything else about `describe()` is convenience; that one is the hole
 being closed, so it is measured against `base_of` and against two payloads built under one name.
 """
@@ -55,7 +55,7 @@ class Finding:
 
 @dataclass(frozen=True)
 class Findings:
-    """§3.3's `findings = await run.step(reviewer())` / `findings.high()`, as a payload:
+    """The `findings = await run.step(reviewer())` / `findings.high()` shape, as a payload:
     one field of every supported kind, and the method the workflow calls on what comes back."""
 
     summary: str
@@ -95,7 +95,7 @@ def _tool[P](
     declared: ReportingTool[P],
     handler: Callable[[Mapping[str, JsonValue]], Awaitable[ToolResult]] = _HANDLER,
 ) -> Tool:
-    """A declaration converted the way 12.1's `Run.step` will convert one: the three declared terms,
+    """A declaration converted the way `Run.step` converts one: the three declared terms,
     plus a handler bound at dispatch. This is the only place in the suite that builds a `Tool`."""
     return Tool(
         name=declared.name,
@@ -123,7 +123,7 @@ def _base(tool: Tool) -> str:
 def test_the_derived_schema_is_the_object_a_vendor_is_handed() -> None:
     """The stored format, in full. Nested objects, an optional as `anyOf`, arrays with their item
     schema, `required` holding exactly the fields with no default, `additionalProperties`, and the
-    `title` §3.6 rule 6 puts on every payload type at every depth.
+    `title` the qualified-type-name rule puts on every payload type at every depth.
 
     `__name__` rather than the literal `"test_tools"`, for `test_run_step.py`'s reason: that string
     is pytest's import mode talking and not this file's claim. What *is* this file's claim is the
@@ -167,8 +167,8 @@ def test_the_schema_carries_the_two_keys_both_adapters_look_for() -> None:
 
 def test_the_schema_is_wrapped_the_way_a_tools_is() -> None:
     """`Tool.__post_init__`'s proxy, one layer earlier: a caller that kept a reference cannot edit a
-    schema already inside a fingerprint. `json.dumps` refusing it is §3.6 rule 4's whole hazard, and
-    `base_of` handling it anyway is the rule being kept."""
+    schema already inside a fingerprint. `json.dumps` refusing it is the whole hazard behind
+    `test_journal.py`'s rule 4, and `base_of` handling it anyway is the rule being kept."""
     assert isinstance(REPORT.payload_schema, MappingProxyType)
     with pytest.raises(TypeError):
         json.dumps(REPORT.payload_schema)
@@ -185,7 +185,7 @@ def test_reordering_two_fields_costs_no_agent_run() -> None:
     sorting of its own: it is a JSON object and canonical JSON sorts an object's keys.
 
     **The two payloads are built through `make_dataclass` under one name**, and that is the whole
-    arrangement rather than an affectation: since 13.0 a payload type contributes its qualified name
+    arrangement rather than an affectation: a payload type contributes its qualified name
     to the schema, so two `class` statements spelled `OneWay` and `TheOther` would differ in their
     `title` before a single field was reordered, and this test would pass while measuring nothing.
     `make_dataclass("Payload", ...)` names both the same and leaves the field order as the only
@@ -219,10 +219,10 @@ def test_a_payload_with_no_fields_is_a_declaration_and_not_a_refusal() -> None:
 
 # --- a field that says what it is: `describe()` ---------------------------------------------------
 #
-# The gap stage 17 reported and 19.2 closed. `sdk/tools.py` refuses an enum field and advises "a
-# `str` field whose description names them"; until this existed there was nowhere in a derived
-# schema to write one, so a payload's vocabulary lived in the tool's description and the prompt and
-# was enforced a third time in a `__post_init__` - which §3.6 rule 6 says the digest cannot see.
+# A gap found and closed late. `sdk/tools.py` refuses an enum field and advises "a `str` field
+# whose description names them"; until this existed there was nowhere in a derived schema to write
+# one, so a payload's vocabulary lived in the tool's description and the prompt and was enforced a
+# third time in a `__post_init__` - which `test_journal.py`'s rule 6 says the digest cannot see.
 
 
 # A fixed vocabulary, which is the case `sdk/tools.py` refuses an enum in favour of and the one
@@ -427,7 +427,7 @@ def test_a_payload_that_is_not_a_dataclass_is_refused() -> None:
 def test_a_payload_instance_where_the_class_belonged_is_refused() -> None:
     """`read` builds an instance of `payload`, so an instance is one the tool cannot build and
     whose fields already hold what the agent was going to be asked for. `sdk/workflow.py` refused
-    this in the same words about a params class until UF2.2 read that class off an annotation,
+    this in the same words about a params class until that class was read off an annotation,
     where a type is all it can be - a payload is an argument, so this is the layer it survives."""
     with pytest.raises(InputError) as refusal:
         reporting_tool("report", "report it", Findings(summary="", findings=[]))  # type: ignore[arg-type]
@@ -483,7 +483,7 @@ def test_a_json_array_comes_back_as_the_sequence_its_field_declared() -> None:
 
 
 def test_no_payload_this_module_accepts_is_one_the_journal_would_refuse() -> None:
-    """A payload instance travels on into the next step's `**inputs` - §3.3's own example passes
+    """A payload instance travels on into the next step's `**inputs` - the tickets example passes
     `findings=highs` - where `journal._canonical` fingerprints it and refuses what it cannot walk.
     The supported field list is drawn inside that walker's set, and this is the measurement."""
     assert canonical_json({"findings": REPORT.read(_ONE_HIGH)})
@@ -564,7 +564,7 @@ def test_null_for_an_optional_field_is_accepted() -> None:
 
 def test_every_problem_in_one_payload_is_reported_at_once() -> None:
     """A model told about one fault per turn pays a turn per fault, and there is a live session
-    holding the reasoning that produced the call - which is the whole of §3.3's argument."""
+    holding the reasoning that produced the call - which is the whole of the argument."""
     refusal = REPORT.rejection(
         {"summary": 3, "notes": "extra", "findings": [{"severity": 1}], "blocking": "yes"}
     )
@@ -595,7 +595,7 @@ def test_a_payload_dataclass_that_refuses_its_own_value_rejects_rather_than_rais
 
 def test_a_recorded_value_that_no_longer_fits_the_payload_is_an_internal_error() -> None:
     """AGL wrote the value and AGL is reading it, so a disagreement is ours - `journal.py`'s test
-    for whose fault an error is. §3.6 expects the fingerprint to have discarded this entry; the
+    for whose fault an error is. The fingerprint is expected to have discarded this entry; the
     module docstring records the two ways it may not have."""
     with pytest.raises(InternalError) as fault:
         REPORT.read({"summary": "x"})
@@ -608,28 +608,29 @@ def test_a_recorded_value_that_is_not_an_object_at_all_is_an_internal_error() ->
         REPORT.read(None)
 
 
-# --- the fingerprint consequences §3.6 names ------------------------------------------------------
+# --- the fingerprint consequences -----------------------------------------------------------------
 
 
 def test_editing_a_derived_tools_description_changes_the_steps_base() -> None:
-    """§3.6's own reason for putting the role in the fingerprint: halt, edit, resume, and you must
-    not replay what the old wording produced. Measured against `base_of`, not restated."""
+    """Why the role is in the fingerprint: halt, edit, resume, and you must not replay what the old
+    wording produced. Measured against `base_of`, not restated."""
     reworded = reporting_tool(REPORT.name, "report every problem you found", Findings)
     assert _base(_tool(REPORT)) != _base(_tool(reworded))
 
 
 def test_editing_a_fields_description_changes_the_steps_base() -> None:
-    """**The whole point of `describe()`, and the measurement stage 17's finding asked for.**
+    """**The whole point of `describe()`, and the measurement the gap above asked for.**
 
-    §3.6 rule 6's one open hole is that a `__post_init__` is invisible to a derived schema, so a
-    payload whose vocabulary is enforced in code and named nowhere else changes what converts while
-    moving no digest - and an entry recorded under the old vocabulary stops converting with its
-    fingerprint still matching, which surfaces as `InternalError` out of `read` on a resume.
+    The one open hole in `test_journal.py`'s rule 6 is that a `__post_init__` is invisible to a
+    derived schema, so a payload whose vocabulary is enforced in code and named nowhere else
+    changes what converts while moving no digest - and an entry recorded under the old vocabulary
+    stops converting with its fingerprint still matching, which surfaces as `InternalError` out of
+    `read` on a resume.
     `fix/findings.py` wrote that down as the accepted price of checking `SEVERITIES`.
 
     A field description is data, and data is in the schema, and the schema is in `base_of`. So a
     payload that interpolates its vocabulary into `describe()` moves the digest when the vocabulary
-    moves, the stale entry is never read, and §3.6's "a stale entry is discarded rather than failing
+    moves, the stale entry is never read, and "a stale entry is discarded rather than failing
     to parse" is true of it. This is that sentence measured rather than asserted: the two payloads
     below differ in one field's description and in nothing else at all.
 
@@ -641,7 +642,7 @@ def test_editing_a_fields_description_changes_the_steps_base() -> None:
     `test_reordering_two_fields_costs_no_agent_run`'s arrangement and is load-bearing here for the
     mirror-image reason. A payload type contributes its qualified name to the schema as `title`, so
     two `class` statements would already differ before a word of the description changed, and this
-    test would be green while measuring the thing 13.0 closed instead of the thing 19.2 opened.
+    test would be green while measuring rule 6 instead of the thing `describe()` opened.
     """
     one = make_dataclass(
         "Payload", [("severity", str, describe(f"one of {', '.join(_VOCABULARY)}"))], frozen=True
@@ -664,7 +665,7 @@ def test_editing_a_fields_description_changes_the_steps_base() -> None:
 
 def test_a_derived_tools_handler_is_not_a_term_in_the_base() -> None:
     """`tests/sdk/test_journal.py` pins this for a hand-built `Tool`; what is new is that a tool
-    12.1 derives from a declaration behaves identically. It has to: the handler is bound per
+    `Run.step` derives from a declaration behaves identically. It has to: the handler is bound per
     invocation, closing over that one call's capture cell, so a base holding one would differ from
     itself on the next call."""
 
@@ -675,7 +676,7 @@ def test_a_derived_tools_handler_is_not_a_term_in_the_base() -> None:
 
 
 def test_editing_the_payload_dataclass_changes_the_steps_base() -> None:
-    """The cascade §3.6 promises: change what the agent is asked to report, and the step re-runs."""
+    """The cascade: change what the agent is asked to report, and the step re-runs."""
 
     @dataclass(frozen=True)
     class Wider:
@@ -691,12 +692,12 @@ def test_editing_the_payload_dataclass_changes_the_steps_base() -> None:
 
 
 def test_two_payload_types_of_one_shape_are_two_schemas_and_two_fingerprints() -> None:
-    """§3.6 rule 6's second half, and the leak 12.3 reported and 13.0 closed.
+    """The second half of `test_journal.py`'s rule 6, and a leak found and closed during the build.
 
     Structurally identical payload types used to derive a byte-identical schema, so swapping
     `Findings` for a `Review` of the same shape left the fingerprint where it was and the old entry
     replayed **into the new type**: the expensive direction, a false cache hit rather than a re-run,
-    with nothing failing to parse and the run carrying on with the wrong thing. §3.6's "a stale
+    with nothing failing to parse and the run carrying on with the wrong thing. "A stale
     entry is discarded rather than failing to parse" is only true once the qualified name is in the
     terms, and the `title` is where it is.
 
@@ -722,8 +723,8 @@ def test_two_payload_types_of_one_shape_are_two_schemas_and_two_fingerprints() -
 
 
 def test_a_nested_payload_types_name_is_a_term_too_and_not_only_the_outermost() -> None:
-    """The depth, which is the whole of the implementation - `journal._canonical`'s rule 6 word for
-    word, one walker over an input and one over a payload.
+    """The depth, which is the whole of the implementation - `test_journal.py`'s rule 6 as
+    `journal._canonical` keeps it, word for word, one walker over an input and one over a payload.
 
     A name written once at the top of `payload_schema` would leave `Outer(inner=Inner)` and
     `Outer(inner=Other)` one fingerprint, which is the same false cache hit one level down. The two
@@ -770,18 +771,18 @@ def test_the_name_in_a_title_is_the_qualified_one_and_not_the_bare_class_name() 
     assert _base(_tool(declared)) != _base(_tool(swapped))
 
 
-# --- the type chain §3.3 promises -----------------------------------------------------------------
+# --- the type chain the SDK promises --------------------------------------------------------------
 
 
 async def _step[P](declared: ReportingTool[P], payload: Mapping[str, JsonValue]) -> P:
-    """A stand-in for 12.1's `Run.step`, carrying the declaration's type parameter through the way
+    """A stand-in for `Run.step`, carrying the declaration's type parameter through the way
     that method must. Nothing here is the journal; the point is what mypy makes of the result."""
     return declared.read(payload)
 
 
 @pytest.mark.asyncio
 async def test_the_payload_type_carries_through_to_what_the_workflow_calls() -> None:
-    """§3.3: `findings = await run.step(reviewer())` then `findings.high()`. `assert_type`
+    """`findings = await run.step(reviewer())` then `findings.high()`. `assert_type`
     is the half `mypy --strict` checks; the call below is the half pytest checks."""
     findings = await _step(REPORT, _ONE_HIGH)
     assert_type(findings, Findings)
@@ -810,7 +811,7 @@ def test_a_declaration_is_not_a_tool_and_carries_no_handler() -> None:
 
 
 def test_a_declaration_holds_the_three_terms_a_tool_contributes_to_a_fingerprint() -> None:
-    """§3.6 rule 4, and the reason a declaration without a handler is the honest shape."""
+    """`test_journal.py`'s rule 4, and why a declaration without a handler is the honest shape."""
     derived = _tool(REPORT)
     assert (derived.name, derived.description) == (REPORT.name, REPORT.description)
     assert dict(derived.payload_schema) == dict(REPORT.payload_schema)
@@ -836,7 +837,7 @@ def test_the_default_factory_case_is_optional_too() -> None:
 
 
 def test_a_sequence_of_declarations_is_ordinary_data() -> None:
-    """Tools keep their declared order and are not sorted (§3.6 rule 4), so a `Role` holding two of
-    these is holding a sequence and nothing more."""
+    """Tools keep their declared order and are not sorted (`test_journal.py`'s rule 4), so a `Role`
+    holding two of these is holding a sequence and nothing more."""
     declarations: Sequence[ReportingTool[Findings]] = (REPORT,)
     assert [declared.name for declared in declarations] == ["report_findings"]

@@ -1,12 +1,12 @@
 """What the walk promises: a step runs once, and everything after that is a lookup.
 
 The third file over `sdk/_engine/journal.py`. `test_journal.py` holds the fingerprint and
-`test_journal_entries.py` holds the file that fingerprint names; this one holds §3.6's loop, which
+`test_journal_entries.py` holds the file that fingerprint names; this one holds the loop, which
 is the only place the two meet - and the only place a wrong answer is paid for in tokens rather
 than in an exception.
 
-**Nothing here is a mock of a workspace.** The bundle is `container.fakes()` - target #8's no
-network, no git, no process - so `restore` really empties a real directory and `commit_all` really
+**Nothing here is a mock of a workspace.** The bundle is `container.fakes()` - no network, no git,
+no process - so `restore` really empties a real directory and `commit_all` really
 records a real state, and every claim below about untracked leavings is a claim about files that
 existed. Where a test needs to know what the walk *asked* the workspace to do rather than what came
 of it, `_Recorded` wraps the fake and writes the calls down; production code gained no
@@ -16,7 +16,7 @@ Five of these tests exist because their failure is silent, and each is written t
 that notices:
 
   * **`last_good` read from the physical worktree** instead of chained from recorded entries.
-    §3.6: root runs `spec` at H0, children integrate and advance the run's own line to H5, and on
+    Root runs `spec` at H0, children integrate and advance the run's own line to H5, and on
     resume `spec` recomputes against H5, misses, and re-runs - every step, every resume, forever,
     with the run still finishing and still right. Two tests come at it from opposite sides: one
     moves the head on behind the journal's back *during* a walk, the other lands three children
@@ -25,31 +25,33 @@ that notices:
     without moving HEAD, so the guard is false at exactly the moment the wipe is needed. The test
     asserts on the *call*, not on the outcome, because a read-only step's own ending restore
     removes the leavings either way and would make an outcome-only test pass against the bug.
-  * **The counter taken after a suspension.** Rule 1 makes `n` deterministic for siblings, which
-    occupy different namespaces; it does nothing for two same-name steps in *one* scope, which
-    share a `(scope, step, base)` key. Two tests again, and the reason there are two is worth
-    stating: the `asyncio.gather` test below is the one §3.6's failure is written in, and it now
-    catches the serialization too - two overlapping steps take one address and the second clobbers
-    the first - but on its own it cannot say *when* the address was taken. So it is joined by
+  * **The counter taken after a suspension.** `test_journal.py`'s rule 1 makes `n` deterministic
+    for siblings, which occupy different namespaces; it does nothing for two same-name steps in
+    *one* scope, which share a `(scope, step, base)` key. Two tests again, and the reason there
+    are two is worth stating: the `asyncio.gather` test below is the one that failure is written
+    in, and it now catches the serialization too - two overlapping steps take one address and the
+    second clobbers the first - but on its own it cannot say *when* the address was taken. So it
+    is joined by
     `test_the_counter_is_taken_before_the_walk_can_suspend`, which drives one `step` coroutine by
     hand, one send at a time, against dependencies that really do suspend, and asks directly.
-  * **Two steps in one namespace overlapping.** §3.6: "a namespace's workspace is single-threaded".
+  * **Two steps in one namespace overlapping.** "A namespace's workspace is single-threaded".
     They share one `Workspace`, so overlapped, A's pre-run restore wipes what B's worker has just
     written, B's `commit_all` records A's changes under B's message, and A's `head()` reads B's.
     The test asserts on the *sequence of calls* the walk made, because every one of those outcomes
     is a wrong answer rather than an exception and two of the three are invisible from the ledger.
-  * **A step that raised consuming a slot.** §3.6: "the counter advances when an entry is written,
+  * **A step that raised consuming a slot.** "The counter advances when an entry is written,
     not when a step is called". The retry that follows a crash **inside one run** is the only place
     the two readings differ, because a resume rebuilds the counter from nothing either way - so the
     test does its retry against the same `Fingerprints` and asserts the entry landed at `n = 0`,
     which is where the resume below it then looks.
 
 **A sixth is here for the opposite reason: its failure is the loudest thing in this design.**
-`advance` is §3.6's "`integrate()` advances the parent's `last_good`", and a chain that did not
-follow a landing means the parent's next fingerprint miss restores past every child that has landed
-and cleans the tree of it. That is not a re-run and not an exception - it is work gone, and one of
-only two places in AGL where a mistake costs that. So the test asserts on the *call*: what the walk
-after an advance asked its workspace to restore to.
+`advance` is the landing handed back to the parent's chain - one of `ARCHITECTURE.md`'s
+"Invariants where a mistake is silent" - and a chain that did not follow a landing means the
+parent's next fingerprint miss restores past every child that has landed and cleans the tree of it.
+That is not a re-run and not an exception - it is work gone, and one of only two places in AGL
+where a mistake costs that. So the test asserts on the *call*: what the walk after an advance asked
+its workspace to restore to.
 
 Named `test_journal_walk.py`: `tests/` carries no `__init__.py` - see `tests/conftest.py` for why
 it must not - so pytest's module names are the bare filenames and every one has to be unique.
@@ -98,7 +100,7 @@ RESTRICTIONS: Final = frozenset({Restriction.NO_VCS_WRITES})
 
 
 class _Crash(Exception):
-    """What an agent dying mid-step looks like from here. Any exception would do; §3.6's rule is
+    """What an agent dying mid-step looks like from here. Any exception would do; the rule is
     that the walk has no opinion about which, and lets it out untouched."""
 
 
@@ -125,7 +127,7 @@ _Opened = tuple[container.FakeServices, Workspace, str]
 async def _opened(root: Path, namespace: Namespace | None = None) -> _Opened:
     """A bundle, one checkout provisioned from `main`, and the commit it starts at.
 
-    The commit and not the ref: `Journal`'s `base` is a resolved commit id, for the reason §3.6
+    The commit and not the ref: `Journal`'s `base` is a resolved commit id, for the reason a run
     pins `base_sha` rather than storing a ref name, and `head()` is where a resolved one comes
     from.
     """
@@ -166,8 +168,8 @@ async def _step(
 ) -> JsonValue:
     """One `Journal.step`, with the role's constituents at a baseline and any of them overridable.
 
-    The role arrives spread across keywords because `Role` does not exist until 12.2; this helper
-    is the shape stage 12's `Run.step` will have, one layer up.
+    The role arrives spread across keywords because `Role` did not exist yet when this was
+    written; this helper is the shape `Run.step` has, one layer up.
     """
     return await journal.step(
         name,
@@ -188,7 +190,7 @@ def _digest(
     instructions: str = INSTRUCTIONS,
     inputs: Mapping[str, object] = INPUTS,
 ) -> str:
-    """The address `_step` writes to, computed the way §3.6 writes it rather than by asking the
+    """The address `_step` writes to, computed from the arithmetic rather than by asking the
     walk. `sha256(base + ":" + str(n))` is spelled out here for `test_journal.py`'s reason: a
     suite that imported the arithmetic would be checking the module against itself."""
     base = base_of(
@@ -223,7 +225,7 @@ class _Worker:
     """A step's worker: counts its runs, does whatever it was given to do, hands back a value.
 
     `runs` is the whole of what most tests below assert, because "the worker was not called" is
-    what a hit *is* - §3.6's replay has no other observable difference from a re-run that happens
+    what a hit *is* - replay has no other observable difference from a re-run that happens
     to produce the same answer.
     """
 
@@ -280,7 +282,7 @@ class _Recorded(Workspace):
 async def test_a_miss_runs_the_worker_writes_one_entry_and_a_second_walk_hits(
     tmp_path: Path,
 ) -> None:
-    """§3.6's loop in one test: nothing recorded means run it, and recorded means do not."""
+    """The loop in one test: nothing recorded means run it, and recorded means do not."""
     harness, workspace, base = await _opened(tmp_path)
     first = _Worker({"tickets": ["T-01"]})
 
@@ -306,10 +308,10 @@ async def test_a_miss_runs_the_worker_writes_one_entry_and_a_second_walk_hits(
 async def test_last_good_is_chained_from_entries_and_never_read_from_the_worktree(
     tmp_path: Path,
 ) -> None:
-    """The failure §3.6 calls load-bearing, staged with a landing arriving mid-walk.
+    """The load-bearing failure, staged with a landing arriving mid-walk.
 
     A child integrating moves the parent's physical head without touching the parent's chain -
-    that is precisely why 14.1 owes this module an `advance`. Until then the physical head and
+    that is precisely why this module owes an `advance`. Until it is called the physical head and
     `last_good` disagree, and a walk that asked the worktree where it was would fingerprint every
     following step against a commit no entry mentions.
     """
@@ -380,7 +382,7 @@ async def test_a_base_that_advanced_between_runs_does_not_invalidate_earlier_ste
 async def test_advance_moves_the_chain_to_a_landed_head_and_the_next_restore_keeps_it(
     tmp_path: Path,
 ) -> None:
-    """§3.6's "`integrate()` advances the parent's `last_good`", and what forgetting it destroys.
+    """The landing handed back to the parent's chain, and what forgetting it destroys.
 
     The same arrangement as the two tests above and the opposite claim, which is the pair worth
     reading together. There a landing arrives behind the journal's back and the chain must *not*
@@ -421,8 +423,8 @@ async def test_advance_moves_the_chain_to_a_landed_head_and_the_next_restore_kee
     assert chained.head == landed
     assert calls[0] == ("restore", landed), (
         f"the pre-run restore targeted {calls[0][1]!r}, a commit from before the landing: that is "
-        f"`reset --hard` and `clean -fd` over every child that had landed, which §3.6 calls one of "
-        f"the three paths in this design that destroy work rather than costing a re-run"
+        f"`reset --hard` and `clean -fd` over every child that had landed, which is one of the "
+        f"three paths in this design that destroy work rather than costing a re-run"
     )
     assert (raw.path / "src" / "landed.txt").read_bytes() == b"from T-01\n"
 
@@ -433,11 +435,11 @@ async def test_advance_writes_no_entry_and_a_second_walk_starts_from_the_ledger(
 ) -> None:
     """Nothing journals an integration, and a resume is where that shows.
 
-    There is no fingerprint over a landing and no file under `steps/` for one - §3.4's "a resumed
-    run must be able to find a hold it did not take" is the same gap named from the other side. So
-    the chain this call moves lives exactly as long as the process: a second walk opens at the base
-    it was given and replays forward out of the entries, and the entry written *before* the landing
-    still hits, because a landing changed nothing any digest was taken over.
+    There is no fingerprint over a landing and no file under `steps/` for one - "a resumed run must
+    be able to find a hold it did not take" is the same gap named from the other side. So the chain
+    this call moves lives exactly as long as the process: a second walk opens at the base it was
+    given and replays forward out of the entries, and the entry written *before* the landing still
+    hits, because a landing changed nothing any digest was taken over.
     """
     harness, workspace, base = await _opened(tmp_path)
     journal = _journal(harness, workspace, base)
@@ -483,12 +485,12 @@ async def test_the_pre_run_restore_is_unconditional_and_not_guarded_on_head(
     """A crashed read-only step's leavings, and the guard that would let them through.
 
     The crashed step wrote a file and did not commit, so HEAD is exactly where it was: a
-    `head() != last_good` guard is *false* here, which is the whole of §3.6's argument. The
+    `head() != last_good` guard is *false* here, which is the whole of the argument. The
     assertion is therefore on the call and its position, not on the outcome - the second step is
     read-only and its own ending restore removes the leavings either way, so an outcome-only test
     would pass against the bug it was written for.
 
-    **The leavings are put back by hand, and that is not the test cheating.** 12.1 gave the walk a
+    **The leavings are put back by hand, and that is not the test cheating.** The walk has a
     failure path, so the crashed step's own ending wipe takes them on the way out - which is
     asserted below, in passing. What reaches the next step is what a killed *process* leaves: a
     kill runs no `finally`, so a checkout can start a step dirty with HEAD unmoved whatever this
@@ -508,7 +510,7 @@ async def test_the_pre_run_restore_is_unconditional_and_not_guarded_on_head(
         await _step(journal, REVIEW, _Worker(does=_leaves_a_mess_and_dies))
 
     assert not (raw.path / "scratch" / "notes.md").exists(), (
-        "the step that raised left its scratch file behind: §3.3's wipe runs on success and on "
+        "the step that raised left its scratch file behind: the wipe runs on success and on "
         "failure alike, or a failed reviewer contaminates the checkout its own retry works in"
     )
     _write(raw, "scratch/notes.md", b"half a thought\n")
@@ -531,7 +533,7 @@ async def test_the_pre_run_restore_is_unconditional_and_not_guarded_on_head(
 async def test_a_read_only_step_leaves_the_worktree_at_last_good(tmp_path: Path) -> None:
     """`commit=None` is the wipe: a tracked edit reverted, an untracked file gone, HEAD unmoved.
 
-    §3.6 - "a read-only role cannot leave anything behind: not a scratch file, not a cache
+    The claim: "a read-only role cannot leave anything behind: not a scratch file, not a cache
     directory, not a partial edit" - and the entry's `head` records that nothing moved.
     """
     harness, workspace, base = await _opened(tmp_path)
@@ -587,7 +589,7 @@ async def test_an_effect_step_records_a_head_that_holds_the_workers_changes(
 async def test_changing_only_the_commit_message_does_not_invalidate_the_entry(
     tmp_path: Path,
 ) -> None:
-    """§3.6 keeps the message out of the fingerprint on purpose: "including it would mean editing
+    """The message is kept out of the fingerprint on purpose: "including it would mean editing
     the wording re-runs the agent, which is the opposite of what fingerprinting is for". The trade
     is that the replayed step keeps the commit it already made, message and all."""
     harness, workspace, base = await _opened(tmp_path)
@@ -644,7 +646,7 @@ async def test_a_crashed_step_leaves_no_entry_and_the_next_attempt_re_runs_it(
 async def test_a_step_that_raised_claims_no_slot_and_its_retry_lands_at_n_zero(
     tmp_path: Path,
 ) -> None:
-    """§3.6: "the counter advances when an entry is written, not when a step is called".
+    """The rule: "the counter advances when an entry is written, not when a step is called".
 
     The retry here is inside **one** walk, against the `Fingerprints` the crashed attempt already
     used, and that is the only arrangement in which the two readings differ: a resume rebuilds the
@@ -689,7 +691,7 @@ async def test_a_step_that_raised_claims_no_slot_and_its_retry_lands_at_n_zero(
 async def test_a_retry_loop_with_nothing_varying_counts_up_and_replays_in_order(
     tmp_path: Path,
 ) -> None:
-    """§3.6's "why the counter": same role, no commits, nothing varying, three times.
+    """Why the counter: same role, no commits, nothing varying, three times.
 
     Without `n` the three calls share one digest and the second hits the first's entry forever.
     With it they are `n = 0, 1, 2`, and a resume walking the same three calls in the same order
@@ -850,11 +852,11 @@ async def test_the_counter_is_taken_before_the_walk_can_suspend(tmp_path: Path) 
 async def test_two_same_name_steps_in_one_scope_land_at_the_same_digests_either_way(
     tmp_path: Path,
 ) -> None:
-    """Rule 1's blind spot, and what closes it.
+    """The blind spot in `test_journal.py`'s rule 1, and what closes it.
 
     Siblings are deterministic because they occupy different namespaces. Two `step("review", ...)`
     calls in *one* scope with one role and one set of inputs share a `(scope, step, base)` key, so
-    rule 1 separates nothing here at all. What separates them is that they do not overlap: §3.6
+    rule 1 separates nothing here at all. What separates them is that they do not overlap: the walk
     serializes steps within a namespace, so the second call takes its address only after the first
     has claimed its entry, and the two addresses fall out in the order the coroutines were created
     - which is the program's own order and is the same on every run.
@@ -913,14 +915,14 @@ async def _settled() -> None:
 
 @pytest.mark.asyncio
 async def test_two_gathered_steps_in_one_namespace_do_not_overlap(tmp_path: Path) -> None:
-    """§3.6: "the framework serializes steps within a namespace", asked of the calls themselves.
+    """The rule "the framework serializes steps within a namespace", asked of the calls themselves.
 
-    Two steps under one `gather` over one `Journal` share one `Workspace`, and §3.3's own example
-    gathers two reviewers over one worktree. Overlapped, A's pre-run restore wipes the files B's
-    worker has just written, B's `commit_all` records A's changes under B's message, and A's
-    `head()` after its own commit reads B's - a wrong answer, a mislabelled commit and a corrupted
-    chain, none of which raises and two of which leave no trace on the ledger at all. So the
-    assertion is on the *sequence*: restore, worker, restore, and only then the second step's.
+    Two steps under one `gather` over one `Journal` share one `Workspace`, and the standing
+    example gathers two reviewers over one worktree. Overlapped, A's pre-run restore wipes the
+    files B's worker has just written, B's `commit_all` records A's changes under B's message, and
+    A's `head()` after its own commit reads B's - a wrong answer, a mislabelled commit and a
+    corrupted chain, none of which raises and two of which leave no trace on the ledger at all. So
+    the assertion is on the *sequence*: restore, worker, restore, and only then the second step's.
 
     **The dependencies really suspend**, which is what makes this able to fail. `_FakeWorkspace`
     and `MemoryStore` return without ever yielding, so two tasks over them run to completion one
@@ -978,13 +980,13 @@ async def test_two_gathered_steps_in_one_namespace_do_not_overlap(tmp_path: Path
 async def test_concurrent_siblings_each_write_their_own_entry_and_both_replay(
     tmp_path: Path,
 ) -> None:
-    """§3.6's own example: `T-01` and `T-02` both `step(implementer)`.
+    """The concurrent example: `T-01` and `T-02` both `step(implementer)`.
 
     Same role, same inputs, same parent head - so identical bases by construction, and the only
     thing separating the two entries is the namespace in the counter's key. One `Fingerprints` is
     shared by both journals, which is what makes that key mean anything: a counter per `Journal`
-    would give each child its own ledger of counts and would look identical here while being rule
-    1's failure with rule 1's fix removed.
+    would give each child its own ledger of counts and would look identical here while being the
+    failure behind `test_journal.py`'s rule 1, with that rule's fix removed.
     """
     harness = container.fakes(TreesRoot(tmp_path / "trees"), files=dict(SEED))
     children = (Namespace("T-01"), Namespace("T-02"))

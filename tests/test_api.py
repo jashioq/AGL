@@ -1,31 +1,31 @@
-"""Stage 10's walking skeleton, driven from the library side: `api.run` on `container.fakes()`.
+"""The walking skeleton, driven from the library side: `api.run` on `container.fakes()`.
 
 Every operation addressed to a run goes through the all-fakes bundle - no network, no git, no
 process - which is measurable target #8 and the reason those three take a bundle rather than build
-one. The other two take no bundle at all, which is §3.10's per-command composition arriving as a
-signature at 11.0: `init` takes settings alone, `list_workflows` takes neither. The workflows
+one. The other two take no bundle at all, which is per-command composition arriving as a
+signature: `init` takes settings alone, `list_workflows` takes neither. The workflows
 are declared in this module and reached through hand-constructed `EntryPoint` values, exactly as
 `tests/config/test_registry.py` and `tests/sdk/test_workflow.py` do: an entry point is a name, a
-`module:attr` string and a group, so §3.3's registration line resolves without installing a package.
-`workflows/noop/` was deliberately not used - it did not exist yet when this file was written at
-10.0, and 19.1 deleted it, so the workflows here have outlived it twice over.
+`module:attr` string and a group, so a registration line resolves without installing a package.
+`workflows/noop/` was deliberately not used - it did not exist yet when this file was written, and
+it has since been deleted, so the workflows here have outlived it twice over.
 
 **The `Stop` criterion is pinned by identity, not by class.** An `assert isinstance(...)` would pass
 against an `api.run` that caught the workflow's `ReviewNotConverging`, threw it away and raised a
 fresh one of the same class - which is the version of this bug worth catching, since the exit code
 would still be 7 and the traceback would name this module instead of the step that stopped.
 
-**The record is asserted field by field against §3.6**, key set included, because `run.json` is the
+**The record is asserted field by field**, key set included, because `run.json` is the
 one value in AGL with no other copy anywhere. The `base_sha` assertions are the ones with teeth:
 full length, and not the ref name - `refs/heads/main` would satisfy every "is a string" check.
 
-**13.4 brought a real repository into this file, and only where a fake cannot answer.** The bundle's
+**A real repository is in this file, and only where a fake cannot answer.** The bundle's
 `FakeWorkspaceProvider` is a full implementation of the port - it makes real directories under the
 trees root and keeps a real registry of which line of work each one holds - so "a workflow that
 takes no step at all still leaves `_base` provisioned" is asserted on fakes, where it costs a
-millisecond and no git. What fakes cannot answer is what §3.9 actually promises: that `agl/<label>`
-is a *ref in a git repository* a person can `git log`, that the checkout sits at the pinned commit
-rather than at wherever the ref has got to since, and that a step reopening it registers no second
+millisecond and no git. What fakes cannot answer is the real promise: that `agl/<label>` is a *ref
+in a git repository* a person can `git log`, that the checkout sits at the pinned commit rather
+than at wherever the ref has got to since, and that a step reopening it registers no second
 worktree. Those two tests build a repository, put `GitWorkspaceProvider` and `GitHistory` under
 `api.run`, and ask git itself.
 """
@@ -62,7 +62,7 @@ PROJECT: Final = ProjectName("myapp")
 LABEL: Final = RunLabel("auth")
 SCOPE: Final = RunScope(PROJECT, LABEL)
 
-# §3.6's `run.json`, key for key. Written out rather than read off `RunSpec`'s fields, because the
+# `run.json`, key for key. Written out rather than read off `RunSpec`'s fields, because the
 # published shape of the file is what this asserts and a record that agreed with itself would pass.
 WIRE_KEYS: Final = frozenset(
     {"workflow", "workflow_version", "label", "base_ref", "base_sha", "branch", "params",
@@ -72,7 +72,7 @@ WIRE_KEYS: Final = frozenset(
 
 @dataclass(frozen=True)
 class ProbeParams:
-    """§3.3's example shape, which is also what `agl run probe -r "add oauth" -c 4` fills in."""
+    """The example params shape, which `agl run probe -r "add oauth" -c 4` fills in."""
 
     request: str = arg("-r", "--request", help="what to build")
     concurrent: int = arg("-c", "--concurrent", default=3)
@@ -84,7 +84,7 @@ class NoParams:
 
 
 class ReviewNotConverging(Stop):
-    """§3.1's own example of a workflow's reason to stop, spelled against the SDK's `Stop`."""
+    """A workflow's own reason to stop, spelled against the SDK's `Stop`."""
 
 
 # The file the real repository below is seeded with, matching what `_fakes` seeds its own with, and
@@ -110,7 +110,7 @@ raised: Final[list[Stop]] = []
 
 @workflow(version="1.1")
 async def probe(run: Run[ProbeParams]) -> None:
-    """Returns. The wiring probe stage 10 is about, with params it can be asserted on."""
+    """Returns. The wiring probe, with params it can be asserted on."""
     handed.append(run)
 
 
@@ -127,22 +127,22 @@ async def stepping(run: Run[NoParams]) -> None:
     """Takes one step, so that the checkout `api.run` provisioned is asked for a second time.
 
     No `commit=` and a role with no reporting tool, because neither is what this is for: the step
-    exists to reach `Steps._namespace`, which is the lazy open 13.4 stopped being the first caller
-    of. The walk restores the checkout on the way out and records `null`.
+    exists to reach `Steps._namespace`, which is the lazy open that stopped being the first caller.
+    The walk restores the checkout on the way out and records `null`.
     """
     await run.step(looking())
 
 
 def _point(name: str, attribute: str) -> EntryPoint:
-    """§3.3's `probe = "agl.workflows.probe:probe"`, pointed at this module instead."""
+    """A `probe = "agl.workflows.probe:probe"` line, pointed at this module instead."""
     return EntryPoint(name=name, value=f"{__name__}:{attribute}", group=registry.GROUP)
 
 
 POINTS: Final = (_point("probe", "probe"), _point("halting", "halting"))
 
 # Deliberately not in `POINTS`. `test_list_workflows_is_the_registrys_sorted_names` asserts the
-# whole listing, so a third workflow added to that tuple would be a stage-13 test editing a
-# stage-10 assertion about something else entirely; the two tests that need it pass both.
+# whole listing, so a third workflow added to that tuple would be one test editing an unrelated
+# assertion about something else entirely; the two tests that need it pass both.
 STEPPING: Final = (_point("stepping", "stepping"),)
 
 
@@ -172,7 +172,7 @@ async def _run(
 
 @pytest.mark.asyncio
 async def test_a_workflow_that_returns_runs_to_completion(tmp_path: Path) -> None:
-    """`agl run probe -n auth` end to end on fakes - the stage's first acceptance criterion."""
+    """`agl run probe -n auth` end to end on fakes - the first acceptance criterion."""
     handed.clear()
     harness = _fakes(tmp_path)
 
@@ -183,10 +183,10 @@ async def test_a_workflow_that_returns_runs_to_completion(tmp_path: Path) -> Non
 
 
 @pytest.mark.asyncio
-async def test_the_record_holds_exactly_section_3_6s_fields(tmp_path: Path) -> None:
-    """`run.json`'s published shape, key for key and value for value. `created_at` is the plan's own
-    example moment because the fakes bundle's clock is frozen at it, and `concurrent` is a default
-    the user never typed - `resume` takes no flags, so an unspoken one is lost if it is not here."""
+async def test_the_record_holds_exactly_the_published_fields(tmp_path: Path) -> None:
+    """`run.json`'s published shape, key for key and value for value. `created_at` is the sample
+    moment because the fakes bundle's clock is frozen at it, and `concurrent` is a default the user
+    never typed - `resume` takes no flags, so an unspoken one is lost if it is not here."""
     harness = _fakes(tmp_path)
     await _run(harness)
     record = await _record(harness)
@@ -204,7 +204,7 @@ async def test_the_record_holds_exactly_section_3_6s_fields(tmp_path: Path) -> N
 
 @pytest.mark.asyncio
 async def test_the_base_sha_is_the_resolved_commit_and_not_the_ref_name(tmp_path: Path) -> None:
-    """The pin (§3.6). An abbreviation is refused by `RunSpec`; a ref name would pin nothing."""
+    """The pin. An abbreviation is refused by `RunSpec`; a ref name would pin nothing."""
     harness = _fakes(tmp_path)
     history = harness.services.history
     default = await history.default_ref()
@@ -222,7 +222,7 @@ async def test_the_base_sha_is_the_resolved_commit_and_not_the_ref_name(tmp_path
 
 @pytest.mark.asyncio
 async def test_from_names_the_base_ref_and_the_default_is_the_repositorys(tmp_path: Path) -> None:
-    """`--from <ref>` (§3.9). What the user said is kept; what it meant is resolved beside it."""
+    """`--from <ref>`. What the user said is kept; what it meant is resolved beside it."""
     harness = _fakes(tmp_path)
 
     await _run(harness, base_ref="main")
@@ -234,10 +234,10 @@ async def test_from_names_the_base_ref_and_the_default_is_the_repositorys(tmp_pa
 
 @pytest.mark.asyncio
 async def test_a_workflow_that_takes_no_step_still_leaves_base_provisioned(tmp_path: Path) -> None:
-    """13.4, and the whole of what it is observable as. `probe` takes no steps at all, so the lazy
-    open in `sdk/_engine/steps.py` is never reached - which makes this precisely the run for which
-    §3.9's "`agl/<label>` is a real ref from run start, so progress is inspectable live" used to be
-    false. Until 13.4 this file asserted the opposite in as many words, that a completed run left
+    """Provisioning, and the whole of what it is observable as. `probe` takes no steps at all, so
+    the lazy open in `sdk/_engine/steps.py` is never reached - which makes this precisely the run
+    for which "`agl/<label>` is a real ref from run start, so progress is inspectable live" used to
+    be false. This file once asserted the opposite in as many words, that a completed run left
     nothing but `run.json`; what changed is not how strong the claim is but which of the two callers
     of `WorkspaceProvider.open` gets there first.
 
@@ -312,7 +312,7 @@ async def test_a_provisioning_that_fails_leaves_the_record_where_clear_can_find_
     assert handed == [], "the workflow ran although its workspace was never provisioned"
 
 
-# --- params, and the two refusals the stage names ------------------------------------------------
+# --- params, and the two refusals -----------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -331,7 +331,7 @@ async def test_the_workflow_gets_its_dataclass_and_the_record_its_values(tmp_pat
 
 @pytest.mark.asyncio
 async def test_flags_the_workflow_refuses_stop_it_before_anything_runs(tmp_path: Path) -> None:
-    """§3.3: validation failure is `InputError` -> exit 2, *before anything runs* - so no record."""
+    """Validation failure is `InputError` -> exit 2, *before anything runs* - so no record."""
     handed.clear()
     harness = _fakes(tmp_path)
 
@@ -344,10 +344,10 @@ async def test_flags_the_workflow_refuses_stop_it_before_anything_runs(tmp_path:
 
 
 @pytest.mark.asyncio
-async def test_the_same_label_twice_is_refused_in_section_3_10s_words(tmp_path: Path) -> None:
-    """The second acceptance criterion: exit 4, and the message the plan writes out. The refusal is
-    here rather than in the command because §1.4's charge is precisely that commands did real work -
-    and because a library caller needs the same answer as `agl run` does."""
+async def test_the_same_label_twice_is_refused_in_the_refusals_own_words(tmp_path: Path) -> None:
+    """The second acceptance criterion: exit 4, and the message it is written with. The refusal is
+    here rather than in the command because commands staying dumb is the whole repair - and because
+    a library caller needs the same answer as `agl run` does."""
     handed.clear()
     harness = _fakes(tmp_path)
     await _run(harness)
@@ -364,14 +364,14 @@ async def test_the_same_label_twice_is_refused_in_section_3_10s_words(tmp_path: 
 
 @pytest.mark.asyncio
 async def test_a_deliverable_branch_that_already_exists_refuses_the_run(tmp_path: Path) -> None:
-    """17.0's refusal, and the defect §3.10 names one paragraph after the asymmetry it argues.
+    """The refusal, and the defect that sits behind the asymmetry `clear` is argued on.
 
     "A retained branch costs a stale ref" is what the `git branch -d` decision is priced on, and
-    §3.10 then says the retained side is worse than that: after `clear` keeps `agl/auth`, a later
-    `agl run ... -n auth --from main` takes `WorkspaceProvider.open`'s **attaching** path - the
-    branch is there, so `worktree add <path> <branch>` rather than `add -b <branch> ... <base>` -
-    and the run starts from the old tip with `--from` silently ignored, because `base` is consulted
-    only when provisioning.
+    the retained side is worse than that: after `clear` keeps `agl/auth`, a later `agl run ... -n
+    auth --from main` takes `WorkspaceProvider.open`'s **attaching** path - the branch is there, so
+    `worktree add <path> <branch>` rather than `add -b <branch> ... <base>` - and the run starts
+    from the old tip with `--from` silently ignored, because `base` is consulted only when
+    provisioning.
 
     The state is arranged through the repository rather than through a `clear`, which is what makes
     this a test about `run`: what it needs is a world in which `agl/auth` names something and the
@@ -420,7 +420,7 @@ async def test_an_unknown_workflow_name_is_a_not_found_and_records_nothing(tmp_p
 
 @pytest.mark.asyncio
 async def test_a_stop_subclass_leaves_api_run_unwrapped_and_exits_seven(tmp_path: Path) -> None:
-    """§3.1's stage-10 criterion: the *same object*, and 7 rather than 6 or 70. Identity is the
+    """The criterion: the *same object*, and 7 rather than 6 or 70. Identity is the
     assertion, not the class - see the module docstring. The last line is the other half of the
     order `run` is written in: the record is written before the workflow is invoked, so a stop or a
     crash leaves a run to resume or to clear, which is `Stop`'s own promise that results persist."""
@@ -435,7 +435,7 @@ async def test_a_stop_subclass_leaves_api_run_unwrapped_and_exits_seven(tmp_path
     assert (await _record(harness))["workflow"] == "halting"
 
 
-# --- 13.4 against a real repository ---------------------------------------------------------------
+# --- against a real repository --------------------------------------------------------------------
 
 
 def _git(where: Path, *argv: str) -> str:
@@ -456,8 +456,8 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     developer with `commit.gpgsign` on, a `core.hooksPath` of their own or a template directory
     would otherwise be running different ones - and they go through `monkeypatch` so the adapters,
     which inherit the environment, see them too. It sits beside `tmp_path/trees` rather than under
-    it: §3.9's trees root is not the repository, and a worktree cut into the user's own checkout is
-    the arrangement this whole stage exists to end.
+    it: the trees root is not the repository, and a worktree cut into the user's own checkout is
+    the arrangement the layout exists to end.
     """
     for name in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"):
         monkeypatch.setenv(name, str(tmp_path / "nonexistent-git-config"))
@@ -479,7 +479,7 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 class _MovingHistory(GitHistory):
     """`GitHistory`, except that a commit lands on the ref the instant it has been resolved.
 
-    §3.6 pins `base_sha` against "a commit landing on `main` between run and resume". Inside
+    `base_sha` is pinned against a commit landing on `main` between run and resume. Inside
     `api.run` that same hazard has a much smaller window - between the `resolve` that computes the
     pin and the `open` that cuts the checkout - and nothing a test can do from outside fits into it,
     the two being consecutive lines. So it is arranged from inside, and that is not decoration: it
@@ -560,7 +560,7 @@ def _looking(seen: list[Path]) -> Script:
 async def test_the_checkout_is_cut_from_the_pin_and_not_from_the_ref(
     repository: Path, tmp_path: Path
 ) -> None:
-    """§3.6's pin, carried all the way into the working checkout. `--from main` is resolved once,
+    """The pin, carried all the way into the working checkout. `--from main` is resolved once,
     the ref moves under it, and `agl/auth` still starts where the record says the run started.
 
     This is what "pass `spec.base_sha`, never `base_ref`" costs to get wrong: `open` accepts a ref
@@ -593,7 +593,7 @@ async def test_a_step_reopens_that_checkout_rather_than_cutting_a_second(
 
     `WorkspaceProvider.open` promises this and `tests/contracts/workspace.py` holds both adapters
     to it, but neither says anything about the two callers now being different modules - and that
-    is the whole of 13.4's risk. The worktree count is the assertion with teeth: a second `add` at
+    is the whole of the risk. The worktree count is the assertion with teeth: a second `add` at
     this path is not merely waste, it is the refusal `open` makes instead of provisioning over a
     place something already holds, so an engine that had stopped reopening would not quietly cut a
     second checkout - it would fail the run."""
@@ -612,7 +612,7 @@ async def test_a_step_reopens_that_checkout_rather_than_cutting_a_second(
 
 
 def test_list_workflows_is_the_registrys_sorted_names() -> None:
-    """§3.10's `agl workflows`, complete: 16.4 adds the command that prints this and nothing more.
+    """`agl workflows`, complete: the command prints this and does nothing more.
     Sorted, so a listing is stable across environments rather than ordered by whatever sequence a
     metadata scan produced, and nothing is imported to answer it."""
     assert api.list_workflows(points=POINTS) == ("halting", "probe")
@@ -621,10 +621,10 @@ def test_list_workflows_is_the_registrys_sorted_names() -> None:
 def test_list_workflows_needs_no_bundle_and_no_registered_repository(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """§3.10: "`list_workflows` takes neither." The call below is the whole assertion.
+    """`list_workflows` takes neither a bundle nor a project, and that is the whole assertion.
 
-    Not a stronger version of the test above but a different claim, and 11.0's half of §3.10: this
-    reads packaging metadata, which is a fact about the installation, so it must answer from a
+    Not a stronger version of the test above but a different claim, the composition's half of it:
+    this reads packaging metadata, which is a fact about the installation, so it must answer from a
     directory that is not a git repository, has no project file naming it, and never built a port.
     A `Services` parameter it did not read would have made `agl workflows` refuse here with
     `NotFoundError` - a listing of what is installed, withheld until the operator registers a
@@ -638,14 +638,14 @@ def test_list_workflows_needs_no_bundle_and_no_registered_repository(
 def test_init_needs_neither_a_bundle_nor_a_registered_repository(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """§3.10's per-command composition for the operation it was written about, as a signature.
+    """Per-command composition for the operation it was written about, as a signature.
 
     `init` writes `AGL_HOME/projects/<name>.toml`, so the repository it is run in is by definition
-    not registered yet and no container can be built for it. Stage 10 composed before dispatching,
-    which made this call unreachable rather than merely unbuilt: the `NotFoundError` would have
-    arrived before the operation did. So the settings come from `resolve_settings` with a literal
-    mapping - the pure core, no process environment touched - and what is asserted is that a real
-    `init` runs there and leaves a file, with no `Services` anywhere in the call.
+    not registered yet and no container can be built for it. Composing before dispatching once made
+    this call unreachable rather than merely unbuilt: the `NotFoundError` would have arrived before
+    the operation did. So the settings come from `resolve_settings` with a literal mapping - the
+    pure core, no process environment touched - and what is asserted is that a real `init` runs
+    there and leaves a file, with no `Services` anywhere in the call.
 
     **The `cwd` is a parameter and this test is what that buys.** `monkeypatch.chdir` is
     deliberately not called: the directory below is handed over, so the process never moves, and
@@ -665,16 +665,17 @@ def test_init_needs_neither_a_bundle_nor_a_registered_repository(
 
 
 def test_every_operation_the_module_declares_is_built() -> None:
-    """One list, and nothing on it refuses for being unfinished. 16.4 is what made that true.
+    """One list, and nothing on it refuses for being unfinished.
 
-    §3.10's five verbs are `api.py`'s row in `ARCHITECTURE.md` §6 and the CLI's dispatch has been
-    written against the whole surface since 10.4, one clause at a time as each was built. `resume`
-    left the unbuilt list at 16.2 and `clear` at 16.3, each into a suite of its own -
-    `tests/test_resume.py` and `tests/test_clear.py` - and `init` was the one left.
+    `api.py`'s operations are named in its own bullet under `ARCHITECTURE.md`'s "The layers", and
+    the CLI's dispatch has been written against the whole surface from the start, one clause at a
+    time as each was built. `resume` left the unbuilt list first and `clear` next, each into a
+    suite of its own - `tests/test_resume.py` and `tests/test_clear.py` - and `init` was the one
+    left.
 
-    `workflow_help` is on `__all__` beside them and is not one of §3.10's five: it is the operation
-    behind `agl workflows <name>`, which extends that grammar, and `cli/commands/workflows.py` is
-    where the deviation is argued.
+    `workflow_help` is on `__all__` beside the five verbs `agl` dispatches and is not one of them:
+    it is the operation behind `agl workflows <name>`, which extends that grammar, and
+    `cli/commands/workflows.py` is where the deviation is argued.
     """
     assert set(api.__all__) == {
         "Ask",

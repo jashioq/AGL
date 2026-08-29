@@ -1,11 +1,12 @@
 """`FakeAgentRunner` against the `AgentRunner` contract, plus the clauses that suite cannot see.
 
 The first class is the port in full: `AgentContract` with its two fixtures overridden and nothing
-else touched. That suite was written at stage 3, against the port's docstrings and before any
-adapter existed (§1.9), which is why nothing below re-asserts any of it. It runs **unconditionally
-and in full** here - no opt-in, no `check_ready` gate, no binary to install and nothing to
-authenticate against - which is the difference between a fake and the real adapter one file over,
-where eight of the same ten tests skip on every machine because their evidence is a model's conduct
+else touched. That suite was written against the port's docstrings and before any adapter
+existed, which is the inversion `tests/contracts/` rests on and why nothing below re-asserts it.
+It runs **unconditionally and in full** here - no opt-in, no `check_ready` gate, no binary to
+install and nothing to authenticate against - which is the difference between a fake and the real
+adapter one file over, where eight of the same ten tests skip on every machine because their
+evidence is a model's conduct
 and the only instrument that produces conduct on this backend is a paid turn. The `model` fixture is
 parametrised over every model this runner serves, which `tests/contracts/agent.py` names as "the
 honest way to cover them all", so the whole suite runs three times.
@@ -25,10 +26,11 @@ top of the port. In the order they matter:
     standing context and `plan_only`, and the two transcripts are compared - which is the only
     assertion that can tell "it does the same thing whatever it is asked" from "it does the right
     thing when it is asked the right way".
-  * **That it is not more permissive than `OpenAiRunner`** (§1.9's whole point, and no gap of the
-    suite's - the suite asserts what the port *says*, and every clause here is somewhere the port
-    says nothing). Both runners are asked about every `ModelId` the port has, and about their
-    capabilities, and the answers are compared rather than each being asserted on its own. The
+  * **That it is not more permissive than `OpenAiRunner`** (the whole point of a shared contract
+    suite, and no gap of the suite's - the suite asserts what the port *says*, and every clause
+    here is somewhere the port says nothing). Both runners are asked about every `ModelId` the
+    port has, and about their capabilities, and the answers are compared rather than each being
+    asserted on its own. The
     refusals are compared **by message and not only by class**, which is this file's version of the
     served-model parity test the other fake needs: there the two tables are separate and a test
     holds them together, here `fake.py` imports `translate.model_slug` and there is one table, so
@@ -88,7 +90,8 @@ class TestOpenAiFake(AgentContract):
     Two overrides and nothing else, which is what the suite asks for. There is no gate on either
     of them: nothing here starts a process, binds a socket or spends a token, so a skip would be
     hiding something rather than declining to do it. All ten tests run and all ten pass, which
-    is §1.9's whole claim about a fake - the same suite, unweakened, over both implementations.
+    is the whole claim a shared suite makes about a fake - the same suite, unweakened, over both
+    implementations.
     """
 
     @pytest.fixture
@@ -150,7 +153,8 @@ RICH_SCHEMA: Final[Mapping[str, JsonValue]] = {
 class Recorded:
     """One tool, what it was handed, and the shared order the calls across several arrived in.
 
-    `refuses` provokes §3.3's clause the way the contract suite's own `Notes` does - the handler
+    `refuses` provokes the reject-back-to-the-agent clause the way the contract suite's own
+    `Notes` does - the handler
     turns down that many calls before accepting one - and `received` is `object` for that suite's
     reason: an adapter that handed over the raw text its backend produced is the bug worth
     catching, and a list already claiming to hold mappings could not report it. `raises` is the
@@ -202,7 +206,8 @@ class Heard:
 
 
 class Raises:
-    """A question handler that raises, which §3.7 makes ordinary rather than hypothetical."""
+    """A question handler that raises, which a headless terminal makes ordinary rather than
+    hypothetical."""
 
     def __init__(self, failure: Exception) -> None:
         self.asked = 0
@@ -225,7 +230,7 @@ def anything(where: Path, *, tools: tuple[Tool, ...] = ()) -> AgentTask:
 async def test_an_answer_visibly_changes_what_happens_next_inside_the_same_run(
     tmp_path: Path,
 ) -> None:
-    """§3.7: the answer returns into the same session, so a negotiation is rounds and not runs.
+    """The answer returns into the same session, so a negotiation is rounds and not runs.
 
     The contract suite can see that two questions were asked and that the last answer came back in
     the closing text. What it cannot see - because it reads a model's conduct rather than an
@@ -305,7 +310,8 @@ async def test_a_scripted_tool_call_reaches_the_handler_as_the_mapping_it_was_gi
 async def test_a_refused_payload_is_corrected_inside_the_same_conversation(
     tmp_path: Path,
 ) -> None:
-    """§3.3, driven rather than inferred: not an adapter retry, not a new run, not an exception.
+    """A malformed payload is rejected back to the agent inside the same conversation, driven
+    rather than inferred: not an adapter retry, not a new run, not an exception.
 
     The contract suite asserts the trace this leaves - the handler called twice inside one run -
     and says in as many words that it will not look at the mechanism, since `ToolResult.rejected`
@@ -333,7 +339,7 @@ async def test_a_refused_payload_is_corrected_inside_the_same_conversation(
     )
     assert notes.received[0] != notes.received[1], (
         f"both calls carried {notes.received[0]}, so the refusal was not read - a second identical "
-        f"call is a retry, which is the thing §3.3 says a refusal is not"
+        f"call is a retry, which is the one thing a refusal is not"
     )
     assert outcome.text == "record_note accepted that."
 
@@ -510,8 +516,9 @@ async def test_the_default_composes_a_payload_out_of_the_tools_own_schema(tmp_pa
 
     Not validation and not a schema language - the port says a `payload_schema` "is data, not a
     type", and on this backend nothing validates it anywhere: `_tools.py` records that AGL has no
-    JSON Schema validator and that a wrong payload is §3.3's case. It is the one thing a default
-    cannot do without: a reporting step's result *is* its reporting tool's payload (§3.3), so a
+    JSON Schema validator and that a wrong payload is rejected back to the agent. It is the one
+    thing a default cannot do without: a reporting step's result *is* its reporting tool's
+    payload, so a
     `--dry-run` whose every call was `{}` would fail every reporting step in the workflow for a
     reason that has nothing to do with the workflow.
     """
@@ -545,7 +552,7 @@ async def test_the_default_never_reports_a_limit_it_did_not_reach(tmp_path: Path
     A usage limit on this harness arrives as `UpstreamUnavailable` and never as a stop reason -
     that module argues it at length and calls it a decision a reader is entitled to know about. So
     a default that produced `LIMIT` would have a `--dry-run` exercising a consumer branch this
-    backend never takes, which is §1.9's failure with the arrow reversed and just as invisible.
+    backend never takes, which is fake drift with the arrow reversed and just as invisible.
     """
     both: tuple[tuple[Tool, ...], ...] = ((), (Recorded(NOTE).tool,))
     for tools in both:
@@ -567,11 +574,12 @@ async def test_the_default_never_reports_a_limit_it_did_not_reach(tmp_path: Path
 async def test_both_runners_refuse_exactly_the_same_models_with_the_same_words(
     tmp_path: Path,
 ) -> None:
-    """§3.2: "An adapter handed a `ModelId` it does not serve raises `InputError`."
+    """`src/agl/ports/agent.py`: an adapter handed a `ModelId` it does not serve raises
+    `InputError` and never silently substitutes.
 
     The contract suite has one `model` fixture and can only ever name a model the runner serves,
     so every refusal is invisible to it. And a fake that served *more* models than the adapter it
-    stands in for is the §1.9 failure in its purest form: a workflow naming a model AGL cannot run
+    stands in for is fake drift in its purest form: a workflow naming a model AGL cannot run
     would pass on fakes and die at preflight in anger.
 
     So this asks both runners about every `ModelId` the port has and compares the answers rather
@@ -738,8 +746,9 @@ def test_this_fake_imports_and_runs_without_reaching_anything_outside_stdlib_and
 
     `fake.py` imports `translate.model_slug` where `adapters/claude_code/fake.py` could not import
     its own adapter's translation, and the argument is that this adapter's vendor is a *binary*:
-    §3.2.1 gives OpenAI support the Python dependency `none`, so there is no extra to be short of
-    and no vendor package for that import to drag in. This is that claim measured rather than
+    OpenAI support has no Python dependency at all - the vendor is the Codex CLI, resolved at
+    preflight - so there is no extra to be short of and no vendor package for that import to drag
+    in. This is that claim measured rather than
     reasoned: a fresh interpreter imports the module and runs a whole task on it, then reports
     every module that arrived in `sys.modules` while it did.
 
@@ -870,9 +879,9 @@ async def test_a_question_handler_that_raises_ends_the_run_with_its_own_exceptio
 ) -> None:
     """`_tools.Asking`'s behaviour, and it is not an implementation detail of the real adapter.
 
-    §3.7's headless terminal raises `UpstreamUnavailable` on any view that needs an answer and a
+    A headless terminal raises `UpstreamUnavailable` on any view that needs an answer and a
     workflow's handler may raise `Stop`, so a fake that swallowed either would turn a run that dies
-    in anger into a run that passes on fakes - which is §1.9's failure exactly. The exception comes
+    in anger into a run that passes on fakes - which is fake drift exactly. The exception comes
     back out of `run` itself, and the handler is not asked again on the way there: spending the
     rest of a run on an asker that has already failed is what `_session.py` refuses to do when it
     checks `asking.failure` after every frame.
@@ -948,7 +957,7 @@ async def test_a_payload_no_model_could_have_produced_never_reaches_a_handler(
     Literally so on this backend: `_tools.py` reads `params.arguments` out of a decoded JSON-RPC
     message and checks only that it arrived as an object. A fake that accepted a value JSON has no
     spelling for would let a workflow build a payload the real path could not deliver and the store
-    could not write down (§3.6) - `memory_store.py` makes the same argument about the same class of
+    could not write down - `memory_store.py` makes the same argument about the same class of
     divergence, and calls it the drift in its purest form. `NaN` is the sharpest case: `float` is a
     `JsonValue`, so nothing in the type system refuses it, and `json` writes a bare `NaN` token that
     comes back unequal to itself.
@@ -970,7 +979,7 @@ async def test_a_payload_no_model_could_have_produced_never_reaches_a_handler(
 async def test_a_scripts_activity_line_arrives_untouched_and_a_reporter_that_raises_is_not_hidden(
     tmp_path: Path,
 ) -> None:
-    """§3.7: each adapter formats its own line and the framework passes it through untouched.
+    """Each adapter formats its own activity line and the framework passes it through untouched.
 
     The contract suite asserts that whatever arrives is a `str` and says it cannot assert that a
     line was passed through, since it does not know what the adapter meant to say. Here the script

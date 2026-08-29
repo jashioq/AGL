@@ -1,9 +1,10 @@
-"""Three runs, one repository, at once - Part 5's measurable target #9, against real git.
+"""Three runs, one repository, at once - `tests/test_measurable_targets.py`'s target #9, against
+real git.
 
     Three runs, one repo, concurrently - two `split` and one `fix`, different base refs -
     complete without contention and leave three independent local branches.
 
-§3.9 is the design that sentence measures, and it is the source of every claim below.
+The design that sentence measures is the source of every claim below.
 
 Two `split` and one `fix`, three labels, three different base refs, one repository and one trees
 root. The claim is about worktrees and refs rather than about model behaviour, so **this file
@@ -20,14 +21,14 @@ of - so the first `integrate()` of the first chunk raises `UpstreamUnexpected` b
 here could assert a thing. A `split` run over real worktrees needs a real integrator, and there is
 no arrangement in which it does not.
 
-Everything else stays a fake, and each for its own reason. The **verifier** stays fake so that
-§3.4's merge gate is a dict lookup: this file starts no build, and a real `ShellVerifier` would be
-the one thing here that could spend a machine. The **agents** are fakes because that is the whole
-economy of the file. The **store**, the **clock** and the **terminal** are fakes because none of
-the claims below is about `AGL_HOME`, about time, or about a screen - `split` and `fix` both show
-only passive boards, which a `HeadlessTerminal` drops, so no gesture is scripted anywhere.
-`fakes.repository` is left in each bundle naming an in-memory repository these runs never touch,
-exactly as `tests/test_api.py::_over` leaves it.
+Everything else stays a fake, and each for its own reason. The **verifier** stays fake so that the
+merge gate is a dict lookup: this file starts no build, and a real `ShellVerifier` would be the one
+thing here that could spend a machine. The **agents** are fakes because that is the whole economy
+of the file. The **store**, the **clock** and the **terminal** are fakes because none of the claims
+below is about `AGL_HOME`, about time, or about a screen - `split` and `fix` both show only passive
+boards, which a `HeadlessTerminal` drops, so no gesture is scripted anywhere. `fakes.repository` is
+left in each bundle naming an in-memory repository these runs never touch, exactly as
+`tests/test_api.py::_over` leaves it.
 
 ## Three bundles and not one, which is the arrangement rather than a convenience
 
@@ -58,7 +59,7 @@ await is bounded and the expiry is the failure.** Nothing here sleeps against a 
 rendezvous five coroutines can reach is reached in microseconds whatever the machine is doing, and
 one they cannot reach is not reached in an hour.
 
-**`asyncio.gather` in one event loop still exercises §3.9's `flock`.** `flock(2)` is per open file
+**`asyncio.gather` in one event loop still exercises the `flock`.** `flock(2)` is per open file
 description and `_trees.registry_lock` opens the file per call, so three coroutines each taking it
 exclude one another exactly as three processes would - and `_held` waits with a non-blocking
 attempt and an `await`, never by parking a thread, so the waiter yields and the holder gets to
@@ -75,11 +76,11 @@ from its own base" would be true of all three for all three and would separate n
 `contains(base, tip)` is true for a run's own base and false for both of the others, and the
 marker file says the same thing a second way by being in the tree that was checked out.
 
-Both `split` runs report **the same two chunk ids**, deliberately. §3.9 makes a namespace unique
+Both `split` runs report **the same two chunk ids**, deliberately. A namespace is unique
 *within a run*, and two runs each holding a `parser` is the case that has to work: two directories
 under two labels, two refs under `agl/_work/`, and one object store between them.
 
-## What §3.9 does not promise, and is therefore not asserted
+## What the design does not promise, and is therefore not asserted
 
 **There is no build concurrency limit**, and the merge queue serialises per *target* rather than
 per run - "a grandchild landing into `T-01` and `T-01` landing into the root are two locks and two
@@ -134,8 +135,8 @@ from agl.workflows.split.chunks import report_chunks
 TRUNK: Final = "main"
 """The branch the user has checked out in `repo/`, and the third run's base ref.
 
-That one of the three runs is cut from the very ref the user is standing on is the case §3.9
-deletes two preflight checks for: `git worktree add -b agl/gamma <path> main` succeeds while `main`
+That one of the three runs is cut from the very ref the user is standing on is the case two
+preflight checks were deleted for: `git worktree add -b agl/gamma <path> main` succeeds while `main`
 is checked out elsewhere, because a branch may be *started from* anywhere and only checking it out
 twice is refused."""
 
@@ -147,7 +148,7 @@ LABELS: Final = (ALPHA, BETA, GAMMA)
 under the trees root. `alpha` and `beta` are the two `split` runs; `gamma` is `fix`."""
 
 BASES: Final[Mapping[str, str]] = {ALPHA: "side-one", BETA: "side-two", GAMMA: TRUNK}
-"""What each run is cut from - `--from <ref>`, §3.9's framework-level run parameter.
+"""What each run is cut from - `--from <ref>`, the framework-level run parameter.
 
 Three refs at three commits, none of them an ancestor of another. The module docstring argues why
 divergent rather than linear is what makes the ancestry assertion able to fail."""
@@ -165,8 +166,8 @@ its branch, which is a fact about content rather than about a commit id."""
 PLAN: Final = ("parser", "api")
 """The chunk ids both `split` runs report, deliberately the same two in each.
 
-§3.9 makes a namespace unique *within a run* and not across the trees root, so two runs each
-holding a `parser` is the case that has to work: two directories under two labels, two refs under
+A namespace is unique *within a run* and not across the trees root, so two runs each holding a
+`parser` is the case that has to work: two directories under two labels, two refs under
 `agl/_work/`, and one object store between them. Two chunks and not three, because what the count
 buys here is barrier parties, and seven checkouts is already the arrangement's whole point."""
 
@@ -213,8 +214,8 @@ def _refused(where: Path, *argv: str) -> str:
     """
     done = subprocess.run(["git", *argv], cwd=where, capture_output=True, text=True, check=False)
     assert done.returncode != 0, (
-        f"`git {' '.join(argv)}` in {where} succeeded, where §3.9 says git refuses it. It printed "
-        f"{done.stdout!r}"
+        f"`git {' '.join(argv)}` in {where} succeeded, where git is supposed to refuse it. "
+        f"It printed {done.stdout!r}"
     )
     return done.stderr
 
@@ -257,9 +258,9 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     one - and they go through `monkeypatch` so the adapters, which inherit the environment, see
     them too.
 
-    It sits at `tmp_path/repo` and the trees root is its sibling, which is the layout §3.9 draws:
-    a trees root inside the working tree would put every checkout AGL makes into the user's own
-    `git status`, and one of the claims below is that there is nothing in it.
+    It sits at `tmp_path/repo` and the trees root is its sibling, which is the layout a run uses: a
+    trees root inside the working tree would put every checkout AGL makes into the user's own `git
+    status`, and one of the claims below is that there is nothing in it.
 
     The three refs are built by checking out and coming back, so the fixture leaves `repo/` where
     the user left it: on `TRUNK`, clean, and holding the seed plus its own marker.
@@ -293,7 +294,7 @@ class _Sample:
     """Which run's agent took it, as `<label>/<namespace>`, so a failure names the run."""
 
     status: str
-    """`git status --porcelain` in `repo/`. §3.9 says it stays empty for the whole of a run."""
+    """`git status --porcelain` in `repo/`. It stays empty for the whole of a run."""
 
     head: str
     """`git rev-parse --abbrev-ref HEAD` in `repo/`. The user is still on the branch they were."""
@@ -357,10 +358,10 @@ def _whose(task: testing.AgentTask) -> str:
     """Which chunk this dispatch is for, read off the prompt the framework composed.
 
     `tests/workflows/test_split_runs.py`'s handle and its argument: `AgentTask` carries no
-    namespace and no step name (§3.3), the implementers of one run share a role, a model and an
-    empty tools tuple, and what differs is `chunk=`, appended as canonical JSON under `## Inputs`.
-    Keying on `task.workspace.name` would work and would make every assertion about which checkout
-    a chunk ran in circular.
+    namespace and no step name, the implementers of one run share a role, a model and an empty
+    tools tuple, and what differs is `chunk=`, appended as canonical JSON under `## Inputs`. Keying
+    on `task.workspace.name` would work and would make every assertion about which checkout a chunk
+    ran in circular.
     """
     for chunk in PLAN:
         if f'"id":"{chunk}"' in task.instructions:
@@ -512,7 +513,7 @@ async def _ended(started: list[asyncio.Task[None]], watch: _Watch) -> None:
             f"{len(pending)} of {len(started)} concurrent runs never finished. After "
             f"{_LIVENESS:g}s the agents dispatched were {watch.entered} and the ones that finished "
             f"were {watch.left}, where {_PARTIES} implementers have to be inside a step at once "
-            f"before any of them may leave. §3.9 gives concurrent runs one contention point - a "
+            f"before any of them may leave. Concurrent runs have one contention point - a "
             f"millisecond `flock` around `worktree add` and `prune` - so a rendezvous that cannot "
             f"be reached means something is held across a step, a landing or a whole run."
         )
@@ -522,10 +523,10 @@ async def _ended(started: list[asyncio.Task[None]], watch: _Watch) -> None:
 async def test_three_runs_on_one_repository_overlap_and_leave_three_independent_branches(
     repository: Path, tmp_path: Path
 ) -> None:
-    """§3.9's measurable target #9, whole: three runs, one repo, different base refs, at once.
+    """Target #9, whole: three runs, one repo, different base refs, at once.
 
     The rendezvous is the arrangement and the module docstring argues it; everything after it is
-    what §3.9 promises, and each part fails on its own:
+    what the design promises, and each part fails on its own:
 
     * **all three completed, and nothing refused.** `ConflictError` is what `run_lock`,
       `registry_lock` and `WorkspaceProvider.open` all raise, so a second run that found the
@@ -534,24 +535,23 @@ async def test_three_runs_on_one_repository_overlap_and_leave_three_independent_
       having skipped their own steps would be three runs that did nothing;
     * **three deliverable branches and four child branches coexist as refs**, asserted against
       `git for-each-ref` and compared to names spelled out here rather than composed from
-      `tree_layout`. That is §3.9's whole paragraph: the obvious scheme, `agl/alpha` beside
-      `agl/alpha/parser`, cannot exist in git in either creation order, and this is the test that
-      the scheme AGL chose can - three times over, concurrently, with both `split` runs using the
-      same two chunk ids. The worktree registry is asserted as a set for the same reason: eight
-      entries is what three uncontended runs leave, and a registry two `worktree add`s raced over
-      is the failure §3.9's `flock` exists to prevent;
+      `tree_layout`. That is the whole of the branch scheme: `agl/alpha` beside `agl/alpha/parser`,
+      cannot exist in git in either creation order, and this is the test that the scheme AGL chose
+      can - three times over, concurrently, with both `split` runs using the same two chunk ids.
+      The worktree registry is asserted as a set for the same reason: eight entries is what three
+      uncontended runs leave, and a registry two `worktree add`s raced over is the failure the
+      `flock` exists to prevent;
     * **independent, and not merely present.** Each branch descends from its own base and from
       neither of the others - which needs the divergent refs the fixture builds - and its tree
       holds its own base's marker file and its own agents' work and nobody else's. A run cut from
       the wrong ref, or an agent dispatched into another run's checkout, arrives here;
     * **the user's working directory is untouched**, sampled from inside the runs at the one
-      instant all seven checkouts provably exist, and again afterwards. §3.9 deletes the
-      dirty-repository and trunk-branch preflight checks precisely because a worktree is cut from a
+      instant all seven checkouts provably exist, and again afterwards. The dirty-repository and
+      trunk-branch preflight checks were deleted precisely because a worktree is cut from a
       *ref*: one of these three runs is cut from the very branch the user is standing on;
-    * **and git refuses a direct checkout of a branch `_base` holds**, which §3.9 calls "the
-      correct guardrail" - so it is asserted as a guarantee. It is asserted last, because a
-      `checkout` that was *not* refused would move the user's HEAD and quietly falsify the claim
-      above it.
+    * **and git refuses a direct checkout of a branch `_base` holds**, which is the correct
+      guardrail - so it is asserted as a guarantee. It is asserted last, because a `checkout` that
+      was *not* refused would move the user's HEAD and quietly falsify the claim above it.
     """
     watch = _Watch()
     barrier = asyncio.Barrier(_PARTIES)
@@ -593,7 +593,7 @@ async def test_three_runs_on_one_repository_overlap_and_leave_three_independent_
         + [f"refs/heads/agl/_work/{label}/{chunk}" for label, chunk in CHILDREN]
     ), (
         "the refs three concurrent runs left are not `agl/<label>` and `agl/_work/<label>/<ns>`. "
-        "§3.9 routes children under `_work` because `refs/heads/agl/alpha` cannot be a file and a "
+        "children are routed under `_work` because `refs/heads/agl/alpha` cannot be a file and a "
         "directory at once, so the obvious scheme collides in either creation order - and "
         "`git check-ref-format` passes each of those names on its own, which is why nothing in "
         "`ids.py` could ever catch it"
@@ -608,7 +608,7 @@ async def test_three_runs_on_one_repository_overlap_and_leave_three_independent_
     ), (
         "git's own worktree registry does not hold the seven checkouts three runs of this shape "
         "make, beside the user's own. `worktree add` and `prune` mutate `.git/worktrees/` and are "
-        "the one thing §3.9 puts a cross-process lock around, so a registry missing an entry is "
+        "the one thing a cross-process lock is put around, so a registry missing an entry is "
         "two runs that raced over it"
     )
 
@@ -616,7 +616,7 @@ async def test_three_runs_on_one_repository_overlap_and_leave_three_independent_
     history = runs[ALPHA].fakes.services.history
     pinned = {label: await _base_sha(runs[label]) for label in LABELS}
     assert len(frozenset(pinned.values())) == len(LABELS), (
-        f"the three runs pinned {pinned}, where §3.9's target says three different base refs. "
+        f"the three runs pinned {pinned}, where the target says three different base refs. "
         f"Three runs resolving to one commit would satisfy every assertion below without any of "
         f"them meaning anything"
     )
@@ -653,7 +653,7 @@ async def test_three_runs_on_one_repository_overlap_and_leave_three_independent_
     for sample in watch.samples:
         assert (sample.status, sample.head) == ("", TRUNK), (
             f"while {sample.who} was working, `git status` in the user's own checkout reported "
-            f"{sample.status!r} on {sample.head!r}. §3.9: AGL never touches the user's working "
+            f"{sample.status!r} on {sample.head!r}. AGL never touches the user's working "
             f"directory, which is the whole reason the trees root is not inside it - and it is why "
             f"the dirty-repository and trunk-branch preflight checks were deleted rather than made "
             f"configurable"
@@ -668,7 +668,7 @@ async def test_three_runs_on_one_repository_overlap_and_leave_three_independent_
         refusal = _refused(repository, "checkout", f"agl/{label}")
         assert f"agl/{label}" in refusal and str(place.resolve()) in refusal, (
             f"git let go of `agl/{label}`, or refused without saying who has it: {refusal!r}. "
-            f"§3.9 calls this the correct guardrail - `agl/<label>` is a real ref from run start "
+            f"this is the correct guardrail - `agl/<label>` is a real ref from run start "
             f"and advances with every `integrate()`, so `git log` and `git diff` on it are live, "
             f"and the one thing a person may not do is check out a branch `_base` is standing on"
         )

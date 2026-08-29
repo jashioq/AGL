@@ -1,17 +1,18 @@
-"""What the trees root promises: the plan's tree, the branches, and the two words it spends.
+"""What the trees root promises: its tree, the branches, and the two words it spends.
 
 Three things are checked here that nothing else can check. That every path stays under the
 trees root, over the shared corpus, in every segment position - the same property
 `test_home_layout.py` states about AGL_HOME, and the reason both files exist. That the derived
-branch names are the plan's and are ones real `git check-ref-format` accepts, asked of git
-rather than of a regex. And that `_base` and `_work`, the two words this layout spends on
-itself, are the two words `ids.py` refuses as names, so that neither can be reached twice.
+branch names are the two this layout promises and are ones real `git check-ref-format` accepts,
+asked of git rather than of a regex. And that `_base` and `_work`, the two words this layout
+spends on itself, are the two words `ids.py` refuses as names, so that neither can be reached
+twice.
 
 The git section at the end is the one to read first. `agl/<label>` and `agl/<label>/<namespace>`
-- the naming any reader would reach for - cannot both exist in one repository, and §3.9 designs
-that collision out with the `_work` infix rather than documenting it. So the tests there create
-real branches in real repositories: the deliverable branch and two children coexisting, in both
-creation orders, and then the same collision one level down, which is the demonstrated reason
+- the naming any reader would reach for - cannot both exist in one repository, and this layout
+designs that collision out with the `_work` infix rather than documenting it. So the tests there
+create real branches in real repositories: the deliverable branch and two children coexisting, in
+both creation orders, and then the same collision one level down, which is the demonstrated reason
 `_work` is a reserved label rather than an asserted one.
 """
 
@@ -52,11 +53,11 @@ _WORK: Final = "_work"
 _NO_GIT: Final = "git is not on PATH, so the git-ref properties went UNVERIFIED"
 
 
-# --- The plan's tree, and the branches that go with it -----------------------------------------
+# --- The tree, and the branches that go with it -------------------------------------------------
 
 
-def test_the_layout_is_the_one_the_plan_draws() -> None:
-    """Every path in plan §3.9's diagram, spelled out rather than recomposed."""
+def test_every_path_under_the_trees_root_is_spelled_out_in_full() -> None:
+    """Every path in the layout, spelled out rather than recomposed."""
     assert run_trees_dir(_TREES, _AUTH) == Path("/repo/.trees/auth")
     assert base_worktree(_TREES, _AUTH) == Path("/repo/.trees/auth/_base")
     assert worktree_dir(_TREES, _AUTH, _T01) == Path("/repo/.trees/auth/T-01")
@@ -78,7 +79,7 @@ def test_the_checkouts_of_one_run_are_siblings_and_never_contain_each_other() ->
     assert len(set(checkouts)) == len(checkouts)
 
 
-def test_the_branch_derivations_are_the_plan_s() -> None:
+def test_the_branch_derivations_are_the_two_this_layout_promises() -> None:
     """`agl/<label>` for the run, `agl/_work/<label>/<namespace>` for a child. Nothing else."""
     assert run_branch(_AUTH) == "agl/auth"
     assert worktree_branch(_AUTH, _T01) == "agl/_work/auth/T-01"
@@ -214,10 +215,10 @@ def _resolved(repo: Path, branch: str) -> str:
 
 @pytest.mark.skipif(shutil.which("git") is None, reason=_NO_GIT)
 def test_the_run_branch_and_its_children_all_coexist_in_one_repository(tmp_path: Path) -> None:
-    """What the `_work` infix buys, asked of real git rather than of the plan.
+    """What the `_work` infix buys, asked of real git rather than of a diagram.
 
     `agl/auth` and `agl/auth/T-01` cannot both exist - `refs/heads/agl/auth` would have to be a
-    file and a directory at once - and §3.9 designs that out by routing children under
+    file and a directory at once - and this layout designs that out by routing children under
     `agl/_work/<label>/`. Both creation orders are tried, because the old naming failed in both
     and a scheme that only worked in one would be no fix. Deleting the children is the other
     half of it: `agl/auth` is what the user pushes, so it has to survive the worktrees it fed,
@@ -251,7 +252,7 @@ def test_a_run_labelled_work_would_collide_with_every_child_branch_there_is(
 
     A run labelled `_work` would want `refs/heads/agl/_work` as its own branch - a file - while
     every child branch of every run needs `agl/_work` to be the directory above it. Each name
-    passes `check-ref-format` alone, exactly as the pair §3.9 designed out did, so the
+    passes `check-ref-format` alone, exactly as the pair this layout designed out did, so the
     reservation is not a matter of taste. It is refused at construction, which means the pair
     cannot be derived here at all and the offending name has to be spelled by hand to be shown -
     and showing it is the point: the reservation has a demonstrated reason, not an asserted one.

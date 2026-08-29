@@ -85,7 +85,7 @@ from agl.ports.terminal import Component, Screen, Terminal, Text
 from ._terminal_views import Approval
 
 DEADLINE: Final = 10.0
-"""How long anything here waits before calling it a hang. A hundred frames at §3.7's ~10 Hz."""
+"""How long anything here waits before calling it a hang. A hundred frames at a ~10 Hz redraw."""
 
 TICK: Final = 0.005
 """How often `displayed()` is read while waiting. Small enough to be invisible against a redraw

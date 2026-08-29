@@ -237,7 +237,7 @@ def _resolvable[P](workflow: Workflow[P]) -> EntryPoint:
         raise InputError(
             f"the workflow declared as {named!r} is inside something else, so there is no module "
             f"attribute for an entry point to name. A workflow is registered as "
-            f"`<module>:<name>` (§3.3) and the harness resolves it the way an installed one is "
+            f"`<module>:<name>`, and the harness resolves it the way an installed one is "
             f"resolved, so declare it at the top level of its module"
         )
     point = EntryPoint(name=named, value=f"{where}:{named}", group=registry.GROUP)

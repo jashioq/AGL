@@ -5,9 +5,8 @@ It binds a listener, answers what is asked of it out of canned data, and forward
 there is no client, no proxy and no upstream URL in this file. So "no test in
 `tests/adapters/test_claude_code_runner.py` reaches a paid endpoint" is not a promise a reader has
 to audit test by test - it is a property of the one process every test in that module points its CLI
-at, and this is that process. `docs/agl-build-stages.md` names this instrument by name: "a loopback
-endpoint reading the composed request before it leaves. This is what settled the `CLAUDE.md`
-question, with two controls and one measurement."
+at, and this is that process. A loopback endpoint reading the composed request before it leaves is
+what settled the `CLAUDE.md` hermeticity question, with two controls and one measurement.
 
 ## What a session actually asks for, which is less than you would guess
 

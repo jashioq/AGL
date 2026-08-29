@@ -1,10 +1,12 @@
-"""§3.6's own acceptance criterion: kill at every step boundary, resume, and nothing moved.
+"""The acceptance criterion: kill at every step boundary, resume, and nothing moved.
 
-The plan states this test rather than leaving it to a stage, and states it as the *one rule*
-fingerprinting places on workflow authors: "Branch only on step results. `if findings.high()` is
-fine; `if datetime.now().hour < 18` breaks replay. **Enforced by an SDK contract test: run to
-completion, kill at every step boundary, resume, assert identical final state.**" This file is that
-sentence. It is a property test and not an example test: for a programme of N steps it sweeps every
+The *one rule* fingerprinting places on workflow authors is that a workflow branches only on step
+results - `if findings.high()` is fine; `if datetime.now().hour < 18` breaks replay - and
+`ARCHITECTURE.md`'s "Invariants where a mistake is silent" is where the rule and its silence are
+written down. What enforces it is an SDK contract test: run to completion, kill at every step
+boundary, resume, assert identical final state. This file is that test.
+
+It is a property test and not an example test: for a programme of N steps it sweeps every
 k in `0..N`, kills the process after the k-th step's entry reaches disk, resumes in a *second*
 process, and compares the whole of the result against a run that was never interrupted.
 
@@ -13,7 +15,7 @@ process, and compares the whole of the result against a run that was never inter
 and the user's own HEAD - all of them compared against the uninterrupted run. `at` is not, because
 `at` is a clock reading and an interrupted run legitimately takes longer than a straight one. That
 exclusion is not a gap being papered over: comparing everything else and passing is itself the
-proof of §3.6's "`at` is never read for control flow", since a walk that branched on a timestamp
+proof that "`at` is never read for control flow", since a walk that branched on a timestamp
 could not produce a byte-identical ledger from two runs whose timestamps differ. The field is still
 examined - `_assert_well_formed_at` parses every one of them against the wire format and checks it
 falls inside this session - because dropping a field unexamined and excluding a field for a stated
@@ -46,7 +48,7 @@ file spends processes at all:
     renders differently in the second process and the digest with it.
   * *`n` is never persisted.* A same-process resume is free to reuse the `Fingerprints` object it
     already had; a second process has to rebuild the counter from nothing by walking the same calls
-    in the same order, which is the whole of what §3.6 means by the phrase.
+    in the same order, which is the whole of what the phrase means.
   * *A commit made before the kill is still there after it.* Only a real repository can be asked.
 
 **And two that are falsifiable in one process but are stated here in the form they are actually
@@ -54,7 +56,7 @@ paid in.** `test_journal_walk.py` and `test_journal.py` pin both as arithmetic; 
 two-process tests at the bottom add is that the value being handed back came off a real ledger
 written by a process that no longer exists, which is what a replay *is*.
 
-  * *A step that raised claims no slot* (§3.6, "the counter advances when an entry is written, not
+  * *A step that raised claims no slot* ("the counter advances when an entry is written, not
     when a step is called"). The `crash` programme raises inside a step and retries it within one
     run; the second process walks the same calls and must hit the retry's entry without running
     anything. Advance on the call instead and the retry sits one slot past where the resume looks.
@@ -162,7 +164,7 @@ class _World:
     """The four directories one scenario happens in, all under one root.
 
     The trees root is a *sibling* of the repository rather than a directory inside it, which is the
-    layout §3.9 draws and which `tests/adapters/test_git_workspace.py` gives the reason for: a
+    layout AGL uses and which `tests/adapters/test_git_workspace.py` gives the reason for: a
     worktree inside the user's working tree shows up in their `git status`.
     """
 
@@ -309,7 +311,7 @@ def _spawn(
 
 @dataclass(frozen=True, slots=True)
 class _Entry:
-    """One step file as this suite reads it: §3.6's four fields, with `value` as canonical text.
+    """One step file as this suite reads it: four fields, with `value` as canonical text.
 
     The value is held as sorted-key JSON rather than as a parsed object so that two entries compare
     by content and print legibly when they do not - and so that a mapping whose keys arrived in a
@@ -352,7 +354,7 @@ class _Snapshot:
     def per_step(self) -> dict[str, int]:
         """How many entries each step directory holds - one per time that step actually ran.
 
-        Superseded entries stay on disk (§3.6), so this is the ledger's answer to "what re-ran":
+        Superseded entries stay on disk, so this is the ledger's answer to "what re-ran":
         a step that was invalidated has two files under its name and a step that replayed has one.
         """
         counts: dict[str, int] = {}
@@ -406,7 +408,7 @@ def _records(world: _World) -> list[Mapping[str, object]]:
 def _workers(records: Sequence[Mapping[str, object]], tag: str | None = None) -> list[str]:
     """The labels of every worker invocation, optionally only one process's.
 
-    "The worker was not called" is the whole of what a replay hit *is* - §3.6's replay has no other
+    "The worker was not called" is the whole of what a replay hit *is* - replay has no other
     observable difference from a re-run that happens to produce the same answer - so this list, and
     the fact that it holds each label exactly once, is the headline property of this file.
     """
@@ -502,7 +504,7 @@ def _assert_identical(actual: _Snapshot, reference: _Snapshot) -> None:
         "are commits AGL made, and a resume that made a different one made different work"
     )
     assert actual.repo_head == reference.repo_head, (
-        "the user's own checkout moved. §3.9: AGL never touches the target repository except "
+        "the user's own checkout moved: AGL never touches the target repository except "
         "through a workspace"
     )
 
@@ -511,8 +513,8 @@ def _assert_well_formed_at(snapshot: _Snapshot) -> None:
     """Every `at` is a timestamp, in the format the ledger stores, from inside this session.
 
     Excluded from the comparison above and examined here instead - a field dropped unexamined and a
-    field excluded for a stated reason are different things. What is checked is exactly what §3.6
-    says the field is for: it is a readable moment for debugging and the view, and nothing else.
+    field excluded for a stated reason are different things. What is checked is exactly what the
+    field is for: it is a readable moment for debugging and the view, and nothing else.
     """
     upper = datetime.now(UTC) + timedelta(seconds=1)
     lower = STARTED - timedelta(seconds=1)
@@ -552,8 +554,8 @@ def _sweep(
     records = _records(world)
     assert _markers(records, "killed") == set(), (
         "the killed process ran a `finally` clause or an `atexit` hook on its way out, so it was "
-        "unwound rather than killed - and an unwound run is the one case §3.6 does not have to "
-        "survive. The driver's exit is `os._exit`; something is catching it"
+        "unwound rather than killed - and an unwound run is the one case replay does not have "
+        "to survive. The driver's exit is `os._exit`; something is catching it"
     )
     assert _markers(records, "resumed") == FINISHED, (
         "the resuming process left no end-of-process markers, so the assertion above - that a "
@@ -593,7 +595,7 @@ def test_the_core_programme_is_identical_however_far_it_got_before_it_was_killed
     """The acceptance criterion, swept over every boundary of a five-step, two-namespace run.
 
     `spec` and `decompose` are read-only, `plan` and `T-01/implement` commit, `report` is read-only
-    and scribbles - so the sweep crosses both of §3.6's endings, both of its namespaces, and the
+    and scribbles - so the sweep crosses both endings, both namespaces, and the
     boundary either side of every one of them. `k = 0` is the run that died before it started and
     `k = 5` is the run that finished everything and died before it could say so.
     """
@@ -604,7 +606,7 @@ def test_the_core_programme_is_identical_however_far_it_got_before_it_was_killed
 def test_a_retry_loop_of_three_identical_calls_replays_all_three_in_order(
     kill_after: int, world: _World, references: _References
 ) -> None:
-    """§3.6's "why the counter", across a kill and across a process.
+    """Why the counter, across a kill and across a process.
 
     Three `step("review", ...)` calls in one namespace with the same role, the same inputs and the
     same head: one `base`, three entries, `n = 0, 1, 2`. A per-`base`-only cache collapses them to
@@ -624,11 +626,11 @@ def test_a_retry_loop_of_three_identical_calls_replays_all_three_in_order(
 def test_concurrent_siblings_replay_when_the_resume_completes_them_the_other_way_round(
     kill_after: int, world: _World, references: _References
 ) -> None:
-    """§3.6's `T-01`/`T-02`, with the interleaving deliberately reversed on the resume.
+    """The `T-01`/`T-02` case, with the interleaving deliberately reversed on the resume.
 
     Both children call `step(implementer, ...)` with the same role, no inputs and the same parent
     head, so their `base` values are identical by construction and only the namespace in the
-    counter's key separates their entries. Rule 1's whole point is that the interleaving must not
+    counter's key separates them. `test_journal.py`'s rule 1 is that the interleaving must not
     decide who gets `n = 0` - "the interleaving differs on resume, so each child looks in its own
     scope for a digest that is not there and **both re-run, forever, silently**" - and a test that
     always released them in the same order could not see it. So the killed process completes them
@@ -650,7 +652,7 @@ def test_concurrent_siblings_replay_when_the_resume_completes_them_the_other_way
         both = {f"{name}/implement" for name in SIBLINGS}
         assert _reached(_records(world), "killed") == {"spec", *both}, (
             "only one sibling was in flight when the process was killed, so the two never "
-            "overlapped and this is not the `T-01`/`T-02` shape §3.6 describes"
+            "overlapped and this is not the `T-01`/`T-02` shape the counter is scoped for"
         )
 
 
@@ -660,7 +662,7 @@ def test_concurrent_siblings_replay_when_the_resume_completes_them_the_other_way
 def test_a_changed_prompt_re_runs_that_step_and_everything_that_took_its_value(
     world: _World,
 ) -> None:
-    """§3.6's build-system cascade: edit `decompose`'s prompt, and watch how far the edit reaches.
+    """The build-system cascade: edit `decompose`'s prompt, and watch how far the edit reaches.
 
     "Halt, edit the implement prompt, resume - without this you replay results produced by the old
     prompt, which is exactly when you are iterating and least want stale output." The edited step is
@@ -706,7 +708,7 @@ def test_a_changed_prompt_re_runs_that_step_and_everything_that_took_its_value(
 def test_a_base_that_advanced_behind_the_journals_back_does_not_invalidate_earlier_steps(
     world: _World,
 ) -> None:
-    """The sentence §3.6 calls load-bearing, provoked between two processes.
+    """The load-bearing sentence, provoked between two processes.
 
     "The starting head is chained logically, not read from disk. It comes from the previous step's
     recorded `head` in that namespace, never from the physical worktree. Otherwise: root runs `spec`
@@ -715,8 +717,8 @@ def test_a_base_that_advanced_behind_the_journals_back_does_not_invalidate_earli
     which is what a landed child produces and what `integrate()` does on every landing.
 
     The second half is the expensive one and is asserted separately: because every step hits, no
-    step restores, and the advanced commit is still the run branch's tip afterwards. §3.6 calls a
-    parent restoring past its landed children one of three paths in the design that destroy work.
+    step restores, and the advanced commit is still the run branch's tip afterwards. A parent
+    restoring past its landed children is one of three paths in the design that destroy work.
     """
     _spawn(world, programme="core", tag="first", seed=KILLED_SEED)
     before = _snapshot(world)
@@ -733,13 +735,13 @@ def test_a_base_that_advanced_behind_the_journals_back_does_not_invalidate_earli
 
     assert _workers(_records(world), "second") == [], (
         "a resume after the run's physical head advanced re-ran steps that were on the ledger. "
-        "That is §3.6's own example: every step, every resume, forever, with the run still "
+        "That is the standing example: every step, every resume, forever, with the run still "
         "finishing and still right - the only symptoms being the bill and the wait"
     )
     assert after.entries == before.entries, "a resume that hit everything wrote something anyway"
     assert after.branches[run_branch(RunLabel(LABEL))] == advanced, (
         "the landed commit is gone: a step missed its fingerprint and restored the worktree to a "
-        "head from before the landing, which §3.6 calls the one path in the design that destroys "
+        "head from before the landing, which is the one path in the design that destroys "
         "work rather than costing a re-run"
     )
 
@@ -747,7 +749,7 @@ def test_a_base_that_advanced_behind_the_journals_back_does_not_invalidate_earli
 def test_changing_only_the_commit_wording_replays_every_step_and_runs_no_worker(
     world: _World,
 ) -> None:
-    """§3.6 keeps the message out of the fingerprint, and states the trade it is making.
+    """The message is kept out of the fingerprint, and the trade is stated.
 
     "A message is cosmetic. Including it would mean editing the wording re-runs the agent, which is
     the opposite of what fingerprinting is for. The trade is that a replayed step keeps the commit
@@ -765,7 +767,7 @@ def test_changing_only_the_commit_wording_replays_every_step_and_runs_no_worker(
     after = _snapshot(world)
 
     assert _workers(_records(world), "second") == [], (
-        "editing a commit message re-ran the agent, which §3.6 calls the opposite of what "
+        "editing a commit message re-ran the agent, which is the opposite of what "
         "fingerprinting is for"
     )
     assert after.entries == before.entries, (
@@ -818,7 +820,7 @@ def _swapped_types(world: _World, variant: str, what: str) -> None:
 def test_an_input_dataclass_of_another_type_re_runs_the_step_rather_than_replaying_it(
     world: _World,
 ) -> None:
-    """§3.6's rule 6, the outer half: `Finding("T-01", 3)` and `Ticket("T-01", 3)`.
+    """`test_journal.py`'s rule 6, outer half: `Finding("T-01", 3)` and `Ticket("T-01", 3)`.
 
     "`asdict` erases the type, so `Finding("T-01", 3)` and `Ticket("T-01", 3)` fingerprint
     identically and changing an input's type while keeping its shape replays the old result." The
@@ -830,7 +832,7 @@ def test_an_input_dataclass_of_another_type_re_runs_the_step_rather_than_replayi
 
 
 def test_a_nested_input_dataclass_of_another_type_re_runs_the_step_too(world: _World) -> None:
-    """Rule 6's nested half, which is where the obvious implementation of it fails.
+    """The nested half of `test_journal.py`'s rule 6, where the obvious implementation fails.
 
     `dataclasses.asdict` recurses: it turns a nested dataclass into a plain `dict` before any
     walker sees it, so a type name attached to what `asdict` returned names the outer type and
@@ -845,7 +847,7 @@ def test_a_nested_input_dataclass_of_another_type_re_runs_the_step_too(world: _W
 def test_a_step_that_raised_and_was_retried_in_one_run_replays_where_a_resume_looks(
     world: _World,
 ) -> None:
-    """§3.6: "the counter advances when an entry is written, not when a step is called".
+    """The rule: "the counter advances when an entry is written, not when a step is called".
 
     "A step that crashes and is retried within one run must not consume a slot - the crash is not
     journalled, so a retry landing at `n = 1` is a slot a later resume asks for at `n = 0`, misses,
@@ -870,7 +872,7 @@ def test_a_step_that_raised_and_was_retried_in_one_run_replays_where_a_resume_lo
     )
     assert before.per_step["steps/implement"] == 1, (
         "two entries under one step name after one crash and one retry: a step that raised wrote "
-        "a file, and §3.6's whole ledger is `a step is done when its file is there`"
+        "a file, and the whole ledger is `a step is done when its file is there`"
     )
 
     _spawn(world, programme="crash", tag="second", seed=RESUMED_SEED)
@@ -900,7 +902,7 @@ def test_the_kill_runs_no_finally_and_no_atexit_where_a_clean_finish_runs_both(
     """The claim every sweep above rests on, asked on its own so a failure says which thing broke.
 
     An exception would run `finally` blocks, `atexit` handlers and asyncio's cancellation path; a
-    killed agent runs none of them, and §3.6's design is built on that - "a crashed step leaves no
+    killed agent runs none of them, and the design is built on that - "a crashed step leaves no
     entry, so the next run resets to the last good head and starts clean" is a claim about a process
     that got no chance to tidy up. The driver registers both an `atexit` hook and a `finally`
     clause; `os._exit` skips both, and the same process completing normally leaves both.
@@ -933,12 +935,12 @@ print(repr(CONSTRAINTS[0]))
 def test_the_seeds_still_vary_what_the_cross_process_half_rests_on() -> None:
     """The non-vacuous half: these three seeds really do produce three different orders.
 
-    Rule 2 is only falsifiable across processes if `frozenset(Restriction)` iterates differently in
-    them, and rule 3 only if the `frozenset[str]` inside the dataclass input renders differently in
-    its `repr` - which is what the one-line `repr()` shortcut would put into the canonical text.
-    If either stops varying, every cross-process assertion in this file keeps passing while proving
-    nothing, so the seeds are re-measured on every run rather than trusted from the day they were
-    chosen.
+    Sorting every set is only falsifiable across processes if `frozenset(Restriction)` iterates
+    differently in them, and never using `repr()` only if the `frozenset[str]` inside the dataclass
+    input renders differently in its `repr` - which is what the one-line `repr()` shortcut would
+    put into the canonical text. If either stops varying, every cross-process assertion in this
+    file keeps passing while proving nothing, so the seeds are re-measured on every run rather than
+    trusted from the day they were chosen.
     """
     seeds = (KILLED_SEED, RESUMED_SEED, REFERENCE_SEED)
     restrictions: dict[str, str] = {}

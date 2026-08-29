@@ -19,7 +19,7 @@ on passing the moment somebody typed it. `KeyboardInterrupt` is settled the same
 is annotated `Exception`, so `except BaseException` at the call site is a type error rather than a
 convention, and the pair of assertions below is what makes that annotation load-bearing.
 
-**§3.1's group rule is asserted on constructed groups, and that is the honest register for it.** A
+**The group rule is asserted on constructed groups, and that is the honest register for it.** A
 `BaseExceptionGroup` is a value, so a group holding two `UpstreamError`s says everything about the
 rule that a real `TaskGroup` would - the leaves are the same objects either way. What a constructed
 group cannot say is that a group *reaches* the handler at all, which is a fact about `cli/main.py`
@@ -65,7 +65,7 @@ _PUBLISHED: Final[tuple[tuple[type[AglError], int], ...]] = (
 
 
 class ReviewNotConverging(Stop):
-    """§3.1's own example of a workflow's reason to stop - in no table, and still worth 7."""
+    """A workflow's own reason to stop - in no table, and still worth 7."""
 
 
 def _hierarchy() -> list[type[AglError]]:
@@ -158,14 +158,14 @@ def test_an_unmapped_branch_and_an_untranslated_exception_agree() -> None:
     assert exit_status(_UnmappedBranch("no code")) == exit_status(OSError("not ours to see"))
 
 
-# --- §3.1's group rule --------------------------------------------------------------------------
+# --- the group rule -----------------------------------------------------------------------------
 
 
 def test_a_single_leaf_group_is_worth_exactly_what_its_leaf_is_worth() -> None:
     """"Unwrap a single-exception group and map its leaf" - the parity, stated as one.
 
-    The number is the point only in as much as it is the *same* number: a `TaskGroup` is how §3.3
-    writes `split`, so a chunk that could not reach the agent has to cost what `fix` costs when the
+    The number is the point only in as much as it is the *same* number: `split` is written as a
+    `TaskGroup`, so a chunk that could not reach the agent has to cost what `fix` costs when the
     same adapter raises the same class, or a script cannot tell one workflow's failures from the
     other's.
     """
@@ -193,8 +193,8 @@ def test_leaves_agree_when_their_codes_agree_and_not_when_their_classes_do() -> 
 def test_leaves_that_disagree_are_seventy_because_no_one_of_them_is_the_answer() -> None:
     """"For leaves that disagree, 70" - and 70 here is a decision, not a fallback.
 
-    §3.1: "a run that failed several different ways is genuinely not attributable to one code, and
-    `InternalError` is the honest answer rather than a guess." The pair below is the smallest
+    A run that failed several different ways is genuinely not attributable to one code, and
+    `InternalError` is the honest answer rather than a guess. The pair below is the smallest
     version of that: both are refusals a user can act on, they say to do different things, and any
     rule picking one of them would publish a number that named one failure and hid the other.
     """
@@ -205,7 +205,7 @@ def test_leaves_that_disagree_are_seventy_because_no_one_of_them_is_the_answer()
 
 
 def test_a_deliberate_stop_inside_a_group_is_still_seven() -> None:
-    """The second half of the defect §3.1 names, and the half a `Stop` subclass reaches too.
+    """The group rule's other half, and the half a `Stop` subclass reaches too.
 
     A workflow that raises `ReviewNotConverging` from inside a chunk has ended deliberately, and 7
     is how a script tells "needs you" from "broken" wherever the raise happened. Both spellings are
@@ -219,7 +219,7 @@ def test_a_deliberate_stop_inside_a_group_is_still_seven() -> None:
 def test_a_leaf_resolves_the_same_however_deeply_its_group_is_nested() -> None:
     """Groups nest because `TaskGroup`s do, so the rule is about leaves and not about children.
 
-    §3.3's `split` opens a `TaskGroup` and a chunk may open its own, which makes "a single-exception
+    `split` opens a `TaskGroup` and a chunk may open its own, which makes "a single-exception
     group" a claim that has to survive one wrapper or twenty. A rule reading `group.exceptions` once
     would answer 70 for the deeper of the two below while answering 6 for the shallower, and the
     only difference between them is how the workflow spelled its concurrency.
@@ -248,7 +248,7 @@ def test_a_leaf_nobody_translated_takes_part_in_agreement_like_any_other() -> No
 def test_leaves_hands_back_every_exception_a_group_holds_and_nothing_else() -> None:
     """The walk `cli/main.py` names all of them with, asserted by identity and in order.
 
-    Public for one reason: "naming all of them" is the half of §3.1's clause that is a message, and
+    Public for one reason: "naming all of them" is the half of the group rule that is a message, and
     the messages are written in `cli/main.py`. A second flattening over there would be free to
     disagree with this one about what a leaf is, so there is one walk and this is it - and the
     groups themselves are deliberately absent from what it yields, a group being the wrapper rather

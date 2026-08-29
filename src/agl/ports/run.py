@@ -151,7 +151,7 @@ def _checked_key(key: object) -> str:
 def _checked_text(value: str, where: str) -> str:
     for index, character in enumerate(value):
         if unicodedata.category(character) == _SURROGATE:
-            raise InternalError(
+            raise InputError(
                 f"{where} holds U+{ord(character):04X} at position {index}, which is a surrogate: "
                 f"UTF-8 has no encoding for one at all, so the store refuses the write and this "
                 f"refuses it here, where the caller still knows what it handed over"

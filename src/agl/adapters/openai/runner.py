@@ -170,7 +170,7 @@ def _not_a_flag(value: str, what: str) -> str:
         raise InputError(
             f"the OpenAI adapter will not use {value!r} as its {what}: it begins with '-', and "
             f"this value reaches the CLI as its own argument, where a leading dash makes it a flag "
-            f"rather than a value. §3.5: every value reaching a command line is hostile regardless "
+            f"rather than a value. Every value reaching a command line is hostile regardless "
             f"of where it came from"
         )
     return value

@@ -5,11 +5,13 @@ thing - a stand-in for something *outside* AGL, built so that a test can start a
 watch what it composes, and read back what it would have sent, without a paid endpoint existing
 anywhere in the picture.
 
-The build's rule is that **no test spends tokens, ever** (`docs/agl-build-stages.md`), and the
-failure that rule was written against is a suite that is green because the environment is broken. An
-instrument here is how a claim moves from "deferred to the manual QA pass" to "asserted on every
-run": the CLI genuinely starts, genuinely composes its session, genuinely sends its request - and
-the far side is a socket on `127.0.0.1` that this package owns.
+The build's rule is that **no test spends tokens, ever** - the paid-endpoint guard in
+`scripts/check` is what holds it - and the failure that rule was written against is a suite that is
+green because the environment is broken: four tests once passed asserting a run would fail, and
+would have passed with no harness installed at all. An instrument here is how a claim moves from
+"deferred to the manual QA pass" to "asserted on every run": the CLI genuinely starts, genuinely
+composes its session, genuinely sends its request - and the far side is a socket on `127.0.0.1`
+that this package owns.
 
 Importable as `instruments.<module>` from any test, by the same mechanism that makes `contracts.*`
 resolve: `tests/` carries no `__init__.py`, so pytest's prepend import mode puts `tests/` itself on

@@ -1,10 +1,10 @@
-"""Stage 10's walking skeleton driven from the argv side: `main(argv)` on `container.fakes()`.
+"""The walking skeleton driven from the argv side: `main(argv)` on `container.fakes()`.
 
 `tests/test_api.py` proved the operations from the library side. This module drives the real entry
 point - the real parser, the real dispatch, the real top-level handler - and reads the real exit
-code, which is §1.5's "nothing can script against AGL" turned into an assertion. The numbers below
-are written out by hand for `tests/cli/test_exit_codes.py`'s reason: they are the API a script
-branches on, so a change to one should have to be typed twice.
+code, which is the old defect - nothing could script against AGL - turned into an assertion. The
+numbers below are written out by hand for `tests/cli/test_exit_codes.py`'s reason: they are the API
+a script branches on, so a change to one should have to be typed twice.
 
 **The bundle is substituted through `main`'s one seam and nothing is monkeypatched.** `compose=` is
 a keyword-only parameter whose default is the real composition, exactly as `api.run`'s `points=` is,
@@ -12,33 +12,33 @@ so the suite hands in `container.fakes()` and an `Invocation` carrying entry poi
 constructs itself. Nothing here reaches into a module's internals to do it, and nothing here needs a
 git repository, an `AGL_HOME` or an installed distribution.
 
-**Two tests are the deliberate exception, and both are about the composition itself.** 11.0 put the
-project and the container behind a callable on the `Invocation`, so what has to be shown is that
+**Two tests are the deliberate exception, and both are about the composition itself.** The project
+and the container sit behind a callable on the `Invocation`, so what has to be shown is that
 composing no longer resolves either - and a seam that substitutes the composition cannot be used to
 assert what the real composition does. Those two set `AGL_HOME` and a working directory with no
-repository above it and let `main` compose for real, which is also the only route to §3.10's answer
-for an unregistered repository: `NotFoundError`, exit 3, naming `agl init`.
+repository above it and let `main` compose for real, which is also the only route to the answer for
+an unregistered repository: `NotFoundError`, exit 3, naming `agl init`.
 
-**The ordering criterion is pinned twice, and neither pin is the exit code.** §3.1 makes it a
-stage-10 acceptance criterion that `Stop` is caught before `AglError`, and an outcome-only test
-cannot fail on a swap: `exit_status` reads 7 out of the one table whichever clause caught it. What
-differs is the rendering - a deliberate end goes to stdout with no prefix, a failure to stderr with
-one - so the behavioural pin is built on that, and the structural pin walks `main`'s own `except`
-clauses in source order.
+**The ordering criterion is pinned twice, and neither pin is the exit code.** It is an acceptance
+criterion that `Stop` is caught before `AglError`, and an outcome-only test cannot fail on a swap:
+`exit_status` reads 7 out of the one table whichever clause caught it. What differs is the
+rendering - a deliberate end goes to stdout with no prefix, a failure to stderr with one - so the
+behavioural pin is built on that, and the structural pin walks `main`'s own `except` clauses in
+source order.
 
-**§3.1's group clause is tested here because here is the only place it is visible.** A `TaskGroup`
+**The group clause is tested here because here is the only place it is visible.** A `TaskGroup`
 whose child raises hands `api` back an `ExceptionGroup`, which is not an `AglError` - and
 `agl.testing`'s harness splits that group before a workflow-level test can see it, so the rule is
-CLI-only and the divergence it repairs went unnoticed for eighteen stages. The workflows below that
-open a `TaskGroup` are the smallest thing that reaches `main`'s handler holding a real one, and
-every assertion about them is made through `main.main`: the real parser, the real dispatch, the real
+CLI-only and the divergence it repairs went unnoticed until late. The workflows below that open a
+`TaskGroup` are the smallest thing that reaches `main`'s handler holding a real one, and every
+assertion about them is made through `main.main`: the real parser, the real dispatch, the real
 arms. `tests/cli/test_exit_codes.py` asserts the same rule on constructed groups, where the leaves
 are the same objects and nothing has to be run to make one.
 
 **The group tests assert parity rather than numbers wherever there is a parity to assert.** The
-whole of §3.1's first clause is that a failure inside a chunk costs what the identical failure costs
-in a sequential workflow, so the test that says so runs both and compares them - a pair of tests
-each pinning 6 would go on passing in a world where one of the two had quietly become 70.
+whole of the group rule's first clause is that a failure inside a chunk costs what that failure
+costs in a sequential workflow, so the test that says so runs both and compares them - a pair of
+tests each pinning 6 would go on passing in a world where one of the two had quietly become 70.
 """
 
 import ast
@@ -83,7 +83,7 @@ class NoParams:
 
 
 class ReviewNotConverging(Stop):
-    """§3.1's own example of a workflow's reason to stop, subclassed as a workflow would."""
+    """A workflow's own reason to stop, subclassed as a workflow would."""
 
 
 # What the workflows below raise, so that the same failure can be raised sequentially and inside a
@@ -103,7 +103,7 @@ handed: Final[list[Run[NoParams]]] = []
 
 @workflow(version="1.1")
 async def probe(run: Run[NoParams]) -> None:
-    """Returns. Stage 10's wiring probe, standing in for 10.5's `workflows/noop/`."""
+    """Returns. The wiring probe, standing in for a workflow package that does nothing."""
     handed.append(run)
 
 
@@ -158,7 +158,7 @@ async def nested(run: Run[NoParams]) -> None:
 
 @workflow(version="0.1")
 async def agreeing(run: Run[NoParams]) -> None:
-    """Two chunks, two classes, one code: "agree" as §3.1 means it rather than class equality."""
+    """Two chunks, two classes, one code: "agree" about the code rather than about the class."""
     async with asyncio.TaskGroup() as chunks:
         chunks.create_task(_chunk(UpstreamUnavailable(UNREACHABLE)))
         chunks.create_task(_chunk(UpstreamUnexpected(UNPARSEABLE)))
@@ -195,7 +195,7 @@ async def chunked_bug(run: Run[NoParams]) -> None:
 
 
 def _point(name: str, attribute: str) -> EntryPoint:
-    """§3.3's `probe = "agl.workflows.probe:probe"`, pointed at this module instead."""
+    """A `probe = "agl.workflows.probe:probe"` line, pointed at this module instead."""
     return EntryPoint(name=name, value=f"{__name__}:{attribute}", group=registry.GROUP)
 
 
@@ -222,8 +222,8 @@ def _fakes(tmp_path: Path) -> container.FakeServices:
 def _compose(harness: container.FakeServices) -> main.Compose:
     """`main`'s seam, filled in: the fakes bundle, this project, and this module's workflows.
 
-    `registered` is a callable because §3.10's composition is per-command, and here it is one that
-    answers without reading anything - which is the whole of what a `run` invocation needs from a
+    `registered` is a callable because composition is per-command, and here it is one that answers
+    without reading anything - which is the whole of what a `run` invocation needs from a
     registered repository, and exactly what a real one would have had to resolve a project to get.
     """
     return lambda: main.Invocation(
@@ -264,7 +264,7 @@ def _clauses() -> list[str]:
     """The exception classes `main.main`'s `try` catches, in the order they are written.
 
     Read off the source rather than off the function object, because the ordering is a property of
-    the text: `except` clauses are tried top to bottom, and the bug §3.1 names is a swap of two
+    the text: `except` clauses are tried top to bottom, and the bug in question is a swap of two
     adjacent lines that leaves every type annotation and every signature identical.
     """
     entry = [
@@ -281,14 +281,14 @@ def _clauses() -> list[str]:
     return caught
 
 
-# --- the four acceptance criteria stage 10 names -------------------------------------------------
+# --- the four acceptance criteria ----------------------------------------------------------------
 
 
 def test_a_workflow_that_returns_exits_zero(tmp_path: Path) -> None:
-    """`agl run <workflow> -n <label>` end to end through argv - the stage's first criterion.
+    """`agl run <workflow> -n <label>` end to end through argv - the first criterion.
 
     The record is asserted too, because "exits 0" would also be true of a `main` that parsed the
-    line and did nothing: `run.json` is the one thing stage 10 persists, and it is the evidence
+    line and did nothing: `run.json` is the one thing a bare run persists, and it is the evidence
     that the dispatch reached `api.run` rather than merely returning.
     """
     handed.clear()
@@ -301,7 +301,7 @@ def test_a_workflow_that_returns_exits_zero(tmp_path: Path) -> None:
 
 
 def test_the_workflow_is_handed_the_bundle_that_was_composed(tmp_path: Path) -> None:
-    """§1.4's charge, from the far end: one composition, and the ports reach the workflow.
+    """"Commands stay dumb", from the far end: one composition, and the ports reach the workflow.
 
     `Git(Path.cwd())` was constructed four times and the whole `RunContext` twice. Identity is what
     makes this a test of that - an equal-looking second bundle would pass anything weaker.
@@ -314,8 +314,8 @@ def test_the_workflow_is_handed_the_bundle_that_was_composed(tmp_path: Path) -> 
     assert handed[0].services is harness.services
 
 
-def test_the_same_label_twice_exits_four_in_section_3_10s_words(tmp_path: Path) -> None:
-    """The second criterion: exit 4, with the plan's message reaching the user on stderr.
+def test_the_same_label_twice_exits_four(tmp_path: Path) -> None:
+    """The second criterion: exit 4, with the refusal's own message reaching the user on stderr.
 
     The refusal is `api.run`'s and the command does not re-detect it, so what is asserted here is
     that it survives the trip: raised in the operation, resolved through the one table, rendered by
@@ -330,7 +330,7 @@ def test_the_same_label_twice_exits_four_in_section_3_10s_words(tmp_path: Path) 
 def test_the_existing_label_refusal_is_printed_as_written(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """§3.10's sentence, on stderr, prefixed with the program's name and nothing else."""
+    """The refusal's sentence, on stderr, prefixed with the program's name and nothing else."""
     harness = _fakes(tmp_path)
     _main(harness, "run", "probe", "-n", "auth")
     capsys.readouterr()
@@ -378,7 +378,7 @@ def test_a_workflows_own_stop_subclass_exits_seven(tmp_path: Path) -> None:
 def test_a_deliberate_stop_is_not_rendered_as_a_failure(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """§3.1's stage-10 criterion, made observable. **This is the test that fails on a clause swap.**
+    """The ordering criterion, made observable. **This is the test that fails on a clause swap.**
 
     Swapping `except Stop` with `except AglError` leaves the exit code at 7 - the table answers for
     the class, not for the clause - and changes exactly this: the stop would be printed to stderr
@@ -413,17 +413,17 @@ def test_the_handler_catches_stop_before_agl_error(tmp_path: Path) -> None:
     assert "BaseException" not in caught
 
 
-# --- §3.1's group clause, which nothing below the CLI can observe --------------------------------
+# --- the group clause, which nothing below the CLI can observe -----------------------------------
 
 
 def test_a_failure_in_one_chunk_costs_what_the_same_failure_costs_sequentially(
     tmp_path: Path,
 ) -> None:
-    """§3.1's first clause, asserted as the parity it exists to restore rather than as a number.
+    """The first clause, asserted as the parity it exists to restore rather than as a number.
 
-    "Unwrap a single-exception group and map its leaf." `split` runs its chunks under a `TaskGroup`,
-    so the same `UpstreamUnavailable` an adapter raises in `fix` arrives here wrapped - and before
-    19.0 the wrapper cost 64 points of exit status, which is the difference between a script
+    "Unwrap a single-exception group and map its leaf." `split` runs its chunks under a
+    `TaskGroup`, so the same `UpstreamUnavailable` an adapter raises in `fix` arrives here wrapped
+    - and the wrapper once cost 64 points of exit status, which is the difference between a script
     retrying an unreachable backend and a script filing a bug against AGL.
 
     Both invocations are run and compared, and the number is pinned after them. Two tests each
@@ -443,9 +443,9 @@ def test_a_failure_in_one_chunk_costs_what_the_same_failure_costs_sequentially(
 def test_a_leaf_costs_the_same_however_deeply_its_group_is_nested(tmp_path: Path) -> None:
     """Groups nest because `TaskGroup`s do, and a leaf is the same leaf at any depth.
 
-    §3.3's `split` opens one and each chunk may open its own, so "a single-exception group" has to
-    be a fact about what the run did rather than about how the workflow spelled its concurrency. The
-    two workflows below differ in exactly one thing - one wrapper - and a rule that read a group's
+    `split` opens one and each chunk may open its own, so "a single-exception group" has to be a
+    fact about what the run did rather than about how the workflow spelled its concurrency. The two
+    workflows below differ in exactly one thing - one wrapper - and a rule that read a group's
     immediate children would answer 70 for the deeper of them.
     """
     deeper = _main(_fakes(tmp_path / "deeper"), "run", "nested", "-n", "auth")
@@ -474,15 +474,15 @@ def test_chunks_that_fail_differently_exit_seventy_naming_every_one_of_them(
 ) -> None:
     """"For leaves that disagree, 70, naming all of them" - the naming being the half asserted here.
 
-    §3.1 argues the number: "a run that failed several different ways is genuinely not attributable
-    to one code, and `InternalError` is the honest answer rather than a guess." What that argument
+    The number is argued: a run that failed several different ways is genuinely not attributable to
+    one code, and `InternalError` is the honest answer rather than a guess. What that argument
     costs the operator is a 70 whose usual meaning is "file a bug" for a run in which nothing was
     AGL's fault, so the naming is not decoration - it is the only thing that tells them which
     failures produced the number and that neither of them was ours.
 
     Each leaf is asserted beside the status it resolves to on its own, because that is what makes
     the sentence actionable: 6 says retry the backend and 4 says the label or the lease is taken,
-    and an operator who is shown two class names and no codes has to go and read §3.1 to act.
+    and an operator shown two class names and no codes has to go and read the table to act.
     """
     harness = _fakes(tmp_path)
 
@@ -498,14 +498,14 @@ def test_chunks_that_fail_differently_exit_seventy_naming_every_one_of_them(
 def test_a_deliberate_stop_in_a_chunk_reads_exactly_like_one_raised_on_its_own(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The second half of the defect §3.1 names, and the second half of it is the rendering.
+    """The group rule's other half, and the second half of it is the rendering.
 
-    A `Stop` inside a `TaskGroup` exited 70 before 19.0, and it was also printed as a traceback
-    under a sentence saying AGL had a bug - so a workflow that ended deliberately in a chunk told
-    the operator both of the two things `Stop` exists to say it is not. The exit code is
+    A `Stop` inside a `TaskGroup` used to exit 70, and it was also printed as a traceback under a
+    sentence saying AGL had a bug - so a workflow that ended deliberately in a chunk told the
+    operator both of the two things `Stop` exists to say it is not. The exit code is
     `cli/exit_codes.py`'s to answer and the message is `main`'s, and both are asserted here against
-    the identical stop raised sequentially, which is the only comparison that fails in a world where
-    one of the two arms drifts.
+    the identical stop raised sequentially, which is the only comparison that fails in a world
+    where one of the two arms drifts.
     """
     together = _main(_fakes(tmp_path / "together"), "run", "halting_together", "-n", "auth")
     concurrent = capsys.readouterr()
@@ -524,7 +524,7 @@ def test_a_chunk_that_stopped_beside_a_chunk_that_broke_is_named_with_both(
     """"All of them" includes the deliberate end, because it is half of why the run exits 70.
 
     A run in which one chunk finished the work it had and another could not reach its backend is
-    exactly the run §3.1 refuses to attribute to one code: 7 says "needs you" and 6 says "broken",
+    exactly the run that cannot be attributed to one code: 7 says "needs you" and 6 says "broken",
     and there is no answer that is both. What the operator has to be able to see is that pair, so
     the stop is named on stderr beside the failure - and it is still reported as a stop on stdout,
     because nothing about the disagreement makes it one.
@@ -543,7 +543,7 @@ def test_a_chunk_that_stopped_beside_a_chunk_that_broke_is_named_with_both(
 def test_an_untranslated_exception_in_a_chunk_keeps_the_traceback_it_would_have_kept(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """§1.5's charge holds inside a group: the fix is not to stop catching but to stop hiding.
+    """The same defect inside a group: the fix is not to stop catching but to stop hiding.
 
     A leaf nobody translated is our bug wherever it was raised, so it resolves to 70 and it keeps
     the one part of a bug worth having. The traceback is printed for that leaf and for no other -
@@ -597,7 +597,7 @@ def test_a_missing_label_exits_two_rather_than_leaving_through_system_exit(
 
 
 def test_a_label_the_filesystem_would_not_take_exits_two(tmp_path: Path) -> None:
-    """`RunLabel` validates on the way in (§3.3), and its `InputError` is the same 2.
+    """`RunLabel` validates on the way in, and its `InputError` is the same 2.
 
     The label becomes a directory and the branch `agl/<label>`, so `my/label` is a path where a
     name belongs. Nothing downstream re-checks it, which is why it is checked before the run.
@@ -617,8 +617,8 @@ def test_no_subcommand_at_all_exits_two(tmp_path: Path) -> None:
 def test_an_unexpected_exception_exits_seventy_with_its_traceback(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """§1.5's charge answered: `_cmd_run` ended in a bare `except Exception` rendering any bug as
-    `error: <str>`, so the traceback - the only part of a bug worth having - was thrown away.
+    """The old defect answered: `_cmd_run` ended in a bare `except Exception` rendering any bug
+    as `error: <str>`, so the traceback - the only part of a bug worth having - was thrown away.
 
     Anything that is not an `AglError` reaching the top is a translation an adapter did not perform,
     which is our bug, which is 70 (`cli/exit_codes.py` argues both halves). The traceback is printed
@@ -654,7 +654,7 @@ def test_help_still_exits_zero_through_system_exit(tmp_path: Path) -> None:
 
 
 def test_the_composition_happens_once_and_only_after_argv_is_understood(tmp_path: Path) -> None:
-    """§1.4's charge, measured: one resolution per invocation, and none for a line that is wrong.
+    """"Commands stay dumb", measured: one resolution per invocation, and none for a wrong line.
 
     Four `Git(Path.cwd())` and two `RunContext`s is what this counts against. The second half is the
     ordering `main` is written in: a person who typed the command wrong is told what they typed
@@ -679,13 +679,13 @@ def test_the_composition_happens_once_and_only_after_argv_is_understood(tmp_path
 def test_composing_resolves_settings_and_not_a_project(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """11.0's whole change, measured on the composition stage 10 would have failed this on.
+    """The whole of that change, measured on the composition that would have failed it.
 
-    Before this deliverable `_compose` resolved the project and built the container before the
-    dispatch chose a command, so in the directory below it raised - and `agl init`, the command
-    whose job is to make that directory a project, could not have been reached from here whatever
-    16.4 wrote. Now composing asks the environment and stops, and the refusal arrives only when
-    something calls the thunk that would resolve a repository.
+    `_compose` used to resolve the project and build the container before the dispatch chose a
+    command, so in the directory below it raised - and `agl init`, the command whose job is to make
+    that directory a project, could not have been reached from here however it was written. Now
+    composing asks the environment and stops, and the refusal arrives only when something calls the
+    thunk that would resolve a repository.
 
     The private `_compose` is called on purpose: `compose=` substitutes the thing under test, and
     the two halves being asserted - that composing returns, and that calling *then* raises - are
@@ -704,8 +704,8 @@ def test_composing_resolves_settings_and_not_a_project(
 def test_an_unregistered_repository_exits_three_naming_agl_init(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """§3.10: "A command invoked in an unregistered repository gets `NotFoundError` -> exit 3,
-    naming `agl init`, which is run once per project and never again."
+    """A command invoked in an unregistered repository gets `NotFoundError` -> exit 3, naming
+    `agl init`, which is run once per project and never again.
 
     The same fact as the test above, through the real entry point with no seam filled in at all -
     the real parser, the real `_compose`, the real dispatch, the real handler. What it adds is the
@@ -746,11 +746,12 @@ def test_main_writes_no_exit_code_of_its_own(tmp_path: Path) -> None:
 
 
 def test_the_working_directory_is_read_exactly_once_in_the_whole_of_agl() -> None:
-    """§1.4's charge, counted: `Git(Path.cwd())` was constructed **four times**, once per command.
+    """"Commands stay dumb", counted: `Git(Path.cwd())` was constructed **four times**, once per
+    command.
 
-    16.4 is where this stopped being free. `Path.cwd()` used to sit inside the thunk that resolves a
-    project, which was the whole of what needed it; `agl init` is the second reader - §3.10 has it
-    find its own git root - so the honest choices were a second read in the `init` path or one read
+    This stopped being free when `init` arrived. `Path.cwd()` used to sit inside the thunk that
+    resolves a project, which was the whole of what needed it; `agl init` is the second reader - it
+    finds its own git root - so the honest choices were a second read in the `init` path or one read
     hoisted here and carried on the `Invocation`. Four started as two, so the count is the test.
 
     **A source scan, for `test_main_writes_no_exit_code_of_its_own`'s reason**: "it works" is true

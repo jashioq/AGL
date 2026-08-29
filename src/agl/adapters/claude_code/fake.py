@@ -165,8 +165,8 @@ def _as_json(payload: Mapping[str, JsonValue], tool: str) -> dict[str, JsonValue
     except (TypeError, ValueError) as unwritable:
         raise InputError(
             f"the payload for tool {tool!r} is not JSON: {unwritable}. A tool call reaches a real "
-            f"handler as JSON a model produced, and a step's result is written down as JSON "
-            f"(§3.6), so a payload that cannot be one is a call no run could have made"
+            f"handler as JSON a model produced, and a step's result is written down as JSON, so a "
+            f"payload that cannot be one is a call no run could have made"
         ) from unwritable
 
 

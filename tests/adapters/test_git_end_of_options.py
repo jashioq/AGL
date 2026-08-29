@@ -15,8 +15,8 @@ a *write* performed by a port whose whole promise is that it changes nothing.
 So a probe per site is the wrong instrument, for the reason the hermeticity test in
 `test_claude_code_runner.py` gives about its own clause: where the property is structural, the
 structural assertion is the one that does not go stale when a site is added. This is that shape's
-fourth application - `test_shell_verifier.py` established it at stage 6 - and like both siblings it
-parses source and runs nothing.
+fourth application - `test_shell_verifier.py` established it - and like both siblings it parses
+source and runs nothing.
 
 ## The rule, which is four docstrings' and not this file's
 

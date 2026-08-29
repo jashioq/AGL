@@ -1,18 +1,18 @@
 """The grammar: `agl run <workflow> -n <label> [workflow flags] [--from <ref>]`, and its seams.
 
 `tests/cli/test_main.py` drives the entry point for its exit codes; this module drives it for what
-argv means. Three things are pinned and each of them is a charge from Part 1 or a decision §3.9
-settles:
+argv means. Three things are pinned, and each of them is a defect in what came before or a decision
+this grammar settles:
 
-**The generic parser holds no workflow's flag** (§1.2). `--max-concurrent` sat on the generic `run`
+**The generic parser holds no workflow's flag.** `--max-concurrent` sat on the generic `run`
 parser with the help text "how many tickets to work on at once", so every workflow paid for one
 workflow's input and it then persisted into a shared record. The pin is read off the parser object -
 its options, its one positional and its namespace - rather than off a sentence, which is
 `params.parser_for`'s own argument for being public.
 
-**`--from` is framework-level and not a workflow param** (§3.9): "every code-producing workflow
-needs one and the framework needs it independently." So it is on the generic parser, it reaches
-`run.json`, and its absence is the repository's default rather than a branch written into the CLI.
+**`--from` is framework-level and not a workflow param**: every code-producing workflow needs one
+and the framework needs it independently. So it is on the generic parser, it reaches `run.json`,
+and its absence is the repository's default rather than a branch written into the CLI.
 
 **Abbreviation is off, and flag collisions are documented rather than refused.** Both are decisions
 `cli/commands/run.py` argues at length, and both have a cost that only a test can hold still: a
@@ -57,7 +57,7 @@ SCOPE: Final = RunScope(PROJECT, LABEL)
 
 @dataclass(frozen=True)
 class FlaggedParams:
-    """§3.3's example shape, which `agl run flagged -n auth -r "add oauth" -c 4` fills in."""
+    """The example params shape, which `agl run flagged -n auth -r "add oauth" -c 4` fills in."""
 
     request: str = arg("-r", "--request", help="what to build")
     concurrent: int = arg("-c", "--concurrent", default=3)
@@ -117,7 +117,7 @@ async def defaulted(run: Run[DefaultedCollisionParams]) -> None:
 
 
 def _point(name: str) -> EntryPoint:
-    """§3.3's registration line, pointed at this module: a name, a `module:attr`, and a group."""
+    """A registration line, pointed at this module: a name, a `module:attr`, and a group."""
     return EntryPoint(name=name, value=f"{__name__}:{name}", group=registry.GROUP)
 
 
@@ -160,9 +160,9 @@ def _run_parser() -> RefusingParser:
 
 
 def test_the_generic_parser_holds_three_arguments_and_no_workflows_flag() -> None:
-    """§1.2's charge, read off the object: `--max-concurrent` could not be added here by accident.
+    """Read off the object: `--max-concurrent` could not be added here by accident.
 
-    Three arguments, one of them the positional §3.3 reserves for the workflow name - "a workflow
+    Three arguments, one of them the positional reserved for the workflow name - "a workflow
     inventing a positional" is refused in `arg()` because this position is already spent - plus the
     `-h` every parser carries. A flag belonging to one workflow would show up in this set.
     """
@@ -205,7 +205,7 @@ def test_a_workflows_flags_are_left_in_the_tail_and_never_in_the_namespace() -> 
 
 
 def test_the_command_calls_exactly_one_api_function() -> None:
-    """"Commands stay dumb" (§1.4), made mechanical: this module reaches `api` once, for `run`.
+    """"Commands stay dumb", made mechanical: this module reaches `api` once, for `run`.
 
     `_cmd_clean` iterated worktrees, deleted branches and called `shutil.rmtree` past the `Store`
     port; `_cmd_init` did build-tool detection and TOML rendering in ~150 lines. The repair is not
@@ -257,7 +257,7 @@ def test_a_flag_the_workflow_refuses_exits_two_from_the_workflows_own_parser(
     tmp_path: Path,
 ) -> None:
     """The tail is handed over unread, so the refusal comes from the only module that could give
-    it: `sdk/params.py`, naming the program as `agl run flagged`. §3.3's "before anything runs"."""
+    it: `sdk/params.py`, naming the program as `agl run flagged`, before anything runs."""
     harness = _fakes(tmp_path)
 
     assert _main(harness, "run", "flagged", "-n", "auth", "-r", "x", "--nosuch") == 2
@@ -269,7 +269,7 @@ def test_a_flag_the_workflow_refuses_exits_two_from_the_workflows_own_parser(
 
 
 def test_from_is_a_framework_flag_and_lands_in_the_record(tmp_path: Path) -> None:
-    """§3.9: "Base ref is a framework-level run parameter, not a workflow param."
+    """Base ref is a framework-level run parameter, not a workflow param.
 
     It is on the generic parser, so every workflow gets it and none declares it, and it reaches
     `run.json` beside the sha it resolved to rather than reaching the workflow's params at all.
@@ -287,7 +287,7 @@ def test_from_is_a_framework_flag_and_lands_in_the_record(tmp_path: Path) -> Non
 def test_without_from_the_base_ref_is_the_repositorys_and_not_the_clis(tmp_path: Path) -> None:
     """No default is written into `add_argument`, and that is the decision.
 
-    `_TRUNK = ("main", "master")` is §1.2's charge in the old preflight - a CLI deciding for a
+    `_TRUNK = ("main", "master")` is the old preflight's version of it - a CLI deciding for a
     repository it had not looked at. `None` reaches `api.run`, which asks `History`, which is the
     one thing that can see the repository.
     """
@@ -337,9 +337,10 @@ def test_a_workflow_declaring_a_generic_spelling_is_shadowed_loudly_when_it_is_r
 
     Neither `sdk/params.py` nor this layer refuses a workflow that declares `-n`: refusing would
     mean loading the workflow to look at its params, which is the first line of `api.run`
-    re-implemented in a command, which is §1.4's charge. So the generic parser wins - it runs first
-    - and the workflow's required flag is simply never given a value, which `sdk/params.py` refuses
-    by name at exit 2 before anything runs. The user is told which flag went missing.
+    re-implemented in a command, which "commands stay dumb" forbids. So the generic parser wins -
+    it runs first - and the workflow's required flag is simply never given a value, which
+    `sdk/params.py` refuses by name at exit 2 before anything runs. The user is told which flag
+    went missing.
     """
     required_with.clear()
     harness = _fakes(tmp_path)
@@ -374,7 +375,7 @@ def test_a_workflow_declaring_a_generic_spelling_keeps_its_default_when_it_has_o
 def test_a_finished_run_is_named_the_way_the_refusal_names_it(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """§3.10's refusal reads `run 'auth' already exists`; a run that finished says so alike.
+    """The refusal reads `run 'auth' already exists`; a run that finished says so alike.
 
     One line, on stdout, quoting the label the same way - so an operator reading a terminal full of
     `agl` output sees one vocabulary rather than two.

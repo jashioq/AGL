@@ -1,13 +1,13 @@
-"""§3.10's run claim: what `hold` excludes, when it lets go, and the half no suite can reach.
+"""The run claim: what `hold` excludes, when it lets go, and the half no suite can reach.
 
 Split out of `workspace.py` along the line the port draws itself. The three verbs beside this one
 make and unmake isolated places; this one makes no place and unmakes none - it says that this
 process is walking this run, for as long as the context is open, so that a `clear` aimed at a run
-live in another `agl` refuses instead of taking its checkouts away underneath it. §3.10 wrote that
-sentence and had no mechanism behind it: "there is no durable 'this run is live' record, and §3.11
-refuses stored status by name ... The fix is a `flock` on the run directory held for the life of
-the process: an OS lock that releases on death, the same shape §3.9 already uses, and not stored
-status."
+live in another `agl` refuses instead of taking its checkouts away underneath it. That sentence
+came before any mechanism behind it: there is no durable "this run is live" record, and
+`ARCHITECTURE.md`'s "Deliberately not built" refuses stored status by name. The mechanism is a
+`flock` on the run directory held for the life of the process - an OS lock that releases on death,
+and not stored status.
 
 ## What is asserted here, and it is exactly what the port states
 
@@ -24,8 +24,8 @@ two different lines in an implementation: a release written after the body rathe
 
 ## What a green run here does NOT entitle anybody to believe
 
-**That the claim is released when the holder dies.** That is the property §3.10 asks for and the
-reason it asks for an OS lock rather than a record: a run killed at the wall socket must not leave
+**That the claim is released when the holder dies.** That is the property the claim exists for and
+the reason it is an OS lock rather than a record: a run killed at the wall socket must not leave
 its label claimed forever, and nothing a `finally` does can be relied on for that. It is
 unassertable from inside one process - a suite that killed the process would have nothing left to
 assert with - so the real adapter carries it and states it in `_trees.py`, and the fake states
@@ -36,7 +36,8 @@ suite: the fixture hands over one built provider and there is no way to ask for 
 same repository, let alone in a second process. What is exercised here is two claims in one
 process, which is what a `flock` on two descriptions of one inode refuses and what an in-process
 set refuses. A provider that excluded only within one Python object would pass this and fail the
-thing §3.10 wants; a provider that excluded across processes is not distinguishable from it here.
+thing the claim is for; a provider that excluded across processes is not distinguishable from it
+here.
 
 **That the claim is non-blocking.** The port says a second claim must refuse rather than wait, and
 a suite cannot tell a refusal from a wait that happened to be short. What it can tell is that
@@ -73,10 +74,10 @@ class WorkspaceHoldingContract:
     async def test_a_second_claim_on_one_run_is_refused_while_the_first_is_open(
         self, provider: WorkspaceProvider
     ) -> None:
-        """The exclusion itself, which is the whole of what §3.10's sentence needs.
+        """The exclusion itself, which is the whole of what the claim needs.
 
         `ConflictError` and not merely "something raised": the class is what `cli/exit_codes.py`
-        turns into exit 4, and §3.10's two neighbouring refusals - a label that already has a
+        turns into exit 4, and the two neighbouring refusals - a label that already has a
         record, a line of work something still has open - are that class already, so a run and a
         `clear` that collide with a live invocation answer alike. An implementation raising
         `UpstreamUnavailable` here would tell an operator their repository was unreachable.
@@ -98,8 +99,8 @@ class WorkspaceHoldingContract:
                     entered = True
 
         assert not entered, (
-            "a second claim on a run that was already claimed opened its body. §3.10's sentence is "
-            "that a `clear` refuses while a run holds the claim, and a claim two callers can hold "
+            "a second claim on a run that was already claimed opened its body. The claim exists so "
+            "that a `clear` refuses while a run holds it, and a claim two callers can hold "
             "at once excludes nobody from anything"
         )
         assert str(LABEL) in str(caught.value), (
@@ -137,7 +138,7 @@ class WorkspaceHoldingContract:
         This is a different line in an implementation from the one the test above exercises: a
         release written after the body rather than in a `finally` passes that test and fails this
         one, and the state it leaves is a run nobody can resume and nobody can clear without
-        restarting `agl`. It is also the nearest a suite in one process can get to §3.10's real
+        restarting `agl`. It is also the nearest a suite in one process can get to the real
         requirement, which is that the *kernel* lets go when a process dies - see this module's
         docstring for why that half is a stated gap rather than a test.
 
@@ -155,8 +156,8 @@ class WorkspaceHoldingContract:
     async def test_two_runs_are_two_claims(self, provider: WorkspaceProvider) -> None:
         """One claim per run, and not one per machine.
 
-        §3.9's whole requirement is "several workflows - or several instances of one - running
-        against a repo simultaneously", and an implementation that took one global lock would
+        The whole requirement is several workflows - or several instances of one - running
+        against a repo simultaneously, and an implementation that took one global lock would
         satisfy every assertion above while making the second concurrent run wait for the first to
         finish. The claim is addressed by `RunLabel` because a run is what is being claimed.
 

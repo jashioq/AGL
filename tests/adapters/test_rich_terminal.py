@@ -1,9 +1,9 @@
 """`RichTerminal` against the `Terminal` contract, plus the things a real console makes visible.
 
 The first class is the port in full: `TerminalContract` with its two fixtures overridden and
-nothing else touched. Everything `Terminal` promises is asserted there, by a suite written at stage
-3 against the port's docstrings and before this adapter existed - which is the inversion the build
-rests on (§1.9), and the reason nothing below re-asserts any of it.
+nothing else touched. Everything `Terminal` promises is asserted there, by a suite written
+against the port's docstrings and before this adapter existed - which is the inversion
+`tests/contracts/` rests on, and the reason nothing below re-asserts any of it.
 
 What is below is what that suite says outright it cannot see. Its own docstring lists seventeen
 gaps; these are the ones a rich console over a buffer can close, in the order they matter:
@@ -28,7 +28,7 @@ gaps; these are the ones a rich console over a buffer can close, in the order th
     region is gone. Asserted on the ordinary path and on the exception path, which is the one the
     lifecycle suite raises a `Stop` down.
   * **The console that cannot animate.** A plain log stream is a real deployment of this adapter
-    (§3.7 phrases the headless rule on input rather than on a TTY for exactly that reason), and it
+    (the headless rule is phrased on input rather than on a TTY for exactly that reason), and it
     takes the other of `_display.py`'s two paths - no `Live`, no redirection, a frame printed for
     every change and none for a screen that did not change.
 
@@ -128,7 +128,7 @@ EARLY: Final = "the question that was asked first"
 RUNNING: Final = "two children running"
 LANDED: Final = "one child landed, one still running"
 
-# §3.7's board, and the activity lines its own example shows.
+# The board a workflow shows, and the activity lines an adapter reports.
 TICKET: Final = "T-01"
 READING: Final = "Read: connectors/api/backend.ts"
 EDITING: Final = "Edit: domain/usecase.kt"
@@ -163,7 +163,7 @@ def dashboard(line: str) -> Screen:
 
 
 def board(rows: Mapping[str, str]) -> Screen:
-    """§3.7's board over a mapping the caller keeps a reference to.
+    """A board over a mapping the caller keeps a reference to.
 
     This exists for the tests that mutate an argument long after `show` was called: the lookup
     happens again on every invocation, which is why a live dict reaches the display with no second
@@ -173,7 +173,7 @@ def board(rows: Mapping[str, str]) -> Screen:
 
 
 def question(label: str) -> Screen[Answer]:
-    """§3.7's approval screen: a body to read, a choice to pick and a field to type into.
+    """An approval screen: a body to read, a choice to pick and a field to type into.
 
     Both response kinds, because they are the two routes to one `T` and because the input
     convention has to be shown answering each of them. The `maps` lambda is rebuilt on every
@@ -528,7 +528,7 @@ async def test_a_screen_that_has_not_changed_is_never_written_again_and_a_change
 ) -> None:
     """Gap 3, closed: the diff, which is the clause that makes per-frame invocation affordable.
 
-    §3.7's design is a view re-invoked ten times a second, and it only works because the expensive
+    The design is a view re-invoked ten times a second, and it only works because the expensive
     part - the write - is skipped when nothing moved. The contract suite says outright that a
     terminal rewriting everything every frame passes it, and from out here that is true: nothing on
     the port could tell the two apart.
@@ -662,7 +662,7 @@ async def test_a_console_that_cannot_animate_still_gets_every_frame_that_changed
 ) -> None:
     """The other of `_display.py`'s two paths: a plain log stream, which is a real deployment.
 
-    §3.7 phrases the headless rule on input rather than on "no TTY attached" precisely so that a
+    The headless rule is phrased on input rather than on "no TTY attached" precisely so that a
     stream with output and no input has a rule too, and a run whose output is redirected to a file
     is that stream. `Live` is no use to it - `Live.refresh` on a non-terminal console renders
     nothing at all while it is started - so the frames are printed instead, and the diff is what

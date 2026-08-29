@@ -6,10 +6,10 @@ one refuses it - so they are two classes rather than one class with a flag, and 
 docstring argues that choice and what it protects against.
 
 **The rule is phrased on the terminal's ability to take input, not on a TTY being attached**, and
-§3.7 says why in as many words: a plain log stream has output and no input, and the TTY wording
-gives it no rule at all. So a terminal writing frames into a file, a terminal writing nothing, and a
-terminal on a pipe are all one case here, and it is the case where a workflow needing a person
-genuinely cannot run.
+the reason is plain: a plain log stream has output and no input, and the TTY wording gives it no
+rule at all. So a terminal writing frames into a file, a terminal writing nothing, and a terminal
+on a pipe are all one case here, and it is the case where a workflow needing a person genuinely
+cannot run.
 
 **This half needs no driver, and that is the design rather than a convenience.** A terminal that
 cannot take input never displays a screen anybody can answer, so there is nothing for a driver to
@@ -19,7 +19,7 @@ this suite with no test-support machinery at all.
 
 **That the headless behaviour doubles as the fake is why these three clauses are asserted at all.**
 A fake that answered differently from the adapter would be a fake that quietly drifts into fiction,
-and §3.7 puts the headless rule on the port precisely so both implementations owe it.
+and the headless rule sits on the port precisely so both implementations owe it.
 
 `HeadlessTerminalContract` in `terminal.py` inherits this class. Implementers subclass that one,
 never this one, and the `terminal` fixture these tests take is declared in `_terminal_lifecycle`.
@@ -82,8 +82,8 @@ class HeadlessRulesContract:
         """A workflow needing human input cannot run here, and saying so at the first question is
         the whole point.
 
-        The alternative is blocking forever on nobody, and §3.7 rejects it in one sentence: there
-        are no timeouts anywhere on this port, so a question nobody can answer blocks its step
+        The alternative is blocking forever on nobody, and one sentence rejects it: there are no
+        timeouts anywhere on this port, so a question nobody can answer blocks its step
         indefinitely and "stuck" and "waiting for you" look alike from outside. A run that stops
         immediately with a reason beats one that looks like work for as long as anybody is prepared
         to wait.

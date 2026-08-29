@@ -1,4 +1,5 @@
-"""The porcelain-code table §1.3 exists to contain, asserted whole and without a repository.
+"""The porcelain-code table that keeps git's vocabulary inside the adapter, asserted whole and
+without a repository.
 
 `_changes.py` is a pure function for exactly this reason: `FileStatus.code: str` carried git's raw
 status letters across the `History` boundary so that every consumer of a changed file was reading

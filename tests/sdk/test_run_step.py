@@ -1,9 +1,9 @@
 """What `run.step` promises: one agent run per step, and a checkout that ends where it was told to.
 
 The suite over `sdk/_engine/steps.py` and over the half of `sdk/workflow.py` that reaches it.
-`test_journal_walk.py` holds §3.6's loop against a hand-written worker; this file holds the thing
-that *builds* that worker - a `Role` becoming an `AgentTask`, a reporting declaration becoming a
-`Tool` with a capture cell behind it, and `commit=` deciding what happens to the worktree.
+`test_journal_walk.py` holds the replay loop against a hand-written worker; this file holds the
+thing that *builds* that worker - a `Role` becoming an `AgentTask`, a reporting declaration becoming
+a `Tool` with a capture cell behind it, and `commit=` deciding what happens to the worktree.
 
 **The repository is real git, and that is the point rather than an expense.** The git fakes keep
 their commits in memory, so "the recorded head is a commit whose tree holds the agent's file" would
@@ -16,7 +16,7 @@ from the arithmetic it is checking.
 
 Six of these are worth naming, because each is written against a failure that is silent:
 
-  * **The entry's `head` is recorded after the commit.** §3.3: "a `run.commit()` after the step
+  * **The entry's `head` is recorded after the commit.** "A `run.commit()` after the step
     would run *after* the entry was written, so the recorded `head` would predate the commit - and
     `head` is the reset target, so the next step to miss its fingerprint would delete the work."
     The assertion is therefore not that the head moved - it moves on a run that committed nothing -
@@ -34,15 +34,15 @@ Six of these are worth naming, because each is written against a failure that is
   * **An agent that never reports leaves no entry.** The step re-runs, which is only true if
     nothing was written; a `RoleIncompleteError` that had recorded something would be a step that
     read as done and had no result.
-  * **What the agent is asked is the role's own text plus this step's inputs.** §3.3 appends one
-    block of canonical JSON under a fixed heading rather than interpolating, and both halves of that
-    fail in silence: inputs that never arrive leave a `triage` agent triaging findings it was never
-    shown, while a template engine quietly rewrites a prompt that carries a JSON Schema. The section
-    near the bottom asserts the whole dispatched string and not a substring of it.
+  * **What the agent is asked is the role's own text plus this step's inputs.** One block of
+    canonical JSON is appended under a fixed heading rather than interpolated, and both halves of
+    that fail in silence: inputs that never arrive leave a `triage` agent triaging findings it was
+    never shown, while a template engine quietly rewrites a prompt that carries a JSON Schema. The
+    section near the bottom asserts the whole dispatched string and not a substring of it.
 
 `run.activity` is here too, at the end, because this file already holds the only thing that
-dispatches to an adapter. There is little to it by design (§3.7: the framework holds the last
-string it was handed and hands it back), so what the tests are written against is the two ways it
+dispatches to an adapter. There is little to it by design - the framework holds the last string
+it was handed and hands it back - so what the tests are written against is the two ways it
 could be wrong that nobody would see - a line surviving the step that produced it, and a step
 replayed from cache producing one at all.
 """
@@ -119,9 +119,10 @@ class Restatement:
     """`Summary`'s shape under another name, for the payload-identity section near the bottom.
 
     Field for field the same, so the schema derived from it is the same schema but for the one term
-    13.0 added: the qualified type name. A reporting tool declared over it carries `REPORT`'s own
-    name and description too, which leaves the payload *type* as the only difference between two
-    otherwise identical roles - and so as the only thing that can move the fingerprint.
+    `test_journal.py`'s rule 6 adds: the qualified type name. A reporting tool declared over it
+    carries `REPORT`'s own name and description too, which leaves the payload *type* as the only
+    difference between two otherwise identical roles - and so as the only thing that can move the
+    fingerprint.
     """
 
     text: str
@@ -189,14 +190,14 @@ def _run(repository: Path, tmp_path: Path, base: str, script: Script | None = No
     test constructing eight ports by hand. The four that stay fake - integrator, verifier, terminal,
     clock - are not reached by a step, and the fifth, the routing runner, is where the script goes.
 
-    **`history` is real because a step now reaches it.** 13.2 made `Steps._namespace` resolve its
-    base through `History.resolve` and hand the one resolved value to both the checkout and the
+    **`history` is real because a step reaches it.** `Steps._namespace` resolves its base
+    through `History.resolve` and hands the one resolved value to both the checkout and the
     `Journal`, so that the cut and the chain cannot disagree about where a namespace began; a
     `FakeHistory` here answers about a `FakeRepository` that has never heard of this repository's
     commits, and would refuse the run's own pinned base. Real git is asked about real git.
 
     Called twice with the same arguments it is a resume: the same ledger on disk, the same worktree
-    reopened, and a fresh counter, which is what §3.6 means by "`n` is never persisted".
+    reopened, and a fresh counter, which is what "`n` is never persisted" means.
     """
     trees = TreesRoot(tmp_path / "trees")
     harness = container.fakes(trees, claude=script)
@@ -223,11 +224,11 @@ async def _checkout(repository: Path, tmp_path: Path, base: str) -> Workspace:
 def _role(name: str, instructions: str, *, read_only: bool = False) -> Role[Summary]:
     """A reporting role: its result is `REPORT`'s payload, read back as a `Summary`.
 
-    `name` is what its entries are recorded under, since `run.step` carries none of its own
-    (§3.3) - so a test that wants two addresses declares two roles, and one that wants two calls at
+    `name` is what its entries are recorded under, since `run.step` carries none of its own -
+    so a test that wants two addresses declares two roles, and one that wants two calls at
     one address hands this same object over twice.
 
-    `read_only` declares `NO_VCS_WRITES`, which is what §3.3 asks an author to pair with a step
+    `read_only` declares `NO_VCS_WRITES`, which is what an author pairs with a step
     that passes no `commit=`. Nothing checks the pairing - the framework does one predictable thing
     either way - so it is here because these tests should read the way a workflow does.
     """
@@ -242,13 +243,13 @@ def _role(name: str, instructions: str, *, read_only: bool = False) -> Role[Summ
 
 @role(model=Claude.SONNET)
 def _effect(name: str, instructions: str) -> Role[None]:
-    """A role with no reporting tool: its result is `null` and its effect is commits (§3.3)."""
+    """A role with no reporting tool: its result is `null` and its effect is commits."""
     return Role(name=name, instructions=instructions)
 
 
 @role(model=Claude.SONNET)
 def _deciding(*, on_question: QuestionHandler | None = None) -> Role[Summary]:
-    """A reporting role that negotiates: §3.7's handler is a closure over a `Run`, so it can only
+    """A reporting role that negotiates: the handler is a closure over a `Run`, so it can only
     reach a role as the one argument this factory takes."""
     return Role(name="decide", instructions="decide", tools=(REPORT,), on_question=on_question)
 
@@ -278,7 +279,7 @@ class _Agent:
         was paid for again" means, and a replay's whole observable difference from a re-run."""
 
         self.results: list[ToolResult] = []
-        """Every answer the reporting tool gave, refusals included - §3.3's rejection path is a
+        """Every answer the reporting tool gave, refusals included - the rejection path is a
         `ToolResult` going back to the model, so this is where it is visible from."""
 
         self.asked: list[Question] = []
@@ -369,7 +370,7 @@ def _tree(repository: Path, commit: str) -> list[str]:
 async def test_three_sequential_steps_replay_against_a_second_walk(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """§3.6's whole promise, at the surface a workflow actually writes.
+    """The whole promise, at the surface a workflow actually writes.
 
     Three steps, one of them committing, then the same three walked again: the second walk calls no
     agent and returns the same three values. The recorder is shared between the two runs so that
@@ -391,9 +392,9 @@ async def test_three_sequential_steps_replay_against_a_second_walk(
 
 
 async def _three(run: Run[None]) -> list[Summary]:
-    """A workflow of three sequential steps - §3.3's `fix` shape, with a report on every one."""
+    """A workflow of three sequential steps - the `fix` shape, with a report on every one."""
     spec = await run.step(_role("spec", "write the spec", read_only=True))
-    # §3.3's typing promise, checked by `mypy --strict` over `tests/` rather than hoped for: the
+    # The typing promise, checked by `mypy --strict` over `tests/` rather than hoped for: the
     # `Role[Summary]` carries the payload type through `step` and out to the workflow.
     assert_type(spec, Summary)
     built = await run.step(_role("implement", "implement it"), commit="implement the spec")
@@ -408,7 +409,7 @@ async def _three(run: Run[None]) -> list[Summary]:
 async def test_an_agent_that_never_reports_leaves_no_entry_and_the_step_runs_again(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """§3.3: "if the agent returns without firing it, there is no result and the step re-runs".
+    """"If the agent returns without firing it, there is no result and the step re-runs".
 
     Both halves, because either alone is satisfiable by the wrong thing: an entry that was written
     would make the step read as done with no result in it, and a step that did not re-run would
@@ -473,7 +474,7 @@ async def test_the_incomplete_message_sends_the_reader_to_the_fix_the_stop_reaso
 async def test_a_step_with_commit_records_a_head_whose_tree_holds_the_agents_file(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """The ordering §3.3 spends a paragraph on: the entry's `head` is read **after** the commit.
+    """The ordering a paragraph is spent on: the entry's `head` is read **after** the commit.
 
     A weaker test - "the recorded head is not `last_good`" - passes on a run where the worker
     committed nothing at all, and passes against the bug: `commit_all` on a clean tree is a no-op
@@ -502,7 +503,7 @@ async def test_a_step_with_commit_records_a_head_whose_tree_holds_the_agents_fil
 async def test_a_step_without_commit_leaves_the_worktree_byte_identical_to_last_good(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """§3.3's wipe: "not a scratch file, not a cache directory, not a partial edit".
+    """The wipe: "not a scratch file, not a cache directory, not a partial edit".
 
     The agent leaves a tracked edit **and** a file git has never heard of, because a reset-only
     implementation passes the version of this test that only checks the edit - untracked files
@@ -530,8 +531,8 @@ async def test_a_step_without_commit_leaves_the_worktree_byte_identical_to_last_
 async def test_changing_only_the_commit_message_does_not_invalidate_the_entry(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """§3.6 keeps the message out of the fingerprint: it is cosmetic, so rewording it must not
-    re-run an agent. The trade is stated there too - the replayed step keeps the commit it already
+    """The message is kept out of the fingerprint: it is cosmetic, so rewording it must not
+    re-run an agent. The trade comes with it - the replayed step keeps the commit it already
     made, message and all - and that half is asserted, because it is the one that surprises."""
     record = _Agent()
     written = {FEATURE: b"the callback route\n"}
@@ -556,7 +557,7 @@ async def test_changing_only_the_commit_message_does_not_invalidate_the_entry(
 async def test_the_wipe_runs_when_a_step_raises_and_no_entry_is_written(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """§3.3: "the wipe runs whether the step succeeded or raised".
+    """"The wipe runs whether the step succeeded or raised".
 
     The failure it prevents is not this step's - this step is already over - it is the next one's:
     a reviewer that scribbled on its way to dying would otherwise leave the scribbles in the
@@ -582,7 +583,7 @@ async def test_a_step_that_raises_with_commit_commits_anyway_and_still_records_n
 ) -> None:
     """The other ending, on the same path: `commit=` given, the framework commits either way.
 
-    "No check of what the role declared, and no comparison of HEAD before and after" (§3.3) - one
+    "No check of what the role declared, and no comparison of HEAD before and after" - one
     predictable thing per `commit=`, and the exception does not make it two. What keeps this from
     stranding a half-finished commit is the rule beside it: no entry means `last_good` never
     advanced, so the next attempt's unconditional pre-run restore puts the branch back before it.
@@ -644,7 +645,7 @@ def _blocks(record: _Agent, running: asyncio.Event, writes: Mapping[str, bytes])
     than at one it hoped for: before it is set there is nothing to wipe, and after it the agent is
     suspended and will stay that way until the task around it is torn down.
 
-    It reports an activity line on its way in, so that the cell §3.7 says is `None` when nothing is
+    It reports an activity line on its way in, so that the cell that is `None` when nothing is
     running has something in it at the moment the cancellation lands. Without that the assertion
     about it afterwards would be true of an implementation that never set it either.
     """
@@ -692,7 +693,7 @@ async def _cancelled[T](task: asyncio.Task[T]) -> None:
 async def test_a_cancelled_step_still_wipes_the_worktree_and_records_nothing(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """§3.3's wipe survives a cancellation, which is the one path a bare `finally` does not cover.
+    """The wipe survives a cancellation, which is the one path a bare `finally` does not cover.
 
     A cancelled reviewer's scratch files are the same contamination a crashed reviewer's are - the
     next step's agent works in the checkout this one left - and a cancellation is the more likely
@@ -732,7 +733,7 @@ async def test_a_cancelled_step_still_wipes_the_worktree_and_records_nothing(
 async def test_a_cancelled_step_with_commit_still_commits_and_still_records_nothing(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """The other ending, through the same door: §3.3's "one predictable thing either way".
+    """The other ending, through the same door: "one predictable thing either way".
 
     `commit=` given, the framework commits whatever is dirty - and a cancellation does not make
     that two things any more than an exception did. What keeps the commit from stranding a
@@ -769,7 +770,7 @@ async def test_a_cancelled_step_with_commit_still_commits_and_still_records_noth
 async def test_a_second_call_to_the_reporting_tool_is_refused_and_the_first_payload_stands(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """§3.3 does not settle this and 12.1 does: first-wins, with the refusal going back in-session.
+    """Undecided in advance and settled by the engine: first-wins, refusal going back in-session.
 
     Last-wins is the other candidate and it fails silently - an agent reporting once per finding
     records only the last one, and the workflow reads one finding where the review found six.
@@ -790,7 +791,7 @@ async def test_a_second_call_to_the_reporting_tool_is_refused_and_the_first_payl
 async def test_a_malformed_payload_is_rejected_back_to_the_agent_and_not_raised(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """§3.3: "rejected by the tool back to the agent within the same conversation, so the model
+    """"Rejected by the tool back to the agent within the same conversation, so the model
     corrects itself. Not an adapter retry, not a workflow retry" - and not an exception either.
 
     The script sends a payload the declaration will not take, reads the refusal, and sends a good
@@ -819,7 +820,7 @@ async def test_a_malformed_payload_is_rejected_back_to_the_agent_and_not_raised(
 async def test_an_effect_step_records_a_null_value_and_the_commits_are_the_result(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """§3.3's other step kind: no reporting tool, so the result is `null` and the effect is commits.
+    """The other step kind: no reporting tool, so the result is `null` and the effect is commits.
 
     The role declares no tools at all, which means the task carries none - and the script therefore
     could not call one if it wanted to, `Conversation.call` refusing a tool the task did not
@@ -849,7 +850,7 @@ async def test_an_effect_step_records_a_null_value_and_the_commits_are_the_resul
 async def test_a_roles_question_handler_reaches_the_runner_and_its_answer_returns(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """§3.7: the answer returns into the same live session, so a negotiation is N rounds inside one
+    """The answer returns into the same live session, so a negotiation is N rounds inside one
     step rather than N steps.
 
     `Role.on_question` folds `Capability.MID_RUN_QUESTIONS` into `requires` at declaration time, on
@@ -873,12 +874,12 @@ async def test_a_roles_question_handler_reaches_the_runner_and_its_answer_return
 
 # --- what the agent is actually asked -------------------------------------------------------------
 #
-# §3.3 settles the mechanism and it is not templating: "the framework appends one structured block
+# The mechanism is settled and it is not templating: "the framework appends one structured block
 # of canonical JSON under a fixed heading, and the author writes the prompt knowing inputs arrive at
 # the end". The five tests below are written against the five ways that goes wrong, and only the
 # first of them is the obvious one:
 #
-#   * *The block never arrives.* Stage 12's actual behaviour and the whole of 13.0(i): §3.3's own
+#   * *The block never arrives.* It was the actual behaviour once: the standing
 #     `w.step(triage, findings=highs)` fingerprints the findings correctly, pays for an
 #     agent, and hands it a prompt with no findings in it. Nothing raises, the step records a
 #     result, and what the run produced is a triage of nothing.
@@ -893,17 +894,17 @@ async def test_a_roles_question_handler_reaches_the_runner_and_its_answer_return
 #   * *The block is not canonical.* Two calls writing the same inputs in a different keyword order
 #     must compose the same text, which is `sort_keys` seen from outside the journal - and must
 #     replay, which is what the same inputs have to mean to a resume.
-#   * *A dataclass arrives as something other than its fields.* §3.3 passes `findings=highs`, so
-#     this is the shape the plan's own example needs and not an exotic one.
+#   * *A dataclass arrives as something other than its fields.* `findings=highs` is passed, so
+#     this is the shape a real workflow needs and not an exotic one.
 #
 # **The expected text is spelled out here rather than imported.** A suite that called
 # `canonical_json` to check what `canonical_json` produced would agree with it whatever either of
-# them said, and the same goes twice over for the heading: it is fixed by §3.3, an author writes
+# them said, and the same goes twice over for the heading: it is fixed, an author writes
 # the closing paragraph of a prompt against it, and no fingerprint contains it - so respelling it is
 # a change to every prompt in AGL that nothing else in this repository can see.
 
 
-# The heading §3.3 fixes, with the blank lines that separate it from the prompt above and the block
+# The fixed heading, with the blank lines that separate it from the prompt above and the block
 # below - the whole of what the framework inserts between an author's text and their step's inputs.
 _HEADING: Final = "\n\n## Inputs\n\n"
 
@@ -920,7 +921,7 @@ _TEMPLATED: Final = (
 
 @dataclass(frozen=True)
 class Finding:
-    """§3.3's `findings=highs`: a list of the workflow's own dataclasses, passed as one input."""
+    """`findings=highs`: a list of the workflow's own dataclasses, passed as one input."""
 
     ticket: str
     severity: int
@@ -930,10 +931,10 @@ class Finding:
 async def test_the_inputs_a_step_passes_are_appended_to_what_the_agent_is_asked(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """13.0(i): `**inputs` are fingerprint terms **and** they reach the agent (§3.3).
+    """`**inputs` are fingerprint terms **and** they reach the agent.
 
     Asserted as the whole dispatched string rather than as `"T-01" in asked`, because everything
-    §3.3 fixes about the block is in the parts a containment check cannot see: that the role's own
+    fixed about the block is in the parts a containment check cannot see: that the role's own
     text comes first, that one fixed heading separates the two, that the keys are sorted, and that
     the separators are the compact ones the fingerprint was taken with.
     """
@@ -943,7 +944,7 @@ async def test_the_inputs_a_step_passes_are_appended_to_what_the_agent_is_asked(
     await run.step(_role("triage", "triage the findings", read_only=True), ticket="T-01", high=3)
 
     assert record.runs == ["triage the findings" + _HEADING + '{"high":3,"ticket":"T-01"}'], (
-        "the step's inputs were fingerprinted and never shown to the agent, which is §3.3's own "
+        "the step's inputs were fingerprinted and never shown to the agent, which is the "
         "tickets example paying for a triage of findings it was never handed"
     )
 
@@ -952,7 +953,7 @@ async def test_the_inputs_a_step_passes_are_appended_to_what_the_agent_is_asked(
 async def test_a_prompt_carrying_braces_and_percent_signs_reaches_the_agent_byte_identical(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """§3.3's reason for rejecting templating, written as the assertion that catches it.
+    """The reason for rejecting templating, written as the assertion that catches it.
 
     Two assertions where one would do, because they fail differently and both are worth reading. The
     prefix says the author's text was not touched - which is the claim - and the equality says what
@@ -977,7 +978,7 @@ async def test_a_prompt_carrying_braces_and_percent_signs_reaches_the_agent_byte
 async def test_a_step_with_no_inputs_is_dispatched_the_roles_instructions_and_nothing_else(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """§3.3's block is appended when there is one, and "nothing at all" when there is not.
+    """The block is appended when there is one, and "nothing at all" when there is not.
 
     Equality and not `startswith`, because every wrong version of this passes `startswith`: a
     heading over an empty object, a blank line, one trailing newline. This is the shape most
@@ -1001,8 +1002,8 @@ async def test_the_same_inputs_in_a_different_keyword_order_compose_and_replay_t
     The replay is the half that costs money when it is wrong, and it is also this file's answer to
     "did the fingerprint move": the entry is written by the first walk and found by the second,
     which is only true if `journal.step` is still being handed `role.instructions` and `inputs` as
-    the two separate terms §3.6 records. A composed prompt hashed in place of them would re-run
-    every step ever recorded, and this is the cheapest place that shows.
+    the two separate terms the fingerprint records. A composed prompt hashed in their place would
+    re-run every step ever recorded, and this is the cheapest place that shows.
     """
     record = _Agent()
     role = _role("triage", "triage the findings", read_only=True)
@@ -1026,13 +1027,14 @@ async def test_the_same_inputs_in_a_different_keyword_order_compose_and_replay_t
 async def test_a_dataclass_input_reaches_the_agent_as_its_fields_and_its_type(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """§3.3's own `findings=highs`, which is a list of the workflow's own dataclasses.
+    """The standing `findings=highs`, which is a list of the workflow's own dataclasses.
 
-    The `__agl_type__` tag is asserted rather than tolerated. §3.6 rule 6 puts a dataclass's
-    qualified name in the fingerprint at every depth, and this block is the same canonical text the
-    digest was taken over - so the tag is in front of the agent by construction, and the only way it
-    would not be is a second serialiser, free to disagree with the first about what these inputs
-    were. It reads as information rather than noise: it is the type the workflow named.
+    The `__agl_type__` tag is asserted rather than tolerated. `test_journal.py`'s rule 6 puts a
+    dataclass's qualified name in the fingerprint at every depth, and this block is the same
+    canonical text the digest was taken over - so the tag is in front of the agent by construction,
+    and the only way it would not be is a second serialiser, free to disagree with the first about
+    what these inputs were. It reads as information rather than noise: it is the type the workflow
+    named.
 
     `Finding.__module__` rather than the literal `"test_run_step"`, because that string is pytest's
     import mode talking and not this file's claim.
@@ -1054,14 +1056,14 @@ async def test_a_dataclass_input_reaches_the_agent_as_its_fields_and_its_type(
         + '"severity":5,"ticket":"T-07"}]}'
     )
     assert record.runs == ["triage the findings" + _HEADING + block], (
-        "the findings §3.3 hands to `triage` did not reach the agent asked to triage them, or they "
+        "the findings handed to `triage` did not reach the agent asked to triage them, or they "
         "reached it as something other than the canonical text their fingerprint was taken over"
     )
 
 
 # --- a prompt that came out of a file ------------------------------------------------------------
 #
-# §3.7: "**`instructions` is prompt text, never a path.** A role holding a filename would
+# "**`instructions` is prompt text, never a path.** A role holding a filename would
 # fingerprint the filename, so editing the prompt would move nothing and a resume would replay what
 # the old wording produced - as a cache hit, with nothing to notice. `prompt_file()` reads at
 # declaration time and is the sanctioned spelling."
@@ -1076,7 +1078,7 @@ async def test_a_dataclass_input_reaches_the_agent_as_its_fields_and_its_type(
 async def test_a_role_declared_with_prompt_file_asks_the_agent_what_the_file_says(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """The whole of §3.7's promise, measured at the far end: what the agent was asked **is** the
+    """The whole of the promise, measured at the far end: what the agent was asked **is** the
     file's text.
 
     Equality against the file's own contents rather than a containment check, because the two
@@ -1103,7 +1105,7 @@ async def test_a_role_declared_with_prompt_file_asks_the_agent_what_the_file_say
 async def test_editing_the_prompt_file_re_runs_the_step_and_the_agent_reads_the_new_wording(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """§3.7's named failure, shown closed - and the control beside it, because "it re-ran" is only
+    """The named failure, shown closed - and the control beside it, because "it re-ran" is only
     a claim if the unedited case replays.
 
     Three walks over one ledger. The first records an entry; the second re-declares the role from
@@ -1135,7 +1137,7 @@ async def test_editing_the_prompt_file_re_runs_the_step_and_the_agent_reads_the_
 
     assert record.runs == [first_wording, edited_wording], (
         "editing the prompt file moved nothing, so the resume replayed what the old wording "
-        "produced - §3.6's own reason for putting the role in the digest, arriving as a cache hit"
+        "produced - the whole reason the role is in the digest, arriving as a cache hit"
     )
     assert len(_entries(tmp_path, "review")) == 2
 
@@ -1147,11 +1149,11 @@ async def test_editing_the_prompt_file_re_runs_the_step_and_the_agent_reads_the_
 async def test_a_step_reporting_through_another_payload_type_does_not_replay_the_first(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """§3.6 rule 6's second half, at the surface where it costs something.
+    """The second half of `test_journal.py`'s rule 6, at the surface where it costs something.
 
     Two roles identical in every term a fingerprint takes but one: the reporting tool's payload
     *type*. Same instructions, same model, same restrictions, same tool name and description, and a
-    payload dataclass of exactly the same shape under a different name. Before 13.0 the two derived
+    payload dataclass of exactly the same shape under a different name. Before rule 6 they derived
     a byte-identical schema, so the second walk found the first's entry and replayed it **into the
     new type** - nothing raised, nothing failed to parse, and the workflow read a `Restatement` that
     was recorded as a `Summary`.
@@ -1221,10 +1223,10 @@ def _recorded(tmp_path: Path, *steps: str) -> set[str]:
 async def test_two_roles_differing_only_in_case_do_not_replay_each_others_entries(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """UF1.6, and the sharpest failure in this file: a **false cache hit**.
+    """The folded counter key, and the sharpest failure in this file: a **false cache hit**.
 
-    `StepName` allows `[A-Za-z0-9._-]`, so `Role(name="Review")` is a legal declaration, and since
-    UF1.1 a step's address is its role's name. Two roles differing only in case, in one namespace,
+    `StepName` allows `[A-Za-z0-9._-]`, so `Role(name="Review")` is a legal declaration, and a
+    step's address is its role's name. Two roles differing only in case, in one namespace,
     alike in every term `base_of` takes - same instructions, same model, same restrictions, same
     tools, no inputs, and run back to back over a tree neither commits to, so the same head - are
     one `base` by construction, because `base_of` has no name parameter to tell them apart.
@@ -1233,8 +1235,8 @@ async def test_two_roles_differing_only_in_case_do_not_replay_each_others_entrie
     sat at `n = 0` and hashed to one digest; and `steps/Review/` and `steps/review/` are **one
     directory** on a case-insensitive volume, which is macOS by default. So the second step read the
     first step's file, matched the fingerprint it found there, and handed back a value no agent
-    produced for it - no re-run, no exception, and the wrong answer. Every other silent failure in
-    §3.6 costs money; this one costs correctness.
+    produced for it - no re-run, no exception, and the wrong answer. Every other silent failure
+    around replay costs money; this one costs correctness.
 
     The repair is `Fingerprints`' folded counter key, not a folded path segment: the author's
     spelling reaches disk verbatim (`tests/ports/test_home_layout.py`) and the second spelling
@@ -1268,16 +1270,16 @@ async def test_two_roles_differing_only_in_case_do_not_replay_each_others_entrie
 async def test_activity_is_the_adapters_own_last_line_and_is_gone_when_the_step_ends(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """§3.7: the framework holds the last string it was handed and hands it back, and that is all.
+    """The framework holds the last string it was handed and hands it back, and that is all.
 
     The two lines are read from *inside* the run, because that is the only place there is anything
     to read - `None` when nothing is running means an assertion after the step can only ever see
-    `None`. They are deliberately spelled the way §3.7 spells them, tool name and target, to make
+    `None`. They are deliberately spelled the documented way, tool name and target, to make
     the point that nothing here parsed either one: no `Activity` type, no verb taxonomy, no lookup
     table, so what comes back is what the adapter said, character for character.
 
     **And it is cleared when the step ends**, which is the half that fails silently. A line left
-    standing describes work that finished minutes ago, on a screen §3.7 redraws every frame, and
+    standing describes work that finished minutes ago, on a screen redrawn every frame, and
     nothing anywhere raises about it.
     """
     record = _Agent()
@@ -1304,7 +1306,7 @@ async def test_activity_is_the_adapters_own_last_line_and_is_gone_when_the_step_
         "adapter's line was rewritten on its way through, or the cell is not the most recent one"
     )
     assert run.activity is None, (
-        "the last line of a finished step is still there. §3.7's `None` means nothing is running, "
+        "the last line of a finished step is still there. `None` means nothing is running, "
         "and a view re-invoked every frame will go on reporting a build that ended long ago"
     )
 
@@ -1319,8 +1321,8 @@ async def test_a_step_that_raises_leaves_no_activity_behind_and_a_replayed_one_r
     out of a dispatch that raised exactly as on the way out of one that returned. (The cancelled
     ending is asserted where the cancellation is, beside the wipe it shares a `finally` with.)
 
-    **A step replayed from cache has no activity at all, correctly, since nothing is running**
-    (§3.7). The second walk below is handed a script that reports on its very first line and is
+    **A step replayed from cache has no activity at all, correctly, since nothing is running.**
+    The second walk below is handed a script that reports on its very first line and is
     never called at all, which is the whole mechanism: activity comes from a callback passed on the
     dispatch, a replay hit returns the stored value without dispatching, and so there is no call
     that could produce a line. Nothing about it is written down, which is the other half of the
@@ -1369,7 +1371,7 @@ async def test_a_step_that_raises_leaves_no_activity_behind_and_a_replayed_one_r
 async def test_two_gathered_steps_open_one_checkout_and_take_two_addresses(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """The one thing 12.1 adds that stage 11 could not have measured: the lazy open, contended.
+    """The one thing a `Run` adds that a bare `Journal` could not have measured: the lazy open.
 
     A `Journal` is built over a `Workspace`, so the checkout has to be opened before the walk that
     serializes steps exists. Two gathered steps in a fresh namespace both arrive at that open. If
@@ -1399,9 +1401,9 @@ async def test_two_gathered_steps_open_one_checkout_and_take_two_addresses(
 
 
 def test_a_step_name_that_could_not_be_a_path_segment_is_refused_at_the_declaration() -> None:
-    """§3.3: names are opaque strings, "validated on the way in" - filesystem- and ref-safe.
+    """Names are opaque strings, "validated on the way in" - filesystem- and ref-safe.
 
-    Since UF1.1 the name is the role's, so this is where "on the way in" now is: at the line that
+    The name is the role's, so this is where "on the way in" is: at the line that
     declared it, before a run exists at all. `tests/sdk/test_roles.py` holds the rest of the
     refusal's shape; what is here is the half that belongs beside the step - that no `run.step`
     could ever be reached with one.
@@ -1426,7 +1428,7 @@ async def test_the_step_refuses_the_same_name_again_before_it_provisions_anythin
     re-made one layer earlier): each has to hold on its own, or the outer one is the only one and
     the inner one is decoration.
 
-    The field is `_model` because since UF1.2 nothing but `@role(model=…)` writes a role's model -
+    The field is `_model` because nothing but `@role(model=…)` writes a role's model -
     `Role.model` is the property that reads it and refuses when nothing has. This loop is writing
     what a factory would have written, which is the same statement one field down.
     """

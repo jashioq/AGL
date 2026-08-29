@@ -1,4 +1,4 @@
-"""§3.4's lease, driven directly, because through `run.integrate()` it cannot be seen at all.
+"""The lease, driven directly, because through `run.integrate()` it cannot be seen at all.
 
 `Leases.claim` takes two locks of identical granularity and holds them for exactly the same span:
 the lease, keyed by the target's `RunScope`, and the target namespace's step lock, taken through
@@ -27,7 +27,7 @@ instrument it is.
 The rest of what `Leases`' docstrings argue is pinned here too, none of it having had a test before:
 one lock per target, kept for the life of the run; a released lease evicted from the live table;
 `release_all` giving back every live lease; and claims into different targets not blocking each
-other, which is §3.4's "a human deliberating in one run never blocks another" at the smallest scale
+other, which is "a human deliberating in one run never blocks another" at the smallest scale
 it has.
 """
 
@@ -118,7 +118,7 @@ def _journal(harness: container.FakeServices, workspace: Workspace, base: str) -
 async def test_a_second_claim_on_one_target_waits_although_the_step_lock_cannot_stop_it(
     tmp_path: Path,
 ) -> None:
-    """§3.4's lease, asked about on its own - the one claim no arrangement built on `Run` can make.
+    """The lease, asked about on its own - the one claim no arrangement built on `Run` can make.
 
     Every serialization test in this package holds through the step lock as well as through the
     lease, because `Leases.claim` takes both at once and one namespace has one `Journal`. Build the
@@ -231,7 +231,7 @@ async def test_a_released_lease_leaves_the_live_table_and_run_exit_then_says_not
 
 @pytest.mark.asyncio
 async def test_release_all_gives_back_every_live_lease_and_not_merely_one(tmp_path: Path) -> None:
-    """§3.4's sweeper - run exit gives back every live lease - all of them, in one call.
+    """The sweeper - run exit gives back every live lease - all of them, in one call.
 
     A run holds one lease per target it is mid-landing into, and a workflow that walked away from
     two conflicts at once leaves two. `api.run`'s `finally` is the only caller, it takes no
@@ -266,7 +266,7 @@ async def test_release_all_gives_back_every_live_lease_and_not_merely_one(tmp_pa
 
 @pytest.mark.asyncio
 async def test_a_lease_on_one_target_does_not_stop_a_claim_into_another(tmp_path: Path) -> None:
-    """§3.4: "a human deliberating in one run never blocks another" - the granularity that buys it.
+    """Why "a human deliberating in one run never blocks another" - the granularity that buys it.
 
     The lease is per **target** and not per run and not per table, which is what lets a conflict
     screen stay up over one parent while another parent's queue keeps moving. A single lock over the
@@ -331,11 +331,11 @@ def _agent(pause: _Pause) -> Agent:
     """Write what this prompt is meant to write, and park if this is the holding role.
 
     Keyed on the prompt because that is the only thing the port hands an agent that says which step
-    this is - `AgentTask` carries no namespace and no step name, deliberately (§3.3).
+    this is - `AgentTask` carries no namespace and no step name, deliberately.
 
     An `async def` in `sdk/testing.py`'s own vocabulary, which is what `container.fakes(agent=...)`
-    takes as of 19.2. Before that a `testing.Agent` could not await, so parking on an event - which
-    is the whole of the arrangement below - had to be written on a raw per-provider `Script`.
+    takes. Before a `testing.Agent` could await, parking on an event - which is the whole of the
+    arrangement below - had to be written on a raw per-provider `Script`.
     """
 
     async def _one(task: AgentTask) -> Reply:

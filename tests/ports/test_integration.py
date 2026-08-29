@@ -7,7 +7,7 @@ the stage that writes the first real adapter.
 That leaves two types and three genuine things. **The exactly-one invariant** is checked in both
 directions, because the two failures mean opposite things: neither field set is an outcome that says
 nothing happened at all, and both set is one that says the work landed and also did not. **The
-`conflicted` property** is what §3.3's worked example reads off `run.integrate()`, so it is pinned
+`conflicted` property** is what a workflow reads off `run.integrate()`, so it is pinned
 against both shapes rather than assumed to follow from the invariant. And **an empty `paths`** is
 asserted to be legal, because it is a design decision an implementation depends on - an integrator
 that cannot enumerate what collided has to be able to say so - and a later reader tightening it into
@@ -90,10 +90,10 @@ def test_an_integrator_that_cannot_list_what_collided_says_so_in_the_summary() -
 def test_a_conflict_lists_the_paths_in_the_repository_s_own_words() -> None:
     """Repository-relative, forward slashes - `history.FileChange.path`'s convention and type."""
     conflict = Conflict(
-        paths=("src/agl/ports/integration.py", "docs/agl-refactor-plan.md"),
+        paths=("src/agl/ports/integration.py", "README.md"),
         summary="2 files could not be combined",
     )
-    assert conflict.paths == ("src/agl/ports/integration.py", "docs/agl-refactor-plan.md")
+    assert conflict.paths == ("src/agl/ports/integration.py", "README.md")
     assert conflict == Conflict(paths=conflict.paths, summary=conflict.summary)
 
 

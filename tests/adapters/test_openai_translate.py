@@ -3,8 +3,8 @@
 There is no contract suite here and there should not be: `AgentContract` is written against
 `AgentRunner`, and this module implements no port. It is the vendor boundary underneath one - pure
 functions over plain values - so what is asserted below is what those functions produce, and the
-suite that asserts what an `AgentRunner` owes runs against `runner.py` and `fake.py` at 8.2 and
-8.3. Everything here is in-process: no subprocess, no CLI, no socket, no clock. The repo-wide
+suite that asserts what an `AgentRunner` owes runs against `runner.py` and `fake.py` instead.
+Everything here is in-process: no subprocess, no CLI, no socket, no clock. The repo-wide
 paid-endpoint guard in `tests/conftest.py` applies anyway, as it does to every file under `tests/`,
 and nothing here needs it.
 
@@ -238,7 +238,7 @@ class TestTheSetCollapsesOntoOneScalar:
     def test_nothing_a_caller_supplied_is_ever_interpolated_into_an_option(
         self, restrictions: frozenset[Restriction]
     ) -> None:
-        """§3.5: every value reaching a command line is hostile regardless of where it came from.
+        """Every value reaching a command line is hostile regardless of where it came from.
 
         This function takes no path, no name and no caller string, and every token it produces is a
         literal from the module - which is what keeps that rule from having any work to do here. It
@@ -248,7 +248,7 @@ class TestTheSetCollapsesOntoOneScalar:
         for token in sandbox(restrictions).options:
             assert token == "-c" or re.fullmatch(r"[a-z_.]+=[a-z]+", token), (
                 f"{token!r} is not a literal key=value override. A token built out of something a "
-                f"caller supplied is the shape §3.5 is about"
+                f"caller supplied is the shape that rule is about"
             )
 
 
@@ -360,7 +360,7 @@ class TestModelSlugs:
 
     @pytest.mark.parametrize("model", list(OpenAI))
     def test_no_slug_could_ever_be_read_as_a_flag(self, model: ModelId) -> None:
-        """§3.5's rule about a value's position, kept where it can actually be kept.
+        """The rule about a value's position, kept where it can actually be kept.
 
         Every value reaching a command line is hostile regardless of provenance, and this one is
         handed to `-m`. A runtime guard in `translate.py` would be a branch no input can reach,
@@ -371,7 +371,7 @@ class TestModelSlugs:
 
     @pytest.mark.parametrize("model", list(Claude))
     def test_a_model_this_adapter_does_not_serve_is_refused(self, model: ModelId) -> None:
-        """§3.2: refuse, and never substitute.
+        """`src/agl/ports/agent.py`: refuse, and never substitute.
 
         `adapters/routing.py` dispatches on `task.model.provider` and should never send one of
         these here, so arriving is already a bug - but the honest answer to it is a refusal naming
@@ -420,10 +420,10 @@ class TestTheApprovalSettingIsAdapterLocalAndConstant:
     def test_the_setting_travels_as_a_configuration_override_and_not_as_a_flag(self) -> None:
         """`codex exec` on this build has no `-a/--ask-for-approval`; the parser rejects it.
 
-        The findings' flag table says otherwise and its recommended composition ends `-a never`,
-        which would have exited 2 on every run. `-a` exists on the *top-level* interactive command,
-        which is where that reading came from. This is the assertion that stops the flag form being
-        copied back in from the document.
+        An earlier reading of the CLI had `-a` on `exec` and a recommended composition ending
+        `-a never`, which would have exited 2 on every run. `-a` exists on the *top-level*
+        interactive command, which is where that reading came from. This is the assertion that
+        stops the flag form being copied back in.
         """
         assert APPROVAL[0] == "-c"
         assert "-a" not in APPROVAL
@@ -471,7 +471,7 @@ class TestFailuresBecomeAglErrors:
         """`check_ready`'s one refusal, whatever the probe found.
 
         The contract suite fails an adapter whose `check_ready` raises anything else, because
-        §3.2's first preflight check catches `UpstreamUnavailable` and nothing else - anything else
+        the first preflight check catches `UpstreamUnavailable` and nothing else - anything else
         reaches the top of the CLI as exit 70 and tells the reader to file a bug about their own
         logged-out session. Every input is the same answer here, *not now*, and only the reason
         varies.
@@ -500,7 +500,8 @@ class TestFailuresBecomeAglErrors:
     def test_each_failure_maps_to_its_meaning(
         self, reported: str | None, exit_code: int, stderr: str, expected: type[AglError]
     ) -> None:
-        """The mapping §3.1 asks for, by what a reader of the exit code should do.
+        """The mapping `src/agl/ports/errors.py` asks for, by what a reader of the exit code
+        should do.
 
         The last row is the one worth reading twice: a `reported` that is only whitespace is
         treated as no report at all, so a `turn.failed` carrying an empty message falls through to
@@ -600,8 +601,8 @@ class TestActivityStrings:
     ) -> None:
         """Four kinds, four fields, and no tool named anywhere.
 
-        This is what makes the rule a match on *frame kind* rather than the per-tool table §3.7
-        forbids: the stream is typed, so the field carrying the interesting value is the field that
+        This is what makes the rule a match on *frame kind* rather than the forbidden per-tool
+        table: the stream is typed, so the field carrying the interesting value is the field that
         kind is about, and the adapter never learns that a command came from a tool called `Bash`.
         Each payload here carries a second field too, so a rule that took whatever came first would
         be caught rather than accidentally agreeing.
@@ -735,12 +736,13 @@ class TestActivityStrings:
         assert activity(item, _WORKSPACE) == "Calling: agl"
 
     def test_the_line_is_not_the_other_adapters_shape(self) -> None:
-        """§3.7's cosmetic inconsistency, asserted so that nobody later "fixes" it into agreement.
+        """A cosmetic inconsistency between the adapters, asserted so that nobody later "fixes"
+        it into agreement.
 
         The Claude adapter renders `Bash: ./gradlew build` because its harness's unit is a named
         tool. Codex's unit is a typed event, and there is no tool name in the frame to put there.
         Forcing this into the other vendor's shape would mean inventing one, which is the first
-        entry in the table §3.7 exists to prevent.
+        entry in the lookup table that must not exist.
         """
         rendered = activity(
             {"type": "command_execution", "command": "./gradlew build"},

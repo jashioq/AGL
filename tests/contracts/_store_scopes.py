@@ -95,7 +95,7 @@ class StoreScopeContract:
     async def test_removing_a_run_takes_its_record_its_entries_and_every_scope_below_it(
         self, store: Store
     ) -> None:
-        """At depth zero `remove` is the whole run, which is what `clear` wants (§3.10).
+        """At depth zero `remove` is the whole run, which is what `clear` wants.
 
         The survivors are chosen to be the ones a careless implementation takes with it: another
         run in the same project, and a run in another project carrying the same label.
@@ -160,7 +160,7 @@ class StoreScopeContract:
     async def test_a_scope_that_was_removed_can_be_recorded_into_again(
         self, store: Store
     ) -> None:
-        """`agl clear auth` and then `agl run --label auth` is an ordinary sequence (§3.10).
+        """`agl clear auth` and then `agl run --label auth` is an ordinary sequence.
 
         A removed address is a free one, not a tombstoned one: after the removal, a write lands
         and a read answers with it, exactly as at an address nobody had ever used.

@@ -64,8 +64,10 @@ class ReportingTool[P]:
             raise InternalError(
                 f"a recorded {self.name} payload does not fit {_describe(self.payload)}: "
                 f"{_refusal(self.name, problems)}. AGL wrote this value and AGL is reading it, so "
-                f"the ledger and the payload type have come apart - §3.6 expects the fingerprint "
-                f"to have discarded this entry, and `sdk/tools.py` records why it may not have"
+                f"the ledger and the payload type have come apart - the fingerprint should have "
+                f"discarded this entry. It covers a tool's name, description and derived schema, "
+                f"so a payload rule enforced only in `__post_init__` changes what converts while "
+                f"moving no digest: `tests/sdk/test_tools.py` is where that hole is pinned"
             )
         return instance
 
@@ -265,7 +267,7 @@ def _check_payload(payload: object, name: str) -> None:
         return
     raise InputError(
         f"the reporting tool {name!r} was declared with {_describe(payload)}, and a payload is a "
-        f"dataclass (§3.3) - the class itself, never an instance of it. Its fields are what the "
+        f"dataclass - the class itself, never an instance of it. Its fields are what the "
         f"schema is derived from and what the agent is asked to fill in"
     )
 

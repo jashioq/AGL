@@ -19,13 +19,14 @@ out of agreement with `pyproject.toml` into something unreadable.
 
 `entry_points.txt` is a *build artifact*. An edit to `pyproject.toml`'s table is invisible until the
 distribution is rebuilt, so between that edit and the next `uv pip install -e . --no-deps` the group
-this environment reports and the group this repository declares are two different lists - and stage
-19.1, which deleted a workflow, is the case that happened. Nothing refreshes the install: not
-`scripts/check`, deliberately. A gate that repaired the environment before measuring it would be a
-gate that could no longer report the drift at all, which is the opposite of the header's "everything
-that can say this build is wrong says it here"; gate 8 writes and deletes a probe file, but that
-file *is* the measurement rather than a repair of the thing being measured. And `scripts/check` is
-not the only way this test runs - a bare `pytest` would be left with the same confusing failure.
+this environment reports and the group this repository declares are two different lists - and
+deleting a workflow, table line and all, is the case that actually happened. Nothing refreshes the
+install: not `scripts/check`, deliberately. A gate that repaired the environment before measuring
+it would be a gate that could no longer report the drift at all, which is the opposite of the
+header's "everything that can say this build is wrong says it here"; the paid-endpoint guard writes
+and deletes a probe file, but that file *is* the measurement rather than a repair of the thing
+being measured. And `scripts/check` is not the only way this test runs - a bare `pytest` would be
+left with the same confusing failure.
 
 So the drift is diagnosed here instead, first, and named for what it is. The test reads the table
 out of `pyproject.toml` and compares it against the entry points this environment attributes to the
@@ -60,7 +61,7 @@ def _point(name: str, value: str) -> EntryPoint:
 
 
 class _Workflow:
-    """Stands in for the type `api.py` passes at stage 10.3. Any class does - that is the point."""
+    """Stands in for the type `api.py` passes as `load`'s `kind`. Any class does - that is why."""
 
 
 def _loadable(name: str) -> EntryPoint:
@@ -81,8 +82,8 @@ def test_names_lists_every_registered_workflow_sorted() -> None:
     """Sorted, so `agl workflows` prints the same list on two machines that scanned differently.
 
     Three names, handed over in reverse of the order asserted, so a `names` that returned its input
-    unchanged fails here. The third is invented, as `tickets` is. It read `noop` until 19.1 deleted
-    that workflow, and the deletion cost this case nothing - which is the point worth leaving
+    unchanged fails here. The third is invented, as `tickets` is. It read `noop` until that
+    workflow was deleted, and the deletion cost this case nothing - which is the point worth leaving
     behind: nothing in this half resolves a name, so what is registered in `pyproject.toml` is not
     a fact any assertion here rests on.
     """
@@ -249,7 +250,7 @@ def _ours() -> tuple[str, ...]:
 
 
 def test_the_real_entry_point_group_is_readable_and_holds_fix_and_split() -> None:
-    """`pyproject.toml` declares `agl.workflows`, and stages 17 and 18 registered `fix` and `split`.
+    """`pyproject.toml` declares `agl.workflows`, and registers `fix` and `split` into it.
 
     Three artefacts have to agree for this to pass and no two of them are the same thing: the table
     in `pyproject.toml`, the `entry_points.txt` the build wrote from it, and the group `GROUP` names
@@ -266,11 +267,11 @@ def test_the_real_entry_point_group_is_readable_and_holds_fix_and_split() -> Non
     ends it. Only then is the claim about `fix` and `split` made, and by then it can only fail for
     the reason it is written for: a `pyproject.toml` that has stopped registering them.
 
-    It named `noop` from stage 10 until 19.1, which deleted that workflow and its line together. The
-    claim survived the name: what is being asserted is that the group is readable and holds the
+    It named `noop` until that workflow and its table line were deleted together. The claim
+    survived the name: what is being asserted is that the group is readable and holds the
     workflows AGL ships, and `fix` and `split` are those. Membership rather than equality, so a
-    workflow registered by a later stage - or by a package installed beside AGL, which is the whole
-    point of an entry-point group - does not fail a test about these two.
+    workflow registered later - or by a package installed beside AGL, which is the whole point of
+    an entry-point group - does not fail a test about these two.
     """
     declared = _declared()
     ours = _ours()

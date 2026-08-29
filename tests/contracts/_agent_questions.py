@@ -1,6 +1,6 @@
 """The mid-run question path: an answer returning into the same session, and one that never comes.
 
-Split out of `agent.py` because §3.7's negotiation is one clause with two edge cases the port
+Split out of `agent.py` because the mid-run negotiation is one clause with two edge cases the port
 settles explicitly - so that no adapter decides them alone - and because both are easy to satisfy
 in a way that looks right and is not. An adapter that asks once per run and starts a new one for
 the second question is a working adapter by every assertion except the one below; an adapter that
@@ -59,7 +59,7 @@ class AgentQuestionContract:
     async def test_a_question_and_its_answer_are_two_rounds_inside_one_run(
         self, runner: AgentRunner, model: ModelId, tmp_path: Path
     ) -> None:
-        """§3.7: the answer returns into the same session, so a negotiation is rounds, not runs.
+        """The answer returns into the same session, so a negotiation is rounds, not runs.
 
         Two questions and not one, because one cannot tell an adapter that answers into the live
         session from one that would have to start a fresh run per question - and N rounds inside
@@ -90,8 +90,8 @@ class AgentQuestionContract:
             f"the handler was called {len(answers.asked)} time(s) in one run against a prompt that "
             f"asks two questions one after the other. The answer goes back into the same session "
             f"so the agent can ask again - an adapter that carries one exchange per run turns a "
-            f"negotiation into N runs, and §3.7 accepts a crash mid-negotiation replaying the "
-            f"whole step precisely because that session is not reconstructible from anything"
+            f"negotiation into N runs, and a crash mid-negotiation replays the whole step "
+            f"precisely because that session is not reconstructible from anything"
         )
         for asked in answers.asked:
             assert isinstance(asked, Question), (

@@ -6,13 +6,13 @@ section are therefore checked over a corpus rather than over examples: every acc
 be free of path separators, must join into a path that stays inside its parent, and must satisfy
 real `git check-ref-format`.
 
-Since §3.3 the character set is an allowlist, which changes what a corpus is for. Under a
-blocklist the interesting values were the ones that got through; under an allowlist almost
-nothing does, so the corpus is built from both ends - the traps that must be refused, and a
-second fuzz drawn only from permitted characters so that the properties still have accepted
-values in bulk to run over. The rejection half carries what an allowlist exists for: shell
-metacharacters, which are legal in a git ref and in a POSIX filename and are frequently *agent
-output*, and non-ASCII, which is a name somebody wanted and cannot have.
+The character set is an allowlist, which changes what a corpus is for. Under a blocklist the
+interesting values were the ones that got through; under an allowlist almost nothing does, so
+the corpus is built from both ends - the traps that must be refused, and a second fuzz drawn
+only from permitted characters so that the properties still have accepted values in bulk to run
+over. The rejection half carries what an allowlist exists for: shell metacharacters, which are
+legal in a git ref and in a POSIX filename and are frequently *agent output*, and non-ASCII,
+which is a name somebody wanted and cannot have.
 
 The corpus is built here, deterministically, rather than drawn by `hypothesis`: taking a new
 dependency is a project-level decision and not this test's to make. Determinism is not purely a
@@ -48,7 +48,7 @@ from agl.ports.ids import Namespace, ProjectName, RunLabel, StepName
 _TYPES: Final = (RunLabel, Namespace, ProjectName, StepName)
 _SEED: Final = 20260819
 
-# The two words §3.3 reserves and the type each is reserved from. Written out here rather than
+# The two reserved words and the type each is reserved from. Written out here rather than
 # imported from the module, so that the test states the rule instead of echoing it.
 _RESERVED_WORDS: Final = {"_base": Namespace, "_work": RunLabel}
 
@@ -60,7 +60,7 @@ _RESERVED_WORDS: Final = {"_base": Namespace, "_work": RunLabel}
 # grapheme, two codepoints, a different string), the fullwidth solidus that looks like a
 # separator and is not one, a CJK ideograph, a banana, and two letters whose casefold is not
 # their lowercase. The first group is invisible and says so; the second is somebody's alphabet,
-# and refusing it is the price §3.3 names out loud.
+# and refusing it is the price the allowlist names out loud.
 _NON_ASCII: Final = [
     "\x85", "\xa0", "\xad", "\u180e", "\u2000", "\u200b", "\u200d", "\u202e",
     "\u2028", "\u2029", "\u3000", "\ufeff", "\ud800", "\ue000", "\U000e0001",
@@ -69,7 +69,7 @@ _NON_ASCII: Final = [
 
 # Everything the rules turn on, plus a few that must stay legal, placed in every position below.
 # The second row is the shell: every character in it is legal in a git ref and in a POSIX
-# filename, and every one of them is refused here, which is the whole of §3.3's argument.
+# filename, and every one of them is refused here, which is the whole of the allowlist's argument.
 _INTERESTING: Final = [
     *"/\\~^:?*[ .-@{}_+", "..", "//", "@{", ".lock", ".LOCK", "\x00", "\t",
     *"$`;|&><()!#'\"", "\n", "$(", "${", "&&", "||",
@@ -194,7 +194,7 @@ def test_each_rule_rejects_with_a_message_naming_the_rule_and_the_value(
     ],
 )  # fmt: skip
 def test_a_name_that_breaks_no_rule_is_taken_by_all_four_types(value: str) -> None:
-    """One language, four types: inside §3.3's character set, a legal name is legal for each."""
+    """One language, four types: inside the allowlist, a legal name is legal for each of them."""
     for name_type in _TYPES:
         assert str(name_type(value)) == value
 
@@ -333,7 +333,7 @@ def test_property_every_accepted_name_satisfies_real_git_check_ref_format() -> N
     refnames = [
         *sample,  # the bare component, which is what --allow-onelevel is for
         *(f"refs/heads/agl/{value}" for value in sample),  # the branch a run label becomes
-        *(f"refs/heads/agl/_work/{value}/{value}" for value in sample),  # a child's, §3.9
+        *(f"refs/heads/agl/_work/{value}/{value}" for value in sample),  # a child's
     ]
     rejected = _git_rejects(refnames)
     assert not rejected, f"git rejects {len(rejected)} of {len(refnames)}: {rejected[:10]}"
@@ -353,7 +353,7 @@ def test_git_would_have_said_so_if_the_property_above_were_vacuous() -> None:
 def test_the_four_types_accept_exactly_the_same_language() -> None:
     """One validator, and no type with a vocabulary of its own - the two reserved words apart.
 
-    §3.3 reserves `_base` from a namespace and `_work` from a label, which is a difference of
+    `_base` is reserved from a namespace and `_work` from a label, which is a difference of
     reserved words and not of language. So the set the four types disagree about is exactly
     those two words in every spelling, and the assertion says that as a set rather than trusting
     the sentence: any third disagreement is a second rule set, which is the thing this pins.
@@ -376,7 +376,7 @@ def test_the_four_types_accept_exactly_the_same_language() -> None:
 
 
 def test_renaming_t01_to_banana_changes_nothing() -> None:
-    """The plan's own test of opacity: no ticket, run or project vocabulary is baked in."""
+    """Opacity: no ticket, run or project vocabulary is baked into a name."""
     ticket, nonsense = Namespace("T-01"), Namespace("banana")
     assert (str(ticket), ticket.collision_key) == ("T-01", "t-01")
     assert (str(nonsense), nonsense.collision_key) == ("banana", "banana")
@@ -421,7 +421,7 @@ def test_a_name_is_frozen_and_slotted_so_it_cannot_be_edited_past_its_validation
 def test_collision_key_folds_the_case_a_filesystem_merges_and_would_fold_the_other() -> None:
     """Case on a case-insensitive volume. A key, not equality - and half of it now unreachable.
 
-    The NFC half of the fold has nothing left to answer through a constructor: §3.3's allowlist
+    The NFC half of the fold has nothing left to answer through a constructor: the allowlist
     admits no character with two spellings, so no accepted name can differ from another by
     normalisation alone. What used to be that half's case is pinned here as a refusal instead,
     which is what the property has become.

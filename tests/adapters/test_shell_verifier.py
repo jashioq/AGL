@@ -3,8 +3,8 @@ suite says it cannot assert - here, where it has a witness.
 
 The first two classes are the port in full: `VerifierContract` with its four fixtures overridden
 and nothing else touched, run once against the real adapter and once against the fake. That suite
-was written at stage 3, against the port's docstrings and before either implementation existed,
-which is the inversion the build rests on (§1.9) and the reason nothing below re-asserts any of it.
+was written against the port's docstrings and before either implementation existed, which is the
+inversion `tests/contracts/` rests on and the reason nothing below re-asserts any of it.
 
 **Two of those fixtures are where that suite is armed or disarmed, and it says so about itself.**
 Its first gap is the port's one security clause - that `workdir` is never interpolated into the
@@ -43,6 +43,7 @@ files of one name under different directories would collide at import.
 import ast
 import asyncio
 import os
+import signal
 import subprocess
 import time
 from collections.abc import Iterator
@@ -67,7 +68,7 @@ from contracts.verifier import ANNOUNCEMENT, VerifierContract
 # first space-separated fragment of this one - so the build's verdict would be decided by the path
 # rather than by the command, which is the failure this fixture exists to make visible. A `/` and a
 # NUL are the only bytes a filename cannot hold; everything else here is legal on every filesystem
-# AGL runs on, which is exactly why §3.3's allowlist is defence in depth and not the guarantee.
+# AGL runs on, which is exactly why the name allowlist is defence in depth and not the guarantee.
 HOSTILE_NAME: Final = "agl $(exit 7); echo leaked | cat & 'q' \"d\" tree"
 
 # What the real adapter is asked to run. Both are `/bin/sh`, since that is what a shell verifier
@@ -133,7 +134,7 @@ class TestShellVerifier(VerifierContract):
 
 
 class TestFakeVerifier(VerifierContract):
-    """The same suite, against the fake - which is the mechanism that stops it drifting (§1.9).
+    """The same suite, against the fake - which is the mechanism that stops it drifting.
 
     The fixtures differ in exactly one thing that matters, the implementation under test. The
     hostile directory is handed over here too, although nothing in the fake can be endangered by
@@ -275,8 +276,9 @@ async def test_a_workdir_holding_a_semicolon_and_a_pipe_decides_nothing_about_th
 ) -> None:
     """The metacharacters `ids.py` refuses, in the half of a path `ids.py` never sees.
 
-    §3.3's allowlist refuses `;` and `|` in a namespace, and this directory holds both - which is
-    the point of the port's paragraph about what a charset cannot reach. A name like this is one
+    The `_ALLOWED_CHARACTERS` allowlist in `src/agl/ports/ids.py` refuses `;` and `|` in a
+    namespace, and this directory holds both - which is the point of the port's paragraph about
+    what a charset cannot reach. A name like this is one
     `mkdir` away for any user who chose a trees root with a semicolon in it, and nothing in AGL
     is asked about that name.
 
@@ -426,8 +428,9 @@ async def test_a_deadline_that_expires_is_a_failed_build_and_never_an_exception(
 
     *Whatever the implementation reports for it arrives here, the gate reads `passed`, and the work
     is rejected rather than retried.* So there is no `pytest.raises` in this test and that absence
-    is half the assertion: a `TimeoutError` escaping would reach §3.4's `integrate` as something
-    other than the ordinary second answer to the only question it asks.
+    is half the assertion: a `TimeoutError` escaping would reach `Integration._gated` in
+    `src/agl/sdk/_engine/integration.py` as something other than the ordinary second answer to the
+    only question it asks.
 
     The elapsed time is the other half. A verifier that answered `passed=False` after waiting out
     the whole sleep would satisfy every other assertion here and would hold the merge queue open
@@ -501,6 +504,119 @@ def _alive(pid: int) -> bool:
     except PermissionError:
         return True
     return True
+
+
+# --- The two clauses inside `_signalled` that no outcome can witness -----------------------------
+
+# `_signalled` is what `_halted` spends twice for its terminate-then-kill escalation, and what
+# `verify`'s `except BaseException` spends once on the way out. Neither property below is visible
+# from a `VerifierOutcome`: one is a signal that must *not* be sent, and the other is a signal sent
+# down a path no build that finishes ever takes. So both reach into the module by name, the way the
+# structural test above already reads its source.
+#
+# `src/agl/adapters/openai/_session.py` runs the identical sequence against the Codex CLI and had
+# both of these; this adapter had neither, and the two are deliberately *not* folded into a shared
+# helper - `ARCHITECTURE.md`'s "Deliberately not built" refuses a general subprocess helper, and
+# `.importlinter`'s adapter-independence contract forbids one adapter importing another. They are
+# two implementations that have to agree, which is what these tests are for.
+
+# How long a signalled child is given to die. The same five seconds `_alive_after` above allows, and
+# for the same reason: delivery is prompt and reaping is when the system gets to it.
+FALLBACK_WAIT: Final = 5.0
+
+
+@pytest.mark.asyncio
+async def test_a_child_that_has_already_been_reaped_is_never_signalled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A reaped pid is the OS's to hand out again, so signalling one signals whoever holds it now.
+
+    This is the ordinary case and not an exotic one. `_halted` sends SIGTERM, waits out a grace
+    period, and sends SIGKILL - and a build that took the hint died somewhere in between. By the
+    time the second signal goes out, `wait()` has reaped it and its pid is free for the next
+    process the machine starts. `os.killpg` against that number then reaches an unrelated process
+    group, and because the group is addressed by the *pid* of a child that no longer exists, what
+    dies is not anything this adapter ever started. `returncode is not None` is what makes that
+    unreachable, and it is exact rather than best-effort: `_signalled` has no `await` in it, so the
+    event loop's reaping callback - the thing that sets `returncode` - cannot run between the check
+    and the call.
+
+    **The instrument is a spy, and the two tests in this section differ on purpose.** The fallback
+    below is asserted by its effect, because a child that dies is a witness. "A process group that
+    was *not* signalled" has none: arranging a real pid reuse would mean starting processes until
+    the OS handed back a number this test had already released, and a green result would still not
+    distinguish "nothing was signalled" from "something was, and it was not looking". So `killpg`
+    is replaced by a recorder and the assertion is that it was never reached.
+    """
+    process = await verifier_module._started("exit 0", tmp_path)
+    await process.wait()
+    assert process.returncode is not None, (
+        "the child was not reaped, so this test is not exercising the guard it is about"
+    )
+
+    signalled: list[tuple[int, int]] = []
+
+    def recorded(pgid: int, number: int) -> None:
+        signalled.append((pgid, number))
+
+    monkeypatch.setattr(os, "killpg", recorded)
+
+    verifier_module._signalled(process, signal.SIGTERM)
+    verifier_module._signalled(process, signal.SIGKILL)
+
+    assert signalled == [], (
+        f"a child that had already exited and been reaped was signalled anyway: {signalled}. Its "
+        f"pid went back to the OS when it was reaped, and the process group being addressed here "
+        f"is that pid - so this is a signal aimed at whatever now holds the number, which on a "
+        f"build machine is whatever started next. Nothing in the outcome would ever show it"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_group_signal_that_is_denied_falls_back_to_the_child_itself(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`PermissionError` may not end the escalation having signalled nothing at all.
+
+    Suppressing it looks harmless and is not: `_halted` would send its SIGTERM into the suppressor,
+    wait out the grace period, send its SIGKILL into the suppressor, and return - having stopped
+    nothing. The build keeps the cores, keeps the pipe this adapter is reading from, and the
+    deadline that was supposed to free the merge queue freed nothing. So a denied *group* signal
+    falls back to signalling the child itself: less than the whole group, and enormously more than
+    nothing. `ProcessLookupError` is suppressed around that fallback and only there, for the child
+    that died between the two calls.
+
+    Asserted by effect rather than by a spy on `send_signal`: a mock that was called proves the
+    line was reached, and a child that is dead proves a signal was delivered. `exec sleep` rather
+    than `sleep`, so the shell replaces itself and there is exactly one process - the fallback
+    signals the child and not its group, and a shell that had forked would leave the sleep behind.
+    """
+
+    def denied(pgid: int, number: int) -> None:
+        raise PermissionError(f"signalling process group {pgid} is not permitted")
+
+    process = await verifier_module._started(f"exec sleep {SLEEP:g}", tmp_path)
+    monkeypatch.setattr(os, "killpg", denied)
+
+    verifier_module._signalled(process, signal.SIGKILL)
+
+    try:
+        status = await asyncio.wait_for(process.wait(), FALLBACK_WAIT)
+    except TimeoutError:
+        process.kill()
+        await process.wait()
+        pytest.fail(
+            f"`os.killpg` answered `PermissionError` and the child was still running "
+            f"{FALLBACK_WAIT:g}s later, so nothing was signalled at all. A denial on the group is "
+            f"not a reason to give up on the child: suppressing it means a build that ignored "
+            f"SIGTERM is never killed either, and the escalation silently does nothing"
+        )
+
+    assert status == -signal.SIGKILL, (
+        f"the child ended with status {status} rather than by the signal the fallback was asked to "
+        f"send. It sleeps for {SLEEP:g}s and nothing here waits that long, so it did not simply "
+        f"finish"
+    )
 
 
 # --- Gaps 3, 5 and 7: the errors, the silence, and the two streams -------------------------------

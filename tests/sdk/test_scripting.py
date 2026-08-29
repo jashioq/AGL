@@ -6,9 +6,10 @@ that compilation; what is left for this file is the three things these types dec
 what they refuse, what they copy, and what they default to - because each of them is a decision that
 would otherwise only show up as a failure somewhere else.
 
-**The `MappingProxyType` test is the one worth explaining.** `Tool.payload_schema` is a proxy and
-§3.6's rule 4 records what that costs the journal's walker; `Call.payload` deliberately is not, and
-the reason is two layers away from where it is declared: both agent fakes put a payload through
+**The `MappingProxyType` test is the one worth explaining.** `Tool.payload_schema` is a proxy, which
+costs the journal's walker a recursive `Mapping` case at every depth; `Call.payload` deliberately is
+not, and the reason is two layers away from where it is declared: both agent fakes put a payload
+through
 `json.dumps(payload, allow_nan=False)` on its way to the handler, and `json.dumps` has no encoder
 for a proxy. So a frozen payload would make every scripted tool call an `InputError` naming the
 payload rather than the freezing. It was found by writing a `Reply` and running it, which is the

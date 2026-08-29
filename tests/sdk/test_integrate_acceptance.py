@@ -1,6 +1,6 @@
-"""Stage 14's acceptance criteria, established from outside the implementation that claims them.
+"""The acceptance criteria for `integrate()`, established from outside the implementation.
 
-A second suite over `run.integrate()`, written against the plan rather than against
+A second suite over `run.integrate()`, written against those criteria rather than against
 `sdk/_engine/integration.py`, and deliberately not a re-reading of
 `tests/sdk/test_run_integrate.py`. Where that file and this one make the same claim, this one makes
 it in a shape that file structurally cannot: **through real git**, **across a process boundary**, or
@@ -27,17 +27,18 @@ The five criteria, and what discharges each:
      `test_a_landed_child_survives_the_parents_next_fingerprint_miss` lands a child, then makes the
      parent miss, and asserts the landed *contents* and the landed *ancestry* are both still there
      after the pre-run `reset --hard` + `clean -fd`. Real git, because that is the primitive whose
-     effect is being survived. §3.6 calls forgetting the advance one of the three paths in AGL
-     that destroy work rather than costing a re-run.
+     effect is being survived. Forgetting the advance is one of the three paths in AGL that
+     destroy work rather than costing a re-run.
   4. **A resumed run finds a hold it did not take, and does not exit 70.**
      `test_a_second_process_meets_the_hold_the_first_one_died_holding` and its `abort` twin, through
      `instruments/landing.py`. Two real processes, the first killed with `os._exit` while holding a
      conflicted merge, the second re-driving the same workflow over the same `AGL_HOME` and the same
-     repository - because `api.resume` is 16.2 and raises. The exit status is mapped through
+     repository - because `api.resume` had not been built yet and raises. The status is through
      `cli/exit_codes.exit_status`, so "not exit 70" is the number the CLI would have printed.
   5. **Root `integrate()` raises.**
-     `test_the_root_refuses_to_integrate_with_the_error_the_plan_asks_for` pins the class, the exit
-     status it resolves to, and the distinction §3.9 makes: `main` is unaddressable, not protected.
+     `test_the_root_refuses_to_integrate_with_an_input_error` pins the class, the exit
+     status it resolves to, and the distinction that matters: `main` is unaddressable, not
+     protected.
 
 Beyond the five, and each of these is a question the implementer's suite has no arrangement to ask:
 
@@ -48,11 +49,11 @@ Beyond the five, and each of these is a question the implementer's suite has no 
     whether a `Stop` subclass still resolves to 7 now that there is a `try` in `api.run`;
   * whether a landing concluded by a person's own hand goes through the build gate - and what the
     gate's revert then does to that person's resolution, which is the one thing here that turned up
-    a cost the plan does not write down;
+    a cost nobody had written down;
   * whether a conflict held in one target stops a landing into another, and whether `integrate()`
     works at all three deep, into a namespace that is not the run's own `_base`;
   * whether an integration replays - kill a run that has landed, resume it, and compare the whole
-    world against a run that was never interrupted (§3.6's own contract-test shape) - and whether
+    world against a run that was never interrupted, the contract-test shape - and whether
     integrating one child twice lands it twice;
   * whether a `land` that raises, a `retry` whose gate raises, or a landing cancelled while it
     queues leaves the target leased by a call that is over.
@@ -195,7 +196,7 @@ REPORT: Final = reporting_tool("report", "report what you did", Summary)
 @role(model=Claude.SONNET)
 def _role(name: str, instructions: str) -> Role[Summary]:
     """A reporting role that may commit: its result is `REPORT`'s payload, read back as a
-    `Summary`. `name` is the address its entries go to, `run.step` carrying none (§3.3)."""
+    `Summary`. `name` is the address its entries go to, `run.step` carrying none."""
     return Role(
         name=name,
         instructions=instructions,
@@ -204,7 +205,7 @@ def _role(name: str, instructions: str) -> Role[Summary]:
     )
 
 
-# Module-level, which is what a `Role` is (§3.3), and distinct per writer: the script below decides
+# Module-level, which is what a `Role` is, and distinct per writer: the script below decides
 # what to write from the instructions it was handed, so two roles sharing a string would be two
 # namespaces writing one file.
 PREPARE: Final = _role("prepare", "prepare the parent")
@@ -218,8 +219,8 @@ BUILDS: Final = {name: _role("implement", f"implement {name}") for name in CHILD
 def _agent(recorded: list[str] | None = None) -> Script:
     """One agent for every role here: write what this prompt is meant to write, then report.
 
-    `recorded` is where a test learns that a step **missed** - the whole of what a replay hit is, in
-    §3.6's own words, is that the worker was not called - and it is a plain list because the port
+    `recorded` is where a test learns that a step **missed** - the whole of what a replay hit is
+    is that the worker was not called - and it is a plain list because the port
     hands a fake no recorder and `adapters/shell/fake.py` argues at length why it should not.
 
     Writing to `task.workspace` with the stdlib is the script's own code and not the adapter's,
@@ -252,7 +253,7 @@ def _file(name: str) -> str:
 
 
 # Keyed on the prompt, because that is the only thing the port hands a script that says which step
-# this is: `AgentTask` carries no namespace and no step name, deliberately (§3.3).
+# this is: `AgentTask` carries no namespace and no step name, deliberately.
 _WRITES: Final[Mapping[str, Mapping[str, bytes]]] = {
     PREPARE.instructions: {PARENT_FILE: PARENT_BODY, CONTESTED: PARENT_SIDE},
     COLLIDE.instructions: {CONTESTED: CHILD_SIDE},
@@ -331,7 +332,7 @@ class _Watcher:
 
     A landing is not one call, so there is nothing to time. What there is, is two moments inside it
     that a *port* can see: `Integrator.land`, which is where the work is combined, and
-    `Verifier.verify`, which is the merge gate §3.4 puts inside the lease and calls "serial because
+    `Verifier.verify`, which is the merge gate inside the lease, "serial because
     the merge queue serializes it, and it must be". Both are recorded here against the target they
     were about and the task that asked, and each yields the event loop for `_TURNS` turns before
     doing anything - which is what turns "did not overlap" into a question with a wrong answer
@@ -432,10 +433,10 @@ async def _landed_children(run: Run[None], names: Sequence[str]) -> None:
 
 
 @pytest.mark.asyncio
-async def test_the_root_refuses_to_integrate_with_the_error_the_plan_asks_for(
+async def test_the_root_refuses_to_integrate_with_an_input_error(
     tmp_path: Path,
 ) -> None:
-    """§3.3 and §3.9: `main` is **unaddressable rather than policy-protected**, and the class is the
+    """`main` is **unaddressable rather than policy-protected**, and the class is the
     one that sends a workflow author to the line they wrote.
 
     Three claims, and the middle one is the reason this test exists beside the implementer's own.
@@ -443,15 +444,16 @@ async def test_the_root_refuses_to_integrate_with_the_error_the_plan_asks_for(
     **The class is `InputError`.** What the caller supplied cannot be used and nothing was
     attempted.
 
-    **The exit status is that class's, and 70 is the wrong answer.** §1.5's charge was that exit
-    codes were meaningless, and §3.1 answers it with one table; a refusal whose *number* is 70 tells
+    **The exit status is that class's, and 70 is the wrong answer.** Exit codes used to be
+    meaningless and `ports/errors.py` answers that with one table; a refusal whose *number* is 70
+    tells
     an operator to file a bug about a call a workflow author made on purpose. So this asks
     `cli/exit_codes.exit_status` - the function `cli/main.py` uses - rather than asserting a class
     and hoping the mapping agrees. Nothing in the framework's own suite reads the two together.
 
     **The message carries the distinction.** A refusal phrased as a permission - "AGL will not write
     to your branches" - invites the reader to go looking for the flag that lets it, and there is
-    none to find: §3.9 puts every ref AGL touches under `agl/*`, so a `Run` has exactly one thing it
+    none to find: every ref AGL touches is under `agl/*`, so a `Run` has exactly one thing it
     could land into and the root has none of them. The words that carry that are what is asserted.
 
     Asked **after** the root has cut a child, deliberately: a run that has a parent-child tree in it
@@ -470,7 +472,7 @@ async def test_the_root_refuses_to_integrate_with_the_error_the_plan_asks_for(
     said = str(raised.value)
     assert exit_status(raised.value) == exit_status(InputError("")), (
         f"the root's refusal resolves to exit {exit_status(raised.value)}, which is not the status "
-        f"`InputError` carries. §3.1 has one table and §1.5's whole charge is that a number nobody "
+        f"`InputError` carries. `ports/errors.py` has one table, and a number nobody "
         f"can act on is worse than none - and 70 in particular tells an operator to file a bug "
         f"about a call a workflow author wrote on purpose"
     )
@@ -478,13 +480,13 @@ async def test_the_root_refuses_to_integrate_with_the_error_the_plan_asks_for(
         "the root's refusal exits with `InternalError`'s status, which is `file a bug`"
     )
     assert "unaddressable" in said, (
-        f"the refusal does not say the word: {said!r}. §3.3 and §3.9 make `main` unaddressable "
+        f"the refusal does not say the word: {said!r}. `main` is unaddressable "
         f"rather than protected, and a refusal that reads as a policy sends the reader looking for "
         f"the setting that relaxes it"
     )
     assert "agl/*" in said, (
         "the refusal does not name the invariant it follows from - AGL never checks out or writes "
-        "to any ref outside `agl/*` (§3.9) - so it reads as a rule rather than as a consequence"
+        "to any ref outside `agl/*` - so it reads as a rule rather than as a consequence"
     )
     assert await child.integrate() is not None, (
         "the child of that same root could not integrate either, so what was refused above is not "
@@ -497,7 +499,7 @@ async def test_the_root_refuses_to_integrate_with_the_error_the_plan_asks_for(
 
 @pytest.mark.asyncio
 async def test_concurrent_landings_into_one_target_never_overlap(tmp_path: Path) -> None:
-    """§3.4: "landings into one target are serialised" - asserted about the *serialization* and not
+    """"Landings into one target are serialised" - asserted about the *serialization* and not
     about the tree it leaves behind.
 
     **A suite that checked only the final state would pass against an implementation with no lease
@@ -507,12 +509,12 @@ async def test_concurrent_landings_into_one_target_never_overlap(tmp_path: Path)
     lease prevents is a *race*, and a race that did not happen this time is not evidence.
 
     So this watches instead. A landing is not one call, but two moments inside it are visible from a
-    port: `Integrator.land`, where the work is combined, and `Verifier.verify`, the merge gate §3.4
-    places inside the lease and calls serial "because the merge queue serializes it, and it must be
+    port: `Integrator.land`, where the work is combined, and `Verifier.verify`, the merge gate
+    inside the lease, serial "because the merge queue serializes it, and it must be
     - it tests a combined state that exists only momentarily". Both are wrapped, both yield the
     event loop before doing their work, and the log they leave is the assertion: **every task's
-    entries into that target are contiguous**. Interleaved is the failure, in the exact shape §3.4
-    names - "if another item lands mid-build, the tree verified is not the tree being decided about,
+    entries into that target are contiguous**. Interleaved is the failure, in the exact shape
+    named - "if another item lands mid-build, the tree verified is not the tree being decided about,
     and a failure cannot be attributed".
 
     The yields are what make the wrong answer reachable: with no lease, all three tasks are inside
@@ -548,13 +550,13 @@ async def test_concurrent_landings_into_one_target_never_overlap(tmp_path: Path)
     assert len(blocks) == len(set(visitors)), (
         f"two landings into one target overlapped: the order they were inside `land` and the merge "
         f"gate was {visitors}, which visits {blocks} - a task appearing in two blocks was inside a "
-        f"landing that another task had already started and not finished. §3.4 serialises landings "
+        f"landing that another task had already started and not finished. Landings serialise "
         f"into one target precisely so the gate decides about the tree it was handed; overlapped, "
         f"the combined state one build verified is not the one that was kept"
     )
     assert len(visitors) == 2 * len(CHILDREN), (
         f"the watcher saw {visitors}, and three landings owe six visits - one `land` and one gate "
-        f"each. Fewer means a landing skipped the gate, which is the check §3.4 gives the framework"
+        f"each. Fewer means a landing skipped the gate, which is the one check the framework has"
     )
     assert [one.conflicted for one in outcomes] == [False] * len(CHILDREN), (
         f"children touching three different files did not all land: "
@@ -600,11 +602,11 @@ async def _held(
 async def test_a_second_landing_waits_while_the_first_conflict_is_undecided(
     tmp_path: Path,
 ) -> None:
-    """§3.4: the lease is held "from the moment an integration starts until its outcome is settled,
+    """The lease is held "from the moment an integration starts until its outcome is settled,
     conflict screen and all". The half that is a *negative*, and the one no state assertion reaches.
 
     A conflicted outcome goes back to the workflow with the target held mid-landing and the lease
-    still taken, and stage 15's screen is put up while it is. So the interesting question is not
+    still taken, and the workflow's screen is put up while it is. So the interesting question is not
     what an abort puts back - the implementer's suite asks that - but whether anything at all stops
     a **second** child from landing into a target somebody is still deliberating over. Nothing else
     could: `Integrator.land` would answer the second child with the *first* child's collision, and a
@@ -623,7 +625,7 @@ async def test_a_second_landing_waits_while_the_first_conflict_is_undecided(
 
     assert not finished, (
         "a second child landed into a target whose first landing is still unresolved. The lease is "
-        "held across the workflow's own decision (§3.4), and without it this landing is offered "
+        "held across the workflow's own decision, and without it this landing is offered "
         "into a held target - which `land` answers with somebody else's `Conflict`, sending a "
         "person to a screen about a collision that is not theirs"
     )
@@ -649,11 +651,11 @@ async def test_a_step_in_the_target_namespace_waits_while_a_conflict_is_undecide
     does not take.
 
     That suite parks a step and offers a landing, which proves the landing queues behind the step.
-    The converse is the one that matters in life, because §3.4 holds the lease "across a human's
+    The converse is the one that matters in life, because the lease is held "across a human's
     deliberation" and a conflict screen can be up for an afternoon: while it is, the target's
     checkout is **full of a half-applied merge**. A step allowed to run in it would restore over the
     collision, hand its agent a tree nobody composed, and commit whatever came back under the
-    parent's own message - none of which raises, and all of which §3.6's serialization lock exists
+    parent's own message - none of which raises, and all of which the serialization lock exists
     to prevent one writer at a time.
 
     So a step in the parent is offered while its own child's conflict is undecided, and it must not
@@ -688,7 +690,7 @@ async def test_a_step_in_the_target_namespace_waits_while_a_conflict_is_undecide
 async def test_a_conflict_held_in_one_target_does_not_stop_a_landing_into_another(
     tmp_path: Path,
 ) -> None:
-    """§3.4: the lease "is scoped to this run's integration target, so a human deliberating in one
+    """The lease "is scoped to this run's integration target, so a human deliberating in one
     run never blocks another" - and within one run, one target's deliberation must not stop another
     target's queue either.
 
@@ -733,7 +735,7 @@ async def test_a_nested_landing_advances_the_middle_namespace_so_its_own_landing
     A grandchild lands into a middle namespace; the middle namespace then lands into the root. The
     second landing carries the first only if the middle namespace's *chain* moved when the
     grandchild went in - `Integrator.land` reads `source.branch`, and the branch moved, but
-    everything the framework does around it is keyed on `last_good`. This is §3.6's advance seen
+    everything the framework does around it is keyed on `last_good`. This is the advance seen
     from the one angle where it is load-bearing for correctness rather than for survival: not "the
     work is still there", but "the work is in what landed next".
 
@@ -756,7 +758,7 @@ async def test_a_nested_landing_advances_the_middle_namespace_so_its_own_landing
     assert await harness.services.history.contains(built, outer.head), (
         f"the root is at {outer.head!r} and that state does not contain the grandchild's work at "
         f"{built!r}. The middle namespace landed what its *chain* said it had, and the "
-        f"grandchild's landing is exactly the thing that moves that chain - §3.6's advance, "
+        f"grandchild's landing is exactly the thing that moves that chain - the advance, "
         f"failing here as a wrong answer rather than as a deletion"
     )
     assert (_fake_target(tmp_path) / _file(CHILDREN[0])).read_bytes() == _work(CHILDREN[0])
@@ -770,7 +772,7 @@ class _World:
     """The four directories one real-git scenario happens in, all under one root.
 
     The trees root is a *sibling* of the repository rather than a directory inside it, which is the
-    layout §3.9 draws and which `tests/adapters/test_git_workspace.py` gives the reason for: a
+    layout AGL uses and which `tests/adapters/test_git_workspace.py` gives the reason for: a
     worktree inside the user's working tree shows up in their `git status`.
     """
 
@@ -794,7 +796,7 @@ class _World:
 
     @property
     def target(self) -> Path:
-        """`.trees/auth/_base/` - the checkout every landing here goes into (§3.9)."""
+        """`.trees/auth/_base/` - the checkout every landing here goes into."""
         return base_worktree(TreesRoot(self.trees), LABEL)
 
 
@@ -925,9 +927,9 @@ def _real(
 async def _real_run(world: _World, services: Services) -> Run[None]:
     """One root `Run` over a real repository, assembled the way `api.run` assembles one.
 
-    The record is not written, because nothing below reads one - `api.resume` is 16.2 - but the
-    `_base` checkout is opened first, exactly as 13.4 put it there, so that `agl/<label>` is a real
-    ref from run start and a landing is offered into a checkout that already exists.
+    The record is not written, because nothing below reads one - `api.resume` had not been built
+    yet - but the `_base` checkout is opened first, exactly where it belongs, so that `agl/<label>`
+    is a real ref from run start and a landing is offered into a checkout that already exists.
     """
     base = await _base_of(services.history)
     await services.workspaces.open(LABEL, None, base)
@@ -941,7 +943,7 @@ async def _real_run(world: _World, services: Services) -> Run[None]:
 async def test_a_red_gate_leaves_a_real_target_unmerged_and_its_tree_clean(world: _World) -> None:
     """The criterion, asked of git rather than of a dictionary.
 
-    §3.4 has the framework "run the build gate and revert on failure", and the revert is
+    The framework "runs the build gate and reverts on failure", and the revert is
     `Workspace.restore(before)` - `reset --hard` **and** `clean -fd`, one verb doing both halves. A
     fake makes both halves invisible: `FakeVerifier` starts no process, so a build that leaves a log
     and a cache directory in the tree it was pointed at is not a thing that can happen to it, and a
@@ -984,7 +986,8 @@ async def test_a_red_gate_leaves_a_real_target_unmerged_and_its_tree_clean(world
     outcome = await first.integrate()
 
     assert outcome.conflicted is True, (
-        "the gate was scripted to fail and the landing stood anyway. §3.4 runs the build gate and "
+        "the gate was scripted to fail and the landing stood anyway. The framework runs the "
+        "build gate and "
         "reverts on failure, and a landing kept over a red build is the semantic conflict this "
         "gate is the only thing in AGL that can catch"
     )
@@ -1023,7 +1026,7 @@ async def test_a_red_gate_leaves_a_real_target_unmerged_and_its_tree_clean(world
         "nothing to offer if the source has been rewritten"
     )
     assert _git(world.repo, "status", "--porcelain") == "", (
-        "the user's own checkout is dirty. §3.9: AGL never touches the target repository except "
+        "the user's own checkout is dirty: AGL never touches the target repository except "
         "through a workspace, and a merge is the one command in this package with an obvious wrong "
         "place to run it"
     )
@@ -1033,7 +1036,7 @@ async def test_a_red_gate_leaves_a_real_target_unmerged_and_its_tree_clean(world
 
     assert _tip(world, branch) == before, (
         f"{branch} moved to {_tip(world, branch)!r} when the parent's next step restored to its "
-        f"chain, so the chain had been advanced over a landing that was undone. §3.6 makes that "
+        f"chain, so the chain had been advanced over a landing that was undone. That is "
         f"the one value whose being wrong deletes work rather than costing a re-run"
     )
     assert _read(world.target / PARENT_FILE) == PARENT_BODY
@@ -1054,20 +1057,20 @@ async def test_a_red_gate_leaves_a_real_target_unmerged_and_its_tree_clean(world
 
 @pytest.mark.asyncio
 async def test_a_landed_child_survives_the_parents_next_fingerprint_miss(world: _World) -> None:
-    """§3.6's destroy-work line, produced in the medium that does the destroying.
+    """The destroy-work line, produced in the medium that does the destroying.
 
     "**`integrate()` advances the parent's `last_good`.** A child landing moves the parent's
     physical head, but `last_good` is chained from step entries and `integrate()` is not a step - so
     the parent's next step to miss its fingerprint would `restore()` to a commit *before* every
     landed child and delete all of it."
 
-    **A hit proves nothing**, which is why this arranges a miss and asserts that it was one. §3.6's
+    **A hit proves nothing**, which is why this arranges a miss and asserts that it was one. A
     replay returns on a hit before `restore` is ever reached, so a suite that landed a child and
     then replayed a recorded step would pass with the advance deleted. `review` has never run in
-    this run, so it misses; it takes no `commit=`, so **both** of §3.3's restores fire - the
-    unconditional one before the worker and the wipe after it - and each of them is `reset --hard`
-    *and* `clean -fd` against whatever `last_good` says. That the worker ran is asserted directly,
-    because "the worker was not called" is the whole of what a replay hit is (§3.6) and this test is
+    this run, so it misses; it takes no `commit=`, so **both** restores fire - the unconditional
+    one before the worker and the wipe after it - and each of them is `reset --hard` *and*
+    `clean -fd` against whatever `last_good` says. That the worker ran is asserted directly,
+    because "the worker was not called" is the whole of what a replay hit is, and this test is
     worthless without a miss.
 
     **What is asserted is contents and ancestry, not a head string.** A head that changed is
@@ -1096,7 +1099,7 @@ async def test_a_landed_child_survives_the_parents_next_fingerprint_miss(world: 
     assert recorded == [REVIEW.instructions], (
         f"the parent's next step ran {recorded} rather than missing its fingerprint and calling "
         f"its worker once. A hit returns before `restore` is reached, so this test would be "
-        f"asserting that nothing happened - §3.6's replay makes the miss the only interesting path"
+        f"asserting that nothing happened - replay makes the miss the only interesting path"
     )
     assert _read(world.target / _file(CHILDREN[0])) == _work(CHILDREN[0]), (
         "the landed child's file is gone from the target's checkout, or holds something else, "
@@ -1157,7 +1160,7 @@ async def test_three_children_land_into_one_real_base_and_all_three_survive(
 
     The watcher runs here too, so the ordering claim is made in both media by one instrument. And
     the merge count is asserted, which nothing else here does: `--no-ff` means each landing is an
-    event in the target's history (§3.9 wants `git log agl/auth` to say which child arrived when),
+    event in the target's history - `git log agl/auth` says which child arrived when -
     so three landings owe exactly three merge commits - a fourth would be a landing done twice and a
     second would be two children arriving as one.
     """
@@ -1201,7 +1204,7 @@ async def test_three_children_land_into_one_real_base_and_all_three_survive(
         f"{_git(world.target, 'status', '--porcelain')}"
     )
     assert _git(world.repo, "status", "--porcelain") == "", (
-        "the user's own checkout is dirty. §3.9's whole premise is that `git status` in `repo/` "
+        "the user's own checkout is dirty. The whole premise is that `git status` in `repo/` "
         "stays clean while a run lands work"
     )
 
@@ -1212,11 +1215,11 @@ async def test_three_children_land_into_one_real_base_and_all_three_survive(
 class _Abandoned(Stop):
     """What a workflow raises while a conflict is still on its screen.
 
-    A `Stop` subclass on purpose, and that is not decoration: §3.1 makes the ordering hazard a
-    stage-10 acceptance criterion - `Stop` descends from `AglError`, so a handler catching the base
-    first reports 6 or 70 where the contract promises 7 - and 14.1 put a `try` into `api.run` for
-    the lease. `api.py`'s own docstring answers that the rule "was about catching" and a `finally`
-    names no class. This is that answer measured: the object leaves `api.run` untouched and resolves
+    A `Stop` subclass on purpose, and that is not decoration: the ordering hazard is an
+    acceptance criterion - `Stop` descends from `AglError`, so a handler catching the base first
+    reports 6 or 70 where the contract promises 7 - and the lease put a `try` into `api.run`.
+    `api.py`'s own docstring answers that the rule "was about catching" and a `finally` names no
+    class. This is that answer measured: the object leaves `api.run` untouched and resolves
     to `Stop`'s exit status, with a lease release having run on the way out.
     """
 
@@ -1225,7 +1228,7 @@ _STRANDED: list[Run[object]] = []
 """Where the workflow below hands its `Run` tree back to the test that started it.
 
 A module-level cell because a workflow function takes a `Run` and returns `None` - there is no
-return value and no argument to smuggle one through, which is the shape §3.3 chose. The one test
+return value and no argument to smuggle one through, which is the shape chosen. The one test
 that reads it clears it first.
 """
 
@@ -1253,17 +1256,17 @@ async def raises_mid_conflict(run: Run[NoParams]) -> None:
 async def test_a_workflow_that_raises_mid_conflict_gives_back_the_lease_and_the_step_lock(
     tmp_path: Path,
 ) -> None:
-    """§3.4's sweeper - run exit gives the lease back - on the exit nobody arranges for.
+    """The sweeper - run exit gives the lease back - on the exit nobody arranges for.
 
     The implementer's suite covers a workflow that *returns* with a conflict undecided. The raise is
     a different line of code reaching the same `finally`, and it is the ordinary one: a conflict
-    screen is where a run is most likely to end in anger, and §3.1's `Stop` hazard lives on exactly
+    screen is where a run is most likely to end in anger, and the `Stop` hazard lives on exactly
     this path. Three claims, none of which the return-path test can make.
 
     **The exception is not touched.** It leaves `api.run` as the object the workflow raised, so
     `cli/exit_codes.exit_status` resolves it to `Stop`'s 7 without either module having heard of
-    `_Abandoned`. Had 14.1's `try` been an `except` of any width, the answer would be 6 or 70 -
-    which is §3.1's stage-10 criterion, re-asked now that there is a `try` in that function.
+    `_Abandoned`. Had that `try` been an `except` of any width, the answer would be 6 or 70 -
+    which is the ordering criterion, re-asked now that there is a `try` in that function.
 
     **Both things the lease took come back.** `Leases.claim` takes the target's lease and then that
     namespace's step lock, and `Lease.release` gives back the second and then the first. A release
@@ -1271,7 +1274,7 @@ async def test_a_workflow_that_raises_mid_conflict_gives_back_the_lease_and_the_
     process, with nothing raising and nothing to read - so a step and a landing are both offered
     afterwards, and neither may be waiting.
 
-    **And the adapter's hold is deliberately left alone**, which is §3.4's durable hold and the
+    **And the adapter's hold is deliberately left alone**, which is the durable hold and the
     reason `abort()` on the way out is the forbidden shortcut: the target's checkout still holds a
     collision nobody decided, so a later invocation can find it. That is asserted first, before the
     step below restores over it.
@@ -1291,15 +1294,16 @@ async def test_a_workflow_that_raises_mid_conflict_gives_back_the_lease_and_the_
 
     assert exit_status(raised.value) == exit_status(Stop("")), (
         f"a workflow's own `Stop` subclass left `api.run` resolving to exit "
-        f"{exit_status(raised.value)} rather than to {exit_status(Stop(''))}. §3.1 makes that a "
-        f"stage-10 criterion and 14.1 put a `try` into that function - a `finally` names no class, "
+        f"{exit_status(raised.value)} rather than to {exit_status(Stop(''))}. That is an "
+        f"acceptance criterion, and the lease put a `try` into that function - a `finally` names "
+        f"no class, "
         f"and an `except` of any width would turn a deliberate end into a bug report"
     )
     assert len(_STRANDED) == 2, "the workflow did not reach the end it was written for"
     run, child = _STRANDED
     assert _read(_fake_target(tmp_path) / CONTESTED) not in (PARENT_SIDE, CHILD_SIDE), (
         "the target's checkout holds one side of the collision whole, so run exit released the "
-        "adapter's hold as well as the lease. §3.4 makes the hold durable precisely so a later "
+        "adapter's hold as well as the lease. The hold is durable precisely so a later "
         "invocation can find one it did not take, and undoing it here discards whatever resolution "
         "a person had started"
     )
@@ -1428,9 +1432,9 @@ async def test_cancelling_a_queued_landing_does_not_strand_the_target(tmp_path: 
 async def test_a_landing_a_person_concluded_by_hand_still_goes_through_the_build_gate(
     tmp_path: Path,
 ) -> None:
-    """The hole 14.3 is written to close, and the cost of closing it that way.
+    """The hole this is written to close, and the cost of closing it that way.
 
-    §3.4 gives the framework exactly one build and puts it inside `integrate()`. A landing reached
+    The framework has exactly one build and it is inside `integrate()`. A landing reached
     through `retry()` after somebody resolved a collision **by hand** is the landing least like the
     one the framework composed - a person invented it, under time pressure, in a checkout - so a
     `retry` that advanced the parent's chain without building would send exactly that past the one
@@ -1445,9 +1449,9 @@ async def test_a_landing_a_person_concluded_by_hand_still_goes_through_the_build
     conflict markers back in the file, and the afternoon they spent resolving it gone with nothing
     said.
 
-    §3.4 forbids `abort()`-before-land by name because "it silently discards partial human
+    `abort()`-before-land is forbidden by name because "it silently discards partial human
     resolutions, which `retry()` exists to preserve". This is that discard arriving through a door
-    the plan does not look at. Both halves are asserted here so that neither can change silently.
+    nothing else looks at. Both halves are asserted here so that neither can change silently.
     """
     harness, run, blocked, _ = await _held(tmp_path)
     target = _fake_target(tmp_path)
@@ -1461,7 +1465,7 @@ async def test_a_landing_a_person_concluded_by_hand_still_goes_through_the_build
 
     assert outcome.conflicted is True, (
         "a landing concluded by a person's own hand went in over a red build, so `retry` advanced "
-        "the parent's chain without building. §3.4 gives the framework one check and this is the "
+        "the parent's chain without building. The framework has one check and this is the "
         "landing that most needs it - a merge nothing in AGL composed"
     )
     assert outcome.verdict is not None and outcome.verdict.passed is False, (
@@ -1471,7 +1475,7 @@ async def test_a_landing_a_person_concluded_by_hand_still_goes_through_the_build
     assert await _head(harness, None) == before, "the gate's revert did not put the target back"
     assert _read(target.joinpath(*CONTESTED.split("/"))) != RESOLVED.encode(), (
         "the person's resolution is still in the target's checkout after the gate reverted the "
-        "landing that carried it, so `restore` did not do what §3.11 says it does"
+        "landing that carried it, so `restore` did not do what it promises"
     )
 
     harness.verifier.answers(container.FAKE_BUILD, passed=True, status=0, output="")
@@ -1486,8 +1490,8 @@ async def test_a_landing_a_person_concluded_by_hand_still_goes_through_the_build
     assert body is not None and b"<<<<<<<" in body, (
         f"the target's copy of the contested file is {body!r}. What is being recorded here is that "
         f"'fix the build and press retry' offers the landing again from scratch, so a collision "
-        f"somebody had already resolved is back in front of them with the markers in it - §3.4's "
-        f"own reason for forbidding `abort()` before a land, arriving through the gate's revert"
+        f"somebody had already resolved is back in front of them with the markers in it - the "
+        f"reason for forbidding `abort()` before a land, arriving through the gate's revert"
     )
     await outcome.abort()
 
@@ -1563,7 +1567,7 @@ def _said(records: Sequence[Mapping[str, object]], tag: str, key: str) -> Mappin
 def _workers(records: Sequence[Mapping[str, object]], tag: str | None = None) -> list[str]:
     """The prompts every agent invocation was dispatched with, optionally only one process's.
 
-    "The worker was not called" is the whole of what a replay hit *is* (§3.6) - there is no other
+    "The worker was not called" is the whole of what a replay hit *is* - there is no other
     observable difference between a replay and a re-run that happens to produce the same answer - so
     this list is how a resumed process's replay is told from a second run of the same programme.
     """
@@ -1600,14 +1604,14 @@ def _died_holding(world: _World) -> str:
     records = _records(world)
     assert _markers(records, "died") == set(), (
         "the process that was meant to be killed ran a `finally` clause or an `atexit` hook on its "
-        "way out, so it was unwound rather than killed - and an unwound run is the one case §3.4 "
-        "does not have to survive, because `api.run`'s own `finally` is what gives the lease back"
+        "way out, so it was unwound rather than killed - and an unwound run is the one case that "
+        "does not have to be survived, because `api.run`'s own `finally` gives the lease back"
     )
     assert _said(records, "died", "landed")["conflicted"] is True, (
         "the first process did not conflict, so there is no hold for a second one to find"
     )
     assert _holding(world.target), (
-        "the target is not holding a merge after the process that took the hold died. §3.4: the "
+        "the target is not holding a merge after the process that took the hold died: the "
         "hold must be durable, not in-memory - `MERGE_HEAD` in the worktree's own git directory is "
         "what makes a crash-during-conflict recoverable at all, and without it there is nothing "
         "for a resumed run to find and nothing an `abort` could ever release"
@@ -1616,18 +1620,18 @@ def _died_holding(world: _World) -> str:
 
 
 def test_a_second_process_meets_the_hold_the_first_one_died_holding(world: _World) -> None:
-    """§3.4's recoverable state, followed through two real processes to the end that lands.
+    """The recoverable state, followed through two real processes to the end that lands.
 
     *A resumed run must be able to find a hold it did not take. The durable hold is what makes a
     crash-during-conflict recoverable - but `integrate()` is not a step, so nothing journals it, and
-    a resumed run calls `land()` into a target still holding the previous process's merge. Stage 14
-    must resolve this ... Not exit 70 on resume.*
+    a resumed run calls `land()` into a target still holding the previous process's merge. This
+    must be resolved ... Not exit 70 on resume.*
 
     Every clause of that is a fact about two processes and none of it is reachable from one. The
     first process is killed with `os._exit` the instant its landing conflicts - no `finally`, so
     `api.run`'s lease release never runs and neither does anything else - and the second is a fresh
     interpreter that re-drives the same workflow over the same `AGL_HOME` and the same repository.
-    It has to be re-driven rather than resumed because `api.resume` is 16.2 and raises today, which
+    It has to be re-driven rather than resumed because `api.resume` raises here, which
     is exactly the shape a resume will have: the same calls, in the same order, hitting the same
     entries.
 
@@ -1652,7 +1656,7 @@ def test_a_second_process_meets_the_hold_the_first_one_died_holding(world: _Worl
 
     records = _records(world)
     assert resumed.returncode == 0, (
-        f"the resumed process exited {resumed.returncode}. §3.4 forbids exactly one answer here - "
+        f"the resumed process exited {resumed.returncode}. Exactly one answer is forbidden - "
         f"*Not exit 70 on resume* - and any non-zero status is a run that could not carry on from "
         f"a repository a person can still put right.\n"
         f"--- log ---\n"
@@ -1672,7 +1676,7 @@ def test_a_second_process_meets_the_hold_the_first_one_died_holding(world: _Worl
     met = _said(records, "resumed", "landed")
     assert met["conflicted"] is True, (
         "landing into a target that was already holding somebody else's merge was not reported as "
-        "a conflict. §3.4 names two acceptable exits and this is the first: the state *is* a "
+        "a conflict. There are two acceptable exits and this is the first: the state *is* a "
         "conflict and the workflow already knows how to route one"
     )
     assert met["paths"], (
@@ -1688,7 +1692,7 @@ def test_a_second_process_meets_the_hold_the_first_one_died_holding(world: _Worl
     )
     assert settled["verdict"] is True, (
         "the landing a person concluded by hand carries no passing build verdict, so it reached "
-        "the parent's chain without going through the one check §3.4 gives the framework"
+        "the parent's chain without going through the one check the framework has"
     )
     assert not _holding(world.target), "the target is still holding a merge after it was concluded"
     assert _tip(world, run_branch(LABEL)) != before, "nothing was committed, so nothing landed"
@@ -1707,7 +1711,7 @@ def test_a_second_process_meets_the_hold_the_first_one_died_holding(world: _Worl
 
 
 def test_a_second_process_can_abort_the_hold_the_first_one_died_holding(world: _World) -> None:
-    """§3.4's other end of the same state: give up, and the target goes back where `land` found it.
+    """The other end of the same state: give up, and the target goes back where `land` found it.
 
     The half of the criterion that does not need a person to have fixed anything, and the one a
     workflow reaches when its conflict screen says "no". It matters separately from the retry
@@ -1740,7 +1744,8 @@ def test_a_second_process_can_abort_the_hold_the_first_one_died_holding(world: _
     assert settled["head"] is None, "an aborted outcome reports a head, so something landed"
     assert not _holding(world.target), (
         "the target is still holding the merge after a second process aborted it. That is the "
-        "silent failure §3.4 names: against an in-memory hold this `abort` finds nothing pending, "
+        "silent failure that is named: against an in-memory hold this `abort` finds nothing "
+        "pending, "
         "releases nothing, reports success and leaves the target half-combined forever"
     )
     assert _tip(world, run_branch(LABEL)) == before, (
@@ -1806,7 +1811,7 @@ def _snapshot(world: _World) -> _Snapshot:
 
 
 def test_a_run_that_landed_replays_identically_after_being_killed(world: _World) -> None:
-    """§3.6's own contract-test shape, applied to the one thing in a run that is not journalled.
+    """The contract-test shape, applied to the one thing in a run that is not journalled.
 
     "Enforced by an SDK contract test: run to completion, kill at every step boundary, resume,
     assert identical final state." `tests/sdk/test_kill_and_resume.py` is that test for *steps*, and
@@ -1882,7 +1887,7 @@ def test_a_run_that_landed_replays_identically_after_being_killed(world: _World)
     )
 
 
-# --- two more paths out of an integration, neither of which the plan writes down ------------
+# --- two more paths out of an integration, neither of them specified anywhere ---------------
 
 @pytest.mark.asyncio
 async def test_a_gate_that_raises_inside_retry_leaves_the_outcome_unsettled_and_abort_frees_it(
@@ -1950,7 +1955,7 @@ async def test_integrating_one_child_twice_lands_it_once_and_says_so_both_times(
 ) -> None:
     """The in-process half of what a replay depends on: a landing is idempotent.
 
-    Nothing journals an integration (§3.6), so the *only* thing that keeps a second walk from
+    Nothing journals an integration, so the *only* thing that keeps a second walk from
     landing a child twice is that `Integrator.land` reports work the target already holds as an
     ordinary landing at the unchanged head - "a landing that changed nothing is still a landing".
     The two-process replay test at the bottom of this file asserts the consequence in the medium

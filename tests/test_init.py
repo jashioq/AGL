@@ -1,8 +1,8 @@
 """`agl init` from the library side: what it detects, what it refuses, and what it leaves behind.
 
-`tests/cli/test_init_command.py` drives the real entry point in a real git repository and proves the
-stage's acceptance criterion end to end. This module is the operation on its own, where the refusals
-are cheap to arrange and the ordering between them is what is being asserted.
+`tests/cli/test_init_command.py` drives the real entry point in a real git repository and proves
+the whole operation end to end. This module is the operation on its own, where the refusals are
+cheap to arrange and the ordering between them is what is being asserted.
 
 **No real git repository is created here, and that is part of the claim.** `toml_file.git_root`
 walks the filesystem looking for a `.git` entry and asks git nothing - no subprocess, no adapter -
@@ -10,12 +10,12 @@ so a marker directory is the entire input `api.init` can see, and `tests/config/
 makes the same argument for the same walk. What a real repository would add is a subprocess per
 case and the chance of quietly testing git.
 
-**Nothing here moves the process.** `api.init` takes a `cwd` rather than reading one, which is
-16.4's first decision, and every test below is what that decision buys: two repositories can be
+**Nothing here moves the process.** `api.init` takes a `cwd` rather than reading one, which was
+the first decision, and every test below is what that decision buys: two repositories can be
 registered in one test, in one process, and a failure leaves no working directory behind it. A
 suite driving an ambient `Path.cwd()` would have had to `monkeypatch.chdir` for every one of them.
 
-**Nothing patches `builtins.input` either.** The question §3.10 has `init` ask travels as a
+**Nothing patches `builtins.input` either.** The question `init` asks travels as a
 parameter, so a test hands in a lambda and reads what the prompt said - and `cli/main.py` is the one
 place `input` is named at all.
 
@@ -61,7 +61,7 @@ def _repo(tmp_path: Path, name: str = "myapp") -> Path:
 
 
 def _keys(written: Path) -> list[str]:
-    """The keys the written file holds, in the order §3.10 prints them.
+    """The keys the written file holds, in the order they are printed.
 
     Read off the text as `key = value` lines rather than through a TOML parser, so that this says
     something the reader's own round-trip tests do not: `read_project` answers `None` for a key that
@@ -88,10 +88,10 @@ class _Asked:
 def test_the_file_it_writes_is_one_the_reader_and_the_resolver_both_accept(tmp_path: Path) -> None:
     """The round trip, which is the criterion rather than the bytes.
 
-    §3.10 prints this file, and what matters about it is not its text but that the two modules
-    reading a project's settings take it: `toml_file.read_project` by name, and
-    `sources.resolve_project` by the layers over it. A test comparing the rendered TOML against a
-    literal would agree with nothing and would have to be edited by anyone who changed a space.
+    What matters about this file is not its text but that the two modules reading a project's
+    settings take it: `toml_file.read_project` by name, and `sources.resolve_project` by the layers
+    over it. A test comparing the rendered TOML against a literal would agree with nothing and
+    would have to be edited by anyone who changed a space.
 
     **The key set is asserted as well as the resolved values**, and `build_timeout` is why. It is
     the one key on the file whose value people revisit - a build that outgrows ten minutes is the
@@ -126,7 +126,7 @@ def test_the_timeout_in_the_file_is_what_answers_and_not_the_default_layer(
     Edit the value and it takes effect with no flag and no environment variable - which is the
     thing an operator does with this key, and the thing they could not do with a key that was not
     there. The default layer still exists behind it, for a file somebody removed the key from and
-    for every project file stages 9 to 15 wrote by hand.
+    for every project file written by hand before `agl init` existed.
 
     The property this pins is also the one `sources.py` warns about in the other direction: a
     project registered today keeps the timeout it was registered with when AGL's own default moves,
@@ -149,7 +149,7 @@ def test_the_timeout_in_the_file_is_what_answers_and_not_the_default_layer(
 
 
 def test_the_project_is_named_after_the_repositorys_own_directory(tmp_path: Path) -> None:
-    """§3.10's example file is `repo = ".../myapp"` and `name = "myapp"`, and this is why.
+    """The example file is `repo = ".../myapp"` and `name = "myapp"`, and this is why.
 
     It is also what lets `agl init` take no arguments at all: the two facts a project file needs
     that nobody types are both derivable from where the command was run.
@@ -164,7 +164,7 @@ def test_the_project_is_named_after_the_repositorys_own_directory(tmp_path: Path
 
 
 def test_the_trees_root_is_beside_the_repository_and_never_under_it(tmp_path: Path) -> None:
-    """§3.5 in one path: `<repo's parent>/.agl-trees/<name>`, which is §3.10's own example.
+    """The layout in one path: `<repo's parent>/.agl-trees/<name>`, which is the example.
 
     Under the repository, AGL's checkouts would be in the operator's `git status`, swept up by `git
     add -A` and walked by whatever their build walks - which is what `check_trees_root` refuses and
@@ -182,7 +182,7 @@ def test_the_trees_root_is_beside_the_repository_and_never_under_it(tmp_path: Pa
 
 
 def test_the_git_root_is_found_from_a_directory_deep_inside_the_repository(tmp_path: Path) -> None:
-    """§3.10: "it detects the git root". Nobody runs `agl init` from the top of their tree.
+    """It detects the git root. Nobody runs `agl init` from the top of their tree.
 
     The name and the repo both come from the root rather than from where the command was typed,
     which is the whole of what detecting it is for.
@@ -204,12 +204,12 @@ def test_the_git_root_is_found_from_a_directory_deep_inside_the_repository(tmp_p
 def test_the_build_command_is_asked_for_once_and_the_prompt_says_what_it_is_for(
     tmp_path: Path,
 ) -> None:
-    """§3.10: `init` "asks for the build command", `_BUILD_GUESSES` existing only to say why not.
+    """`init` asks for the build command, `_BUILD_GUESSES` existing only to say why not.
 
     There is no build-tool detection anywhere in AGL, so this one question is the whole mechanism,
     and the prompt has to name the thing being asked about: there are two build commands in AGL's
-    world - the merge gate's, which is this, and the one a workflow writes into a prompt, which
-    §3.11 keeps out of the framework entirely - and "build command:" alone would not distinguish
+    world - the merge gate's, which is this, and the one a workflow writes into a prompt, which is
+    deliberately no business of the framework's - and "build command:" alone would not distinguish
     them.
     """
     asked = _Asked()
@@ -258,7 +258,7 @@ def test_a_blank_build_command_is_refused_and_nothing_is_written(tmp_path: Path)
 
 
 def test_a_second_init_in_the_same_repository_is_a_conflict(tmp_path: Path) -> None:
-    """§3.10 runs `init` once per repo, and the second run must not take the first one's file away.
+    """`init` runs once per repo, and the second run must not take the first one's file away.
 
     `ConflictError` - exit 4 - which is the class `api.run` answers a label that already exists
     with, and for the same reason `ports/errors.py` gives: everything named was found, and the world
@@ -297,9 +297,9 @@ def test_the_conflict_is_refused_before_anybody_is_asked_anything(tmp_path: Path
 def test_a_directory_that_is_in_no_git_repository_is_not_found(tmp_path: Path) -> None:
     """`git_root`'s own refusal, uncaught: exit 3, and the message already says to run this here.
 
-    AGL works on a repository (§3.5), so registering something that is not one has no meaning - and
-    the answer is not to write a project file for a directory whose `repo` key names nothing git
-    would recognise.
+    AGL works on a repository, so registering something that is not one has no meaning - and the
+    answer is not to write a project file for a directory whose `repo` key names nothing git would
+    recognise.
     """
     settings = _settings(tmp_path)
     elsewhere = tmp_path.resolve() / "elsewhere"
@@ -319,7 +319,7 @@ def test_a_repository_whose_directory_name_is_not_a_usable_project_name_is_refus
 ) -> None:
     """The name is the directory's, so `ids.py`'s allowlist reaches `agl init` through it.
 
-    §3.3 refuses non-ASCII and shell metacharacters wholesale, and a project name becomes
+    The allowlist refuses non-ASCII and shell metacharacters wholesale, and a project name becomes
     `projects/<name>.toml` and the directory beside it. The refusal is `ProjectName`'s own and is
     not re-worded on the way past - `api.py` catches nothing, and a fourth copy of that rule would
     be a fourth thing to keep in agreement with the allowlist.
@@ -339,14 +339,15 @@ def test_a_repository_whose_directory_name_is_not_a_usable_project_name_is_refus
 def test_a_trees_root_that_only_resolution_shows_to_be_inside_is_refused_before_writing(
     tmp_path: Path,
 ) -> None:
-    """16.1 exported `check_trees_root` "so that 16.4's `init` refuses it when the file is written",
-    and this is the arrangement in which the layout `init` picks can actually be inside the repo.
+    """`check_trees_root` is exported so that `init` refuses a trees root inside the repository
+    when the file is written, and this is the arrangement in which the layout `init` picks can
+    actually be inside it.
 
     `<repo's parent>/.agl-trees` is beside the repository as written, and a symlink is what makes
     the written path a lie: point that name at a directory inside the repository and AGL's checkouts
-    land in the operator's own working tree - present in `git status`, swept up by `git add -A`
-    (§3.5). Only `Path.resolve()` can see it, which is exactly why stage 9 could not put the check
-    on `schema.Project` and why it is impure by construction.
+    land in the operator's own working tree - present in `git status`, swept up by `git add -A`.
+    Only `Path.resolve()` can see it, which is exactly why the check could not go on
+    `schema.Project` and why it is impure by construction.
 
     Refused where the trees root is *chosen*, so nothing is written. Left to the reader alone, `agl
     init` would report success and the next command in that repository would refuse.

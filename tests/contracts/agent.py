@@ -12,8 +12,8 @@ Subclass it once per implementation, override the two fixtures, and add nothing:
             return SomeModel.THE_ONE_IT_SERVES
 
 The real adapters and the fakes run this class, which is the whole mechanism keeping a fake from
-drifting into fiction (§1.9). It is written here, at stage 3, before any of them exists, because a
-subagent that writes its own tests writes tests that pass - and stages 4 to 8 each end with "the
+drifting into fiction. It is written against the port alone, before any of them exists, because a
+subagent that writes its own tests writes tests that pass - and every adapter ships only once "the
 contract suite passes", a sentence worth something only when the suite had no stake in the outcome.
 
 `AgentContract` is one class assembled from four modules, and only this name is public. Its own
@@ -21,8 +21,8 @@ tests are the five things a `run` answers for that need no machinery: the outcom
 call, a tool call whose handler *failed*, the activity it may or may not report, and what becomes
 of a run whose activity reporter raises. The three it inherits follow seams the port draws itself.
 `_agent_preflight` holds the two members that are asked *about* an agent rather than running one;
-`_agent_questions` holds §3.7's negotiation and the two edge cases the port settles by hand;
-`_agent_hermeticity` holds §3.5's poisoned repository and the table it is built from, and is the
+`_agent_questions` holds the mid-run negotiation and the two edge cases the port settles by hand;
+`_agent_hermeticity` holds the poisoned repository and the table it is built from, and is the
 centrepiece. `_agent_tasks` under all of them holds the workspace, the tasks, the tool and the two
 callbacks every test is made of, and argues there why this suite touches a filesystem when the store
 suite refuses to.
@@ -47,20 +47,20 @@ not entitle anybody to believe.
 
 1. **That any adapter is hermetic - when the runner is a fake.** A fake reads no configuration, so
    the poisoned repository cannot catch it doing anything. The test is trivially satisfied there by
-   construction and bites only at stages 6 and 7. `_agent_hermeticity` says this at more length and
-   says why it is still written to bite.
+   construction and bites only against the real adapters. `_agent_hermeticity` says this at more
+   length and says why it is still written to bite.
 
 2. **A configuration an adapter loaded that the agent then ignored.** The poison is instructions,
    and instructions are only visible once acted on. Three channels make that likelier; none of them
    makes it certain.
 
 3. **Anything at all about the environment a backend runs in.** No test here reads or asserts an
-   environment variable. That is **deferred by decision, not overlooked**: §3.11's
-   "Credential-environment isolation" row states that v1.1 inherits the parent environment, that
-   managing what reaches a spawned agent interacts with proxies, cloud credentials and each
-   harness's own precedence rules, and that the operator simply keeps the key unset. §3.5 names it
-   the *second* channel and puts it out of scope in the same breath as putting hermeticity in.
-   Adding an environment assertion here would be building the thing the plan declined to build.
+   environment variable. That is **deferred by decision, not overlooked**: credential-environment
+   isolation was left unbuilt because AGL inherits the parent environment, because managing what
+   reaches a spawned agent interacts with proxies, cloud credentials and each harness's own
+   precedence rules, and because the operator can simply keep the key unset. It is the *second*
+   channel, put out of scope in the same breath that put hermeticity in. Adding an environment
+   assertion here would be building the thing that was declined.
 
 4. **That a `Restriction` was enforced.** The port lets a backend with no mechanism put a
    restriction to the agent as an instruction, so a dropped `NO_FILE_WRITES` and an agent that did
@@ -212,14 +212,14 @@ class AgentContract(AgentPreflightContract, AgentQuestionContract, AgentHermetic
         """Three legal answers to "why did it stop", and `None` is one of them.
 
         `None` means "this backend cannot tell you". It is not `COMPLETED` and it is not `LIMIT`,
-        and a consumer that reads it as either is inventing a fact: stage 8 reports honestly
+        and a consumer that reads it as either is inventing a fact: an adapter reports honestly
         precisely because a harness that says nothing here has a way of saying so. The port chose
         `None` over a third `UNKNOWN` member so that "did not say" is not listed beside two things
         that actually happened.
 
         `isinstance` and not `in`, because `StopReason` is a `StrEnum` and `"completed"` compares
         equal to `StopReason.COMPLETED` - a membership test would wave through an adapter handing
-        back whatever string its backend printed, which is exactly the leak §1.1 caught this port
+        back whatever string its backend printed, which is exactly the leak this port was found
         carrying before. And `text` is asserted to be a `str` because `""` is what the port says
         "the agent said nothing" looks like: an adapter answering `None` there hands the one member
         that reports what an agent said a second spelling of nothing.
@@ -241,7 +241,7 @@ class AgentContract(AgentPreflightContract, AgentQuestionContract, AgentHermetic
     async def test_a_refused_tool_call_is_put_back_to_the_agent_inside_the_same_run(
         self, runner: AgentRunner, model: ModelId, tmp_path: Path
     ) -> None:
-        """§3.3: a malformed payload is rejected back to the model inside the same conversation.
+        """A malformed payload is rejected back to the model inside the same conversation.
 
         Not an adapter retry, not a workflow retry, and not an exception. By the time a call is
         malformed there is a session in flight holding all the reasoning that produced it, and
@@ -287,7 +287,7 @@ class AgentContract(AgentPreflightContract, AgentQuestionContract, AgentHermetic
     async def test_a_tool_handler_that_raises_is_a_refusal_and_not_the_end_of_the_run(
         self, runner: AgentRunner, model: ModelId, tmp_path: Path
     ) -> None:
-        """The other half of §3.3's mechanism: a handler that *failed*, not one that refused.
+        """The other half of that mechanism: a handler that *failed*, not one that refused.
 
         A tool handler is the caller's own code and it can hit a bug - an unwritable file, a
         service that is down, a `KeyError` in somebody's payload reading. The agent is told and
@@ -296,8 +296,8 @@ class AgentContract(AgentPreflightContract, AgentQuestionContract, AgentHermetic
         and the argument for not throwing that away is the same argument.
 
         **This clause exists because its silence was doing damage.** The suite pinned the refusal
-        path and said nothing here, and two fakes of this port answered it differently for a whole
-        stage - one carrying the run on, one killing it - with every suite green. A clause can only
+        path and said nothing here, and two fakes of this port answered it differently for a long
+        time - one carrying the run on, one killing it - with every suite green. A clause can only
         be written where every implementation agrees, so writing it is what closes that: an
         implementation that lets a handler's exception out of `run` reports a failure in
         `--dry-run` that the backend it stands in for would have carried through, and one that
@@ -383,7 +383,7 @@ class AgentContract(AgentPreflightContract, AgentQuestionContract, AgentHermetic
         reporter that raises is a *broken* one and the trade is not "a step or a progress line" but
         "a bug that says so or a bug that does not, on every step, for the length of a run"; the
         port's other caller-supplied callback, `on_question`, already ends the run when it raises;
-        §3.7's terminal views are decoration by the same definition and what a view raises comes
+        terminal views are decoration by the same definition and what a view raises comes
         straight out; and a step that dies is a step the journal never recorded, so a resume
         replays everything before it. `ports/agent.py` carries the argument in full.
 

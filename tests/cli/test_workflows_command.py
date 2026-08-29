@@ -1,7 +1,7 @@
 """`agl workflows [<workflow>]`: the listing that imports nothing, and the help that imports one.
 
-§3.10 writes this verb with no argument and 16.4 gives it an optional one, which is a deviation from
-the plan's grammar and is asserted here as deliberately as it is argued in
+This verb was designed with no argument and has an optional one, which is a deliberate deviation
+from the grammar it started with and is asserted here as deliberately as it is argued in
 `cli/commands/workflows.py`. The two halves are different claims and the tests are separated
 accordingly, because the interesting property of each is what it does *not* do.
 
@@ -16,13 +16,13 @@ explicit request, so `agl workflows broken` is the operator asking for the one t
 and a silent answer would be worse than a refusal. Exit 2 - `config/registry.py` argues that class
 against `InternalError` and `UpstreamUnavailable` both.
 
-**Neither invocation composes a repository.** §3.10: "`list_workflows` takes neither." The
-`registered` on the `Invocation` raises if it is called, which is `main`'s own seam used as the
-instrument - nothing here reaches into a module to count anything.
+**Neither invocation composes a repository.** `list_workflows` takes neither a project nor a
+services bundle. The `registered` on the `Invocation` raises if it is called, which is `main`'s own
+seam used as the instrument - nothing here reaches into a module to count anything.
 
 The bundle is not needed at all, which is itself the point: these tests build no `container.fakes()`
 and no trees root, because a command that listed what is installed and needed a repository to do it
-would be the defect §3.10 names.
+would be a defect.
 """
 
 import ast
@@ -49,7 +49,7 @@ SETTINGS: Final = sources.resolve_settings(sources.Overrides(), {"AGL_HOME": str
 
 @dataclass(frozen=True)
 class Flagged:
-    """§3.3's own example params class, so the help printed below has something in it."""
+    """The example params class, so the help printed below has something in it."""
 
     request: str = arg("-r", "--request", help="what to build")
     concurrent: int = arg("-c", "--concurrent", default=3, help="how many at once")
@@ -71,7 +71,7 @@ async def probe(run: Run[NoParams]) -> None:
 
 
 def _point(name: str, attribute: str) -> EntryPoint:
-    """§3.3's registration line, pointed at this module: a name, a `module:attr`, and a group."""
+    """A registration line, pointed at this module: a name, a `module:attr`, and a group."""
     return EntryPoint(name=name, value=f"{__name__}:{attribute}", group=registry.GROUP)
 
 
@@ -85,7 +85,7 @@ POINTS: Final = (_point("tickets", "tickets"), _point("probe", "probe"), BROKEN)
 
 
 def _never() -> tuple[ProjectName, object]:
-    """A `Registered` that fails the test if a command calls it. §3.10's "takes neither"."""
+    """A `Registered` that fails the test if a command calls it: this command takes neither."""
     raise AssertionError("`agl workflows` composed a repository")
 
 
@@ -115,7 +115,7 @@ def _workflows_parser() -> RefusingParser:
 def test_the_listing_is_the_registrys_sorted_names_one_per_line(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """§3.10: "list what's registered". Sorted, on stdout, one name per line.
+    """List what is registered. Sorted, on stdout, one name per line.
 
     One per line because a listing is data somebody pipes - `agl workflows | while read` is the
     reason it is not a sentence with commas in it - and sorted because `registry.names` sorts, so a
@@ -147,7 +147,7 @@ def test_an_installation_with_nothing_registered_says_so_on_stderr(
 ) -> None:
     """An empty listing needs a sentence and not blank output - and not on the stream being piped.
 
-    §3.8 is "logs to stderr, data to stdout", so `agl workflows | wc -l` has to answer 0 here; and
+    Logs go to stderr and data to stdout, so `agl workflows | wc -l` has to answer 0 here; and
     silence from a command that was asked a question reads as a command that failed quietly, so the
     explanation goes to stderr rather than nowhere. Exit 0, because nothing failed: no workflow
     installed is the true answer.
@@ -165,7 +165,7 @@ def test_an_installation_with_nothing_registered_says_so_on_stderr(
 def test_naming_a_workflow_prints_the_flags_it_declares(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """The UX gap stage 10 declined, closed: `agl run tickets -h` cannot show these, and this can.
+    """The UX gap once declined, closed: `agl run tickets -h` cannot show these, and this can.
 
     The usage line names `agl run tickets` rather than `agl workflows tickets`, because these are
     flags typed on *that* command - the parser is the very one `api.run` parses with, so what is
@@ -234,8 +234,8 @@ def test_a_workflow_with_no_flags_prints_a_usage_line_rather_than_nothing(
 def test_the_workflows_parser_holds_one_optional_positional_and_no_flags() -> None:
     """The grammar, read off the object: `agl workflows [<workflow>]`.
 
-    Optional, so that §3.10's own spelling - the bare `agl workflows` - stays the listing it always
-    was, and the argument 16.4 adds cannot make anybody type one.
+    Optional, so that the original spelling - the bare `agl workflows` - stays the listing it
+    always was, and the argument added later cannot make anybody type one.
     """
     parser = _workflows_parser()
 
@@ -248,12 +248,12 @@ def test_the_workflows_parser_holds_one_optional_positional_and_no_flags() -> No
 
 
 def test_the_command_calls_api_and_nothing_else() -> None:
-    """"Commands stay dumb" (§1.4), made mechanical, on the command whose subject is workflows.
+    """"Commands stay dumb", made mechanical, on the command whose subject is workflows.
 
     Two `api` names and no third, which is the shape of the deviation: the listing and the help are
     two functions because one of them imports a package and the other must never. A `registry.` or
-    a `params.` appearing here would be this command learning what a workflow is - which is the
-    charge, in the file most tempted by it.
+    a `params.` appearing here would be this command learning what a workflow is - which is exactly
+    what that rule forbids, in the file most tempted by it.
     """
     called = {
         node.attr
@@ -286,7 +286,7 @@ def test_the_command_starts_no_event_loop() -> None:
 
 
 def test_neither_invocation_asks_for_a_registered_repository() -> None:
-    """§3.10: "`list_workflows` takes neither" - measured on both spellings of the command.
+    """`list_workflows` takes neither - measured on both spellings of the command.
 
     `_never` raises, so a clause that called `invocation.registered` would fail every test in this
     file; this one says it in its own name, and covers the argument form too, because the half that
@@ -305,9 +305,9 @@ def test_a_second_positional_is_refused_and_points_at_the_command_that_takes_fla
     """`_dispatch`'s tail refusal, reached by the fourth command to share it.
 
     One optional name is the grammar and two words are not one name. The message is asserted not to
-    have kept 16.3's wording: "read back from the record `agl run` wrote" was true of `resume` and
-    `clear` and says nothing about a command addressed to no run at all, and the sentence had to
-    become what is true of every caller - that only `agl run` names a workflow.
+    have kept its original wording: "read back from the record `agl run` wrote" was true of
+    `resume` and `clear` and says nothing about a command addressed to no run at all, and the
+    sentence had to become what is true of every caller - that only `agl run` names a workflow.
     """
     assert _main("workflows", "tickets", "probe") == 2
 

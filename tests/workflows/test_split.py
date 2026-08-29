@@ -4,8 +4,8 @@
 the two screens - and none of it needs a terminal or a run: a `Chunks` is built by calling it and a
 view is a pure function of its arguments, so every assertion here is a call and a comparison
 against the value it returned, with no display, no redraw loop, no gestures and nothing that could
-block. **The second half is the run itself**, 18.3's, in `tests/workflows/test_split_runs.py`. The
-line between them is `test_fix.py`'s and is drawn in the same place, for the reason that file
+block. **The second half is the run itself**, in `tests/workflows/test_split_runs.py`. The line
+between them is `test_fix.py`'s and is drawn in the same place, for the reason that file
 argues: what a person would have been shown, and what a model is told when it gets a payload wrong,
 are the halves this package owns, and reading them is the cheaper claim and worth keeping cheap.
 
@@ -46,11 +46,11 @@ survived, and that the beginning of it did not.
 
 ## The board needs a `Run` per chunk, and that is now one call each
 
-§3.7's board reads `runs[id].activity` out of live child `Run`s rather than being handed strings,
+The board reads `runs[id].activity` out of live child `Run`s rather than being handed strings,
 which is the whole reason `show` registers a function and its arguments. So a board test needs real
 `Run`s - and `agl.sdk` cannot build one: `services` is `sdk/_engine`'s bundle and `scope` is a
 `ports.home_layout.RunScope`, both the framework's to compose. `testing.a_run(harness, params,
-activity=...)` is 18.0's answer to that, and `testing.reports(run, line)` is what plays the adapter
+activity=...)` is the answer to that, and `testing.reports(run, line)` is what plays the adapter
 when a test wants to watch the board *move*.
 
 `split` is the first workflow to want several at once, and what it wants is not several `a_run`s:
@@ -60,8 +60,8 @@ fixture that way rather than out of siblings is there.
 
 ## One name still comes from `agl.ports`, and it is reported rather than repaired
 
-`Conflict` and `VerifierOutcome` were reaches into `agl.ports` at 18.3 and are on `agl.sdk`'s front
-door as of 19.2. `JsonValue` below is not, and the argument for leaving it is that it is not a
+`Conflict` and `VerifierOutcome` were once reaches into `agl.ports` and are now on `agl.sdk`'s
+front door. `JsonValue` below is not, and the argument for leaving it is that it is not a
 *workflow's* name: no module under `src/agl/workflows/` mentions it, and what wants it here is a
 test building the payload a scripted agent reports and reading a record back afterwards. That is
 `agl.testing`'s vocabulary rather than `agl.sdk`'s - `Call.payload` is a `Mapping[str,
@@ -104,7 +104,7 @@ CHUNKS: Final = (
 """A plan, in the order a planner reported it - **which is not alphabetical, deliberately**.
 
 `Chunks.items` keeps the planner's order and says it means nothing; the board renders it unchanged,
-and §3.7's purity rule names sorting as the first thing a view may not do. Ids that sort into a
+and a view's purity rule names sorting as the first thing it may not do. Ids that sort into a
 different order are what makes the exact-`Screen` comparisons below able to notice a board that
 sorted them anyway."""
 
@@ -171,8 +171,8 @@ def test_an_id_the_framework_would_refuse_as_a_worktree_is_refused_in_the_tool_c
 ) -> None:
     """`Chunk.__post_init__`'s one line, and the reason it is a line rather than a comment.
 
-    `split` passes `chunk.id` to `run.worktree()`, which is `Namespace(name)`, which is §3.3's
-    allowlist - so an id like these is refused by the framework whatever this module does. What this
+    `split` passes `chunk.id` to `run.worktree()`, which is `Namespace(name)`, which is the
+    framework's allowlist - so an id like these is refused whatever this module does. What this
     check changes is **when**: here it is inside the tool call, where `sdk/tools.py::_instance`
     catches it and `rejection` carries the sentence back into the same conversation for the planner
     to correct; one line later, at `worktree()`, the `plan` entry is already journalled and `agl
@@ -205,12 +205,12 @@ def test_an_id_the_framework_would_refuse_as_a_worktree_is_refused_in_the_tool_c
 def test_two_ids_that_are_two_refs_to_git_and_one_directory_are_refused_together() -> None:
     """The rule that needs the whole plan in view, and is therefore on `Chunks` and not `Chunk`.
 
-    §3.9 makes a namespace unique run-wide and compares with `collision_key` - casefold then NFC -
-    because `parser` and `Parser` are two branches to git and one directory on macOS. Unchecked
-    here, the second `run.worktree()` raises `ConflictError` after `plan` is journalled, which is
-    the same dead run the test above is about; and on a case-insensitive filesystem the failure
-    that check *prevents* is worse than a refusal, because the second child's checkout would be the
-    first one's.
+    A namespace is unique run-wide and compares with `collision_key` - casefold then NFC - because
+    `parser` and `Parser` are two branches to git and one directory on macOS. Unchecked here, the
+    second `run.worktree()` raises `ConflictError` after `plan` is journalled, which is the same
+    dead run the test above is about; and on a case-insensitive filesystem the failure that check
+    *prevents* is worse than a refusal, because the second child's checkout would be the first
+    one's.
 
     The comparison is the framework's own and not a lowercasing of this file's, so the assertion is
     on the reason and not only on the class: a message that did not say the two names are one
@@ -351,15 +351,15 @@ def test_the_board_reads_every_activity_again_on_every_frame(tmp_path: Path) -> 
 
 
 def test_a_chunk_with_no_run_behind_it_gets_the_cell_an_idle_one_gets(tmp_path: Path) -> None:
-    """§3.7: "A view may be composed before every child exists, so the workflow guards its own
-    lookups (`runs.get(id)`)."
+    """A view may be composed before every child exists, so the workflow guards its own lookups
+    with `runs.get(id)`.
 
     `split` cannot produce this - `children` is a comprehension over the same `plan.items` the board
     iterates, built before any concurrency starts, so every key is present from the first frame. The
     guard is written anyway because the guarantee is the workflow's and the view is a separate
-    value: a later edit that provisioned inside the child, as §3.3's own sketch does, would turn a
-    missing key into a `KeyError` raised inside the redraw loop against a screen already displayed,
-    where `ports/terminal.py` says there is no caller left to hand it to.
+    value: a later edit that provisioned inside the child would turn a missing key into a
+    `KeyError` raised inside the redraw loop against a screen already displayed, where
+    `ports/terminal.py` says there is no caller left to hand it to.
     """
     runs = _runs(tmp_path, {"parser": "Edit: src/parse.py", "docs": None})
 
@@ -410,7 +410,7 @@ def test_the_screen_for_work_that_would_not_combine_is_the_conflict_and_the_two_
 
 
 def test_each_response_produces_the_value_the_workflow_branches_on() -> None:
-    """§3.4's call site is `if await run.terminal.show(views.conflict, ...)`, so what this screen
+    """The call site is `if await run.terminal.show(views.conflict, ...)`, so what this screen
     returns is what decides between the two verbs that release the lease.
 
     Asserted as identities rather than as truthiness: a `Choice` whose value was a non-empty string
@@ -531,7 +531,7 @@ def test_two_frames_of_one_unchanged_conflict_are_equal() -> None:
 
 # --- the run itself ----------------------------------------------------------------------------
 #
-# 18.3's half is `tests/workflows/test_split_runs.py`, and it is a second module rather than a
+# That half is `tests/workflows/test_split_runs.py`, and it is a second module rather than a
 # section here: `split` driven end to end on an all-fakes bundle needs a scripted agent per
 # arrangement, a merge gate to hold a landing open and a terminal to answer a conflict on, and none
 # of that is anything the screens above need. The line is the one the file docstring draws - what a

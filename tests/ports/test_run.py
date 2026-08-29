@@ -1,4 +1,4 @@
-"""What `run.json` promises: the plan's shape, an exact round trip, and params nobody interprets.
+"""What `run.json` promises: its wire shape, an exact round trip, and params nobody interprets.
 
 Three properties carry this suite. The **wire shape** is written out literally rather than
 recomposed, because a later stage reading an older record depends on those eight key names, and a
@@ -20,12 +20,12 @@ import pytest
 from _corpus import ACCEPTED, CORPUS, imported_modules, impurities
 
 from agl.ports import run
-from agl.ports.errors import InputError, InternalError
+from agl.ports.errors import InputError, InternalError, exit_code_for
 from agl.ports.ids import RunLabel
 from agl.ports.run import JsonValue, RunSpec
 
-# Plan §3.6's example, with its `base_sha` doubled to a full sha1 - see `test_the_pin...` for why
-# the twenty characters the plan prints cannot be the length the field means.
+# An example record, with its `base_sha` doubled to a full sha1 - see `test_the_pin...` for why
+# a twenty-character abbreviation cannot be the length the field means.
 _ABBREVIATED: Final = "8c19f7ae4d2b0913e5f6"
 _SHA: Final = _ABBREVIATED * 2
 _SHA256: Final = _ABBREVIATED * 3 + "4d2b"
@@ -43,11 +43,11 @@ _WIRE: Final[dict[str, JsonValue]] = {
 _SPEC: Final = RunSpec.from_json(_WIRE)
 
 
-# --- The plan's shape, and the round trip -------------------------------------------------------
+# --- The wire shape, and the round trip ---------------------------------------------------------
 
 
-def test_the_wire_shape_is_the_one_the_plan_writes() -> None:
-    """Plan §3.6's `run.json`, spelled out - eight keys, in that order, with those spellings."""
+def test_the_wire_shape_is_eight_keys_in_one_order_with_those_spellings() -> None:
+    """`run.json`, spelled out - eight keys, in that order, with those spellings."""
     assert _SPEC.to_json() == {
         "workflow": "tickets",
         "workflow_version": "1.0.0",
@@ -171,6 +171,17 @@ def _has_surrogate(value: str) -> bool:
     return any(unicodedata.category(character) == "Cs" for character in value)
 
 
+# What a wrong verdict here costs, said once and cited by both tests below. The class alone is not
+# the assertion: the class is what a reader of the source sees and the number is what a user sees,
+# and it was the number that was wrong.
+_WRONG_EXIT: Final = (
+    "a lone surrogate came back with an exit code other than 2. It is malformed input - a "
+    "command-line byte `sys.argv` decoded with `surrogateescape`, or a value an agent produced - "
+    "and 70 would tell whoever hit it that AGL is broken when what is broken is their data. "
+    "`journal.py`'s `_checked_text` is this same test over this same category and answers 2"
+)
+
+
 def test_a_surrogate_is_refused_at_write_time_wherever_it_sits() -> None:
     """The one `str` UTF-8 cannot encode, refused as a value, as a key, and at any depth.
 
@@ -180,16 +191,25 @@ def test_a_surrogate_is_refused_at_write_time_wherever_it_sits() -> None:
     at the call that produced it, which is the trade the non-finite float and the non-string key
     above already take. Keys as well as values, because a key reaches the same encoder and takes
     the whole document down rather than one field of it.
+
+    **`InputError`, and the exit code is asserted beside the class.** This module and
+    `sdk/_engine/journal.py` each hold a `_checked_text` whose surrogate test is character for
+    character the same, and they used to disagree about what it raised - so the same string was
+    exit 2 or exit 70 depending only on which module inspected it first. Both say `InputError`
+    now, for the reason `_WRONG_EXIT` gives: a lone surrogate arrives from outside, and the two
+    messages are kept different because the consequences they name are different and both real.
     """
     for surrogate in ("\ud800", "\udfff", "before \udc00 after"):
-        with pytest.raises(InternalError, match="surrogate"):
+        with pytest.raises(InputError, match="surrogate") as as_value:
             replace(_SPEC, params={"p": surrogate})
-        with pytest.raises(InternalError, match="surrogate"):
+        assert exit_code_for(as_value.value) == 2, _WRONG_EXIT
+        with pytest.raises(InputError, match="surrogate") as as_key:
             replace(_SPEC, params={surrogate: "in a key"})
+        assert exit_code_for(as_key.value) == 2, _WRONG_EXIT
 
-    with pytest.raises(InternalError, match="surrogate"):
+    with pytest.raises(InputError, match="surrogate"):
         replace(_SPEC, params={"nested": [{"deep": "\ud800"}]})
-    with pytest.raises(InternalError, match="surrogate"):
+    with pytest.raises(InputError, match="surrogate"):
         replace(_SPEC, params={"nested": [{"\ud800": "a key three containers down"}]})
 
     assert replace(_SPEC, params={"astral": "\U0001f34c"}).params == {"astral": "\U0001f34c"}, (
@@ -201,10 +221,12 @@ def test_a_surrogate_is_refused_at_write_time_wherever_it_sits() -> None:
 def test_a_surrogate_ids_refuses_in_a_name_is_refused_here_too_and_nothing_else_is() -> None:
     """The parity, in both directions, over the corpus `ids.py`'s own suite is checked against.
 
-    One rule, two layers, two error classes: `ids.py` says `InputError` because a user typed a
-    name that has to become a path segment, and this says `InternalError` because AGL built a
-    record that has to be writable. The values are the same values, and the corpus is what holds
-    the two together - so the day either door widens or narrows, the disagreement shows up here.
+    One rule, two layers, **one error class**: `ids.py` says `InputError` because a user typed a
+    name that has to become a path segment, and this says `InputError` because the value reached
+    the record from outside too - a param off a command line, a value an agent produced - and exit
+    2 is the answer that sends whoever produced it back to their own data. The values are the same
+    values, and the corpus is what holds the two together - so the day either door widens or
+    narrows, the disagreement shows up here.
 
     The second half is the one that matters more, because the two rules are deliberately *not*
     equal. `ids.py` turns away almost the whole corpus - a space, a shell metacharacter, `café`, a
@@ -214,12 +236,15 @@ def test_a_surrogate_ids_refuses_in_a_name_is_refused_here_too_and_nothing_else_
     refused = [value for value in CORPUS if _has_surrogate(value)]
     assert len(refused) > 1, "the corpus carries no surrogate, so this compares two empty sets"
     for value in refused:
-        with pytest.raises(InputError, match="cannot be used"):
+        with pytest.raises(InputError, match="cannot be used") as as_name:
             RunLabel(value)
-        with pytest.raises(InternalError, match="surrogate"):
+        with pytest.raises(InputError, match="surrogate") as as_value:
             replace(_SPEC, params={"p": value})
-        with pytest.raises(InternalError, match="surrogate"):
+        with pytest.raises(InputError, match="surrogate") as as_key:
             replace(_SPEC, params={value: "in a key"})
+        assert {exit_code_for(caught.value) for caught in (as_name, as_value, as_key)} == {2}, (
+            _WRONG_EXIT
+        )
 
     kept = {value: value for value in CORPUS if not _has_surrogate(value)}
     assert len(kept) > len(ACCEPTED), "the corpus accepted here must exceed what a name may be"
@@ -236,10 +261,10 @@ def test_a_surrogate_ids_refuses_in_a_name_is_refused_here_too_and_nothing_else_
 # --- The pin ------------------------------------------------------------------------------------
 
 
-def test_the_pin_is_a_full_object_id_and_the_plans_own_example_is_not_one() -> None:
-    """An abbreviation is unique when printed and stops being unique as the repository grows. Plan
-    §3.6 prints twenty characters, which this module reads as elision for the page - that section
-    elides digests elsewhere. Stated as a test so the disagreement with it is on the record."""
+def test_the_pin_is_a_full_object_id_and_a_printed_abbreviation_is_not_one() -> None:
+    """An abbreviation is unique when printed and stops being unique as the repository grows. The
+    example record this suite is built from prints twenty characters, which this module reads as
+    elision for the page. Stated as a test so the disagreement is on the record."""
     assert replace(_SPEC, base_sha=_SHA).base_sha == _SHA
     assert replace(_SPEC, base_sha=_SHA256).base_sha == _SHA256
     with pytest.raises(InternalError, match="not a resolved commit"):
@@ -351,10 +376,10 @@ def test_a_record_is_frozen() -> None:
 
 
 def test_there_is_no_run_status() -> None:
-    """`ARCHITECTURE.md` §6 refuses one by name; the plan removes stored status twice, and the
-    module docstring argues the absence out. Pinned as a test rather than left to prose because an
-    empty enum is the easy thing for a later stage to add here, and adding it is one field away from
-    storing it in `run.json` - the second source of truth §3.11 says forces a reconcile pass."""
+    """`ARCHITECTURE.md`'s "Deliberately not built" refuses one by name, and the module docstring
+    argues the absence out. Pinned as a test rather than left to prose because an empty enum is the
+    easy thing to add here, and adding it is one field away from storing it in `run.json` - a
+    second source of truth that nothing updates."""
     assert not hasattr(run, "RunStatus")
     assert run.__all__ == ["JsonValue", "RunSpec"]
     assert "status" not in run._WIRE_KEYS

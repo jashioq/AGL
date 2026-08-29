@@ -4,17 +4,17 @@ Split out of `terminal.py` along the port's own line - "one slot, two queues" - 
 half of the queues that is about *answering*: that a `Screen[T]` blocks, that the two kinds of
 response both produce a `T`, that questions at one priority are answered in the order they arrived,
 that a question asked outside the context raises rather than waiting for nobody, and that exactly
-one screen can be answered at a time. What `pending` reports and what preemption
-does to the ordering are the other half, and they stay in `terminal.py` because §3.7 calls one "the
-specification" and the other "not cosmetic".
+one screen can be answered at a time. What `pending` reports and what preemption does to the
+ordering are the other half, and they stay in `terminal.py` because one of them is a specification
+and the other is not cosmetic.
 
 **A single answerer is assumed here, and it is a reading of the port rather than a quotation.**
-§3.7 says a human answers one thing at a time and that is why it must queue, and says the
-highest-priority screen is always the one rendered; the ABC adds that `pending` excludes what is on
-screen, which only means anything if exactly one thing is. The last test below turns that into a
-clause: a queued question does not resolve while another is displayed. An implementation that
-answered several at once would make `pending` a number nobody could act on and would put a person in
-front of two questions with one keyboard.
+A human answers one thing at a time and that is why it must queue, and the highest-priority screen
+is always the one rendered; the ABC adds that `pending` excludes what is on screen, which only
+means anything if exactly one thing is. The last test below turns that into a clause: a queued
+question does not resolve while another is displayed. An implementation that answered several at
+once would make `pending` a number nobody could act on and would put a person in front of two
+questions with one keyboard.
 
 `TerminalContract` in `terminal.py` inherits this class. Implementers subclass that one, never this
 one, and the `terminal` and `driver` fixtures these tests take are declared there and in
@@ -68,7 +68,7 @@ class TerminalQueueContract:
         frames go by with the question on screen and the call has not come back, because there are
         no timeouts anywhere in this port and a question nobody answered blocks its step
         indefinitely. A terminal that returned early - a default, a `None`, whatever was on the
-        screen before - would hand a workflow an answer no person gave, and §3.7's approval loop
+        screen before - would hand a workflow an answer no person gave, and an approval loop
         would revise a proposal against nobody's opinion.
 
         The second half is `Choice`: the value picking it produces is what `show` answers with.
@@ -106,7 +106,7 @@ class TerminalQueueContract:
         `TextInput.maps` is the workflow's function, at the workflow's layer, and calling it is how
         typed text becomes the type a workflow declared. That is why the two response kinds are one
         `Response[T]` and why `show` promises a single return type across a screen offering both:
-        §3.7's approval screen has a `Choice` and a `TextInput` side by side and answers with an
+        an approval screen has a `Choice` and a `TextInput` side by side and answers with an
         `Approval` either way.
 
         A terminal that returned the typed string itself would typecheck at its own boundary - the
@@ -137,11 +137,10 @@ class TerminalQueueContract:
     ) -> None:
         """FIFO within a priority, so simultaneous questions from several agents stack and wait.
 
-        Three children asking at once is the ordinary case (§3.7), and the order they are put to a
-        person in is the order they arrived. Not last-in-first-out, which would leave the agent that
-        asked first waiting longest while its siblings are served ahead of it, and not an order
-        nobody can predict, which would make "two of them are waiting" a statement with no second
-        half.
+        Three children asking at once is the ordinary case, and the order they are put to a person
+        in is the order they arrived. Not last-in-first-out, which would leave the agent that asked
+        first waiting longest while its siblings are served ahead of it, and not an order nobody
+        can predict, which would make "two of them are waiting" a statement with no second half.
 
         The first question is waited for before the other two are asked, so their arrival order is a
         fact of this test rather than a race between three tasks. After that the loop asserts the

@@ -1,19 +1,19 @@
 """Two namespaces running at once: no lock between them, one lock inside each, one file per step.
 
-13.3's suite, and the three claims §3.6 makes about a run that has more than one namespace in
-flight. Every one of them is already argued in the plan and already implemented; what was missing
-was the evidence, and each of the three fails in a way no existing test could see.
+The three claims the design makes about a run that has more than one namespace in flight. Every
+one of them was already argued and already implemented; what was missing was the evidence, and each
+of the three fails in a way no existing test could see.
 
-  * **Concurrent siblings write with no lock and no coordination.** §3.6: "`T-01/implement/…json`
+  * **Concurrent siblings write with no lock and no coordination.** "`T-01/implement/…json`
     and `T-02/implement/…json` are written by two concurrent children. Separate paths mean each
     write is one `os.replace` - atomic, no lock, no coordination." The failure a lock spanning
     namespaces produces is not a wrong answer, it is *no answer*: two children that cannot both be
     inside a step at once are two children that deadlock the moment either one waits on the other.
-  * **§3.6's serialization is per namespace and stops there.** "A namespace's workspace is
+  * **Serialization is per namespace and stops there.** "A namespace's workspace is
     single-threaded" is a statement about one checkout, and reading it as a statement about the run
-    would cost the only real concurrency AGL has - §3.9 flattens the trees root and cuts a checkout
+    would cost the only real concurrency AGL has - the trees root is flat and cuts a checkout
     per child precisely so that two agents can run at once.
-  * **`last_good` is chained from recorded entries and never read from the worktree.** §3.6: "root
+  * **`last_good` is chained from recorded entries and never read from the worktree.** "Root
     runs `spec` at H0, children integrate and advance `_base` to H5, and on resume `spec` recomputes
     against H5, mismatches, and re-runs."
 
@@ -28,7 +28,7 @@ Under any lock that spans namespaces the second child never reaches it, the firs
 forever, and the test hangs; so both tests below are bounded, and a bound that expires is the
 failure rather than a flake.
 
-The mirror uses the same barrier over **one** `Run`, where §3.6 requires the opposite answer: two
+The mirror uses the same barrier over **one** `Run`, where the answer must be the opposite: two
 steps in one namespace share one `Workspace`, so they are serialized, so the rendezvous is
 unreachable and must stay unreachable. That is the sharpest available statement of "per namespace
 and no further" - one arrangement, two namespaces' worth of children pass it, two steps of one
@@ -48,7 +48,7 @@ write_their_own_entry_and_both_replay` pins the counter's arithmetic across two 
 see a lock that spans namespaces, because neither ever asks two coroutines to be inside a step at
 the same moment - each releases its siblings one at a time, which a global mutex satisfies
 perfectly. `tests/sdk/test_run_worktree.py::test_a_second_walk_over_a_nested_run_replays_every_
-namespace` is stage 13's "replay reproduces every namespace" and is not repeated here.
+namespace` is the "replay reproduces every namespace" claim and is not repeated here.
 
 The repository is real git and the ledger is a real `FilesystemStore`, for `test_run_step.py`'s
 reasons: "the entries are two files at two paths" is a directory listing, and the checkouts a
@@ -82,7 +82,7 @@ PROJECT: Final = ProjectName("myapp")
 LABEL: Final = RunLabel("auth")
 SCOPE: Final = RunScope(PROJECT, LABEL)
 
-# §3.6's own example, by name: "`T-01` and `T-02` both call `step(implementer)` with
+# The standing example, by name: "`T-01` and `T-02` both call `step(implementer)` with
 # the same role, no inputs, and the same parent head".
 SIBLINGS: Final = ("T-01", "T-02")
 
@@ -124,10 +124,10 @@ REPORT: Final = reporting_tool("report", "report what you did", Summary)
 @role(model=Claude.SONNET)
 def _role(name: str, instructions: str, *, read_only: bool = False) -> Role[Summary]:
     """A reporting role: its result is `REPORT`'s payload, read back as a `Summary`. `name` is what
-    its entries are recorded under, `run.step` carrying none of its own (§3.3).
+    its entries are recorded under, `run.step` carrying none of its own.
 
     The three parameters are this file's whole override surface, which is what a `@role` factory
-    buys (§3.3): the model is on the decorator and unreachable from any call below."""
+    buys: the model is on the decorator and unreachable from any call below."""
     restrictions = {Restriction.NO_VCS_WRITES} if read_only else set[Restriction]()
     return Role(
         name=name,
@@ -137,10 +137,10 @@ def _role(name: str, instructions: str, *, read_only: bool = False) -> Role[Summ
     )
 
 
-# Module-level, which is what a `Role` is (§3.3: "a module-level value shared across steps and
-# across concurrent runs"), and load-bearing for every "identical `base`" claim below: two children
+# Module-level, which is what a `Role` is - "a module-level value shared across steps and across
+# concurrent runs" - and load-bearing for every "identical `base`" claim below: two children
 # calling `step(IMPLEMENT)` with no inputs are hashing the same object's fields - and, since the
-# call carries no name of its own (§3.3), addressing the same `steps/implement/` inside their own
+# call carries no name of its own, addressing the same `steps/implement/` inside their own
 # namespaces.
 PLAN: Final = _role("plan", "plan the ticket", read_only=True)
 IMPLEMENT: Final = _role("implement", "implement the ticket")
@@ -192,10 +192,10 @@ def _run(repository: Path, tmp_path: Path, base: str, agent: Agent) -> Run[None]
 
     `test_run_worktree.py::_run`, and called twice with the same arguments it is a resume: the same
     ledger on disk, the same worktrees reopened, and a fresh counter and a fresh namespace table,
-    which is what §3.6 means by "`n` is never persisted".
+    which is what "`n` is never persisted" means.
 
     `agent=` and not `claude=`: every agent below is an `async def` in `sdk/testing.py`'s own
-    vocabulary, which 19.2 made possible and which this file is one of the reasons for. Before that
+    vocabulary, which this file is one of the reasons for. Before that
     an `Agent` could not await, so a barrier - the only instrument that can tell two children
     overlapping from a framework that ran them in order - had to be reached from a raw per-provider
     `Script`, and every arrangement in this file was written on one.
@@ -225,7 +225,7 @@ def _run_dir(tmp_path: Path) -> Path:
 
 
 def _steps_dir(tmp_path: Path, step: str, *namespaces: str) -> Path:
-    """`<run>/worktrees/<n>/.../steps/<step>/` - §3.6's layout, written out as §3.6 draws it."""
+    """`<run>/worktrees/<n>/.../steps/<step>/` - the layout, written out rather than computed."""
     where = _run_dir(tmp_path)
     for namespace in namespaces:
         where = where / "worktrees" / namespace
@@ -268,7 +268,7 @@ def _trees_dir(tmp_path: Path) -> Path:
 class _Dispatches:
     """Which namespace's agent was dispatched, and which of them got all the way through.
 
-    `entered` is the list a replay's whole observable difference from a re-run is read off - §3.6's
+    `entered` is the list a replay's whole observable difference from a re-run is read off - a
     hit "returns the stored value without running anything" - and `left` is what separates an agent
     that was paid for from one that was dispatched and then torn down when a bound expired.
     """
@@ -285,8 +285,8 @@ def _rendezvous(record: _Dispatches, barrier: asyncio.Barrier) -> Agent:
     sequence. Every scripted agent in this file is dispatched with `task.workspace` pointing at its
     own namespace's checkout, so `workspace.name` is `_base`, `T-01` or `T-02` - the one thing
     reaching a script that says which namespace it is serving, and deliberately not a fingerprint
-    term, so two children can be told apart here while hashing identically (§3.6: the terms are the
-    role, the inputs and the starting head, and the namespace is none of them).
+    term, so two children can be told apart here while hashing identically - the terms are the
+    role, the inputs and the starting head, and the namespace is none of them.
 
     The file each agent writes is named after its own namespace, which is what makes "neither
     child's checkout contains the other's file" answerable: two children sharing a working tree
@@ -322,11 +322,11 @@ class _Relay:
     """Two siblings dispatched at once and **completed** in an order the test chooses.
 
     The other half of the evidence, and the half a barrier cannot give. A rendezvous proves the two
-    children overlap; it says nothing about which of them finishes first, and §3.6's rule 1 is
-    entirely about that: "a per-invocation counter lets the interleaving decide who gets `n = 0`,
-    and the interleaving differs on resume". So the two walks of the replay test below are driven
-    through two of these with opposite orders, and the second walk's interleaving is provably not
-    the first's rather than being whatever git happened to do twice.
+    children overlap; it says nothing about which of them finishes first, and `test_journal.py`'s
+    rule 1 is entirely about that: "a per-invocation counter lets the interleaving decide who gets
+    `n = 0`, and the interleaving differs on resume". So the two walks of the replay test below are
+    driven through two of these with opposite orders, and the second walk's interleaving is
+    provably not the first's rather than being whatever git happened to do twice.
 
     **The gate is inside the agent and the release is at the call site.** Holding the *worker* is
     what makes a held sibling a step genuinely in flight - its counter is taken, its entry has been
@@ -383,7 +383,7 @@ class _Relay:
 async def test_two_children_neither_of_which_can_finish_until_the_other_starts_both_finish(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """§3.6's concurrent siblings, arranged so that a lock spanning namespaces cannot pass.
+    """Concurrent siblings, arranged so that a lock spanning namespaces cannot pass.
 
     Two children of one run, cut from one head, running one step each, with an `asyncio.Barrier`
     reached from **inside** each scripted agent: neither returns until the other has been
@@ -394,12 +394,12 @@ async def test_two_children_neither_of_which_can_finish_until_the_other_starts_b
     the gather is bounded and the bound expiring *is* the assertion; nothing else in this test can
     tell the two designs apart, which is why every other sibling test in the suite is blind to it.
 
-    **The rest of the assertions are §3.6's "one file per step, and why".** The two entries are two
+    **The rest of the assertions are "one file per step, and why".** The two entries are two
     files at two paths, each named by the digest it claims, so "each write is one `os.replace` -
     atomic, no lock, no coordination" is visible as two independent addresses rather than inferred.
     A single `steps.json` would be one path both children had to read, modify and write back under
     a mutex, so the run directory is checked for one. And the two checkouts are asked whether they
-    can see each other's work: §3.9 cuts a working tree per child precisely so that they cannot,
+    can see each other's work: a working tree is cut per child precisely so that they cannot,
     and two agents sharing one would each be editing the other's files with nothing raising.
     """
     record = _Dispatches()
@@ -418,7 +418,7 @@ async def test_two_children_neither_of_which_can_finish_until_the_other_starts_b
         pytest.fail(
             f"two children of one run could not both be inside a step at once: after "
             f"{_LIVENESS:g}s the agents dispatched were {record.entered} and the ones that "
-            f"finished were {record.left}. §3.6 serializes steps **within a namespace** and "
+            f"finished were {record.left}. Steps serialize **within a namespace** and "
             f"nothing across them - a lock spanning namespaces leaves the second child waiting "
             f"for a first child that is waiting for the second, which is the only real "
             f"concurrency AGL has, deadlocked"
@@ -432,13 +432,13 @@ async def test_two_children_neither_of_which_can_finish_until_the_other_starts_b
     for entry in (one, two):
         assert _field(entry, "fingerprint") == entry.stem, (
             f"{entry} is not named by the digest it claims. The filename **is** the address "
-            f"(§3.6), and an entry filed anywhere else is one every future read misses"
+            f"and an entry filed anywhere else is one every future read misses"
         )
     assert _field(one, "head") != _field(two, "head"), (
         "both children recorded the same head, so they did not commit into separate checkouts"
     )
     assert list(_run_dir(tmp_path).rglob("steps.json")) == [], (
-        "a shared per-run entry file has appeared. §3.6: one steps.json 'would need "
+        "a shared per-run entry file has appeared: one steps.json 'would need "
         "read-modify-write under a mutex on every completion, serializing something with no reason "
         "to be serial'"
     )
@@ -448,7 +448,7 @@ async def test_two_children_neither_of_which_can_finish_until_the_other_starts_b
         assert (checkout / "src" / f"{name}.py").is_file()
         assert not (checkout / "src" / f"{other}.py").exists(), (
             f"{name}'s checkout holds {other}'s file, so the two children are working in one tree "
-            f"and every commit either of them makes carries the other's edits (§3.9)"
+            f"and every commit either of them makes carries the other's edits"
         )
 
 
@@ -459,15 +459,15 @@ async def test_two_children_neither_of_which_can_finish_until_the_other_starts_b
 async def test_the_rendezvous_two_children_pass_is_one_two_steps_of_a_namespace_cannot_reach(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """§3.6: "a namespace's workspace is single-threaded", asked with the test above's own barrier.
+    """"A namespace's workspace is single-threaded", asked with the test above's own barrier.
 
-    The same arrangement over **one** `Run`, where the required answer is the opposite one. §3.3's
-    own example gathers two reviewers over one worktree, and §3.6 spells out what overlapping them
-    costs: "A's pre-run restore wipes the files B's worker just wrote, B's `commit_all` records A's
-    changes under B's message, and A's `head()` after its own commit can read B's" - a wrong answer,
-    a mislabelled commit and a corrupted chain, none of which raises and two of which leave no
-    trace on the ledger at all. So the two steps must not overlap, so the rendezvous must be
-    unreachable, so this test asserts a negative and the wait is how it is proved.
+    The same arrangement over **one** `Run`, where the required answer is the opposite one. The
+    standing example gathers two reviewers over one worktree, and what overlapping them costs is
+    spelled out: "A's pre-run restore wipes the files B's worker just wrote, B's `commit_all`
+    records A's changes under B's message, and A's `head()` after its own commit can read B's" - a
+    wrong answer, a mislabelled commit and a corrupted chain, none of which raises and two of which
+    leave no trace on the ledger at all. So the two steps must not overlap, so the rendezvous must
+    be unreachable, so this test asserts a negative and the wait is how it is proved.
 
     **Why the negative rather than a recorded sequence.** `test_journal_walk.py::test_two_gathered_
     steps_in_one_namespace_do_not_overlap` already pins the ordered list of workspace calls one
@@ -491,14 +491,14 @@ async def test_the_rendezvous_two_children_pass_is_one_two_steps_of_a_namespace_
 
     assert record.entered == ["_base"], (
         f"the agents dispatched into one namespace were {record.entered}, so both steps were in "
-        f"flight at once and the rendezvous was reachable after all. §3.6 makes a namespace's "
+        f"flight at once and the rendezvous was reachable after all. A namespace's "
         f"workspace single-threaded, and two steps overlapping over one checkout is one step "
         f"emptying the working tree the other's agent is editing"
     )
     assert record.left == []
     assert _entries(tmp_path, "review") == [], (
         "a step that was torn down before its worker returned recorded an entry anyway - and a "
-        "step is done when its file is there (§3.6), so a resume would replay a result nobody "
+        "step is done when its file is there, so a resume would replay a result nobody "
         "produced"
     )
 
@@ -510,7 +510,7 @@ async def test_the_rendezvous_two_children_pass_is_one_two_steps_of_a_namespace_
 async def test_two_siblings_at_one_head_replay_when_the_second_walk_completes_them_the_other_way(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """§3.6 rule 1, in the one shape that can fail: the same two siblings, interleaved twice.
+    """`test_journal.py`'s rule 1, in the one shape that can fail: two siblings, interleaved twice.
 
     Both children call `step(IMPLEMENT)` with the same role, no inputs and the same
     parent head, so their `base` values are **identical by construction** - and that is asserted
@@ -519,22 +519,22 @@ async def test_two_siblings_at_one_head_replay_when_the_second_walk_completes_th
     `base` and one `n = 0`, and the only thing keeping the two entries apart is the namespace in
     the *path*.
 
-    **The two walks complete the siblings in opposite orders, and that is the whole test.** §3.6:
-    a per-invocation counter "lets the interleaving decide who gets `n = 0`, and the interleaving
+    **The two walks complete the siblings in opposite orders, and that is the whole test.**
+    A per-invocation counter "lets the interleaving decide who gets `n = 0`, and the interleaving
     differs on resume, so each child looks in its own scope for a digest that is not there and
     **both re-run, forever, silently**". A counter keyed per `(namespace, step name)` gives both
     children `n = 0` whichever way round they run; a counter keyed per invocation gives the first
     arrival `0` and the second `1`, and reversing the order on the second walk sends each child to
     the address the *other* one used. So the first walk finishes `T-01` then `T-02` and the second
     finishes `T-02` then `T-01`, and a test that always interleaved the same way would be green
-    against exactly the design §3.6 spends a paragraph refusing.
+    against exactly the design the per-invocation counter was refused for being.
 
     **The priming step is what makes the order the program's rather than git's.** A counter is taken
     inside `Journal.step` with nothing suspending before it, but the *first* step in a namespace
     reaches that walk through `History.resolve` and `WorkspaceProvider.open` - two subprocesses and
     a cross-process lock - so two first-steps under a `gather` take their addresses in whatever
-    order git finished in. Opening both checkouts before the gather (11.4 measured the same thing,
-    and `instruments/replay.py`'s siblings programme carries the same paragraph) leaves each
+    order git finished in. Opening both checkouts before the gather - `instruments/replay.py`'s
+    siblings programme carries the same paragraph - leaves each
     sibling's `step` running from `gather` to `digest` without a suspension, which makes the
     address order the order the coroutines were created in - the program's own order, and therefore
     reversible on purpose.
@@ -558,8 +558,9 @@ async def test_two_siblings_at_one_head_replay_when_the_second_walk_completes_th
     one, two = (_only(tmp_path, "implement", name) for name in SIBLINGS)
     assert one.name == two.name, (
         f"the two siblings recorded `implement` under {one.name} and {two.name}. Same role, no "
-        f"inputs, same parent head is one `base` by §3.6's own terms, and both are the first use "
-        f"of it in their own namespace, so both are `n = 0` and the digests are one string"
+        f"inputs, same parent head is one `base` by the fingerprint's own terms, and both are "
+        f"the first use of it in their own namespace, so both are `n = 0` and the digests are "
+        f"one string"
     )
 
     second = _Relay(tuple(reversed(SIBLINGS)))
@@ -571,7 +572,7 @@ async def test_two_siblings_at_one_head_replay_when_the_second_walk_completes_th
         "is a false cache hit rather than a re-run"
     )
     assert second.dispatched == [], (
-        f"the second walk paid for {second.dispatched}. §3.6: each child 'looks in its own scope "
+        f"the second walk paid for {second.dispatched}: each child 'looks in its own scope "
         f"for a digest that is not there and both re-run, forever, silently' - the run still "
         f"finishes and is still right, and the only symptoms are the bill and the wait"
     )
@@ -611,22 +612,22 @@ async def _walk(run: Run[None], relay: _Relay) -> dict[str, Summary]:
 async def test_a_head_advanced_behind_the_frameworks_back_does_not_move_the_chain(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """§3.6's load-bearing sentence, provoked with raw git in one process.
+    """The load-bearing sentence, provoked with raw git in one process.
 
     "The starting head is chained logically, not read from disk. It comes from the previous step's
     recorded `head` in that namespace, never from the physical worktree. Otherwise: root runs `spec`
     at H0, children integrate and advance `_base` to H5, and on resume `spec` recomputes against H5,
     mismatches, and re-runs."
 
-    **Stage 14's `integrate()` is the real producer of this state**, and it produces it on every
-    landing rather than as an accident: a child merging into the run's branch moves `_base`'s head
-    with no step having run and so with nothing journalled. §3.6 attaches an obligation to that
-    which nothing here can discharge - "`IntegrationOutcome.head` carries the value; the engine must
-    write it into the parent's chain" - because `integrate()` is not a step, and a parent whose
-    chain still points before its landed children would `restore()` past all of them on its next
-    fingerprint miss, which §3.6 calls "one of the three paths in the design that destroy work
-    rather than costing a re-run". The commit made below with `_git` is that state, arranged by hand
-    at the one stage that has no `integrate()` to make it for real.
+    **`integrate()` is the real producer of this state**, and it produces it on every landing
+    rather than as an accident: a child merging into the run's branch moves `_base`'s head with no
+    step having run and so with nothing journalled. An obligation is attached to that which nothing
+    here can discharge - "`IntegrationOutcome.head` carries the value; the engine must write it into
+    the parent's chain" - because `integrate()` is not a step, and a parent whose chain still points
+    before its landed children would `restore()` past all of them on its next fingerprint miss,
+    which is "one of the three paths in the design that destroy work rather than costing a re-run".
+    The commit made below with `_git` is that state, arranged by hand where there is no
+    `integrate()` to make it for real.
 
     **The child is the second half and the sharper one.** A run's own step replaying is a claim
     about `Journal._last_good`; a child cut on the *second* walk landing at the same base is a claim
@@ -661,7 +662,7 @@ async def test_a_head_advanced_behind_the_frameworks_back_does_not_move_the_chai
     assert (replayed, child) == (Summary("_base"), Summary("T-01"))
     assert sorted(record.left) == ["T-01", "_base"], (
         "the resume paid for an agent after the run's physical head moved with nothing journalled. "
-        "That is §3.6's own example: every step, every resume, forever, with the run still "
+        "That is the standing example: every step, every resume, forever, with the run still "
         "finishing and still right"
     )
     assert len(_entries(tmp_path, "review")) == 1
@@ -671,6 +672,6 @@ async def test_a_head_advanced_behind_the_frameworks_back_does_not_move_the_chai
     )
     assert _git(checkout, "rev-parse", "HEAD").strip() == advanced, (
         "the landed commit is gone: a step missed its fingerprint and restored the checkout to a "
-        "head from before the landing, which §3.6 calls the one path in the design that destroys "
+        "head from before the landing, which is the one path in the design that destroys "
         "work rather than costing a re-run"
     )

@@ -2,15 +2,15 @@
 
 The suite over `sdk/_engine/worktrees.py` and over the half of `sdk/workflow.py` that reaches it.
 `test_run_step.py` holds one namespace against real git; this file holds what happens when there is
-more than one, which is the only real concurrency AGL has - §3.6 serializes steps within a namespace
+more than one, which is the only real concurrency AGL has - steps serialize within a namespace
 on purpose, so an author who wants two agents running at once opens two worktrees.
 
 **The repository is real git, and the ledger is a real `FilesystemStore`**, for
 `test_run_step.py`'s reasons and for one more of this file's own: every claim below is about where
 something landed. "The entry nests" is a path on disk, "the checkouts are siblings" is a directory
 listing, and "`agl/auth` and `agl/_work/auth/T-01` coexist" is a question only git can be asked -
-the fakes keep their branches in a dict, where the ref directory/file conflict §3.9 is about cannot
-exist at all and so cannot be shown closed.
+the fakes keep their branches in a dict, where the ref directory/file conflict cannot exist at all
+and so cannot be shown closed.
 
 The fixtures are duplicated from `test_run_step.py` rather than imported. Nothing under `tests/`
 imports another test module, `tests/` carries no `__init__.py` (see `tests/conftest.py`), and a
@@ -19,7 +19,7 @@ suite acquires a base class nobody can change.
 
 Five of these are worth naming, because each is written against a failure that is silent or remote:
 
-  * **The asymmetry, both halves in one test.** §3.9: `AGL_HOME` nests because it records the
+  * **The asymmetry, both halves in one test.** `AGL_HOME` nests because it records the
     parent-child structure of the run, and the trees root does not because a worktree inside another
     worktree's working tree is untracked files to the parent - its `git status` and its build gate
     would both see the child's entire checkout. Asserting either half alone is satisfiable by a
@@ -29,16 +29,16 @@ Five of these are worth naming, because each is written against a failure that i
     `.trees/<label>/`: the second would be handed the first one's working tree, with its work in it.
     Both orders, because a sibling-wide table admits whichever arrives second whatever that order
     is, and only one of the two orders is the obvious one to write.
-  * **A child starts at its parent's *logical* head.** §3.6's "the starting head is chained
+  * **A child starts at its parent's *logical* head.** "The starting head is chained
     logically, not read from disk". The branch can be ahead of the chain with nothing journalled -
     a step that raised after `commit=` does it today and `integrate()` will do it deliberately - so
     a child cut from where the branch actually is inherits work the run has no record of, and the
     parent's next fingerprint miss restores past it.
-  * **A reopened namespace replays instead of re-cutting.** §3.3: "an existing name reopens rather
+  * **A reopened namespace replays instead of re-cutting.** "An existing name reopens rather
     than recreates, which is what makes replay work". An implementation that quietly re-provisioned
     would pass every test that only asks whether opening twice raises, and would destroy the
     committed work of every child on every resume.
-  * **The name is opaque.** §3.3's own test is "rename `T-01` to `banana` and the framework behaves
+  * **The name is opaque.** The test is "rename `T-01` to `banana` and the framework behaves
     identically", and the sharpest form of it is that the two entries are **byte-identical files**:
     the namespace reaches the digest through nothing at all, so only the directory differs.
 """
@@ -70,7 +70,7 @@ from agl.sdk.workflow import Run
 
 # Every test that awaits is marked one by one rather than through a module-level `pytestmark`,
 # matching the rest of `tests/sdk/`. Several tests here are deliberately **not** async, because
-# `worktree()` is a plain synchronous call (§3.3) and a test that had to await it would be asserting
+# `worktree()` is a plain synchronous call and a test that had to await it would be asserting
 # the opposite of what this file says.
 
 PROJECT: Final = ProjectName("myapp")
@@ -154,8 +154,8 @@ def _run(repository: Path, tmp_path: Path, base: str, script: Script | None = No
     one test below cuts a child from a ref *name*.
 
     Called twice with the same arguments it is a resume: the same ledger on disk, the same worktrees
-    reopened, and a fresh counter and a fresh namespace table, which is what §3.6 means by "`n` is
-    never persisted" and what makes a second walk cut the same children again.
+    reopened, and a fresh counter and a fresh namespace table, which is what "`n` is
+    never persisted" means and what makes a second walk cut the same children again.
     """
     trees = TreesRoot(tmp_path / "trees")
     harness = container.fakes(trees, claude=script)
@@ -237,7 +237,7 @@ def _run_dir(tmp_path: Path) -> Path:
 
 
 def _steps_dir(tmp_path: Path, step: str, *namespaces: str) -> Path:
-    """`<run>/worktrees/<n>/.../steps/<step>/` - §3.6's layout, written out as §3.6 draws it."""
+    """`<run>/worktrees/<n>/.../steps/<step>/` - the layout, written out rather than computed."""
     where = _run_dir(tmp_path)
     for namespace in namespaces:
         where = where / "worktrees" / namespace
@@ -258,7 +258,7 @@ def _one(tmp_path: Path, step: str, *namespaces: str) -> dict[str, JsonValue]:
 
 
 def _head(tmp_path: Path, step: str, *namespaces: str) -> str:
-    """The commit one recorded step ended at - the value §3.6 chains `last_good` from."""
+    """The commit one recorded step ended at - the value `last_good` is chained from."""
     recorded = _one(tmp_path, step, *namespaces)["head"]
     assert isinstance(recorded, str)
     return recorded
@@ -282,12 +282,12 @@ def _branches(repository: Path) -> list[str]:
 async def test_entries_nest_arbitrarily_while_every_checkout_is_a_flat_sibling(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """§3.9's two layouts at once, in one nested run, both asserted on disk.
+    """The two layouts at once, in one nested run, both asserted on disk.
 
     Three namespaces, three steps: the run itself, its child `T-01`, and `T-01`'s child `sub-b`.
 
     **Half one - `AGL_HOME` nests**, because it is recording the parent-child structure of the run,
-    so `sub-b`'s entry is two `worktrees/` deep. Asserted as the literal path §3.6 draws, because
+    so `sub-b`'s entry is two `worktrees/` deep. Asserted as the literal path, because
     the alternative - `runs/auth/worktrees/sub-b/` for a grandchild - is a tree that has lost the
     only record there is of who cut whom, and every path in it is still perfectly well-formed.
 
@@ -312,13 +312,13 @@ async def test_entries_nest_arbitrarily_while_every_checkout_is_a_flat_sibling(
     assert len(_entries(tmp_path, "implement", "T-01")) == 1
     assert len(_entries(tmp_path, "implement", "T-01", "sub-b")) == 1, (
         "the grandchild's entry is not under runs/auth/worktrees/T-01/worktrees/sub-b/steps/. "
-        "`AGL_HOME` nests because it records the parent-child structure of the run (§3.9), and a "
+        "`AGL_HOME` nests because it records the parent-child structure of the run, and a "
         "flattened memo tree keeps every path well-formed while losing who cut whom"
     )
 
     trees = _trees_dir(tmp_path)
     assert sorted(place.name for place in trees.iterdir()) == ["T-01", "_base", "sub-b"], (
-        "the checkouts are not flat siblings under .trees/auth/. §3.9: a worktree inside another "
+        "the checkouts are not flat siblings under .trees/auth/: a worktree inside another "
         "worktree's working tree is untracked files to the parent, so its git status and its build "
         "gate would both see the child's entire checkout"
     )
@@ -335,7 +335,7 @@ async def test_entries_nest_arbitrarily_while_every_checkout_is_a_flat_sibling(
 def test_a_grandchilds_name_and_a_top_level_name_collide_in_either_creation_order(
     repository: Path, tmp_path: Path, base: str, nested_first: bool
 ) -> None:
-    """§3.9: "namespace names are unique within the run, not merely among siblings".
+    """Namespace names are unique within the run, not merely among siblings.
 
     `T-01`'s child `sub-b` and a top-level `sub-b` are two scopes under `AGL_HOME` and **one
     directory** under `.trees/auth/`, because the trees root is flat. Whichever opened second would
@@ -347,7 +347,7 @@ def test_a_grandchilds_name_and_a_top_level_name_collide_in_either_creation_orde
     whichever way round it happens, and a test that asserted only the sibling case would be green
     against exactly that implementation.
 
-    Synchronous, and nothing is provisioned by either call: `worktree()` is a plain call (§3.3), the
+    Synchronous, and nothing is provisioned by either call: `worktree()` is a plain call, the
     refusal happens in the run's own namespace table, and no checkout is opened until a step runs.
     """
     run = _run(repository, tmp_path, base)
@@ -374,7 +374,7 @@ def test_a_grandchilds_name_and_a_top_level_name_collide_in_either_creation_orde
 def test_two_spellings_of_one_name_are_one_directory_and_the_second_is_refused(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """§3.9: "the comparison is case-insensitive (casefold): `T-01` and `t-01` are two refs to git
+    """The comparison is case-insensitive (casefold): "`T-01` and `t-01` are two refs to git
     and one directory on macOS".
 
     Both are perfectly good names - `ids.py` accepts each, and `Namespace("T-01") != Namespace(
@@ -404,7 +404,7 @@ def test_two_spellings_of_one_name_are_one_directory_and_the_second_is_refused(
 def test_a_namespace_name_that_could_not_be_a_path_segment_or_a_ref_is_refused(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """§3.3: names are opaque strings, "validated on the way in", and `_base` is reserved.
+    """Names are opaque strings, "validated on the way in", and `_base` is reserved.
 
     `InputError` and not `ConflictError`: nothing is taken and nothing collides - the name could
     never have been used. It comes out of `Namespace` itself, before the run's table is consulted,
@@ -427,7 +427,7 @@ def test_a_namespace_name_that_could_not_be_a_path_segment_or_a_ref_is_refused(
 def test_asking_twice_for_one_name_hands_back_the_same_child_and_the_runs_own_tables(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """§3.3: "an existing name reopens rather than recreates, which is what makes replay work".
+    """"An existing name reopens rather than recreates, which is what makes replay work".
 
     **The same object, not an equal one.** A second `Run` over one namespace would be a second
     `Steps`, a second lazily opened checkout and a second `Journal` - "two locks over one namespace,
@@ -436,12 +436,13 @@ def test_asking_twice_for_one_name_hands_back_the_same_child_and_the_runs_own_ta
 
     The two identities beneath it are asserted here rather than through behaviour, and the reason is
     worth stating because it is the reason a mutation of either is hard to catch. `Fingerprints`'
-    key already carries the scope (§3.6 rule 1), and a child's scope is unique run-wide by the rule
-    two tests up - so a counter built privately per child produces the same digests as the run's own
-    for as long as no two `Run`s share a scope, and the only thing that makes two `Run`s share a
-    scope is a reopen that built a second one. The identity is what the behaviour rests on, so the
-    identity is what is asserted. The namespace table is not in that position - a private one is
-    caught by the collision tests - and is asserted here beside it because they are one seam.
+    key already carries the scope (`test_journal.py`'s rule 1), and a child's scope is unique
+    run-wide by the rule two tests up - so a counter built privately per child produces the same
+    digests as the run's own for as long as no two `Run`s share a scope, and the only thing that
+    makes two `Run`s share a scope is a reopen that built a second one. The identity is what the
+    behaviour rests on, so the identity is what is asserted. The namespace table is not in that
+    position - a private one is caught by the collision tests - and is asserted here beside it
+    because they are one seam.
     """
     run = _run(repository, tmp_path, base)
 
@@ -450,12 +451,13 @@ def test_asking_twice_for_one_name_hands_back_the_same_child_and_the_runs_own_ta
 
     assert second is first
     assert first.fingerprints is run.fingerprints, (
-        "the child was handed a counter of its own. §3.6 scopes `n` per (namespace, step name) and "
+        "the child was handed a counter of its own. `n` is scoped per (namespace, step name) and "
         "one counter per run is what makes that key mean anything"
     )
     assert first.worktrees is run.worktrees, (
         "the child was handed a namespace table of its own, which is a table per namespace - it "
-        "cannot see a name taken anywhere else in the run, which is §3.9's check written and "
+        "cannot see a name taken anywhere else in the run, which is the run-wide check written "
+        "and "
         "unreachable"
     )
     assert first.params is run.params and first.services is run.services
@@ -468,8 +470,8 @@ def test_asking_twice_for_one_name_hands_back_the_same_child_and_the_runs_own_ta
 def test_the_root_has_no_parent_and_every_child_holds_the_run_that_cut_it(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """14.0's seam. `integrate()` writes into the **parent's** chain and lands into the **parent's**
-    checkout (§3.4, §3.6), so what it needs is the parent `Run`, and this is where it comes from.
+    """The seam `integrate()` needs. It writes into the **parent's** chain and lands into the
+    **parent's** checkout, so what it needs is the parent `Run`, and this is where it comes from.
 
     **Asserted by identity, and that is the claim rather than a shortcut.** What the engine wants
     off the parent is its live journal - the in-memory `last_good` a landing advances - so an
@@ -520,7 +522,7 @@ def test_a_reopened_namespace_still_holds_the_parent_that_first_cut_it(
 async def test_the_landing_seam_hands_out_the_namespaces_own_journal_and_checkout(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """14.0's third seam, and the two claims that make it a seam rather than an accessor.
+    """The third of these seams, and the two claims that make it a seam rather than an accessor.
 
     `integrate()` lands a child's workspace into its parent's and then advances the parent's chain,
     so it asks the parent's `Steps` for both at once. **The checkout has to be the one the parent's
@@ -529,8 +531,8 @@ async def test_the_landing_seam_hands_out_the_namespaces_own_journal_and_checkou
     a copy is a value nothing reads.
 
     The second claim is asserted the only way it can be shown from outside: advance through the seam
-    and then cut a child, whose base is that chain (§3.6, "the starting head is chained logically,
-    not read from disk"). A `landing()` that built its own `Journal` would pass every assertion
+    and then cut a child, whose base is that chain - "the starting head is chained logically,
+    not read from disk". A `landing()` that built its own `Journal` would pass every assertion
     above this one and leave every later child cut from the commit before the landing - which is the
     destructive failure `advance` exists to prevent, arriving through the door that was opened to
     prevent it.
@@ -601,7 +603,7 @@ async def test_a_reopened_namespace_replays_its_step_and_is_not_cut_again(
 async def test_a_second_walk_over_a_nested_run_replays_every_namespace(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """Stage 13's own acceptance criterion: "replay of a nested run reproduces every namespace".
+    """The acceptance criterion: "replay of a nested run reproduces every namespace".
 
     Three namespaces at three depths, walked twice, with the recorder shared between the two runs so
     that "no agent was called" is counted across both rather than reset by the arrangement.
@@ -651,7 +653,7 @@ async def _nested(run: Run[None]) -> list[Summary]:
 async def test_a_step_and_a_worktree_of_the_same_name_address_different_places(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """§3.6: "`steps/` and `worktrees/` are sibling subtrees so `worktree("review")` and a step
+    """"`steps/` and `worktrees/` are sibling subtrees so `worktree("review")` and a step
     named `review` in the same Run cannot collide".
 
     Both calls, in one `Run`, with the same string - and both work. `ids.py` keeps `StepName` and
@@ -682,7 +684,7 @@ async def test_a_step_and_a_worktree_of_the_same_name_address_different_places(
 async def test_the_run_branch_and_a_child_branch_coexist_in_one_real_repository(
     repository: Path, tmp_path: Path, base: str, child_first: bool
 ) -> None:
-    """§3.9's ref directory/file conflict, shown closed by the code that creates both.
+    """The ref directory/file conflict, shown closed by the code that creates both.
 
     Refs are files under `refs/heads/`, so the obvious scheme - `agl/auth` for the run and
     `agl/auth/T-01` for its child - cannot exist in git in **either** creation order:
@@ -715,7 +717,7 @@ async def test_the_run_branch_and_a_child_branch_coexist_in_one_real_repository(
     assert "refs/heads/agl/_work/auth/T-01" in _branches(repository), (
         "the child's branch is not `agl/_work/<label>/<namespace>`. Under `agl/<label>/<ns>` this "
         "run could not have got this far: refs/heads/agl/auth would have to be a file and a "
-        "directory at once, in either creation order (§3.9)"
+        "directory at once, in either creation order"
     )
     assert _git(repository, "rev-parse", "refs/heads/agl/auth").strip() == base
     assert _git(repository, "rev-parse", "refs/heads/agl/_work/auth/T-01").strip() == base
@@ -760,7 +762,7 @@ async def test_a_child_starts_at_the_parents_logical_head_and_not_at_the_runs_ba
 async def test_a_child_cut_from_a_sibling_starts_at_that_siblings_recorded_head(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """§3.3's `w = parent.worktree(ticket.id, base=blocker)`, which is the whole of AGL's graph
+    """`w = parent.worktree(ticket.id, base=blocker)`, which is the whole of AGL's graph
     support: "a workflow with a dependency graph resolves its own blockers and passes the resulting
     `Run`; the framework never reads a `blocked_by` field and never learns that a graph exists".
 
@@ -824,16 +826,16 @@ async def test_a_child_cut_from_a_ref_string_starts_where_that_ref_points(
 async def test_a_child_is_cut_from_the_chain_and_not_from_where_the_branch_actually_is(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """§3.6: "the starting head is chained logically, not read from disk", at the one moment stage
-    13 can already produce the divergence.
+    """"The starting head is chained logically, not read from disk", at the earliest moment a run
+    can produce the divergence.
 
     A step that raised after `commit=` is the case: the framework does one predictable thing per
     `commit=` "on success and on failure alike", so the commit lands and the branch moves - and no
     entry is written, because "a step is done when its file is there". The run's chain is therefore
     still at its base while `agl/auth` is a commit ahead of it, with nothing journalled in between.
-    Stage 14's `integrate()` produces the same divergence deliberately and much more often.
+    `integrate()` produces the same divergence deliberately and much more often.
 
-    A child cut from `agl/auth` by name - which is how §3.9 describes it, and which
+    A child cut from `agl/auth` by name - the ordinary way to describe it, and which
     `WorkspaceProvider.open` still accepts - would inherit a commit this run has no record of. The
     parent's next fingerprint miss then restores to the chain, *before* that commit, and the child
     is left working on top of something the run has just deleted.
@@ -866,12 +868,12 @@ async def test_a_child_is_cut_from_the_chain_and_not_from_where_the_branch_actua
 async def test_renaming_a_namespace_changes_the_paths_and_nothing_else(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """§3.3's own test: "rename `T-01` to `banana` and the framework behaves identically".
+    """The test is "rename `T-01` to `banana` and the framework behaves identically".
 
     Two children of one run, cut from the same head, running the same step with the same role and no
     inputs. The sharpest available form of "identically" is that the two entry files are **the same
     filename holding the same bytes**: a namespace reaches a fingerprint through nothing at all -
-    §3.6's terms are the role, the inputs and the starting head - so the only place either name may
+    the terms are the role, the inputs and the starting head - so the only place either name may
     appear is in a path and in a branch.
 
     A digest that differed between the two would mean the namespace had leaked into the fingerprint,

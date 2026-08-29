@@ -4,12 +4,12 @@ notices when a list and the thing it is meant to police stop agreeing.
 Three of the six contracts are fail-closed and need nothing from this file. Contract 5's source is
 `agl.*`, which re-expands as packages are added, and contract 6's is `agl.workflows`, which
 re-expands as workflows are - so a module introduced at a later stage is covered the moment it
-exists, and its author need do nothing to be policed. **Contract 1 was the fourth guard here until
-19.1** and is now the third of those: `containers = agl` plus `exhaustive = True` makes an unlisted
-child of `agl` break that contract natively and by name, which is what a hand-maintained comparison
-in this file used to notice. A rule the linter enforces beats a rule a neighbour asserts, so the
-comparison went; `.importlinter`'s own comment on contract 1 records what the rewrite does and does
-not still reach. The three below cannot be written that way, and each fails open in its own
+exists, and its author need do nothing to be policed. **Contract 1 was the fourth guard here and is
+now the third of those**: `containers = agl` plus `exhaustive = True` makes an unlisted child of
+`agl` break that contract natively and by name, which is what a hand-maintained comparison in this
+file used to notice. A rule the linter enforces beats a rule a neighbour asserts, so the comparison
+went; `.importlinter`'s own comment on contract 1 records what the rewrite does and does not still
+reach. The three below cannot be written that way, and each fails open in its own
 direction:
 
   * **Contract 2** (`forbidden`) has *two* hand-maintained lists - `source_modules`, the pure
@@ -25,11 +25,11 @@ direction:
     simply absent from it and free to import any other adapter.
 
 **The silence is the defect, not the gap.** A broken contract fails the build and names the import
-that broke it; a contract that never heard of your module agrees with everything you do. Stage 0
-found this on contract 4 and deferred it to the first stage that adds an adapter; stage 5 found
-that three others had the same shape, and one guard covered all four until 19.1 handed contract 1's
-share back to the linter. Without it, later stages would be written under rules that were not being
-applied to them, and the first sign of it would have been two vendors quietly sharing a helper.
+that broke it; a contract that never heard of your module agrees with everything you do. It was
+found first on contract 4 and deferred to the first adapter that would need it; three others turned
+out to have the same shape, and one guard covered all four until contract 1's share went back to
+the linter. Without it, later work would be written under rules that were not being applied to it,
+and the first sign of it would have been two vendors quietly sharing a helper.
 
 `scripts/check`'s package-root gate is the precedent: a rule `.importlinter` cannot express,
 enforced beside it rather than wished into it. This is a test rather than a shell gate only because
@@ -81,19 +81,19 @@ The extras table is the whole of what this reads, and that is the second limit. 
 into `[project] dependencies` or spelled out inside a `[dependency-groups]` entry would not be seen
 here. The first is empty by design, AGL's core being stdlib-only, so an SDK there is a design change
 big enough to bring somebody back to this file. The second needs stating more carefully, because
-19.4 put one there: `[dependency-groups] dev` names `agl[all]`, which resolves to both of today's
-vendor SDKs. That is not a hole in this guard and it is not §4's asymmetry being walked back - it is
-a *self-reference to the extras table below*, so the distributions are still declared in exactly one
-place, still gain a third member only by being written there, and this comparison still reads the
-table they are written in. `pyproject.toml`'s own comment argues why the dev group needs them at
-all. What would be invisible here is a vendor distribution spelled out **by name** in a dependency
-group, bypassing the extras; nothing does that today, and doing it would be the design change this
-paragraph used to describe. What is asserted is that the table where vendor SDKs *do* go cannot gain
-one unnoticed.
+there is one there: `[dependency-groups] dev` names `agl[all]`, which resolves to both of today's
+vendor SDKs. That is not a hole in this guard and it is not the vendor-containment asymmetry being
+walked back - it is a *self-reference to the extras table below*, so the distributions are still
+declared in exactly one place, still gain a third member only by being written there, and this
+comparison still reads the table they are written in. `pyproject.toml`'s own comment argues why the
+dev group needs them at all. What would be invisible here is a vendor distribution spelled out **by
+name** in a dependency group, bypassing the extras; nothing does that today, and doing it would be
+the design change this paragraph used to describe. What is asserted is that the table where vendor
+SDKs *do* go cannot gain one unnoticed.
 
-The asymmetry with OpenAI is deliberate and is not a gap here (ARCHITECTURE.md §4): that adapter
-wraps the Codex CLI binary and has no Python import to contain, so it has no extra to declare and
-is guarded by `scripts/check`'s grep gate instead.
+The asymmetry with OpenAI is deliberate and is not a gap here (`ARCHITECTURE.md`'s "Vendor
+containment"): that adapter wraps the Codex CLI binary and has no Python import to contain, so it
+has no extra to declare and is guarded by `scripts/check`'s grep gate instead.
 
 ## Why each comparison is a function and not three lines inside a test
 
@@ -120,11 +120,11 @@ Splitting **pure from impure** - the comparisons and their complaints in one mod
 and the tests in another - is the seam this file genuinely draws, and it still does not pay. It
 would put the paragraph a reader is chasing one file away from the assertion that printed it, which
 is the whole of the reason: the bulk here is complaint texts and fabricated cases rather than any
-one mechanism, so both halves would be readable and neither would be *about* anything the other
-was not. Until 19.5 this paragraph carried a second reason - that both halves landed over the
-ceiling regardless - and that arithmetic no longer holds now the gate counts code lines: halved,
-this file would be two modules of roughly 220 and both would clear it. The reader cost was always
-the load-bearing half, and it is now the only half.
+one mechanism, so both halves would be readable and neither would be *about* anything the other was
+not. This paragraph used to carry a second reason - that both halves landed over the ceiling
+regardless - and that arithmetic no longer holds now the gate counts code lines: halved, this file
+would be two modules of roughly 220 and both would clear it. The reader cost was always the
+load-bearing half, and it is now the only half.
 
 What the length actually is: three rules, each with a paragraph explaining itself to somebody who
 has never seen this file, and each with fabricated cases proving it can still say so.
@@ -147,8 +147,8 @@ PACKAGE_DIR: Final = REPO_ROOT / "src" / "agl"
 PORTS_DIR: Final = PACKAGE_DIR / "ports"
 ADAPTERS_DIR: Final = PACKAGE_DIR / "adapters"
 
-# Contract numbers are stable - `.importlinter`'s own header says so, and stage briefs cite them -
-# and each section's `type` is what this file reads its list as. The pairing is asserted below, so
+# Contract numbers are stable - `.importlinter`'s own header says so, and failure reports cite them
+# - and each section's `type` is what this file reads its list as. The pairing is asserted below, so
 # a renumbering fails here rather than silently pointing a comparison at the wrong contract.
 # Contract 1 is absent because this file no longer reads it; `tests/test_contract_firing.py` pins
 # all six numbers to their types, that being the file that builds a contract object per number.
@@ -174,11 +174,11 @@ PORT_EXEMPT: Final[Mapping[str, str]] = {
 # Top-level `.py` files under `adapters/` that are not adapters to be policed, each with the reason
 # it is not. Everything else there belongs in contract 4's `modules =` instead. Do not add an entry
 # to spare yourself an edit to `.importlinter`: an exemption here removes a module from the rule,
-# while a listing there applies it. Nothing is pre-authorised, and stage 0 left one hypothetical
-# name here to say so - a shared `_process.py`, which stage 8 was expected to want and did not
-# write: the git package kept `_runner.py`, the shell verifier and the OpenAI runner each spawn
-# their own, and no top-level module arrived. 19.1 confirmed the list against the tree and both
-# entries below are still the whole of it.
+# while a listing there applies it. Nothing is pre-authorised, and one hypothetical name was left
+# here early to say so - a shared `_process.py`, which the second vendor adapter was expected to
+# want and did not write: the git package kept `_runner.py`, the shell verifier and the OpenAI
+# runner each spawn their own, and no top-level module arrived. The list has been confirmed against
+# the tree and both entries below are still the whole of it.
 ADAPTER_EXEMPT: Final[Mapping[str, str]] = {
     "__init__.py": "the adapters package's own docstring; no adapter lives in it",
     "routing.py": "contract 4's one sanctioned exception: dispatching on task.model.provider "
@@ -315,10 +315,11 @@ def _unclassified_port(shown: str, dotted: str) -> str:
         f"[{PURE_TYPES_SECTION}]:\n"
         f"    {dotted}\n"
         f"\n"
-        f"Which list is ARCHITECTURE.md §6's question and not this test's: `source_modules` if the "
-        f"module holds types an ABC speaks, `forbidden_modules` if it holds an ABC. There is no "
-        f"exemption route here - __init__.py is out of the comparison because import-linter would "
-        f"skip it in both lists, which is a fact about the tool and not a licence to add a second."
+        f"Which list is a question for ARCHITECTURE.md's \"The layers\" and not for this test: "
+        f"`source_modules` if the module holds types an ABC speaks, `forbidden_modules` if it "
+        f"holds an ABC. There is no exemption route here - __init__.py is out of the comparison "
+        f"because import-linter would skip it in both lists, which is a fact about the tool and "
+        f"not a licence to add a second."
     )
 
 
@@ -358,11 +359,11 @@ def _uncontained_vendor(distribution: str, imported: str) -> str:
         f".importlinter does not contain it.\n"
         f"\n"
         f"That contract is what keeps a vendor SDK visible to exactly one adapter package, so that "
-        f"installing one vendor never drags in another's SDK (ARCHITECTURE.md §4). Its "
-        f"`forbidden_modules` is a hand-maintained list of two, and a third SDK missing from it is "
-        f"contained by nothing at all: contract 5 governs who may import agl.adapters and has no "
-        f"opinion about what an adapter imports from outside, so any module in the tree could "
-        f"import this one with all six contracts still reported kept.\n"
+        f"installing one vendor never drags in another's SDK (ARCHITECTURE.md's \"Vendor "
+        f"containment\"). Its `forbidden_modules` is a hand-maintained list of two, and a third "
+        f"SDK missing from it is contained by nothing at all: contract 5 governs who may import "
+        f"agl.adapters and has no opinion about what an adapter imports from outside, so any "
+        f"module in the tree could import this one with all six contracts still reported kept.\n"
         f"\n"
         f"Resolve it by adding the SDK's *import* name to `forbidden_modules` under "
         f"[{VENDOR_SECTION}], plus one `ignore_imports` expression per module permitted to import "
@@ -454,7 +455,7 @@ def _section(name: str) -> Mapping[str, str]:
     assert name in parser, (
         f"{CONFIG_FILE} has no [{name}] section. Contract numbers are stable by policy - see that "
         f"file's header - so if a contract was renumbered, both the policy and this test need "
-        f"revisiting, and every stage brief that cites a contract by number too."
+        f"revisiting, and every failure report that cites a contract by number too."
     )
     return parser[name]
 
@@ -507,9 +508,9 @@ def _declared_vendors() -> dict[str, str]:
     extras = project.get("optional-dependencies")
     assert isinstance(extras, dict) and extras, (
         f"{PYPROJECT_FILE} declares no [project.optional-dependencies], which is where a vendor "
-        f"SDK is added (ARCHITECTURE.md §4). Either the table moved and this test is now comparing "
-        f"contract 3 against nothing, or AGL has stopped having vendor extras and contract 3 and "
-        f"this comparison both need revisiting."
+        f"SDK is added (ARCHITECTURE.md's \"Vendor containment\"). Either the table moved and this "
+        f"test is now comparing contract 3 against nothing, or AGL has stopped having vendor "
+        f"extras and contract 3 and this comparison both need revisiting."
     )
     own = _import_name(str(project.get("name", "")))
     found: dict[str, str] = {}
@@ -534,7 +535,7 @@ def test_each_contract_is_still_the_kind_of_contract_this_file_reads(
     assert contract_type == expected, (
         f"[{section}] is a `{contract_type}` contract, not `{expected}`. This test reads that "
         f"section's own list as the set of modules it holds to a rule; if the contract now means "
-        f"something else, this test is guarding the wrong thing - and so is every stage brief "
+        f"something else, this test is guarding the wrong thing - and so is every failure report "
         f"that cites it by number."
     )
 

@@ -2,18 +2,18 @@
 
 Unit tests for `adapters/rich_terminal/queues.py`, and when they were written they were the only
 ones there were: `tests/contracts/terminal.py` is what finally grades this behaviour and it could
-not run until 6.2 put a `Terminal` in front of it, so until then every claim §3.7 makes about one
-slot and two queues was checked here or checked nowhere. The suite is written on that assumption
+not run until there was a `Terminal` in front of it, so until then every claim about one slot and
+two queues was checked here or checked nowhere. The suite is written on that assumption
 and stays written that way: it goes at the arithmetic, at the ordering after preemption, and at the
 two directions identity could be got wrong, rather than at the happy path a module's own author
 already believes in.
 
 **Nothing here is a `Terminal`.** No context manager, no redraw loop, no `rich`, no input. Which
-half of `show` a view lands in - the dispatch on an empty `responses` tuple - is 6.2's decision and
-so is refusing a call from outside the context, so neither is asserted. What is driven here is the
-bookkeeping alone, and driven the way `terminal.py` will drive it: `hold` and `queue` for the two
-halves of `show`, `current` and `displayed` for what should be up, `answer` for a person, `pending`
-for the port's own property, `close` on the way out.
+half of `show` a view lands in - the dispatch on an empty `responses` tuple - is `terminal.py`'s
+decision and so is refusing a call from outside the context, so neither is asserted. What is
+driven here is the bookkeeping alone, and driven the way `terminal.py` will drive it: `hold` and
+`queue` for the two halves of `show`, `current` and `displayed` for what should be up, `answer` for
+a person, `pending` for the port's own property, `close` on the way out.
 
 **The views are this module's own** rather than `tests/contracts/_terminal_views.py`'s. Reusing that
 one would couple these tests to a suite this deliverable may not edit, and would make a failure here
@@ -40,7 +40,8 @@ from agl.ports.terminal import Choice, Row, Rows, Screen, Text, TextInput
 # pytest quietly skips - which is how a file like this passes against a module it never called.
 pytestmark = pytest.mark.asyncio
 
-# §3.7's own two priorities - an agent question and a merge conflict - as two integers that differ.
+# The two priorities a workflow uses - an agent question and a merge conflict - as two integers
+# that differ.
 # Nothing here is a vocabulary: the module compares numbers, and this suite would pass on 1 and 2.
 AGENT: Final = 5
 CONFLICT: Final = 10
@@ -60,7 +61,7 @@ LATE: Final = "the question that was asked second"
 LAST: Final = "the question that was asked third"
 URGENT: Final = "the conflict holding the merge queue"
 
-# The dashboards, and §3.7's board.
+# The dashboards, and the board.
 RUNNING: Final = "two children running"
 LANDED: Final = "one child landed, one still running"
 TICKET: Final = "T-01"
@@ -101,12 +102,12 @@ def dashboard(line: str) -> Screen:
 
 
 def board(rows: Mapping[str, str]) -> Screen:
-    """§3.7's board, over a mapping the caller keeps a reference to and mutates."""
+    """A board, over a mapping the caller keeps a reference to and mutates."""
     return Screen(Rows([Row(name, activity) for name, activity in rows.items()]))
 
 
 def question(label: str) -> Screen[Answer]:
-    """§3.7's approval screen: a body to read, a choice to pick, and a field to type into.
+    """An approval screen: a body to read, a choice to pick, and a field to type into.
 
     A fresh `maps` lambda on every invocation, and `TextInput.maps` is excluded from comparison, so
     two invocations with the same `label` compare **equal**. That is what makes "two identical
@@ -205,7 +206,7 @@ async def test_holding_a_second_view_replaces_the_first_and_the_first_never_come
 
 
 async def test_the_slot_is_written_under_a_question_and_is_where_the_queues_end() -> None:
-    """§3.7's "no extra machinery", from all three sides at once.
+    """The slot needing no extra machinery, from all three sides at once.
 
     A passive registration under a question does not take the screen, because a dashboard is not in
     that ordering at all. It is still written. And when the queues empty, what appears is the board
@@ -534,14 +535,14 @@ async def test_an_entry_is_the_registration_and_never_the_screen_its_view_return
 
 
 async def test_pending_counts_what_is_waiting_and_excludes_what_is_displayed() -> None:
-    """§3.7's `{5: 2, 10: 0}`, built exactly, because the zero is the specification.
+    """`pending` as `{5: 2, 10: 0}`, built exactly, because the zero is the specification.
 
     Two clauses at once. What is on screen is excluded - it is displayed, not pending - so the
     conflict at 10 contributes nothing to its own count while a person is looking at it. And every
     priority the terminal has been asked for is reported, including the ones with nothing waiting.
 
-    The state is §3.7's own: two agent questions waiting, one of which was displaced rather than
-    never shown, and a conflict displayed with nothing behind it.
+    The state is the one the map is for: two agent questions waiting, one of which was displaced
+    rather than never shown, and a conflict displayed with nothing behind it.
     """
     screens = Screens()
     early = ask(screens, EARLY, priority=AGENT)

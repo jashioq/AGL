@@ -1,18 +1,19 @@
-"""`agl resume <label>` from the library side: §3.6's replay, driven through the real entry point.
+"""`agl resume <label>` from the library side: replay, driven through the real entry point.
 
-`tests/sdk/test_kill_and_resume.py` is §3.6's own acceptance criterion and is not repeated here. It
-kills a real process at every step boundary and resumes in a second one - which is the only way to
-falsify half of §3.6's rules - but it constructs its ports and its `Journal` directly and never goes
+`tests/sdk/test_kill_and_resume.py` is replay's own acceptance criterion and is not repeated here.
+It kills a real process at every step boundary and resumes in a second one - which is the only way
+to falsify half of the rules - but it constructs its ports and its `Journal` directly and never goes
 through `api` at all. What this module owes is the other half of that sentence: that **`api.resume`
 genuinely replays**, that the operation a person types is the one wired to the ledger, and that the
-refusals §3.10 and §3.11 ask of it are the ones it makes.
+refusals asked of it are the ones it makes.
 
-The headline property is therefore stated the way §3.6 states it - "the worker was not called" is
-the whole of what a replay hit *is* - so every test that cares counts **agent dispatches**, not
-entries. A run is interrupted between two steps, resumed, and the first step's agent must have run
-exactly once across both invocations while still handing back the value it produced the first time.
-An implementation that re-ran it would pass every assertion about the final state and cost the
-operator an agent; one that skipped the second step would pass every assertion about the first.
+The headline property is therefore stated the way `ARCHITECTURE.md`'s "Invariants where a mistake
+is silent" states it - "the worker was not called" is the whole of what a replay hit *is* - so
+every test that cares counts **agent dispatches**, not entries. A run is interrupted between two
+steps, resumed, and the first step's agent must have run exactly once across both invocations while
+still handing back the value it produced the first time. An implementation that re-ran it would
+pass every assertion about the final state and cost the operator an agent; one that skipped the
+second step would pass every assertion about the first.
 
 **Everything is `container.fakes()`** - no network, no git, no process - which is target #8 and what
 lets a two-invocation replay cost milliseconds. The workflows are declared in this module and
@@ -21,10 +22,10 @@ seam is also how the two mismatches below are arranged: a workflow whose *versio
 run and the resume, and one whose *params class* did, are two attributes of this module registered
 under one entry-point name. Nothing is monkeypatched to produce either.
 
-**The version stamp is asserted with the record afterwards.** §3.11 gives resume one line - "stamp
-the version, refuse on mismatch. Runs live hours" - and a refusal that had already touched the run
-would be worse than none: the ledger it refused to finish under a stranger's version is the thing
-an operator is about to install the right version for.
+**The version stamp is asserted with the record afterwards.** Resume gets one line - stamp the
+version, refuse on mismatch, because runs live hours - and a refusal that had already touched the
+run would be worse than none: the ledger it refused to finish under a stranger's version is the
+thing an operator is about to install the right version for.
 """
 
 from collections.abc import Mapping, Sequence
@@ -77,14 +78,14 @@ LABEL: Final = RunLabel("auth")
 SCOPE: Final = RunScope(PROJECT, LABEL)
 
 # The file every repository below is seeded with, and the one a commit landing between the run and
-# the resume adds - §3.6's "a commit landing on `main` between run and resume".
+# the resume adds - a commit landing on `main` between run and resume.
 SEEDED: Final = "src/a.txt"
 LANDED: Final = "src/landed.txt"
 
 
 @dataclass(frozen=True)
 class ResumeParams:
-    """§3.3's example shape. `concurrent` is a default the user never typed, which is the half of
+    """The example params shape. `concurrent` is a default the user never typed, the half of
     "params come from `run.json`" that is lost if the record is not the whole story."""
 
     request: str = arg("-r", "--request", help="what to build")
@@ -114,13 +115,13 @@ class Summary:
 REPORT: Final = reporting_tool("report", "report what this step produced", Summary)
 
 # Two roles, differing in name and prompt, so the two steps below are two addresses and two
-# fingerprints. Read-only and paired with steps that pass no `commit=`, which is what §3.3 asks an
-# author to write.
+# fingerprints. Read-only and paired with steps that pass no `commit=`, which is what an author is
+# asked to write.
 #
-# Two factories rather than one `replace` of the other, which is what UF1.2 took away: a factory
-# closes the override surface, and a role that could be re-spelled at a call site is a role whose
-# fingerprint terms a call site can move. The duplication is four literals and it is the honest
-# version of a distinction that is only ever declared once.
+# Two factories rather than one `replace` of the other, which is what a later change took away: a
+# factory closes the override surface, and a role that could be re-spelled at a call site is a role
+# whose fingerprint terms a call site can move. The duplication is four literals and it is the
+# honest version of a distinction that is only ever declared once.
 
 
 @role(model=Claude.SONNET)
@@ -155,7 +156,7 @@ class Interrupted(Exception):
 
 
 class ReviewNotConverging(Stop):
-    """§3.1's own example of a workflow's reason to stop, spelled against the SDK's `Stop`."""
+    """A workflow's own reason to stop, spelled against the SDK's `Stop`."""
 
 
 # What each workflow was handed, what its steps gave back, and the interruption a test arms. Module
@@ -185,8 +186,8 @@ async def two_steps(run: Run[ResumeParams]) -> None:
 
 @workflow(version="1")
 async def quiet(run: Run[NoParams]) -> None:
-    """Takes no step at all - the run for which §3.9's "`agl/<label>` is a real ref from run start"
-    is only true if something above the first step provisioned `_base`."""
+    """Takes no step at all - the run for which "`agl/<label>` is a real ref from run start" is
+    only true if something above the first step provisioned `_base`."""
     handed.append(run)
 
 
@@ -230,7 +231,7 @@ async def drifting_after(run: Run[OtherParams]) -> None:
 
 
 def _point(name: str, attribute: str) -> EntryPoint:
-    """§3.3's `probe = "agl.workflows.probe:probe"`, pointed at this module instead."""
+    """A `probe = "agl.workflows.probe:probe"` line, pointed at this module instead."""
     return EntryPoint(name=name, value=f"{__name__}:{attribute}", group=registry.GROUP)
 
 
@@ -254,7 +255,7 @@ AFTER: Final = (
 def _reporting(dispatched: list[str]) -> Script:
     """An agent that writes nothing, reports one payload, and records that it was paid for.
 
-    `dispatched` is the whole instrument of this module: §3.6's replay has no observable difference
+    `dispatched` is the whole instrument of this module: a replay has no observable difference
     from a re-run that happens to produce the same answer, other than that the worker was not
     called. `task.instructions` names which role was served, because the two roles differ only
     there.
@@ -319,7 +320,7 @@ def _clear() -> None:
 async def test_a_resumed_run_replays_the_completed_step_and_runs_only_the_rest(
     tmp_path: Path,
 ) -> None:
-    """§3.6, through the command rather than through a hand-built `Run`.
+    """Replay, through the command rather than through a hand-built `Run`.
 
     The workflow function is re-run from the top - `handed` gets a second `Run` - the step that
     already has an entry is a no-op returning its stored value, and only the step that never ran
@@ -330,7 +331,7 @@ async def test_a_resumed_run_replays_the_completed_step_and_runs_only_the_rest(
     finish nothing.
 
     The counter is rebuilt from nothing on the way, which is what makes the first step *hit* at
-    all: §3.6's `n` is never persisted, so the resume's fresh `Fingerprints` has to walk the same
+    all: the ordinal `n` is never persisted, so the resume's fresh `Fingerprints` walks the same
     calls in the same order and arrive at the same digest.
     """
     dispatched: list[str] = []
@@ -389,13 +390,13 @@ async def test_resuming_a_finished_run_runs_no_worker_at_all(tmp_path: Path) -> 
 async def test_the_workflow_is_handed_its_params_as_the_dataclass_the_record_stored(
     tmp_path: Path,
 ) -> None:
-    """§3.3: "persisted into `run.json`, which is why `agl resume auth` takes no flags", read back.
+    """Params are persisted into `run.json`, which is why `agl resume auth` takes no flags.
 
     `concurrent` is asserted at 4 - a value the resume's own command line could not have carried,
     since there is no command line - and `request` at what was typed hours earlier. The type is
     asserted too: `run.params` is an instance of the workflow's class and not the mapping the store
-    handed over, which is the difference between §3.3's typing promise holding on a resume and
-    holding only on a fresh run.
+    handed over, which is the difference between the typing promise holding on a resume and holding
+    only on a fresh run.
     """
     dispatched: list[str] = []
     harness = _fakes(tmp_path, dispatched)
@@ -463,7 +464,7 @@ class _Counting(Store):
 
 @pytest.mark.asyncio
 async def test_a_resume_does_not_rewrite_run_json(tmp_path: Path) -> None:
-    """§3.6's pin, from the side only a resume can show it from - and `api.resume`'s bold claim.
+    """The pin, from the side only a resume can show it from - and `api.resume`'s bold claim.
 
     Both hands that could move the record are moved between the two invocations: the clock, so a
     `created_at` rewritten with "now" would differ, and the repository's default branch, so a
@@ -515,7 +516,7 @@ async def test_a_resume_does_not_rewrite_run_json(tmp_path: Path) -> None:
     )
     assert await _record(harness) == before, (
         "a resume rewrote the record. `base_sha` pins the resolved commit so that a commit landing "
-        "on `main` between run and resume cannot move the first step's starting head (§3.6) - a "
+        "on `main` between run and resume cannot move the first step's starting head - a "
         "resume that re-resolved and stored the answer performs the failure the field prevents"
     )
     assert handed[0].base == pinned, "the resumed run started from somewhere other than the pin"
@@ -554,7 +555,7 @@ async def test_a_resume_reopens_base_from_the_pin_even_when_the_workflow_takes_n
 ) -> None:
     """The decision `api.resume` makes about `workspaces.open`, and both halves of why.
 
-    §3.9 promises `agl/<label>` is a real ref a person can `git log` from run start, and
+    `agl/<label>` is promised to be a real ref a person can `git log` from run start, and
     `run.step`'s open is lazy - so a resumed run whose workflow takes no step provisions nothing
     unless the operation does. That is `api.run`'s own argument, and the state a resume exists to
     recover from makes it sharper: a crash between the record and the checkout leaves a run whose
@@ -597,8 +598,8 @@ async def test_a_resume_reopens_base_from_the_pin_even_when_the_workflow_takes_n
 async def test_a_label_with_no_record_is_a_not_found_and_reads_as_runs_mirror(
     tmp_path: Path,
 ) -> None:
-    """§3.10: "`resume` on a missing label errors symmetrically. Keeping both verbs makes a typo'd
-    label a loud error rather than a silent replay of something unrelated."
+    """`resume` on a missing label errors symmetrically. Keeping both verbs makes a typo'd label
+    a loud error rather than a silent replay of something unrelated.
 
     Both messages are asserted here, in one test, because the claim is about the pair: `run` says
     the label is taken and names the verbs that free it, `resume` says it is free and names the verb
@@ -628,7 +629,8 @@ async def test_a_label_with_no_record_is_a_not_found_and_reads_as_runs_mirror(
 async def test_a_workflow_version_the_record_was_not_stamped_with_is_refused(
     tmp_path: Path,
 ) -> None:
-    """§3.11: "Schema migration | Stamp the version, refuse on mismatch. Runs live hours."
+    """`ARCHITECTURE.md`'s "Invariants where a mistake is silent": stamp the version, refuse on
+    mismatch rather than migrating.
 
     `ConflictError` - exit 4, the same code `run` answers a taken label with - because the record
     exists and the workflow exists and neither is wrong: they do not fit, which is
@@ -725,7 +727,7 @@ async def test_a_workflow_the_record_names_and_nothing_registers_is_a_not_found(
 async def test_a_stop_raised_by_a_resumed_workflow_leaves_api_resume_unwrapped(
     tmp_path: Path,
 ) -> None:
-    """§3.1's criterion, asserted of `resume` as `tests/test_api.py` asserts it of `run`.
+    """The criterion, asserted of `resume` as `tests/test_api.py` asserts it of `run`.
 
     Identity and not `isinstance`: a resume that caught the workflow's `ReviewNotConverging`, threw
     it away and raised a fresh one of the same class would still exit 7 and would name this module
@@ -846,7 +848,7 @@ class _NotTaken(WorkspaceProvider):
     `pytest.raises(UpstreamUnavailable)` around a resume that took the lock fails carrying the
     sentence below rather than passing on the exception the test was already expecting.
 
-    **`hold` is the member this class exists for.** §3.10's run lock is a claim on the run's own
+    **`hold` is the member this class exists for.** The run lock is a claim on the run's own
     directory and *making that directory is its one side effect* - `FakeWorkspaceProvider.hold` and
     the real provider agree about that - so a resume that took it and then refused would have left
     something behind on a run it declined to walk. That is the half of `api.py`'s ordering rule this
@@ -855,7 +857,7 @@ class _NotTaken(WorkspaceProvider):
 
     async def open(self, label: RunLabel, namespace: Namespace | None, base: str) -> Workspace:
         raise AssertionError(
-            "preflight refused this resume and `_base` was opened anyway, so §3.9's `agl/<label>` "
+            "preflight refused this resume and `_base` was opened anyway, so `agl/<label>` "
             "was cut - or reopened - for a run nobody is walking"
         )
 
@@ -867,7 +869,7 @@ class _NotTaken(WorkspaceProvider):
 
     def hold(self, label: RunLabel) -> AbstractAsyncContextManager[None]:
         raise AssertionError(
-            "preflight refused this resume and §3.10's run lock was taken anyway. The claim is a "
+            "preflight refused this resume and the run lock was taken anyway. The claim is a "
             "lock on the run's own directory and making that directory is the one side effect of "
             "taking it, so a refusal underneath it is a refusal that left something behind"
         )
@@ -880,13 +882,12 @@ async def test_a_resume_refused_at_preflight_takes_no_lock_and_writes_nothing(
     """`api.resume`'s own sentence about preflight, pinned by something that is not that sentence.
 
     "Everything above it refuses for free; nothing below it does" is a claim about the two lines
-    directly under it - §3.10's run lock and `_base` - and `tests/sdk/test_preflight.py` makes the
-    same claim mechanical for `api.run`, with a tripwire provider and an assertion about what is
-    under `AGL_HOME`. `api.resume` had neither wired in: its tests asserted that
-    `UpstreamUnavailable` came out and nothing about what was taken or written on the way, so the
-    ordering rested on a comment. **The ordering is not what this test changes** - `preflight.check`
-    already sits above `workspaces.hold`, and this adds no more than a way to find out when it
-    stops.
+    directly under it - the run lock and `_base` - and `tests/sdk/test_preflight.py` makes the same
+    claim mechanical for `api.run`, with a tripwire provider and an assertion about what is under
+    `AGL_HOME`. `api.resume` had neither wired in: its tests asserted that `UpstreamUnavailable`
+    came out and nothing about what was taken or written on the way, so the ordering rested on a
+    comment. **The ordering is not what this test changes** - `preflight.check` already sits above
+    `workspaces.hold`, and this adds no more than a way to find out when it stops.
 
     **The "nothing written" half is not `api.run`'s, and cannot be.** There it is `_no_record`: a
     run refused at preflight must leave nothing under `AGL_HOME`, or an operator has to `agl clear`
@@ -901,8 +902,8 @@ async def test_a_resume_refused_at_preflight_takes_no_lock_and_writes_nothing(
     that recorded nothing would otherwise report silence and be believed.
 
     Six assertions and each fails differently. The class and the exit code say the refusal reaching
-    the operator is still §3.2's. The tripwire says the lock was not taken and `_base` not opened,
-    which no directory listing could say - the run has a checkout already, so its presence
+    the operator is still preflight's. The tripwire says the lock was not taken and `_base` not
+    opened, which no directory listing could say - the run has a checkout already, so its presence
     afterwards is evidence of nothing. The store says the record was not rewritten and the ledger
     not appended to. `handed` says the workflow itself never started. And `runner.asked` is what
     stops the whole thing passing for the wrong reason: preflight really was reached, and

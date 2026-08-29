@@ -10,9 +10,10 @@ paragraph is what guards it." What follows is that paragraph made mechanical.
 A module-level `asyncio.Lock` taken around every write leaves all sixty store tests green. Nothing
 in `tests/` so much as says the word: the clause is stated everywhere and checked nowhere.
 `ports/store.py` states it - "An implementation that would have to put every write behind one
-mutex, because everything it holds is one document, is not satisfying this port" - and §3.6 states
-the design decision under it, that separate addresses make each write one `os.replace`, "atomic, no
-lock, no coordination". Both store implementations restate it in their own docstrings.
+mutex, because everything it holds is one document, is not satisfying this port" - and
+`ARCHITECTURE.md`'s "Deliberately not built" states the decision under it: every document has its
+own address, so a write is one `os.replace`, atomic and needing no coordination. Both store
+implementations restate it in their own docstrings.
 
 And both places that could have caught it concede that they cannot. `tests/contracts/store.py`
 lists "that distinct addresses are written without a shared lock" among the things a green run does
@@ -20,7 +21,7 @@ not entitle anybody to believe, and finishes: "through this interface, a global 
 invisible". `tests/contracts/_store_concurrency.py` concedes the same clause from the other side -
 it observes the store only at the moments an implementation yields, and it refuses threads for a
 reason it states. A lock is correct and merely slow, and slow is not a thing either of them can
-see. It would surface at stage 13 as concurrency that quietly is not there.
+see. It would surface as concurrency that quietly is not there.
 
 ## Why the shape is structural and not a stopwatch
 
@@ -36,7 +37,7 @@ re-run the suite instead of to read it.
 What is being forbidden is a thing in the source, so the assertion is about the source. Where the
 property is structural, the structural assertion is the one that does not go stale when a module is
 added - `test_claude_code_runner.py`'s argument about its own clause, and this is that shape's fifth
-application. `test_shell_verifier.py` established it at stage 6, `test_claude_code_runner.py` and
+application. `test_shell_verifier.py` established it, `test_claude_code_runner.py` and
 `test_openai_runner.py` carry the two hermeticity siblings, and `test_git_end_of_options.py` is the
 fourth. Like all four, this file parses source and runs nothing.
 
@@ -102,7 +103,7 @@ PRIMITIVES: Final = frozenset(
         "Barrier",
         # The queues, from `asyncio`, `queue` and `multiprocessing` alike. A queue drained by one
         # consumer is a mutex with a nicer name: it makes every write wait for the write before it,
-        # which is the arrangement §3.6 gave every step its own address to avoid.
+        # which is the arrangement giving every step an address of its own avoids.
         "Queue",
         "SimpleQueue",
         "LifoQueue",
@@ -142,9 +143,9 @@ def test_no_module_in_the_filesystem_package_names_a_synchronisation_primitive()
     of this file matching nothing could not be green while checking nothing.
 
     Both stores are covered, `store.py` and `memory_store.py`, by globbing the package the way
-    `test_claude_code_runner.py` globs its own. §1.9's rule is that the fake and the real adapter
-    are held to one standard, and a fake that serialised its writes would be a `--dry-run` whose
-    concurrency is a fiction the real run does not share.
+    `test_claude_code_runner.py` globs its own. The fake and the real adapter are held to one
+    standard - that is what `tests/contracts/` is for - and a fake that serialised its writes would
+    be a `--dry-run` whose concurrency is a fiction the real run does not share.
     """
     package = Path(filesystem_package.__file__).parent
     walked: list[str] = []
@@ -156,8 +157,8 @@ def test_no_module_in_the_filesystem_package_names_a_synchronisation_primitive()
             for line, name in _spelled(node):
                 assert name not in PRIMITIVES, (
                     f"{source.name}:{line} names {name!r}, which is a synchronisation primitive, "
-                    f"and this package must not name one. §3.6 gives every step its own address "
-                    f"so that a completion is one write - 'no lock, no coordination' - and the "
+                    f"and this package must not name one. Every step has an address of its own "
+                    f"so that a completion is one write, needing no coordination, and the "
                     f"port refuses an implementation that would put every write behind one mutex. "
                     f"A lock here passes the whole contract suite: it is correct and merely slow, "
                     f"and slow is the one thing that suite says outright it cannot see. Take it "

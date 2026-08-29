@@ -20,9 +20,10 @@ Subclass it once per implementation, override the four fixtures, and add nothing
             return f"echo {ANNOUNCEMENT}; exit 1"  # answers `not passed`, and says ANNOUNCEMENT
 
 The real adapter and the fake both run this class, which is the whole mechanism keeping a fake from
-drifting into fiction (§1.9). It is written here, at stage 3, before either exists, because a
-subagent that writes its own tests writes tests that pass - and stage 6 ends with "the contract
-suite passes", a sentence worth something only when the suite had no stake in the outcome.
+drifting into fiction. It is written against the port alone, before either implementation exists,
+because a subagent that writes its own tests writes tests that pass - and an adapter ships only
+once "the contract suite passes", a sentence worth something only when the suite had no stake in
+the outcome.
 
 One class in one module, because the port is one method and draws no seam to split along. Every
 other suite in this package is assembled out of two or three modules; this one would be inventing
@@ -60,10 +61,10 @@ made to reveal, not a test somebody forgot.
    path disarms it silently. And a green result could not be read: "nothing interpolated this
    path" and "this path had nothing in it to interpolate" produce the same `VerifierOutcome`, and
    the port hands back nothing else to tell them apart. Where the clause is enforceable is at the
-   implementation - stage 6.1 records how the configured command is executed and passes the
-   workspace by `cwd=` - and that is where an assertion has a witness. The half that *is* pinned
-   here without any test at all is structural: `verify` takes one `str`, so an adapter reaching a
-   working directory into that argument has to compose it on purpose.
+   implementation - `adapters/shell/` runs the configured command and passes the workspace by
+   `cwd=` - and that is where an assertion has a witness. The half that *is* pinned here without any
+   test at all is structural: `verify` takes one `str`, so an adapter reaching a working directory
+   into that argument has to compose it on purpose.
 
 2. **That the command reaches the runner unaltered.** "Exactly as the user wrote it, operators and
    all" is asserted by the signature and by `mypy --strict` at every call site - one `str`, never a
@@ -102,8 +103,8 @@ made to reveal, not a test somebody forgot.
    is asserted is that a marker the failing command announced comes back; an implementation
    dropping one stream, truncating, or interleaving differently is not visible from out here.
 
-8. **Anything about two builds at once.** §3.4 has the gate serial because the queue in front of
-   it serialises it, and that queue is the framework's. Nothing here starts two.
+8. **Anything about two builds at once.** The gate is serial because the queue in front of it
+   serialises it, and that queue is the framework's. Nothing here starts two.
 
 ## Where the port is silent, and what this suite assumed
 
@@ -253,7 +254,7 @@ class VerifierContract:
     ) -> None:
         """The ordinary answer, and the shape every field of it has to arrive in.
 
-        `passed` is the whole of what the framework does with this port: §3.4 keeps a landing that
+        `passed` is the whole of what the framework does with this port: it keeps a landing that
         passes the gate and undoes one that does not, and there is no third branch for it to take.
 
         The two carried fields are asserted for their shapes and for nothing else. **No number
@@ -293,7 +294,7 @@ class VerifierContract:
         assert outcome.passed is False, (
             f"a build the implementer named as failing came back with passed={outcome.passed!r}. "
             f"A failing build is the answer rather than an error, and it is the one that costs "
-            f"something: §3.4 undoes the landing that produced it"
+            f"something: the framework undoes the landing that produced it"
         )
         assert ANNOUNCEMENT in outcome.output, (
             f"the failing build announced {ANNOUNCEMENT!r} and the outcome came back with output "

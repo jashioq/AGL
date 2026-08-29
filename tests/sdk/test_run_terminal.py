@@ -1,6 +1,6 @@
 """`run.terminal`, the context `api.run` opens around a workflow, and the two re-export facades.
 
-15.1 is wiring and this suite is written as wiring: `tests/contracts/terminal.py` already pins the
+Wiring, and this suite is written as wiring: `tests/contracts/terminal.py` already pins the
 port against all three implementations, `tests/adapters/test_rich_terminal*.py` pin the redraw loop,
 the diff, the slot, the queues and preemption, and none of that is re-proved here. What is left is
 the four seams that only exist above the adapter, and each of them is a place where a plausible
@@ -10,29 +10,28 @@ implementation would pass every existing test.
 of the claim with teeth: a `Run` that built or wrapped a terminal of its own would satisfy every
 `isinstance` and every "can it show" check, and would be a different object in every namespace.
 
-**A child reaches the same one.** §3.7 assumes a single answerer, and 15.1's argument is that this
+**A child reaches the same one.** A single answerer is assumed, and the argument is that this
 is structural rather than maintained - `_child` copies `services` across, so there is exactly one
 terminal in a run tree and no line that could make a second. A terminal per `Run` gives a run with
 four children five slots and five sets of queues, four of them drawing over each other; every test
 in the adapter suite passes on such a build, because each of the five works perfectly alone.
 
 **The context is genuinely open around `wf.fn`, and around nothing else.** `ports/terminal.py`
-makes `show` outside the context an `InternalError`, so before 15.1 every screen in a real run
-raised. Three assertions, because each of the other two is satisfied by a build that gets the third
-wrong: it is open while the workflow runs, it is shut when `api.run` returns, and it was never
-entered at all by a run that died before the workflow - which is where the `async with`'s placement
-after the record and after `_base` becomes observable.
+makes `show` outside the context an `InternalError`, so until the context was opened here every
+screen in a real run raised. Three assertions, because each of the other two is satisfied by a
+build that gets the third wrong: it is open while the workflow runs, it is shut when `api.run`
+returns, and it was never entered at all by a run that died before the workflow - which is where
+the `async with`'s placement after the record and after `_base` becomes observable.
 
-**And the same three lines are asserted of `api.resume`, which is 16.2's half of this file.**
-`docs/agl-build-stages.md` states the hazard in as many words: "`api.resume` needs `async with
-services.terminal` exactly as `api.run` does, and nothing in the repository would notice its
-absence" - because until 15.1 no test drove a `show` through an `api` entry point at all, and every
-SDK terminal test builds its own `Run`, where the context never comes into it. That is the shape of
-the hole rather than one instance of it, so what closes it is one test *per entry point* that goes
-red when the line is deleted: `showing` is driven through `api.run` above and through `api.resume`
-below, and both were checked by deleting the line and watching them fail. A resumed run shows the
-same screens the run showed, and there is nothing weaker than a `show` that can tell whether a
-terminal was entered.
+**And the same three lines are asserted of `api.resume`, which is the other half of this file.**
+The hazard, in as many words: "`api.resume` needs `async with services.terminal` exactly as
+`api.run` does, and nothing in the repository would notice its absence" - because no test drove a
+`show` through an `api` entry point at all until this file, and every SDK terminal test builds its
+own `Run`, where the context never comes into it. That is the shape of the hole rather than one
+instance of it, so what closes it is one test *per entry point* that goes red when the line is
+deleted: `showing` is driven through `api.run` above and through `api.resume` below, and both were
+checked by deleting the line and watching them fail. A resumed run shows the same screens the run
+showed, and there is nothing weaker than a `show` that can tell whether a terminal was entered.
 
 **A view's arguments are registered, not evaluated.** The port promises that `show` keeps the
 function and its arguments and that the loop invokes it again per frame, which is what makes
@@ -94,14 +93,14 @@ class NoParams:
 
 
 def board(lines: list[str]) -> Screen:
-    """§3.7's board, reduced to what a wiring test can assert: a table of one cell per line.
+    """The board, reduced to what a wiring test can assert: a table of one cell per line.
 
     Passive - no responses - so `HeadlessTerminal` drops it and answers `None` rather than refusing
     it, and so the mutation test below is about registration and not about anybody answering.
 
-    It takes a `list` on purpose. §3.7's own example passes `runs`, the live dict of child `Run`s,
-    and the whole point of the per-frame design is that arguments need not be values; a view here
-    that took a tuple would be one whose argument could not be mutated to show the difference.
+    It takes a `list` on purpose. The design's own example passes `runs`, the live dict of child
+    `Run`s, and the whole point of the per-frame design is that arguments need not be values; a view
+    here that took a tuple would be one whose argument could not be mutated to show the difference.
     """
     return Screen(Rows([ports_terminal.Row(Text(line)) for line in lines]))
 
@@ -194,7 +193,7 @@ async def showing(run: Run[NoParams]) -> None:
 
 
 def _point(name: str, attribute: str) -> EntryPoint:
-    """§3.3's `probe = "agl.workflows.probe:probe"`, pointed at this module instead."""
+    """The `probe = "agl.workflows.probe:probe"` entry point, pointed at this module instead."""
     return EntryPoint(name=name, value=f"{__name__}:{attribute}", group=registry.GROUP)
 
 
@@ -202,7 +201,7 @@ POINTS: Final = (_point("showing", "showing"),)
 
 
 def _fakes(tmp_path: Path) -> container.FakeServices:
-    """Target #8's deployment: no network, no git, no process, and a `HeadlessTerminal`."""
+    """End-to-end on fakes alone: no network, no git, no process, and a `HeadlessTerminal`."""
     return container.fakes(TreesRoot(tmp_path / "trees"), files={"src/a.txt": b"one\n"})
 
 
@@ -217,11 +216,11 @@ def _run(services: container.Services) -> Run[None]:
 def test_run_terminal_is_the_object_in_the_bundle(tmp_path: Path) -> None:
     """Identity, which is the only form of this claim worth making.
 
-    `Services.terminal` has been a port-typed field since stage 9 and `api.run` is handed one
-    already built, so §3.3's sixth member is a read of it and not a second reference to it. A `Run`
-    that constructed, wrapped or memoised a terminal of its own would pass every check that asked
-    what type came back or whether it could be shown on; `is` is what says the workflow and the
-    composition root are holding one object.
+    `Services.terminal` is a port-typed field and `api.run` is handed one already built, so
+    `Run`'s sixth member is a read of it and not a second reference to it. A `Run` that constructed,
+    wrapped or memoised a terminal of its own would pass every check that asked what type came back
+    or whether it could be shown on; `is` is what says the workflow and the composition root are
+    holding one object.
     """
     harness = _fakes(tmp_path)
 
@@ -230,7 +229,7 @@ def test_run_terminal_is_the_object_in_the_bundle(tmp_path: Path) -> None:
 
 
 def test_a_child_worktree_reaches_the_same_terminal_as_its_parent(tmp_path: Path) -> None:
-    """§3.7's single answerer, asserted as the structural fact 15.1 claims it is.
+    """The single answerer, asserted as the structural fact it is.
 
     `worktree()` cuts a child that shares this run's params, ports, counter and namespace table, so
     a child's terminal is the run's terminal - one slot, one set of queues, one display, and a
@@ -253,9 +252,9 @@ def test_a_child_worktree_reaches_the_same_terminal_as_its_parent(tmp_path: Path
 
 
 def test_two_sibling_worktrees_share_one_terminal(tmp_path: Path) -> None:
-    """The other shape of the same claim, and the one §3.7's queues are actually about.
+    """The other shape of the same claim, and the one the terminal's queues are actually about.
 
-    Siblings are AGL's only real concurrency - §3.6 serializes steps within a namespace, so an
+    Siblings are AGL's only real concurrency - steps serialize within a namespace, so an
     author who wants two agents running at once opens two worktrees - and two agents asking at once
     is exactly the case "a human answers one thing at a time" exists for. Two terminals here would
     queue one question each and neither would wait for the other.
@@ -289,7 +288,7 @@ def test_the_terminal_is_a_read_and_not_a_field(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_a_workflow_can_show_a_screen_through_api_run(tmp_path: Path) -> None:
-    """The gap 15.1 closes, and it was a real one.
+    """The gap this closes, and it was a real one.
 
     `ports/terminal.py` refuses a `show` outside the context, so until `api.run` entered the
     terminal every screen in every real run raised `InternalError` - a failure invisible from the
@@ -318,7 +317,7 @@ async def test_a_workflow_can_show_a_screen_through_api_run(tmp_path: Path) -> N
 async def test_the_terminal_is_shut_again_when_api_run_returns(tmp_path: Path) -> None:
     """The other half: a context opened and never left satisfies the test above and nothing else.
 
-    §3.7 makes the terminal an async context manager precisely so there is a way to stop a redraw
+    The terminal is an async context manager precisely so there is a way to stop a redraw
     loop and hand a display back; a run that left one open would leave a person's terminal owned by
     a process that has finished with it. What is observable from here is the port's own rule - a
     `show` after the context is `InternalError` on every implementation - so that is what is asked.
@@ -354,7 +353,7 @@ async def test_the_terminal_is_entered_once_around_the_workflow(tmp_path: Path) 
 
 @pytest.mark.asyncio
 async def test_a_workflow_can_show_a_screen_through_api_resume(tmp_path: Path) -> None:
-    """The same gap, one entry point over - and the one 16.2 had to build something to notice.
+    """The same gap, one entry point over - and the one that took building something to notice.
 
     A resumed run shows the same screens the run showed, so `api.resume` needs the `async with`
     `api.run` has; without it every `show` in a resumed run raises `InternalError` by the port's own
@@ -456,7 +455,7 @@ async def test_a_run_that_fails_before_the_workflow_never_opens_the_terminal(
 async def test_show_registers_the_view_and_its_arguments_rather_than_a_screen(
     tmp_path: Path,
 ) -> None:
-    """§3.7's per-frame design, asserted at the one seam this layer owns.
+    """The per-frame design, asserted at the one seam this layer owns.
 
     "`show` registers the view function **and its arguments**; the terminal's redraw loop calls it
     again every frame." That is the port's promise, and what this layer could break is what it hands
@@ -495,7 +494,7 @@ async def test_show_registers_the_view_and_its_arguments_rather_than_a_screen(
 
 
 def test_the_terminal_facade_re_exports_the_ports_objects_themselves() -> None:
-    """Identity, name by name. `ARCHITECTURE.md` §5: a pure re-export facade, holding no logic.
+    """Identity, name by name. `sdk/terminal.py` is a pure re-export facade, holding no logic.
 
     Equality would be satisfied by a facade that redefined `Text` as its own frozen dataclass with
     the same field - and every view built through it would then produce a `Screen` whose body no
@@ -536,10 +535,10 @@ def test_the_facades_declare_nothing_of_their_own() -> None:
 
     `sdk/tools.py` is deliberately not held to this - it re-exports `Tool` *and* carries the
     reporting-tool declaration, and says so in its first paragraph - so this is a test about the
-    three modules `ARCHITECTURE.md` §5 names as pure facades and no fourth.
+    three modules that are pure re-export facades and no fourth.
 
     **`sdk/errors.py` is compared against its own `__all__` where the other two are compared
-    against their port's**, and that is the one asymmetry here. It joined at 18.0 and it takes the
+    against their port's**, and that is the one asymmetry here. It joined late and it takes the
     `AglError` hierarchy out of `ports/errors.py` while leaving that module's exit-code table to
     `cli/exit_codes.py` - a seam the port itself draws, which is why the test above asserts whole-
     surface equality for two modules and not for three. Where that cut falls is pinned in

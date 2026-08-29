@@ -1,4 +1,4 @@
-"""16.5's acceptance criterion, written the way the person it is for would write it.
+"""The acceptance criterion, written the way the person it is for would write it.
 
 > A trivial workflow written against the harness runs green with no network and no git.
 
@@ -22,7 +22,7 @@ rest on, the refusals the harness makes, and a last section for the keywords it 
 
 `harness()` takes six and the two operations take one each, and a keyword no test ever passes is a
 keyword wired by inspection - which is not the care the rest of the SDK gets, and matters more here
-than elsewhere because stages 17 and 18 build every end-to-end test on this module. `agent=`,
+than elsewhere because every end-to-end test elsewhere is built on this module. `agent=`,
 `files=` and `terminal=` are passed by the tests above; the last section covers the other five,
 each driven through the thing that keyword changes rather than read back off the harness, since
 reading it back would measure an assignment and not the wiring. `interrupt_after=` on a resume
@@ -32,9 +32,9 @@ what the count is counted from.
 ## What each test can fail on, because a green harness test proves nothing by itself
 
   * **The replay assertion counts agent dispatches**, not entries, and it counts them across both
-    invocations. §3.6's replay has no observable difference from a re-run that happens to produce
-    the same answer other than that the worker was not called - so `seen` below is the instrument,
-    and it lives in the author's own `Agent` function, which is exactly where the agent fakes say a
+    invocations. A replay has no observable difference from a re-run that happens to produce the
+    same answer other than that the worker was not called - so `seen` below is the instrument, and
+    it lives in the author's own `Agent` function, which is exactly where the agent fakes say a
     test's knowledge belongs ("what a test wants to know is already held by the tool handlers and
     question handler it supplied itself" - `adapters/claude_code/fake.py` and its OpenAI twin).
   * **The payload assertion reads the ledger** through `harness.recorded`, and the value it compares
@@ -49,13 +49,13 @@ what the count is counted from.
 
 `container.fakes()` builds a `HeadlessTerminal`, which refuses every `Screen[T]` with
 `UpstreamUnavailable` - correctly, since a workflow needing human input cannot run with nobody
-there. Until 18.0 AGL shipped no second input-capable `Terminal`, so answering a screen meant the
-real `RichTerminal` (the `agl[terminal]` extra) over a `Keys` of the test's own, which here was
+there. AGL once shipped no second input-capable `Terminal`, so answering a screen meant the real
+`RichTerminal` (the `agl[terminal]` extra) over a `Keys` of the test's own, which here was
 `instruments.keyboard.Typing` - a module inside this repository that a workflow author outside it
 does not have, driving a class `.importlinter`'s contract 6 forbids a workflow to touch. That was
-reported as a gap rather than papered over, and 18.0(i) closed it: `testing.answering([...])` is a
-third implementation that runs `tests/contracts/terminal.py`'s input-capable half, so the seam is
-a list of gestures rather than a tty.
+reported as a gap rather than papered over, and closed since: `testing.answering([...])` is a third
+implementation that runs `tests/contracts/terminal.py`'s input-capable half, so the seam is a list
+of gestures rather than a tty.
 
 **Both question tests are written on it**, which is the point rather than a tidy-up: this file is
 what an author can write on a bare `pip install agl`, and a test here that still needed a keyboard
@@ -65,11 +65,11 @@ assertion is about their workflow.
 
 ## Every await is bounded
 
-§3.7 has no timeouts anywhere - "an unanswered question blocks its step indefinitely" - so a mistake
-in a test that answers a screen is a hang rather than a failure, and `answering()` says so in as
-many words: a question with no gesture left waits exactly as a real terminal with nobody at it does.
-The two that answer a screen therefore run under `asyncio.timeout`; the rest cannot block, there
-being nobody to wait for.
+There are no timeouts anywhere - "an unanswered question blocks its step indefinitely" - so a
+mistake in a test that answers a screen is a hang rather than a failure, and `answering()` says so
+in as many words: a question with no gesture left waits exactly as a real terminal with nobody at
+it does. The two that answer a screen therefore run under `asyncio.timeout`; the rest cannot block,
+there being nobody to wait for.
 """
 
 import asyncio
@@ -111,7 +111,7 @@ from agl.testing import Agent, AgentTask, Call, Press, Recorded, Reply
 
 DEADLINE: Final = 5.0
 """Seconds a test that answers a screen is allowed to take, and the whole of why it exists is that
-§3.7 has no timeouts: an exhausted script waits forever, exactly as a real terminal with nobody at
+there are no timeouts: an exhausted script waits forever, exactly as a real terminal with nobody at
 it does, so a scripting mistake is a hang rather than a failure. Generous, because it is not a
 performance assertion - these runs are in-memory and take milliseconds - and it fires only when
 something is genuinely never going to be answered. `remaining` catches the opposite mistake, a
@@ -123,7 +123,7 @@ script the run never fully spent, and it is a comparison rather than a wait."""
 
 @dataclass(frozen=True)
 class DemoParams:
-    """§3.3's shape: named flags, no positionals. `agl run demo -n test -r "add oauth"`."""
+    """The params shape: named flags, no positionals. `agl run demo -n test -r "add oauth"`."""
 
     request: str = arg("-r", "--request", help="what to build")
 
@@ -147,9 +147,9 @@ def implement() -> Role:
 
 @role(model=OpenAI.SOL)
 def review() -> Role[Findings]:
-    """A reporting role, on the other provider - §3.3's `fix` shape: Claude implements, OpenAI
-    reviews. Paired below with a step that passes no `commit=`, which is what §3.3 asks of a
-    read-only role."""
+    """A reporting role, on the other provider - `fix`'s shape: Claude implements, OpenAI
+    reviews. Paired below with a step that passes no `commit=`, which is what a read-only role is
+    owed."""
     return Role(
         name="review",
         instructions="review the worktree and report what you found",
@@ -162,10 +162,10 @@ def review() -> Role[Findings]:
 def decide(*, on_question: QuestionHandler | None = None) -> Role[Findings]:
     """The role the two question tests use, and the one factory here with a parameter.
 
-    §3.7's handler is a closure over the workflow's own `Run`, so it cannot be written at this
-    level - which is exactly what a factory parameter is for: `decide()` is what a workflow
-    declares and `decide(on_question=...)` is what it steps with, and nothing else about this role
-    is reachable from either call."""
+    A handler is a closure over the workflow's own `Run`, so it cannot be written at this level -
+    which is exactly what a factory parameter is for: `decide()` is what a workflow declares and
+    `decide(on_question=...)` is what it steps with, and nothing else about this role is reachable
+    from either call."""
     return Role(
         name="decide",
         instructions="propose something, ask whether to go ahead, then report what was decided",
@@ -175,7 +175,7 @@ def decide(*, on_question: QuestionHandler | None = None) -> Role[Findings]:
 
 
 def approve(question: Question) -> Screen[Answer]:
-    """The screen the agent's question is shown on. A pure function of what it was handed (§3.7).
+    """The screen the agent's question is shown on. A pure function of what it was handed.
 
     Its options become the choices in the order the agent offered them, so the digit that answers
     this screen means whatever that question's second option said.
@@ -190,10 +190,10 @@ def approve(question: Question) -> Screen[Answer]:
 async def demo(run: Run[DemoParams]) -> None:
     """Implement, then review what was implemented, and repair what the review found.
 
-    `fix`'s shape at its smallest, including the part UF1.1 changed: the repair runs `implement()`
-    a second time, and since `run.step` carries no name of its own the two land under one
-    `steps/implement/` - which is why `harness.recorded` below reads `implement`, `review`,
-    `implement` rather than naming a third step. Their inputs differ, so they are two digests.
+    `fix`'s shape at its smallest, including the naming: the repair runs `implement()` a second
+    time, and since `run.step` carries no name of its own the two land under one `steps/implement/`
+    - which is why `harness.recorded` below reads `implement`, `review`, `implement` rather than
+    naming a third step. Their inputs differ, so they are two digests.
     """
     await run.step(implement(), commit=f"implement {run.params.request}")
     findings = await run.step(review(), request=run.params.request)
@@ -216,12 +216,12 @@ async def asking(run: Run[DemoParams]) -> None:
 
 @workflow(version="1")
 async def landing(run: Run[DemoParams]) -> None:
-    """One child worktree, one committing step, one integration - §3.9's shape at its smallest.
+    """One child worktree, one committing step, one integration - a run's shape at its smallest.
 
-    Here because a landing is the only thing that runs a build. §3.4: "the framework runs exactly
-    one build: the merge gate, inside `integrate()`" - so a workflow that never integrates never
-    reaches the project's build command, and a test about which command the harness carries has to
-    take a run all the way to a landing to see one.
+    Here because a landing is the only thing that runs a build: the framework runs exactly one
+    build, the merge gate, inside `integrate()` - so a workflow that never integrates never reaches
+    the project's build command, and a test about which command the harness carries has to take a
+    run all the way to a landing to see one.
     """
     ticket = run.worktree("T-01")
     await ticket.step(implement(), commit=f"implement {run.params.request}")
@@ -357,11 +357,11 @@ async def test_a_workflow_runs_to_completion_on_fakes(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_a_scripted_payload_comes_back_as_the_step_result(tmp_path: Path) -> None:
-    """§3.3's capture mechanism, end to end: what the agent reported *is* the step's result.
+    """The capture mechanism, end to end: what the agent reported *is* the step's result.
 
     The value on the ledger is the mapping this file's own agent handed to the reporting tool, and
-    the effect step's is `null` because it declared no tool - which is §3.3's two step kinds, both
-    of them observable in one list.
+    the effect step's is `null` because it declared no tool - which is the two step kinds, both of
+    them observable in one list.
     """
     harness = testing.harness(tmp_path, agent=_agent([]), files={"src/a.py": b"pass\n"})
 
@@ -379,13 +379,13 @@ async def test_a_scripted_question_reaches_the_workflows_own_screen(tmp_path: Pa
     the agent asked, and with all three of its fields (`allow_free_text=False` included); the
     gesture came back as the `Answer` the workflow's *own* view built out of that question's first
     option, which nothing answering from a constant could produce; the step completed and recorded;
-    and it was **one** dispatch, which is §3.7's "one step, one session, N rounds" - a workflow loop
-    that re-invoked the step per round would reach the same final answer and cost a second session.
+    and it was **one** dispatch, which is "one step, one session, N rounds" - a workflow loop that
+    re-invoked the step per round would reach the same final answer and cost a second session.
 
     `answering([0])` is the whole of the person here, and a bare `int` is `Press(int)` - so "the
     first response of whatever is on screen" is what this scripts, and which string that is was
-    decided by `approve` out of the agent's own `options`. Until 18.0 this needed the
-    `agl[terminal]` extra and a `Keys` of AGL's own; the module docstring says what that cost.
+    decided by `approve` out of the agent's own `options`. This once needed the `agl[terminal]`
+    extra and a `Keys` of AGL's own; the module docstring says what that cost.
     """
     seen: list[str] = []
     term = testing.answering([0])
@@ -404,7 +404,7 @@ async def test_a_scripted_question_reaches_the_workflows_own_screen(tmp_path: Pa
 
 @pytest.mark.asyncio
 async def test_the_answer_returns_into_the_same_session(tmp_path: Path) -> None:
-    """§3.7's other half: what the person picked reaches the agent, inside the call it asked from.
+    """The other half: what the person picked reaches the agent, inside the call it asked from.
 
     **This is the escape hatch, used as an escape hatch.** A `Reply` is computed before the run and
     has nowhere to put an answer, so an agent whose next move depends on one is a raw `Script`
@@ -437,7 +437,7 @@ async def test_the_answer_returns_into_the_same_session(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_an_interrupted_run_resumes_without_redoing_completed_steps(tmp_path: Path) -> None:
-    """§3.6's replay, driven the way a workflow author drives it.
+    """Replay, driven the way a workflow author drives it.
 
     `interrupt_after=1` leaves one entry on the ledger and abandons the rest; the resume walks the
     workflow again, replays the step that has an entry and runs only the one that does not. The
@@ -489,9 +489,9 @@ async def test_a_whole_workflow_runs_with_no_agent_written_at_all(tmp_path: Path
 async def test_the_run_is_recorded_where_agl_would_have_recorded_it(tmp_path: Path) -> None:
     """The harness runs the real operation, so `run.json` is the real record.
 
-    §3.10's `agl resume <label>` reads this file and nothing else, which is why the params are in
-    it: an author who wants to know what a resume will be handed reads the same thing a resume
-    does, through the bundle the harness is holding.
+    `agl resume <label>` reads this file and nothing else, which is why the params are in it: an
+    author who wants to know what a resume will be handed reads the same thing a resume does,
+    through the bundle the harness is holding.
     """
     harness = testing.harness(tmp_path, agent=_agent([]), files={"src/a.py": b"pass\n"})
 
@@ -526,8 +526,8 @@ async def test_a_workflow_declared_inside_a_function_is_refused_with_the_reason(
 ) -> None:
     """The harness resolves a workflow the way an installed one is resolved, so it can say no.
 
-    §3.3 registers a workflow as `<module>:<name>`, and a `@workflow` declared inside something
-    else names no module attribute - so it could never be installed. Refused here, in front of the
+    A workflow is registered as `<module>:<name>`, and a `@workflow` declared inside something else
+    names no module attribute - so it could never be installed. Refused here, in front of the
     author, rather than on the day they publish the package.
     """
 
@@ -627,12 +627,12 @@ SECOND_RUN: Final = "billing"
 async def test_a_resume_can_be_interrupted_at_its_own_first_step(tmp_path: Path) -> None:
     """`interrupt_after=` counts what *this* invocation wrote, which is what makes a sweep possible.
 
-    §3.6's acceptance criterion is a sweep over kill points, and stage 17.3 is "run, kill mid-step,
-    resume, assert identical" - so a harness whose interruption could only arm the *first*
-    invocation would stop every workflow at its second step and never reach the rest.
-    `Harness._interrupting` arms the ledger around one call and resets its count precisely so that
-    `interrupt_after=1` on a resume means the first step of that resume: here one entry is already
-    on the ledger before the resume starts, and the resume was asked for one more.
+    The acceptance criterion is a sweep over kill points - run, kill mid-step, resume, assert
+    identical - so a harness whose interruption could only arm the *first* invocation would stop
+    every workflow at its second step and never reach the rest. `Harness._interrupting` arms the
+    ledger around one call and resets its count precisely so that `interrupt_after=1` on a resume
+    means the first step of that resume: here one entry is already on the ledger before the resume
+    starts, and the resume was asked for one more.
 
     **Three steps, and the third is why this is not vacuous.** The review reports something, so
     `demo` takes the branch it has for that - and a two-step run would make the resume's kill point
@@ -699,7 +699,7 @@ async def test_a_resumes_kill_point_counts_that_resumes_own_entries(tmp_path: Pa
 async def test_a_run_can_be_started_from_a_ref_other_than_the_default(tmp_path: Path) -> None:
     """`base_ref=` is `--from` reaching the harness, and the record is where it lands.
 
-    §3.9 makes the default the repository's own default branch and §3.6 pins whatever the ref
+    The default is the repository's own default branch and `base_sha` pins whatever the ref
     resolved to, so a run started from somewhere else is a run whose `base_sha` is that branch's
     head. The two heads differ by a commit, which is what makes the assertion unsatisfiable by a
     harness that dropped the argument and resolved the default instead - and `base_ref` is asserted
@@ -735,7 +735,7 @@ async def test_a_run_can_be_started_from_a_ref_other_than_the_default(tmp_path: 
 
 @pytest.mark.asyncio
 async def test_the_merge_gate_runs_the_build_command_the_harness_was_given(tmp_path: Path) -> None:
-    """`build=` is the project's own command, and §3.4's merge gate is the only thing that runs it.
+    """`build=` is the project's own command, and the merge gate is the only thing that runs it.
 
     `Verifier.verify(command, workdir)` takes the command as a parameter, so what the bundle
     carries is what the gate asks about - and the verdict is scripted against that exact string and
@@ -766,14 +766,14 @@ async def test_two_harnesses_in_one_directory_are_told_apart_by_project_and_labe
 ) -> None:
     """`project=` and `label=` name the run, and `harness.scope` is the address they compose.
 
-    Two runs in one directory is the case they are parameters for, and §3.5's layout is what makes
-    the second one need a name of its own: the trees root is keyed by the label alone, so two
-    harnesses sharing a directory and a label provision `<where>/trees/<label>/_base` twice, and
-    the second is refused - `WorkspaceProvider.open` will not provision over a directory that holds
-    files nothing there has open. Naming the second run is the whole fix and it is one keyword,
-    which is why `second.run` below is an assertion in its own right, before any of them are
-    reached. **Both repositories are seeded for that reason**: an empty checkout holds no files and
-    is adopted rather than refused, so a bundle with no `files=` would not reach that clause.
+    Two runs in one directory is the case they are parameters for, and the layout is what makes the
+    second one need a name of its own: the trees root is keyed by the label alone, so two harnesses
+    sharing a directory and a label provision `<where>/trees/<label>/_base` twice, and the second
+    is refused - `WorkspaceProvider.open` will not provision over a directory that holds files
+    nothing there has open. Naming the second run is the whole fix and it is one keyword, which is
+    why `second.run` below is an assertion in its own right, before any of them are reached. **Both
+    repositories are seeded for that reason**: an empty checkout holds no files and is adopted
+    rather than refused, so a bundle with no `files=` would not reach that clause.
 
     The record is then read back **at `harness.scope`**, which is the address `api` was called
     with. A harness whose scope said one thing while its run was recorded at another would hand an
@@ -813,7 +813,7 @@ WRITTEN: Final = "implemented.py"
 field for and a real agent would have had."""
 
 ACTIVITY: Final = "Edit: src/a.py"
-"""A line in the serving adapter's own words, which is the only kind there is (§3.7)."""
+"""A line in the serving adapter's own words, which is the only kind there is."""
 
 ELSEWHERE: Final = "b7c1d4f09a2e63518cd047fb29e15a83d604c7f2"
 """A head of the caller's own choosing, to tell `base=` from the default `a_run` falls back to."""
@@ -825,7 +825,7 @@ def a_board(run: Run, request: str) -> Screen:
     Above the tests with the workflows, because it is the same kind of thing - a view is a pure
     function of its arguments, and this is what `a_run` exists so that somebody can call. Passive:
     no responses, so `show` would drop it in the slot and answer immediately without waiting for
-    anyone. It takes the `Run` and not `run.activity`, which is the whole point (§3.7).
+    anyone. It takes the `Run` and not `run.activity`, which is the whole point.
     """
     return Screen(Rows([Row("request", request), Row("agent", run.activity or "")]))
 
@@ -901,8 +901,8 @@ def test_a_run_reports_the_activity_it_was_built_with_and_nothing_otherwise(tmp_
 def test_a_board_is_a_function_of_the_run_it_is_handed(tmp_path: Path) -> None:
     """What `a_run` is for: calling a view, and comparing the `Screen` it answered with.
 
-    The empty cell is the one worth writing out in full, because it is what §3.7 renders whenever
-    nothing is running and it is the state an `activity=` keyword alone can reach.
+    The empty cell is the one worth writing out in full, because it is what a board renders
+    whenever nothing is running and it is the state an `activity=` keyword alone can reach.
     """
     harness = testing.harness(tmp_path)
     idle = testing.a_run(harness, DemoParams(request="add oauth"))
@@ -917,7 +917,7 @@ def test_a_board_is_a_function_of_the_run_it_is_handed(tmp_path: Path) -> None:
 def test_reports_moves_a_board_that_is_already_up(tmp_path: Path) -> None:
     """`reports` is the half of the reach a constructor argument cannot express.
 
-    §3.7's design is that `show` registers a view and its arguments and invokes them again every
+    The design is that `show` registers a view and its arguments and invokes them again every
     frame, so the claim is about **one** `Run`: read it, report something, read it again, and the
     two screens differ. A board that read `run.activity` once and cached it against the object it
     was handed satisfies everything `a_run(activity=...)` can ask on its own and fails here, which
@@ -983,11 +983,11 @@ async def test_an_agent_that_only_replies_leaves_every_commit_message_with_nothi
 
     **Why this is worth a test rather than a paragraph.** Both runs succeed, both ledgers are
     identical, `harness.recorded` cannot tell them apart, and neither the framework nor the fake
-    reports anything - §3.3's framework "does not inspect whether HEAD moved", deliberately. So a
-    test written to pin a workflow's three `commit=` decisions passes against a workflow that
-    dropped all three, and the only place that shows is here, on the branch.
+    reports anything - the framework does not inspect whether HEAD moved, deliberately. So a test
+    written to pin a workflow's three `commit=` decisions passes against a workflow that dropped
+    all three, and the only place that shows is here, on the branch.
 
-    Two labels in one directory, because §3.5 keys the trees root by the label alone and the second
+    Two labels in one directory, because the trees root is keyed by the label alone and the second
     harness would otherwise provision over the first one's checkout.
     """
     quiet: list[str] = []

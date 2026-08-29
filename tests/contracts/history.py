@@ -16,9 +16,10 @@ Subclass it once per implementation, override the three fixtures, and add nothin
             return "..."
 
 The real adapter and the fake both run this class, which is the whole mechanism keeping a fake from
-drifting into fiction (§1.9). It is written here, at stage 3, before either exists, because a
-subagent that writes its own tests writes tests that pass - and stage 5 ends with "the contract
-suite passes", a sentence worth something only when the suite had no stake in the outcome.
+drifting into fiction. It is written against the port alone, before either implementation exists,
+because a subagent that writes its own tests writes tests that pass - and an adapter ships only
+once "the contract suite passes", a sentence worth something only when the suite had no stake in
+the outcome.
 
 `HistoryContract` is one class assembled from two modules, and only this name is public. Its own
 tests are the members that answer *where* - `default_ref`, `resolve`, `exists` and `contains` -
@@ -32,17 +33,16 @@ rename detection is not required.
 `History` reads a repository's past and has no member that adds to one, deliberately: seven
 questions and nothing that changes anything. So a suite for it has to get its states from
 somewhere, and across both of these ports there is exactly one way to record a state -
-`Workspace.commit_all`. The
-alternative is an implementation-supplied fixture handing over a prepared history, which is a knob
-whose whole job would be to be shaped by whoever also writes the implementation, and stage 5 would
-end with a suite that passed because the fixture agreed with it.
+`Workspace.commit_all`. The alternative is an implementation-supplied fixture handing over a
+prepared history, which is a knob whose whole job would be to be shaped by whoever also writes the
+implementation, and the suite would then pass because the fixture agreed with it.
 
 This is not a liberty. The port says a commit id from `Workspace.head()` "is also the vocabulary
 `History` accepts ... which is honest because one adapter package implements both ports over one
-repository", and stage 5 builds exactly that. The cost is real and is listed in the gaps below: a
-`History` whose repository is provisioned by a broken `WorkspaceProvider` fails this suite for the
-other port's reason. Every test that builds a state asserts what it built before asking about it,
-so a failure says which side of that line it came from.
+repository", and `adapters/git/` is exactly that. The cost is real and is listed in the gaps below:
+a `History` whose repository is provisioned by a broken `WorkspaceProvider` fails this suite for
+the other port's reason. Every test that builds a state asserts what it built before asking about
+it, so a failure says which side of that line it came from.
 
 ## Written against the port, never against one tool
 
@@ -68,11 +68,11 @@ not entitle anybody to believe.
    path `changed_files` named, and that identical states leave nothing to read. A patch in a format
    no reviewer has seen passes all four.
 
-3. **`clear`'s actual question.** §3.10 deletes a run's line of work only if it is already contained
-   in the base ref, which in life means *merged*. Landing work is `integration.py`'s, this suite has
-   no way to land anything, and so the ancestry asserted here is the kind that comes from committing
-   in one place - a true case, a false case, a reflexive one and a divergence. The shape `clear`
-   meets after a successful merge is not built here.
+3. **`clear`'s actual question.** `clear` deletes a run's line of work only if it is already
+   contained in the base ref, which in life means *merged*. Landing work is `integration.py`'s,
+   this suite has no way to land anything, and so the ancestry asserted here is the kind that comes
+   from committing in one place - a true case, a false case, a reflexive one and a divergence. The
+   shape `clear` meets after a successful merge is not built here.
 
 4. **`UpstreamUnavailable`.** Nothing here can make a repository unreachable, and inventing a member
    that could would be inventing a port. `NotFoundError` is the one refusal this suite provokes.
@@ -258,7 +258,7 @@ class HistoryContract(HistoryChangeContract):
     async def test_default_ref_names_a_state_of_this_repository_and_says_the_same_thing_twice(
         self, history: History
     ) -> None:
-        """Where a run starts from when the user names none - §3.9's `--from`, defaulting to this.
+        """Where a run starts from when the user names none - `--from`, defaulting to this.
 
         It exists because nothing else in AGL can answer it: a project's settings hold a
         repository, a trees root and a build command, none of which implies a starting point, and
@@ -341,8 +341,8 @@ class HistoryContract(HistoryChangeContract):
         Three refs, and each one is a different way of being present or absent: a branch this suite
         made, a ref expression the repository does not hold, and a well-formed commit id nothing
         recorded. The third is the one an implementation built on a name table gets wrong - a
-        recorded id is something `resolve` answers for and is not a name in any listing - and it is
-        also the shape §3.10's leak paragraph is about, so it is asserted rather than assumed.
+        recorded id is something `resolve` answers for and is not a name in any listing - so it
+        is asserted rather than assumed.
 
         `is True` and `is False` rather than truthiness, because a `bool` is what the port answers
         with and a truthy string would satisfy everything else here.
@@ -379,7 +379,7 @@ class HistoryContract(HistoryChangeContract):
         """Is X already in Y - a true case, a false case, a reflexive one, and a divergence.
 
         Asked in one place: `clear` deletes a run's own line of work only if it is already
-        contained in the base ref, and otherwise keeps it and says so (§3.10). The costs are
+        contained in the base ref, and otherwise keeps it and says so. The costs are
         asymmetric - a retained name is a stale ref, a deleted one is the entire run - so all four
         answers below decide between "tidy up" and "leave it alone", and an implementation that
         answers a constant is one that either never tidies or always destroys.
@@ -441,10 +441,11 @@ class HistoryContract(HistoryChangeContract):
         """The other half of `Workspace.commit_all(message)`, and the only member of either port
         that reads one back.
 
-        §3.3 makes `commit=` the workflow author's one step-ending decision and §3.11 keeps the
-        message the *workflow's* domain vocabulary rather than something AGL generates - so this is
-        the one such decision a test for a workflow could not previously see. Before 19.2, a suite
-        that wanted to assert a commit message either asserted that *some* commit happened, which
+        `commit=` is the workflow author's one step-ending decision, and the message stays the
+        *workflow's* domain vocabulary rather than something AGL generates - so this is the one
+        such decision a test for a workflow could not previously see. Before `History.message`
+        existed, a suite that wanted to assert a commit message either asserted that *some* commit
+        happened, which
         is what a missing `commit=` also produces, or reached into a fake's internal vocabulary and
         recomputed the id from the tree and the message it expected.
 
@@ -473,7 +474,7 @@ class HistoryContract(HistoryChangeContract):
 
         assert await history.message(recorded) == AWKWARD_MESSAGE, (
             "the message this commit was recorded under did not come back as it was written. It "
-            "is the workflow author's own prose (§3.11) and the one argument neither port may "
+            "is the workflow author's own prose and the one argument neither port may "
             "interpret, so an implementation that escapes, truncates, re-wraps or re-encodes it is "
             "handing back a sentence nobody wrote"
         )
@@ -492,8 +493,8 @@ class HistoryContract(HistoryChangeContract):
         why: git cleans a message and stores it with a final newline, so an adapter over git that
         handed back what it stored answers one line feed longer than an implementation that kept
         what it was given - and a workflow comparing `message(head)` against its own `commit=`
-        template would pass on one and fail on the other, which is §1.9's drift in the form that
-        costs the most. Both implementations keep the rule with one `rstrip`.
+        template would pass on one and fail on the other, which is fake-against-adapter drift in
+        the form that costs the most. Both implementations keep the rule with one `rstrip`.
 
         The test above *argues* that clause and this one is what measures it. `AWKWARD_MESSAGE`
         carries no trailing whitespace, so an implementation that dropped the rule answers it

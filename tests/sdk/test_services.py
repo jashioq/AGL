@@ -27,7 +27,7 @@ def test_the_composition_root_re_exports_the_bundle_rather_than_declaring_a_seco
 
 
 def test_the_bundle_a_run_carries_is_the_bundle_the_container_builds() -> None:
-    """The other end of the same claim: what `api.py` gets from `container.real()` at 10.3 is what
+    """The other end of the same claim: what `api.py` gets from `container.real()` is what
     `Run.services` is declared to hold, so the walking skeleton's wiring has somewhere to go."""
     assert get_type_hints(Run)["services"] is Services
 

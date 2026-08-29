@@ -3,8 +3,8 @@
 The first three classes are the ports in full: `WorkspaceContract`, `HistoryContract` and
 `IntegratorContract` with their fixtures overridden and nothing else touched, the same tests the
 real adapters run in `test_git_workspace.py`, `test_git_history.py` and `test_git_integrator.py`.
-That is the mechanism §1.9 asks for - the real adapter and the fake held to one suite, written at
-stage 3 before either existed - and nothing below re-asserts any of it.
+That is what `tests/contracts/` is for - the real adapter and the fake held to one suite, written
+before either existed - and nothing below re-asserts any of it.
 
 Where the two implementations *differ* is not here either. A divergence is a fact about the pair,
 so it belongs in `test_git_parity.py` beside the assertions that they otherwise answer alike, and
@@ -19,17 +19,17 @@ file needs an answer both implementations can give.
     answer to two `agl` invocations over one `.git/`.
   * **One repository is one repository, however many adapters are built over it.** The real three
     reach one shared object through the filesystem, so two `GitIntegrator`s over one path are the
-    same integrator; the fake has to make that true by holding nothing itself, and the hold §3.4
-    argues about is the case where it matters most. Twice over: an integrator built after the hold
-    was taken can end it, and one asked to *land* into it is told what is in the way rather than
-    combining over a collision nobody resolved - which is the resumed run of §3.4, in the strongest
-    form a repository that dies with its process admits.
-  * **The lock that is deliberately not taken.** §3.9's `flock` guards git's worktree registry
+    same integrator; the fake has to make that true by holding nothing itself, and a conflicted
+    landing's hold is the case where it matters most. Twice over: an integrator built after the
+    hold was taken can end it, and one asked to *land* into it is told what is in the way rather
+    than combining over a collision nobody resolved - which is a resumed run, in the strongest form
+    a repository that dies with its process admits.
+  * **The lock that is deliberately not taken.** A `flock(2)` guards git's worktree registry
     across processes. This registry is a dict in one process, so a second process would contend
     over nothing - and a lock file appearing in the trees root would say otherwise.
   * **What a crash leaves on disk.** A `FakeRepository` dies with its process and the checkouts it
     made do not, so the next invocation meets a directory full of files that nothing has
-    registered. That is the one half of §3.4's durability question a fake still has to answer.
+    registered. That is the one half of the durability question a fake still has to answer.
 
 Named `test_git_fake.py`, for the module it covers: `tests/` carries no `__init__.py` - see
 `tests/conftest.py` for why it must not - so pytest's module names are the bare filenames and two
@@ -85,8 +85,8 @@ LATECOMER: Final = Namespace("T-03")
 ELSEWHERE: Final = "agl-acceptance/elsewhere.txt"
 LATER: Final = b"what the latecomer wrote, while the target was held\n"
 
-# §3.9's lock file, named here so that this file asserts *where* one would be rather than reading
-# a constant back out of the implementation that would then agree with itself.
+# The worktree registry's lock file, named here so that this file asserts *where* one would be
+# rather than reading a constant back out of the implementation that would then agree with itself.
 LOCK: Final = "worktrees.lock"
 
 
@@ -139,7 +139,7 @@ class TestFakeWorkspaceProvider(WorkspaceContract):
 
     @pytest.fixture
     def base(self, repository: FakeRepository) -> str:
-        """A resolved commit id, which is the shape a run's own workspace is cut from (§3.6)."""
+        """A resolved commit id, which is the shape a run's own workspace is cut from."""
         return repository.resolve(repository.default_ref)
 
 
@@ -206,12 +206,12 @@ async def test_two_repositories_share_nothing(tmp_path: Path) -> None:
 async def test_one_repository_is_one_integrator_however_many_are_built_over_it(
     repository: FakeRepository, trees: TreesRoot, base: str
 ) -> None:
-    """§3.4's durable hold, in the strongest form one process admits.
+    """The durable hold, in the strongest form one process admits.
 
-    The plan requires a conflicted landing's hold to be readable from the repository rather than
-    kept in the object that took it, because a run that dies holding a target can only be released
-    by a later invocation - and it says a contract suite cannot catch this, which 5.4 confirmed by
-    passing the whole of one with an in-memory hold. A `FakeRepository` dies with its process, so
+    A conflicted landing's hold has to be readable from the repository rather than kept in the
+    object that took it, because a run that dies holding a target can only be released by a later
+    invocation - and no contract suite can catch this, which was confirmed by passing the whole of
+    one with an in-memory hold. A `FakeRepository` dies with its process, so
     the crash that clause is about leaves nothing behind to be released; what remains true, and is
     asserted here, is the structural half: an integrator built *afterwards* over the same
     repository sees the hold and can end it. An implementation keeping the hold in an attribute
@@ -234,7 +234,7 @@ async def test_one_repository_is_one_integrator_however_many_are_built_over_it(
     found = FakeIntegrator(repository)
     assert (await found.retry(target)).conflicted is True, (
         "an integrator built after the hold was taken cannot see it, so the hold is being kept "
-        "in whichever object happened to take it - which is the shape §3.4 forbids"
+        "in whichever object happened to take it - which is the shape a durable hold forbids"
     )
     await found.abort(target)
     assert await target.head() == settled
@@ -245,11 +245,11 @@ async def test_one_repository_is_one_integrator_however_many_are_built_over_it(
 async def test_an_integrator_landing_into_a_hold_another_one_took_is_told_so_and_touches_nothing(
     repository: FakeRepository, trees: TreesRoot, base: str
 ) -> None:
-    """§3.4's resumed hold, in the strongest form a fake admits - and its answer to it.
+    """The resumed hold, in the strongest form a fake admits - and its answer to it.
 
-    *A resumed run must be able to find a hold it did not take*, and the answer stage 14 gives is
-    the first exit the plan names: `land` into a held target reports a `Conflict` rather than
-    raising, because the state is recoverable and exit 70 on resume is what §3.4 refuses. A
+    *A resumed run must be able to find a hold it did not take*, and the answer is the one that
+    keeps the state recoverable: `land` into a held target reports a `Conflict` rather than
+    raising, because exit 70 on resume is what a recoverable state must never produce. A
     `FakeRepository` dies with its process, so the resumed *run* is out of reach here - what stands
     in for it is the same thing the test above uses for the hold itself, an integrator built after
     the one that took it, and the claim is that the second one is told what is in the way rather
@@ -303,7 +303,7 @@ async def test_an_integrator_landing_into_a_hold_another_one_took_is_told_so_and
     )
     assert (await took.retry(target)).conflicted is True, (
         "the hold was gone after being landed over, which is the partial resolution `retry` exists "
-        "to preserve being thrown away by the shortcut §3.4 forbids"
+        "to preserve being thrown away by the `abort`-before-every-land shortcut"
     )
 
     await took.abort(target)
@@ -317,7 +317,7 @@ async def test_an_integrator_landing_into_a_hold_another_one_took_is_told_so_and
 async def test_the_registry_lock_is_deliberately_not_taken(
     provider: WorkspaceProvider, trees: TreesRoot, base: str
 ) -> None:
-    """§3.9's `flock` guards git's worktree registry across processes. There is nothing to guard.
+    """A `flock(2)` guards git's worktree registry across processes. There is nothing to guard.
 
     A second process gets a different `FakeRepository`, with different states, different lines of
     work and a different registry, so a lock in the trees root would serialise nothing and would
@@ -328,7 +328,7 @@ async def test_the_registry_lock_is_deliberately_not_taken(
     await provider.open(LABEL, CHILD, base)
 
     assert not (trees.path / LOCK).exists(), (
-        f"the fake created {LOCK} in the trees root. §3.9's lock is cross-process, and two "
+        f"the fake created {LOCK} in the trees root. That lock is cross-process, and two "
         f"processes running on fakes share no repository at all - so a lock here excludes nothing"
     )
 
@@ -336,7 +336,7 @@ async def test_the_registry_lock_is_deliberately_not_taken(
 async def test_a_checkout_left_by_a_dead_process_is_refused_rather_than_adopted(
     repository: FakeRepository, trees: TreesRoot, base: str
 ) -> None:
-    """The one half of §3.4's durability question a fake still has to answer.
+    """The one half of the durability question a fake still has to answer.
 
     The repository dies with the process; the directories it made do not. So a later invocation
     meets a checkout full of files that nothing in its repository has ever heard of, and the

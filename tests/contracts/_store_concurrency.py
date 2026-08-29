@@ -25,12 +25,12 @@ whole of a value or nothing recorded, and an exception is neither.
 
 **Every method is `async` and this suite drives one event loop.** A reader therefore observes the
 store only at moments the implementation yields control. An implementation whose write does all
-its work without awaiting - a `os.replace` behind an `async def`, which is exactly what stage 4.1
-will write - is never observed part-way through, because from this loop's point of view there is
-no part-way through. The concurrency tests still run and still assert against it; they cannot
-fail. That is a limit of watching an async interface from inside its own loop, not a gap the tests
-could close by trying harder, and it is why `store.py`'s docstring lists it under what this suite
-does not prove.
+its work without awaiting - a `os.replace` behind an `async def`, which is exactly what the
+filesystem store does - is never observed part-way through, because from this loop's point of view
+there is no part-way through. The concurrency tests still run and still assert against it; they
+cannot fail. That is a limit of watching an async interface from inside its own loop, not a gap the
+tests could close by trying harder, and it is why `store.py`'s docstring lists it under what this
+suite does not prove.
 
 Measured when this suite was written, against two throwaway implementations: a correct one that
 never awaits mid-write left 3 observations of which 0 overlapped the write, and one that yielded
@@ -273,9 +273,9 @@ class StoreConcurrencyContract:
         `None` is counted as a failure here and the reading is deliberate. The port's sentence -
         "a reader sees either the whole of a value or nothing recorded at that address" - could be
         read as permitting an overwrite to pass through absence, but "never a mixture of two
-        values" names the two outcomes it means, and §3.6 makes the existence of an entry the
-        ledger: an entry that blinks out mid-supersede is a step that reads as not done while it
-        is being recorded as done.
+        values" names the two outcomes it means, and the existence of an entry is the ledger: an
+        entry that blinks out mid-supersede is a step that reads as not done while it is being
+        recorded as done.
         """
         old, new = _woven("old"), _woven("new")
         whole = {"old": old, "new": new}

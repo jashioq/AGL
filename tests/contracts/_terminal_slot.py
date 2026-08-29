@@ -116,9 +116,9 @@ class TerminalSlotContract:
         what appears is the board as it stood at the last write and not the one that was up when the
         question arrived.
 
-        That last one is the whole of §3.7's "no extra machinery". If the slot went stale under a
-        question, a workflow would have to re-`show` its dashboard after every answer to get a
-        current one back - which means knowing when a question was dismissed, which is a
+        That last one is the whole of why no extra machinery is needed. If the slot went stale
+        under a question, a workflow would have to re-`show` its dashboard after every answer to
+        get a current one back - which means knowing when a question was dismissed, which is a
         notification this port does not have and should not grow.
         """
         async with terminal as term, Asking(term) as ask:

@@ -65,7 +65,7 @@ class Role[P = None]:
         if len(reporting) > 1:
             raise InputError(
                 f"this role declares more than one reporting tool: {reporting}. A reporting step's "
-                f"result is that tool's payload (§3.3), singular - with two, `run.step` would have "
+                f"result is that tool's payload, singular - with two, `run.step` would have "
                 f"to pick one, and whichever it picked would be a rule living in the framework "
                 f"about a decision the workflow made. A role reports through one tool or none"
             )
@@ -93,7 +93,7 @@ class Role[P = None]:
                 f"the role named {self.name!r} has no model, so nothing can say which provider "
                 f"runs it, fingerprint it or check what its backend can do. A role's model is "
                 f"declared on its factory - `@role(model=Claude.OPUS)` above the function that "
-                f"returns this `Role` (§3.2, §3.3) - and is deliberately not a field of `Role` "
+                f"returns this `Role` - and is deliberately not a field of `Role` "
                 f"itself, so that preflight can read it without calling the factory. This value "
                 f"came from a bare `Role(...)`, which builds one nothing has bound a model to"
             )

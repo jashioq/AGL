@@ -1,22 +1,22 @@
 """The grammar: `agl resume <label>`, and the two things it deliberately refuses to carry.
 
-`tests/test_resume.py` drives `api.resume` from the library side, where every refusal §3.10 and
-§3.11 ask for is asserted. This module drives the real entry point for what argv means, and there
-are only three claims to make about a command whose whole grammar is one positional:
+`tests/test_resume.py` drives `api.resume` from the library side, where every refusal it owes is
+asserted. This module drives the real entry point for what argv means, and there are only three
+claims to make about a command whose whole grammar is one positional:
 
-**It holds nothing else.** §3.10: "`resume` takes the label only; params come from `run.json`." The
-pin is read off the parser object rather than off a sentence - one positional and no flag but `-h` -
-which is `params.parser_for`'s own argument for being public and `cli/commands/run.py`'s for
-returning its subparser.
+**It holds nothing else.** `resume` takes the label only; params come from `run.json`. The pin is
+read off the parser object rather than off a sentence - one positional and no flag but `-h` - which
+is `params.parser_for`'s own argument for being public and `cli/commands/run.py`'s for returning
+its subparser.
 
 **A tail is refused, and refused where the tail is produced.** `main` parses with
 `parse_known_args`, once, for `run`'s sake, so an unrecognised argument on a `resume` line arrives
-at the dispatch rather than at argparse's own error. `cli/main.py`'s `_dispatch` has said since 10.4
-that the clause each label-taking command adds "will refuse a tail rather than carry one", and
-`agl resume auth -r "..."` is the invocation that says why it matters: somebody expecting the flags
-`agl run` took, whose answer is not "unrecognised argument" but where those flags went.
+at the dispatch rather than at argparse's own error. `cli/main.py`'s `_dispatch` says that the
+clause each label-taking command adds "will refuse a tail rather than carry one", and `agl resume
+auth -r "..."` is the invocation that says why it matters: somebody expecting the flags `agl run`
+took, whose answer is not "unrecognised argument" but where those flags went.
 
-**It stays a dumb command** (§1.4). One `api` name, read off the module's own source, because the
+**It stays a dumb command.** One `api` name, read off the module's own source, because the
 repair is not that the file is short - it is that everything which decides anything is one call
 away.
 
@@ -60,8 +60,8 @@ SCOPE: Final = RunScope(PROJECT, LABEL)
 
 @dataclass(frozen=True)
 class FlaggedParams:
-    """§3.3's example shape, so that `agl run flagged -n auth -r "add oauth"` has flags to store -
-    which is the whole of what `agl resume auth` then does not have to be given."""
+    """The example params shape, so that `agl run flagged -n auth -r "add oauth"` has flags to
+    store - which is the whole of what `agl resume auth` then does not have to be given."""
 
     request: str = arg("-r", "--request", help="what to build")
     concurrent: int = arg("-c", "--concurrent", default=3)
@@ -80,7 +80,7 @@ async def flagged(run: Run[FlaggedParams]) -> None:
 
 
 def _point(name: str) -> EntryPoint:
-    """§3.3's registration line, pointed at this module: a name, a `module:attr`, and a group."""
+    """A registration line, pointed at this module: a name, a `module:attr`, and a group."""
     return EntryPoint(name=name, value=f"{__name__}:{name}", group=registry.GROUP)
 
 
@@ -116,7 +116,7 @@ def _resume_parser() -> RefusingParser:
 
 
 def test_the_resume_parser_holds_one_positional_and_no_flags() -> None:
-    """§3.10's sentence, read off the object: "`resume` takes the label only".
+    """The sentence, read off the object: `resume` takes the label only.
 
     Every argument the `run` parser holds is absent because the record already settled it - the
     workflow name, the base ref, and the workflow's own flags - so a flag appearing in this set is
@@ -140,7 +140,7 @@ def test_abbreviation_is_off_on_the_resume_subparser() -> None:
 
 
 def test_the_command_calls_exactly_one_api_function() -> None:
-    """"Commands stay dumb" (§1.4), made mechanical: this module reaches `api` once, for `resume`.
+    """"Commands stay dumb", made mechanical: this module reaches `api` once, for `resume`.
 
     The same scan `tests/cli/test_run_command.py` makes of the run command, and the same argument:
     a second `api.` name appearing here is a use case moving back into the CLI.
@@ -166,8 +166,8 @@ def test_a_resume_runs_the_workflow_the_record_names_with_the_params_it_stored(
     auth`.
 
     The second line names no workflow and carries no flag, and the workflow is nevertheless handed
-    the same instance - which is §3.3's "persisted into `run.json`, which is why `agl resume auth`
-    takes no flags" arriving through the real parser, the real dispatch and the real command.
+    the same instance - params persisted into `run.json`, which is why `agl resume auth` takes no
+    flags, arriving through the real parser, the real dispatch and the real command.
     """
     flagged_with.clear()
     harness = _fakes(tmp_path)
@@ -186,9 +186,9 @@ def test_a_finished_resume_is_named_the_way_the_run_command_names_one(
 ) -> None:
     """One line, on stdout, quoting the label the way every other `agl` line quotes it.
 
-    §3.10's refusal reads `run 'auth' already exists` and `agl run` says `run 'auth' finished`; this
-    is that shape with the verb the operator typed, so a terminal full of `agl` output reads as one
-    vocabulary and still says which command produced which line.
+    The refusal for a taken label reads `run 'auth' already exists` and `agl run` says `run 'auth'
+    finished`; this is that shape with the verb the operator typed, so a terminal full of `agl`
+    output reads as one vocabulary and still says which command produced which line.
     """
     harness = _fakes(tmp_path)
     assert _main(harness, "run", "flagged", "-n", "auth", "-r", "x") == 0
@@ -202,7 +202,7 @@ def test_a_finished_resume_is_named_the_way_the_run_command_names_one(
 def test_resuming_a_label_with_no_record_exits_three(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """§3.10's symmetric refusal, through the handler: `NotFoundError` out of `api.resume`, resolved
+    """The symmetric refusal, through the handler: `NotFoundError` out of `api.resume`, resolved
     to 3 out of the one table, printed with nothing added but the program's name.
 
     A typo'd label is the case the verb exists to make loud, so the message is asserted to name the
@@ -287,8 +287,8 @@ def test_the_run_command_still_carries_its_tail(tmp_path: Path) -> None:
     """The other half of the refusal, so that it is about `resume` and not about tails.
 
     `run` is the one verb whose line carries arguments AGL deliberately does not understand, and a
-    `_dispatch` that refused every tail would break §1.2's whole repair. Asserted through the flag a
-    workflow declares and the generic parser has never heard of.
+    `_dispatch` that refused every tail would break what makes adding a workflow mechanical.
+    Asserted through the flag a workflow declares and the generic parser has never heard of.
     """
     flagged_with.clear()
     harness = _fakes(tmp_path)

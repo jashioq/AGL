@@ -41,7 +41,8 @@ def arg(*flags: str, default: Any = MISSING, help: str = "") -> Any:
     if not flags:
         raise InputError(
             "a parameter is declared with at least one flag - `arg('-r', '--request')`. A field "
-            "with none could only be filled by position, and §3.3 gives a workflow no such way"
+            "with none could only be filled by position, and a workflow's parameters are named "
+            "flags and nothing else"
         )
     for flag in flags:
         reason = _unusable_flag(flag)
@@ -60,7 +61,7 @@ def arg(*flags: str, default: Any = MISSING, help: str = "") -> Any:
 
 def parser_for(params: type[object], *, prog: str | None = None) -> RefusingParser:
     if not is_dataclass(params):
-        raise InputError(f"{_describe(params)} is not a dataclass of `arg()` fields (§3.3)")
+        raise InputError(f"{_describe(params)} is not a dataclass of `arg()` fields")
     parser = RefusingParser(prog=prog, add_help=False, allow_abbrev=False)
     hints = _hints(params)
     claimed: dict[str, str] = {}
@@ -127,7 +128,7 @@ def from_json[T](params: type[T], data: Mapping[str, JsonValue]) -> T:
 
 def _field_names(params: object) -> tuple[str, ...]:
     if not is_dataclass(params):
-        raise InputError(f"{_describe(params)} is not a dataclass of `arg()` fields (§3.3)")
+        raise InputError(f"{_describe(params)} is not a dataclass of `arg()` fields")
     return tuple(spec.name for spec in fields(params))
 
 
@@ -194,7 +195,7 @@ def _hints(params: type[object]) -> Mapping[str, object]:
 
 def _unusable_flag(flag: str) -> str | None:
     if not flag.startswith("-"):
-        return "it is a positional, and `agl run <workflow>` already occupies that position (§3.3)"
+        return "it is a positional, and `agl run <workflow>` already occupies that position"
     name = flag.removeprefix("--") if flag.startswith("--") else flag[1:]
     if not name:
         return "it is dashes and nothing else"

@@ -1,11 +1,11 @@
-"""What AGL_HOME's layout promises: the plan's tree, and one path that never leaves the root.
+"""What AGL_HOME's layout promises: its tree, and one path that never leaves the root.
 
-The layout is checked against the plan's own diagram by writing the paths out in full, because
-a test that composes the answer the same way the module does agrees with any bug it has. The
-property in the middle is the one that matters and the one nothing downstream re-checks: no
-value `ids.py` accepts, in any segment position, at any nesting depth, can produce a path
-outside the AGL_HOME it was joined onto. It is checked over the shared corpus - see
-`_corpus.py` for how that is built and why it is not `hypothesis`.
+The layout is checked by writing every path out in full, because a test that composes the
+answer the same way the module does agrees with any bug it has. The property in the middle is
+the one that matters and the one nothing downstream re-checks: no value `ids.py` accepts, in
+any segment position, at any nesting depth, can produce a path outside the AGL_HOME it was
+joined onto. It is checked over the shared corpus - see `_corpus.py` for how that is built and
+why it is not `hypothesis`.
 """
 
 import hashlib
@@ -39,11 +39,11 @@ _DIGEST: Final = "9f2c4e" + "b" * 54 + "a71b"
 _RUN: Final = "/agl-home/projects/myapp/runs/auth"
 
 
-# --- The plan's tree, written out ------------------------------------------------------------
+# --- The tree, written out --------------------------------------------------------------------
 
 
-def test_the_layout_is_the_one_the_plan_draws() -> None:
-    """Every path in plan §3.6's diagram, spelled out rather than recomposed."""
+def test_every_named_path_under_agl_home_is_spelled_out_in_full() -> None:
+    """Every path in the layout, spelled out rather than recomposed."""
     t01 = _SCOPE.inside(Namespace("T-01"))
     assert project_config(_HOME, ProjectName("myapp")) == Path("/agl-home/projects/myapp.toml")
     assert project_dir(_HOME, ProjectName("myapp")) == Path("/agl-home/projects/myapp")
@@ -75,8 +75,8 @@ def test_the_two_paths_under_home_that_no_project_name_composes() -> None:
 def test_the_projects_directory_is_the_one_the_named_paths_are_composed_beneath() -> None:
     """The container and the paths under it are one answer, so a scan cannot look elsewhere.
 
-    `projects/` is handed back where `steps/` and `worktrees/` are not, because §3.6 looks a
-    project up by repository path and the names are not known in advance - so enumerating the
+    `projects/` is handed back where `steps/` and `worktrees/` are not, because a project is
+    looked up by repository path and the names are not known in advance - so enumerating the
     directory is the operation, not joining a segment onto it.
     """
     myapp = ProjectName("myapp")
@@ -111,7 +111,7 @@ def test_worktrees_nest_arbitrarily_and_inside_is_the_only_thing_that_makes_dept
 
 
 def test_steps_and_worktrees_are_siblings_so_one_name_cannot_be_both() -> None:
-    """The plan's reason for two subtrees: `worktree("review")` and `step("review", ...)`."""
+    """The reason for two subtrees: `worktree("review")` and `step("review", ...)`."""
     as_step = step_dir(_HOME, _SCOPE, StepName("review"))
     as_worktree = scope_dir(_HOME, _SCOPE.inside(Namespace("review")))
     assert as_step != as_worktree
@@ -121,9 +121,9 @@ def test_steps_and_worktrees_are_siblings_so_one_name_cannot_be_both() -> None:
 
 
 def test_a_name_reaches_disk_in_the_spelling_its_author_wrote_and_not_a_folded_one() -> None:
-    """UF1.6's other half: the fold belongs in the counter's key, and never in a path segment.
+    """The other half of the fold: it belongs in the counter's key, never in a path segment.
 
-    `Role(name="Review")` is a legal declaration - §3.3's allowlist is `[A-Za-z0-9._-]` - and
+    `Role(name="Review")` is a legal declaration - the allowlist is `[A-Za-z0-9._-]` - and
     `steps/Review/` is the directory it is entitled to. Two spellings of one name are one directory
     on a case-insensitive volume and two on a case-sensitive one, and the repair for that is
     `Fingerprints`' folded counter key, which is correct on both. Lowercasing the segment here
@@ -234,7 +234,7 @@ def test_a_project_name_that_fits_the_cap_but_whose_toml_file_would_not_is_refus
 
 
 def test_the_headroom_is_measured_in_bytes_though_no_name_can_show_that_any_more() -> None:
-    """`é` is one character and two bytes - and since §3.3 no name may carry one at all.
+    """`é` is one character and two bytes - and no name may carry one at all.
 
     The count here stays in bytes because NAME_MAX counts bytes, and this is the module that
     composes a name into a filename: the day the character set widens again is not the day to

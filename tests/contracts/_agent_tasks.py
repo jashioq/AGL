@@ -7,13 +7,13 @@ workspace, and no way to point the suite at the task an implementation happens t
 
 **The workspace is a real directory, and that is not the backdoor it looks like.** The store suite
 refuses `Path` outright, because `Store` never speaks one. `AgentTask.workspace` *is* a `Path`, it
-is refused unless absolute, and §3.5's hermeticity clause is a statement about what a directory
+is refused unless absolute, and the hermeticity clause is a statement about what a directory
 contributes - so a suite for this port that would not touch a filesystem could not assert the
 promise this port most needs asserted. Everything past that is still refused: nothing here knows how
 an adapter starts an agent, what it writes, whether it starts a process, or whether it is local.
 
-**The workspace is deliberately not a git checkout.** A real one is (§3.5, `WorkspaceProvider`), and
-building one here would mean running `git` from a contract suite - a binary this port never
+**The workspace is deliberately not a git checkout.** A real one is - `WorkspaceProvider` cuts one
+- and building one here would mean running `git` from a contract suite - a binary this port never
 mentions, in a suite whose whole discipline is asserting nothing the port did not promise, and a
 second thing to be installed before an implementation can be judged. `workspace` below is the one
 place that changes if a harness turns out to refuse a directory that is not a repository, and
@@ -75,7 +75,7 @@ _SOURCE_TEXT: Final = '''def greet(name: str) -> str:
 def workspace(root: Path) -> Path:
     """A workspace holding source code and nothing else, at an absolute path, and hand it back.
 
-    Source code and nothing else is the point (§3.5) - this is what the poisoned repository in
+    Source code and nothing else is the point - this is what the poisoned repository in
     `_agent_hermeticity` is built on top of, and what every other task here runs in. The README
     exists so that a prompt can ask the agent to read something and say what it found, which is
     how a run produces text worth looking at without depending on the agent's own knowledge.
@@ -142,9 +142,9 @@ _NOTE_SCHEMA: Final[Mapping[str, JsonValue]] = {
     # hand-written - but `sdk/tools.py::_object_schema` writes a qualified type name into every
     # derived payload schema at every depth, that schema crosses the port untouched, and until this
     # line existed every free measurement of a tool reaching a real harness was taken on a schema
-    # without one. The spelling is `_object_schema`'s own, `f"{module}.{qualname}"`. See
-    # `docs/manual-qa.md` entry 15: what is still deferred there is a *vendor* accepting it, which
-    # needs an installed CLI; what this line closes is everything on AGL's side of the crossing.
+    # without one. The spelling is `_object_schema`'s own, `f"{module}.{qualname}"`. What is still
+    # deferred is a *vendor* accepting it, which needs an installed CLI; what this line closes is
+    # everything on AGL's side of the crossing.
     "title": "tests.contracts._agent_tasks.Note",
     "type": "object",
     "properties": {"note": {"type": "string", "description": "The note, in one sentence."}},
@@ -220,9 +220,9 @@ ANSWER_TOKENS: Final = ("alpha-K41", "bravo-Q73")
 class Answers:
     """A question handler that answers with a different token each round, and remembers the asking.
 
-    A token per round rather than one for both, because "N rounds inside one run" is the clause
-    (§3.7) and an adapter that asked twice while replaying the first answer into both is a thing
-    one string could not tell apart from a working one.
+    A token per round rather than one for both, because "N rounds inside one run" is the clause,
+    and an adapter that asked twice while replaying the first answer into both is a thing one
+    string could not tell apart from a working one.
     """
 
     def __init__(self) -> None:
@@ -256,9 +256,9 @@ class Activity:
     in another callback's clothes: the reporter records the line, then raises `ReporterFailed` for
     that many calls. The port settles what happens next - the exception ends the run and comes out
     of `run` - so what the clause using this asserts is that it *arrived*, rather than that the
-    adapter did something particular with it. Until 19.4 the port said nothing here and this class
-    said so; two implementations agreeing is not a contract, and both fakes and both real adapters
-    had been agreeing for a whole stage with nothing written down.
+    adapter did something particular with it. The port once said nothing here and this class said
+    so; two implementations agreeing is not a contract, and both fakes and both real adapters had
+    been agreeing for a long time with nothing written down.
     """
 
     def __init__(self, *, raise_first: int = 0) -> None:

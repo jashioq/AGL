@@ -18,17 +18,17 @@ override its fixtures, and add nothing:
         def terminal(self) -> Terminal:
             return TheHeadlessOneIWrote(...)     # no driver: it displays nothing
 
-Three classes run these, which is the whole mechanism keeping a fake from drifting into fiction
-(§1.9) - and here it matters more than anywhere else in the package, because §3.7 has the headless
-behaviour *double* as the fake. They are not one implementation and two stand-ins for it; they are
-three implementations of one port, and this is what keeps them honest. `RichTerminal` is the one a
-person sits in front of, `HeadlessTerminal` is the one that runs unattended, and `ScriptedTerminal`
-- what `agl.testing.answering([...])` builds - is the one written *for* tests, which is precisely
-why it is graded here rather than trusted: a terminal a test drives that is under no suite's eye is
-a mock, and a mock is where the fiction §1.9 is about gets in. It is written at stage 3, before any
-of them exists, because a subagent that writes its own tests writes tests that pass - and stage 6
-ends with "contract suite 3.5 passes", a sentence worth something only when the suite had no stake
-in the outcome.
+Three classes run these, which is the whole mechanism keeping a fake from drifting into fiction -
+and here it matters more than anywhere else in the package, because the headless behaviour
+*doubles* as the fake. They are not one implementation and two stand-ins for it; they are three
+implementations of one port, and this is what keeps them honest. `RichTerminal` is the one a person
+sits in front of, `HeadlessTerminal` is the one that runs unattended, and `ScriptedTerminal` - what
+`agl.testing.answering([...])` builds - is the one written *for* tests, which is precisely why it
+is graded here rather than trusted: a terminal a test drives that is under no suite's eye is a
+mock, and a mock is the fiction a contract suite exists to keep out. It is written against the port
+alone, before any of them exists, because a subagent that writes its own tests writes tests that
+pass - and an implementation ships only once "the contract suite passes", a sentence worth
+something only when the suite had no stake in the outcome.
 
 `TerminalContract` is one class assembled from four modules and `HeadlessTerminalContract` from two;
 only those two names and `TerminalDriver` are public. `_terminal_lifecycle` holds what both owe -
@@ -36,8 +36,8 @@ the context manager, and the two things true outside it - and declares the `term
 both. `_terminal_slot` and `_terminal_queues` follow the port's own line, "one slot, two queues".
 `_terminal_registration` holds what a `show` call registers and is where this port's one genuinely
 open question is settled. `_terminal_headless` holds the rule a terminal with no input
-follows. What this module keeps for itself is the pair §3.7 singles out: preemption, which it calls
-"not cosmetic", and `pending`, whose example it states as a specification.
+follows. What this module keeps for itself is the pair that carries the design: preemption, which
+is not cosmetic, and `pending`, whose example state is a specification.
 
 ## Two classes, and not one class with a capability fixture
 
@@ -75,7 +75,7 @@ and to see the slot, which no member of this port can report.
 Nothing here assumes a TTY, a curses screen, a control code, a colour, a size, a position, a
 library, or a frame rate. `Screen`, `Rows`, `Row`, `Text`, `Choice` and `TextInput` are the whole
 vocabulary, because they are the whole of what a view is; everything else is mechanism and mechanism
-lives in `adapters/`. §3.7's future `run.web` is a different object with websocket concepts on it,
+lives in `adapters/`. A future `run.web` would be a different object with websocket concepts on it,
 and a suite that had crept into terminal *implementation* concepts would be a suite that had decided
 what a terminal is made of on behalf of the next one.
 
@@ -93,16 +93,16 @@ reveal, not a test somebody forgot.
 2. **Any frame rate, or that a redraw loop exists.** Re-invocation is asserted as *registration* - a
    live argument reaching the screen, a response that grew after `show` was called - and never as a
    schedule. An implementation that derives the screen from the view and its arguments only when
-   somebody asks what is displayed passes, and §3.7's ~10 Hz is deliberately encoded nowhere.
+   somebody asks what is displayed passes, and the ~10 Hz a redraw loop actually runs at is
+   deliberately encoded nowhere.
 
 3. **The diff, and write-on-change.** Comparing this frame against the last and writing only on a
    change is what makes per-frame invocation affordable, and it is invisible from out here: a
    terminal that rewrote everything every frame passes.
 
-4. **That preemption keeps text somebody was part-way through typing.** §3.7 lists losing it as
-   known and accepted unless an implementation keeps input state per screen, and the driver has no
-   way to type without submitting - a member that could would be a member dictating how input is
-   held.
+4. **That preemption keeps text somebody was part-way through typing.** Losing it is known and
+   accepted unless an implementation keeps input state per screen, and the driver has no way to
+   type without submitting - a member that could would be a member dictating how input is held.
 
 5. **Whether `pending` lists a priority a *passive* `show` was given.** The clause says the map
    reports every priority the terminal has been asked for, and priority has no meaning for a passive
@@ -124,8 +124,8 @@ reveal, not a test somebody forgot.
    deadline, which is what a suite can see. A terminal that took four seconds passes, and a
    threshold tight enough to catch it would fail an honest implementation on a loaded machine.
 
-10. **Anything about more than two priorities.** Two are exercised, which is §3.7's own example and
-    what one level of preemption needs. Nothing here says what three levels of displacement do.
+10. **Anything about more than two priorities.** Two are exercised, which is what one level of
+    preemption needs. Nothing here says what three levels of displacement do.
 
 11. **A view that raises, or one whose arguments do not match its parameters.** The port says a
     misspelled argument surfaces inside the redraw loop rather than at the call site, and settles
@@ -236,10 +236,10 @@ class TerminalContract(
 ):
     """The suite for a terminal that can take input: one slot, two queues, and a person at them.
 
-    Its own three tests are the pair §3.7 singles out. **Preemption**, which it calls not cosmetic:
-    `integrate()` holds the target lease while a conflict is unresolved, so a conflict screen queued
-    behind two agent questions would stall the merge queue on something unrelated. And
-    **`pending`**, twice: the state §3.7 writes out as a specification, zeros and all, and the
+    Its own three tests are the pair that carries the design. **Preemption**, which is not
+    cosmetic: `integrate()` holds the target lease while a conflict is unresolved, so a conflict
+    screen queued behind two agent questions would stall the merge queue on something unrelated.
+    And **`pending`**, twice: the example state that is a specification, zeros and all, and the
     snapshot the port promises whoever reads it. The four halves this class is assembled from are
     named in the module docstring.
 
@@ -343,7 +343,7 @@ class TerminalContract(
     async def test_pending_counts_what_is_waiting_and_keeps_reporting_a_priority_that_emptied(
         self, terminal: Terminal, driver: TerminalDriver
     ) -> None:
-        """§3.7's `{5: 2, 10: 0}`, built exactly, because the zero is the specification.
+        """`{5: 2, 10: 0}`, built exactly, because the zero is the specification.
 
         Two clauses, and the map states both at once. **What is on screen is excluded** - it is
         displayed, not pending - so the conflict at 10 contributes nothing to its own count while a
@@ -357,7 +357,7 @@ class TerminalContract(
         there are no timeouts anywhere here, so an unanswered question is invisible without it and a
         person can walk away from a fully blocked run believing it is working.
 
-        The state is the one §3.7 describes: two agent questions waiting, one of which was displaced
+        The state is the specified one: two agent questions waiting, one of which was displaced
         rather than never shown, and a conflict displayed with nothing behind it. Then everything is
         answered, and the assertion at the end is the zeros clause in its purest form - both
         priorities still listed, both empty, because that is what "has been asked for" means.
@@ -375,7 +375,7 @@ class TerminalContract(
 
             assert dict(term.pending) == {AGENT: 2, CONFLICT: 0}, (
                 f"the queues hold two agent questions waiting behind a displayed conflict, and "
-                f"`pending` reports {dict(term.pending)}. §3.7 writes this exact state as "
+                f"`pending` reports {dict(term.pending)}, where the specified state is "
                 f"{{{AGENT}: 2, {CONFLICT}: 0}}: the displaced question is waiting again, the one "
                 f"queued behind it never stopped, and the conflict is on screen - which is "
                 f"displayed and so counts as nothing"
@@ -451,8 +451,8 @@ class HeadlessTerminalContract(HeadlessRulesContract, TerminalLifecycleContract)
     question.
 
     It has no tests of its own. `_terminal_headless` holds the rule and the argument for asserting
-    it - that §3.7 phrases it on input rather than on a TTY so that a plain log stream has a rule
-    too, and that this behaviour doubles as the fake every AGL command runs against.
+    it - that the rule is phrased on input rather than on a TTY so that a plain log stream has a
+    rule too, and that this behaviour doubles as the fake every AGL command runs against.
     `_terminal_lifecycle` holds the context manager, which a terminal owes whether or not anybody
     can answer it.
 

@@ -38,7 +38,7 @@ LABEL: Final = RunLabel("contract")
 CHILD: Final = Namespace("T-01")
 SIBLING: Final = Namespace("T-02")
 
-# A second run, and only `_workspace_holding` needs one: §3.10's claim is per run, so telling that
+# A second run, and only `_workspace_holding` needs one: the claim is per run, so telling that
 # apart from one lock over the whole provider takes two labels and nothing else. Deliberately not
 # used anywhere a checkout is provisioned - every other test in these suites works under `LABEL`,
 # and a second run's directories would be a second thing to tear down for no assertion.
@@ -69,9 +69,9 @@ CACHED: Final = f"{CACHE_DIR}/notes.txt"
 _LINES: Final = 24
 
 # A commit message in the vocabulary a workflow author actually writes, carrying every character an
-# implementation that builds a command line by pasting strings together comes apart on. §3.3
-# narrowed the charset of a *name* for exactly this hazard and deliberately left messages alone: a
-# message is prose, and prose is where the metacharacters live.
+# implementation that builds a command line by pasting strings together comes apart on. The
+# charset of a *name* was narrowed for exactly this hazard and messages were deliberately left
+# alone: a message is prose, and prose is where the metacharacters live.
 AWKWARD_MESSAGE: Final = (
     'implement T-01: "auth" & $(whoami) | tee /dev/null; done\n'
     "\n"

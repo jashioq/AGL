@@ -1,9 +1,9 @@
 """`GitHistory` against the `History` contract, plus what only real git and a real repository show.
 
 The first class is the port in full: `HistoryContract` with its three fixtures overridden and
-nothing else touched. Everything `History` promises is asserted there, by a suite written at stage 3
-against the port's docstrings and before this adapter existed - which is the inversion the build
-rests on (§1.9), and the reason nothing below re-asserts any of it.
+nothing else touched. Everything `History` promises is asserted there, by a suite written against
+the port's docstrings and before this adapter existed - which is the inversion `tests/contracts/`
+rests on, and the reason nothing below re-asserts any of it.
 
 What is below is what that suite says outright it cannot see. Its own docstring lists eight gaps and
 three assumptions; these are the ones a real repository can close:
@@ -18,19 +18,20 @@ three assumptions; these are the ones a real repository can close:
     of the suite's assertions. Here it is a unified diff, and a `diff.external` in the repository's
     own configuration - an ordinary thing for a person to have - does not replace it with the output
     of some other program.
-  * **`clear`'s actual question** (gap 3). §3.10 deletes a run's line of work only once the base ref
-    holds it, which in life means *merged*; the suite has no way to land anything, so the ancestry
-    it asserts is the kind that comes from committing in one place. Landing it takes one raw git
-    command from out here.
+  * **`clear`'s actual question** (gap 3). `agl clear` deletes a run's line of work only once the
+    base ref holds it, which in life means *merged*; the suite has no way to land anything, so
+    the ancestry it asserts is the kind that comes from committing in one place. Landing it takes
+    one raw git command from out here.
   * **`UpstreamUnavailable`** (gap 4). "Nothing here can make a repository unreachable, and
     inventing a member that could would be inventing a port." From out here it is a directory.
   * **What `default_ref` actually names** (gap 6). The suite asserts only that it resolves, twice
     the same way, because there is no second source for what the default *is*. This file has one:
     the branch the fixture put HEAD on.
 
-The one gap this file does *not* close is the table §1.3 exists to contain - every status letter git
-spells and what each becomes. That is `test_git_changes.py`'s, next to the pure function it asserts
-and away from the `pytest.mark.asyncio` this module puts on everything in it.
+The one gap this file does *not* close is the table that keeps git's vocabulary inside the
+adapter - every status letter git spells and what each becomes. That is `test_git_changes.py`'s,
+next to the pure function it asserts and away from the `pytest.mark.asyncio` this module puts on
+everything in it.
 
 Named `test_git_history.py`, for the module it covers: `tests/` carries no `__init__.py` - see
 `tests/conftest.py` for why it must not - so pytest's module names are the bare filenames and two
@@ -114,8 +115,8 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     none.
 
     Two commits, so that there is a state behind HEAD for a tag to be put on and for HEAD to be
-    detached onto. It is at `tmp_path/repo` with the trees root as its sibling, which is the layout
-    §3.9 draws.
+    detached onto. It is at `tmp_path/repo` with the trees root as its sibling, which is the
+    layout a run is given: the user's checkout, and `.trees/` beside it.
     """
     for name in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"):
         monkeypatch.setenv(name, str(tmp_path / "nonexistent-git-config"))
@@ -279,9 +280,9 @@ async def test_changed_files_reads_paths_that_no_quoting_would_have_survived(
     instead of careful.
 
     The patch is not asserted here. git spells a path needing quotes in its own quoted form inside a
-    `diff --git` header, and how a patch is written is explicitly not this port's - §3.7 hands the
-    text over untouched precisely so that no implementation has to render its output into a taxonomy
-    this port invented.
+    `diff --git` header, and how a patch is written is explicitly not this port's - the text is
+    handed over untouched precisely so that no implementation has to render its output into a
+    taxonomy this port invented.
     """
     awkward = [
         f"{WORK}/a name with spaces.txt",
@@ -382,9 +383,10 @@ async def test_contains_is_true_once_a_line_of_work_has_been_merged_into_the_bas
 ) -> None:
     """Gap 3: the shape `clear` actually meets, which the suite has no way to build.
 
-    §3.10 deletes a run's own line of work only if the base ref already holds it, and in life that
-    means merged. The suite can only commit in one place, so the ancestry it asserts is the kind
-    that comes from committing - a true case, a false case, a reflexive one and a divergence - and
+    `agl clear` deletes a run's own line of work only if the base ref already holds it, and in
+    life that means merged. The suite can only commit in one place, so the ancestry it asserts is
+    the kind that comes from committing - a true case, a false case, a reflexive one and a
+    divergence - and
     it says plainly that "the shape `clear` meets after a successful merge is not built here".
     Landing it takes one raw git command, and the costs on either side of the answer are why it is
     worth the command: a retained name is a stale ref, and a deleted one is the entire run.
@@ -406,8 +408,8 @@ async def test_contains_is_true_once_a_line_of_work_has_been_merged_into_the_bas
 
     assert landed != head, "a --no-ff merge did not make a commit of its own"
     assert await history.contains(head, landed) is True, (
-        "a line of work merged into the base is reported as not contained in it, so §3.10's "
-        "`clear` would keep every run's branch forever - the answer this member exists to give"
+        "a line of work merged into the base is reported as not contained in it, so `agl clear` "
+        "would keep every run's branch forever - the answer this member exists to give"
     )
     assert await history.contains(landed, head) is False, (
         "ancestry has a direction, and the merge commit is not inside the work it merged"
@@ -445,7 +447,7 @@ async def test_default_ref_is_the_full_ref_of_the_branch_this_repositorys_head_i
 ) -> None:
     """Gap 6: "there is no second source for what the default *is*". Out here the fixture is one.
 
-    §3.9 spells the default "the repo's default branch", and the branch HEAD names is the only
+    A run's base ref defaults to the repo's default branch, and the branch HEAD names is the only
     default branch a repository records about itself - `refs/remotes/origin/HEAD` is a cached copy
     of a second repository's answer, which this port declines even the parameter to ask about.
 
@@ -477,8 +479,8 @@ async def test_default_ref_refuses_a_detached_head_in_words_that_say_what_to_do_
     """A repository sitting on a state rather than on a line of work has no default to offer.
 
     `NotFoundError`, so the person who typed `agl run` gets exit 3 - the class for something
-    well-formed this repository does not have - and a sentence naming the way out. §1.5's charge was
-    that exit codes meant nothing and errors were not a hierarchy; the value of the class here is
+    well-formed this repository does not have - and a sentence naming the way out. The exit-code
+    table in `src/agl/ports/errors.py` is what makes that class mean something; its value here is
     lost if the message is still git's fact about a data structure ("ref HEAD is not a symbolic
     ref"), which tells somebody who has never detached a HEAD on purpose exactly nothing.
     """

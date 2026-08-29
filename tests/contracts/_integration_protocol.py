@@ -8,9 +8,10 @@ convention, and the three tests that hold it apart from a convention are here.
 
 ## What "held" is made of is not this suite's business, and that is the whole design
 
-§1.3's charge was one tool's merge state machine written out as method names - `merge_in_progress`,
-`unmerged_paths`, `abort_merge`, `commit_merge` - so this port has no in-progress predicate, no way
-to ask which files are half-resolved, no staging step and no ref format. A suite that reached for
+The charge this split answers was one tool's merge state machine written out as method names -
+`merge_in_progress`, `unmerged_paths`, `abort_merge`, `commit_merge` - so this port has no
+in-progress predicate, no way to ask which files are half-resolved, no staging step and no ref
+format. A suite that reached for
 any of that would be reintroducing exactly what the split removed.
 
 So nothing below looks at a held target. **The hold is observed only through the two verbs**, and

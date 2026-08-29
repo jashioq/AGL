@@ -1,26 +1,26 @@
 """A step programme that can be killed at a step boundary, run in a process of its own.
 
-`tests/sdk/test_kill_and_resume.py` is §3.6's own acceptance criterion - "run to completion, kill at
-every step boundary, resume, assert identical final state" - and this module is the half of it that
-has to be somewhere else. The test cannot kill itself: what a killed agent does is stop, mid-run,
-without unwinding, and the only way to watch that from a test is to do it to somebody else.
+`tests/sdk/test_kill_and_resume.py` is replay's own acceptance criterion - run to completion, kill
+at every step boundary, resume, assert identical final state - and this module is the half of it
+that has to be somewhere else. The test cannot kill itself: what a killed agent does is stop,
+mid-run, without unwinding, and the only way to watch that from a test is to do it to somebody else.
 
 **The kill is `os._exit`, and the distinction is the whole point.** An exception would run `finally`
 blocks, `atexit` handlers, `__del__` methods and asyncio's cancellation path; a process that is
-killed runs none of them, and §3.6's design rests on that - "a crashed step leaves no entry, so the
-next run resets to the last good head and starts clean" is a claim about a process that got no
+killed runs none of them, and the ledger's design rests on that: a crashed step leaves no entry, so
+the next run resets to the last good head and starts clean - a claim about a process that got no
 chance to tidy up. So `_Programme._maybe_exit` calls `os._exit(0)` at the k-th step boundary, and
 this module registers both an `atexit` hook and a `finally` clause that append a marker to the log
 for the only reason a marker like that is ever worth writing: the parent asserts the markers are
 **absent** after a kill and present after a clean finish, which is how "this was a kill and not an
 unwind" becomes something measured rather than something claimed.
 
-**Why a subprocess buys the other half at the same time.** Three things §3.6 rests on fail only
-across a process boundary, and every one of them fails silently:
+**Why a subprocess buys the other half at the same time.** Three things the ledger rests on fail
+only across a process boundary, and every one of them fails silently:
 
   * a `frozenset[Restriction]` reaching the canonical text in iteration order rather than sorted
-    (rule 2) has a *fixed* order for the life of one interpreter, so a same-process resume computes
-    the digest it wrote and hits;
+    (`tests/sdk/test_journal.py`'s rule 2) has a *fixed* order for the life of one interpreter, so
+    a same-process resume computes the digest it wrote and hits;
   * a dataclass in `**inputs` canonicalised with `repr()` rather than walked field by field
     (rule 3) carries an object id that does not move while the object is alive, likewise;
   * `Fingerprints` really being rebuilt from nothing on a resume - `n` is never persisted - is
@@ -34,8 +34,8 @@ workflow's own dataclasses with a `frozenset[str]` field inside it. Without thos
 nothing and the second process proves only that the first one wrote some files.
 
 **Two more things a second process is what makes visible, and neither is about hash seeds.** A
-*replay* is a value read back off a real ledger written by a process that no longer exists, so the
-two claims deliverable 12.0 corrects are stated here in their end-to-end form. The `crash`
+*replay* is a value read back off a real ledger written by a process that no longer exists, so two
+claims a same-process test cannot make are stated here in their end-to-end form. The `crash`
 programme raises inside a step and retries it within one run, and the second process must hit the
 retry's entry and run nothing at all - which only holds if the crashed attempt claimed no slot. And
 the `retyped` and `renested` variants hand the same field names and the same values under a
@@ -51,22 +51,22 @@ thing that survives its own process.
 **Everything is constructed here rather than through `config.container`.** `container.real()` also
 builds agent runners, a routing runner and a terminal, none of which a programme with no agent in it
 has any use for, and two of which would want credentials. What a programme needs is the three ports
-§3.6's loop actually touches - a `Store`, a `WorkspaceProvider` and a `Clock` - so those three are
-named here directly. Tests are outside `agl.*`, so contract 5 has nothing to say about it, and
+the replay loop actually touches - a `Store`, a `WorkspaceProvider` and a `Clock` - so those three
+are named here directly. Tests are outside `agl.*`, so contract 5 has nothing to say about it, and
 `tests/adapters/` already imports adapters the same way.
 
 **Two shapes this instrument stands in for, and neither is being built here.**
 
-  * *A worker is a function, not an agent.* Stage 12's `Run.step` dispatches an `AgentTask`; the
+  * *A worker is a function, not an agent.* The shipped `Run.step` dispatches an `AgentTask`; the
     workers below write files and hand back JSON, because what is under test is the ledger and not
     the vendor. Each invocation appends one line to the log, which is how the parent counts what
     ran - "the worker was not called" is the whole of what a replay hit *is*.
   * *A child worktree is opened at the run's pinned base, and its `Journal` starts there too.*
-    Stage 13.1 derives a child's base properly and 13.4 resolves the run's own from its record;
-    neither exists. The pinned base is used for both because it is the one value that is the same
-    string in every process at every kill point, which is exactly what a property test over kill
-    points needs. §3.9's "a child is cut from the run's branch by name" is the shape 13.1 will
-    build; using it here would make a child's starting head depend on how far the *root* had got
+    Deriving a child's base from where the parent has actually got to, and resolving the run's own
+    base from its record, are the engine's jobs and neither is done here. The pinned base is used
+    for both because it is the one value that is the same string in every process at every kill
+    point, which is exactly what a property test over kill points needs. Cutting a child from the
+    run's branch by name would make a child's starting head depend on how far the *root* had got
     before the kill, which would be this instrument deciding the answer to the question being asked.
 
 Run as `python tests/instruments/replay.py '<json>'`. The configuration arrives as one JSON object
@@ -107,7 +107,8 @@ __all__ = ["Config", "PROGRAMMES", "Programme", "SIBLINGS", "driver_path", "main
 
 @dataclass(frozen=True)
 class Budget:
-    """A dataclass **nested** inside the one a workflow passes, and rule 6's sharpest term.
+    """A dataclass **nested** inside the one a workflow passes, and the sharpest term in
+    `tests/sdk/test_journal.py`'s rule 6.
 
     One integer field, because the value is not the point: the point is that this sits one level
     down. `dataclasses.asdict` recurses, so a type name attached to what `asdict` returned names
@@ -134,12 +135,12 @@ class Ceiling:
 
 @dataclass(frozen=True)
 class Constraint:
-    """A workflow's own dataclass, passed in `**inputs` exactly as §3.3's tickets example does.
+    """A workflow's own dataclass, passed in `**inputs` exactly as a workflow passes its own types.
 
     Three fields and each is deliberate. `area` is ordinary text. `tags` is a `frozenset[str]`, and
-    it is the term that makes rule 3 falsifiable across processes: the canonical walker hands a
-    frozen dataclass's set field on **as a set**, so it has to sort at that depth too - and the
-    one-line shortcut, `repr()`, renders the set in iteration order, which `PYTHONHASHSEED`
+    it is what makes `tests/sdk/test_journal.py`'s rule 3 falsifiable across processes: the walker
+    hands a frozen dataclass's set field on **as a set**, so it has to sort at that depth too - and
+    the one-line shortcut, `repr()`, renders the set in iteration order, which `PYTHONHASHSEED`
     randomises. So the `repr` of one of these is a different string in the next process even when
     nothing about the value changed, which is rule 2's failure arriving through rule 3's door, and
     it is measured rather than assumed: the parent asserts the two seeds it uses really do render
@@ -165,8 +166,9 @@ class Constraint:
 class Requirement:
     """`Constraint`'s twin - identical field names in identical order, and a different type.
 
-    Swapped in behind variant `retyped`, which is §3.6's own pair (`Finding` and `Ticket`) wearing
-    this file's names. Declared beside `Constraint` rather than derived from it, because two
+    Swapped in behind variant `retyped`, the pair `tests/sdk/test_journal.py`'s rule 6 exists for -
+    two structurally identical dataclasses, `Finding` and `Ticket`, which `asdict` renders alike -
+    wearing this file's names. Declared beside `Constraint` rather than derived from it, because two
     dataclasses are what the rule is about and a factory would leave a reader wondering whether
     the types really were distinct.
     """
@@ -182,9 +184,10 @@ async def _unused(payload: Mapping[str, JsonValue]) -> ToolResult:
     return ToolResult(text="")
 
 
-# All four members, which is rule 2's term. A role declaring `frozenset(Restriction)` is the same
-# role tomorrow, and a journal that iterated it rather than sorting it would compute a different
-# base in the resuming process and re-run every step in silence.
+# All four members, the term `tests/sdk/test_journal.py`'s rule 2 needs. A role declaring
+# `frozenset(Restriction)` is the same role tomorrow, and a journal that iterated it rather than
+# sorting it would compute a different base in the resuming process and re-run every step in
+# silence.
 RESTRICTIONS: Final = frozenset(Restriction)
 
 TOOL: Final = Tool(
@@ -206,13 +209,14 @@ _VALUES: Final = (
     ("api", frozenset({"routes", "handlers", "schemas", "errors"}), 25_000),
 )
 
-# The dataclass input, on the first step of every programme. A list of them, because §3.3 passes a
-# list and because a list is what makes the walker recurse before it reaches the set.
+# The dataclass input, on the first step of every programme. A list of them, because a workflow
+# passes a list and because a list is what makes the walker recurse before it reaches the set.
 CONSTRAINTS: Final = tuple(
     Constraint(area=area, tags=tags, budget=Budget(tokens=tokens)) for area, tags, tokens in _VALUES
 )
 
-# Variant `retyped`: the **outer** type swapped, which is §3.6's `Finding`/`Ticket` pair.
+# Variant `retyped`: the **outer** type swapped, the `Finding`/`Ticket` pair of
+# `tests/sdk/test_journal.py`'s rule 6.
 RETYPED: Final = tuple(
     Requirement(area=area, tags=tags, budget=Budget(tokens=tokens))
     for area, tags, tokens in _VALUES
@@ -227,7 +231,9 @@ RENESTED: Final = tuple(
     for area, tags, tokens in _VALUES
 )
 
-# The two child namespaces §3.6 names when it explains why the counter is scoped per namespace.
+# Two child namespaces, which is the shape the counter is scoped per namespace for: concurrent
+# siblings produce identical `base` values, so a per-invocation counter would let the interleaving
+# decide who got `n = 0` and both would re-run forever on resume.
 SIBLINGS: Final = ("T-01", "T-02")
 
 
@@ -242,7 +248,7 @@ class Config:
     and then reads the same field names back out of the log when an assertion fails. `kill_after` is
     the parameter the whole file exists for: `None` runs the programme to its end, and `k` exits the
     process the moment the k-th step has returned - which is after that step's entry is on disk and
-    before the next step begins, the only boundary §3.6's ledger makes any promise about.
+    before the next step begins, the only boundary the ledger makes any promise about.
     """
 
     home: str
@@ -321,7 +327,7 @@ def _text(data: Mapping[str, object], key: str) -> str:
 class _Programme:
     """One process's journals, its kill counter, and the log the parent counts workers from.
 
-    Journals are cached per namespace, which is not an optimisation: §3.6 keeps `last_good` per
+    Journals are cached per namespace, which is not an optimisation: `last_good` is kept per
     namespace and in memory, so a second `Journal` over one scope would be a second chain starting
     at the base again - and a `Fingerprints` shared with it would then be the only thing keeping
     the counts straight. One `Fingerprints` for the whole run and one `Journal` per namespace is the
@@ -435,8 +441,9 @@ class _Programme:
         """A worker that puts one file in its checkout - what an agent leaves behind.
 
         Handed to `step(does=...)`. On an effect step the following `commit_all` records it; on a
-        read-only step the following `restore` takes it away again, which is §3.6's wipe and is
-        worth having a programme actually provoke rather than describe.
+        read-only step the following `restore` takes it away again - the wipe that leaves a
+        read-only role unable to put anything on disk - and it is worth having a programme actually
+        provoke that rather than describe it.
         """
 
         def _write(_: JsonValue) -> None:
@@ -483,7 +490,7 @@ class _Programme:
 # The one prompt edit the `edited` variant makes, and the step it lands on. `decompose` is
 # deliberately a *read-only* step: its head does not move, so a downstream step that re-runs after
 # the edit re-ran because its **inputs** changed and for no other reason. Editing an effect step's
-# prompt would change its commit as well, and "inputs or head" is not the claim §3.6 makes.
+# prompt would change its commit as well, and "inputs or head" is not the claim being made.
 EDITED_STEP: Final = "decompose"
 EDIT: Final = " Group them by area, smallest first."
 
@@ -502,10 +509,10 @@ def _constraints(config: Config) -> list[Constraint | Requirement]:
     """The dataclass inputs, under the types this variant declares.
 
     Three tuples built from one list of values, so the only difference a variant makes here is a
-    type name - which is the whole of rule 6. `retyped` swaps the outer type and `renested` swaps
-    the type one level down while holding the outer one still; the parent asserts that each of them
-    re-runs the step that carries these, because a step that *replayed* would be handing back a
-    result produced from inputs of another type entirely.
+    type name - the whole of `tests/sdk/test_journal.py`'s rule 6. `retyped` swaps the outer type
+    and `renested` swaps the type one level down while holding the outer one still; the parent
+    asserts that each of them re-runs the step that carries these, because a step that *replayed*
+    would be handing back a result produced from inputs of another type entirely.
     """
     if config.variant == "retyped":
         return list(RETYPED)
@@ -515,11 +522,11 @@ def _constraints(config: Config) -> list[Constraint | Requirement]:
 
 
 def _message(config: Config, text: str) -> str:
-    """A step's commit message, with variant 3's rewording applied to all of them.
+    """A step's commit message, with variant `reworded`'s rewording applied to all of them.
 
-    §3.6 keeps this out of the fingerprint on purpose - "including it would mean editing the wording
-    re-runs the agent, which is the opposite of what fingerprinting is for" - so a programme run
-    twice, differing only here, must not run a single worker the second time.
+    A commit message is kept out of the fingerprint on purpose - including it would mean editing
+    the wording re-runs the agent, which is the opposite of what fingerprinting is for - so a
+    programme run twice, differing only here, must not run a single worker the second time.
     """
     return text + REWORD if config.variant == "reworded" else text
 
@@ -530,7 +537,7 @@ async def _core(run: _Programme) -> None:
     This is the programme the kill-point sweep runs, so its shape is the acceptance criterion's:
 
       1. `spec`       root, read-only  - carries the dataclass inputs and the four restrictions
-      2. `decompose`  root, read-only  - takes `spec`'s value; the step variant 2 edits
+      2. `decompose`  root, read-only  - takes `spec`'s value; the step variant `edited` edits
       3. `plan`       root, effect     - takes `decompose`'s value, commits a file
       4. `implement`  T-01, effect     - takes `plan`'s value, in a namespace of its own
       5. `report`     root, read-only  - takes `implement`'s value, and scribbles
@@ -542,10 +549,10 @@ async def _core(run: _Programme) -> None:
 
     **What the effect steps write is deliberately *not* a function of the variant.** The commit
     plan makes is byte-identical under either prompt, so its recorded `head` is the same commit id
-    both times - which leaves `inputs` as the only term that moved, and lets variant 2 say "this
-    re-ran because its inputs changed" rather than "because its inputs or its head changed". Step 4
-    is in a child namespace for the same reason from the other direction: its head is chained from
-    *its own* ledger, so a commit in the root's line cannot reach it at all.
+    both times - which leaves `inputs` as the only term that moved, and lets variant `edited` say
+    "this re-ran because its inputs changed" rather than "because its inputs or its head changed".
+    `implement` is in a child namespace for the same reason from the other direction: its head is
+    chained from *its own* ledger, so a commit in the root's line cannot reach it at all.
     """
     config = run.config
     spec = await run.step(
@@ -589,14 +596,14 @@ async def _core(run: _Programme) -> None:
         instructions=_instructions(config, "report", "say what was done"),
         inputs={"built": built},
         # A read-only step that leaves a file behind, so the ending `restore` has something to take
-        # away. §3.6: "a read-only role cannot leave anything behind - not a scratch file".
+        # away: a read-only role cannot leave anything behind, not even a scratch file.
         does=run.writes("scratch/notes.md", "half a thought\n"),
         value={"done": True, "from": built},
     )
 
 
 async def _retry(run: _Programme) -> None:
-    """§3.6's "why the counter": three identical calls in one namespace, `n = 0, 1, 2`.
+    """Why the counter exists: three identical calls in one namespace, `n = 0, 1, 2`.
 
     Same role, same inputs, same head, no commits - so the three share one `base` and are separated
     only by the counter. A per-`base`-only cache collapses them to one entry and loops forever; what
@@ -615,13 +622,14 @@ async def _retry(run: _Programme) -> None:
 
 
 async def _siblings(run: _Programme) -> None:
-    """§3.6's `T-01`/`T-02`: one root step, then two children under one `asyncio.gather`.
+    """Why the counter is keyed per namespace: one root step, then two children under one
+    `asyncio.gather`.
 
     Both siblings call `step(implementer, ...)` with the same role, no inputs and the same parent
     head, so their `base` values are identical by construction and only the namespace in the
     counter's key keeps their entries apart. The parent runs the resume with the two **completing**
-    in the opposite order, because rule 1's whole point is that the interleaving must not decide who
-    gets `n = 0`, and a test that always interleaves the same way cannot see it.
+    in the opposite order, because `tests/sdk/test_journal.py`'s rule 1 is that the interleaving
+    must not decide who gets `n = 0`, and a test that always interleaves the same way cannot see it.
 
     **The order is a chain and never a timing.** Both `step` calls are started at once and both get
     as far as their worker - counter taken, entry looked up, worktree restored - and then each one
@@ -675,10 +683,10 @@ async def _siblings(run: _Programme) -> None:
 class Refused(Exception):
     """What a worker that fails looks like from the journal's side.
 
-    Any exception would do - §3.6's walk has no opinion about which and lets it out untouched - and
-    a named one is only so that `_crash` catches its own worker rather than any bug that happens to
-    pass through. What matters is what does **not** happen: the step wrote no entry, so nothing on
-    the ledger says it ever ran.
+    Any exception would do - the journal's walk has no opinion about which and lets it out
+    untouched - and a named one is only so that `_crash` catches its own worker rather than any bug
+    that happens to pass through. What matters is what does **not** happen: the step wrote no entry,
+    so nothing on the ledger says it ever ran.
     """
 
 
@@ -697,11 +705,11 @@ RETRIED: Final = "implement#retried"
 
 
 async def _crash(run: _Programme) -> None:
-    """A step that raises and is retried **inside one run** - §3.6's reason for advancing on write.
+    """A step that raises and is retried **inside one run** - the reason for advancing on write.
 
-    "A step that crashes and is retried within one run must not consume a slot - the crash is not
+    A step that crashes and is retried within one run must not consume a slot: the crash is not
     journalled, so a retry landing at `n = 1` is a slot a later resume asks for at `n = 0`, misses,
-    and pays an agent for again."
+    and pays an agent for again.
 
     **The retry is in an `except` and that is the whole design of this programme.** The second
     process walks the same code: it reaches the first call, and if the retry's entry is where a
@@ -735,8 +743,8 @@ async def _crash(run: _Programme) -> None:
         )
     except Refused:
         # Same name, same role, same inputs, same head - so the same `base`, and the address is the
-        # counter's alone to decide. `commit=` differs and is allowed to: §3.6 keeps the message
-        # out of the fingerprint, so the retry writing a commit does not move it to another slot.
+        # counter's alone to decide. `commit=` differs and is allowed to: the commit message is
+        # kept out of the fingerprint, so the retry writing a commit does not move it elsewhere.
         await run.step(
             RETRIED,
             "implement",
@@ -789,7 +797,7 @@ def driver_path() -> Path:
 
 
 async def _drive(config: Config) -> None:
-    """Build the three ports §3.6's loop touches, then walk the programme.
+    """Build the three ports the replay loop touches, then walk the programme.
 
     `FilesystemStore` and `GitWorkspaceProvider` and `SystemClock` by name, and nothing else: the
     container's `real()` would additionally build agent runners and a terminal that a programme
@@ -814,8 +822,8 @@ def main(argv: Sequence[str]) -> int:
     Both markers exist for one assertion in the parent, and the assertion is about their **absence**
     after a kill: `os._exit` runs neither an `atexit` hook nor a `finally` clause, so a run that
     was killed leaves no `finally` line and no `atexit` line on the log. That is the difference
-    between a kill and an unwind, made mechanical - and it is the difference §3.6's design depends
-    on, because a workflow engine that got to tidy up is not the one a person Ctrl-C'd.
+    between a kill and an unwind, made mechanical - and it is the difference the ledger's design
+    depends on, because a workflow engine that got to tidy up is not the one a person Ctrl-C'd.
     """
     if len(argv) != 2:
         raise SystemExit("usage: replay.py '<configuration json>'")

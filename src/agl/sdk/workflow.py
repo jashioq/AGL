@@ -107,10 +107,10 @@ def _starts_at(run: Run[object], base: Run[object] | str | None) -> str:
 def _unaddressable(scope: RunScope) -> str:
     return (
         f"there is no parent to integrate into: {_where(scope)} called `run.integrate()`, and a "
-        f"landing goes into the worktree of the `Run` that cut this one (§3.3). Only a child "
+        f"landing goes into the worktree of the `Run` that cut this one. Only a child "
         f"opened with `run.worktree(name)` has one. There is no argument to point it elsewhere, "
-        f"and that is not a policy: AGL never checks out or writes to any ref outside `agl/*` "
-        f"(§3.9), so `main` and every branch of yours is unaddressable rather than protected - "
+        f"and that is not a policy: AGL never checks out or writes to any ref outside `agl/*`, "
+        f"so `main` and every branch of yours is unaddressable rather than protected - "
         f"there is no rule here that could be relaxed and no spelling that would name one"
     )
 
@@ -148,7 +148,7 @@ def workflow[P](*, version: str) -> Callable[[_Function[P]], Workflow[P]]:
         if not iscoroutinefunction(fn):
             raise InputError(
                 f"{fn!r} is decorated as a workflow and is not an `async def`. A workflow is one "
-                f"async function (§3.3), the framework awaits it, and a plain function returning "
+                f"async function, the framework awaits it, and a plain function returning "
                 f"an awaitable type-checks here and then never yields"
             )
         return Workflow(version=version, fn=fn)
@@ -171,7 +171,7 @@ def _declared(fn: Callable[..., object]) -> object:
     if not parameters:
         raise InputError(
             f"the workflow {_written_at(fn)} takes no parameters, and a workflow is one async "
-            f"function taking a `Run` (§3.3) - which is also where it declares its own parameters, "
+            f"function taking a `Run` - which is also where it declares its own parameters, "
             f"now that `@workflow` takes only `version=`. Write `async def {fn.__qualname__}(run: "
             f"Run[YourParams])`, or `run: Run` for a workflow that never reads `run.params`"
         )
@@ -179,7 +179,7 @@ def _declared(fn: Callable[..., object]) -> object:
     if first not in hints:
         raise InputError(
             f"the workflow {_written_at(fn)} annotates nothing on its first parameter {first!r}, "
-            f"and that annotation is the one place a workflow declares its parameters (§3.3). An "
+            f"and that annotation is the one place a workflow declares its parameters. An "
             f"unannotated parameter is **not** read as a bare `Run`: the two say different things "
             f"and only one of them was written down. Write `{first}: Run[YourParams]`, or "
             f"`{first}: Run` for a workflow that never reads `run.params`"
@@ -200,12 +200,12 @@ def _not_a_run(fn: Callable[..., object], first: str, annotation: object, subjec
             f"is a subclass of `Run`. A workflow is handed the `Run` the framework builds, never a "
             f"class of its own, so the annotation would be describing an object this run cannot "
             f"produce - and the params are read from it precisely because it and the object agree. "
-            f"§3.3 gives two spellings and they are the whole list: `Run[YourParams]`, and a bare "
+            f"There are two spellings and they are the whole list: `Run[YourParams]`, and a bare "
             f"`Run` for a workflow that never reads `run.params`"
         )
     return (
         f"the workflow {_written_at(fn)} annotates {first!r} as {_describe(annotation)}, and a "
-        f"workflow is one async function taking a `Run` (§3.3). That annotation is also where it "
+        f"workflow is one async function taking a `Run`. That annotation is also where it "
         f"declares its parameters, now that `@workflow` takes only `version=`, so this is not a "
         f"style note: there is nothing here to read the params class out of. Write `{first}: "
         f"Run[YourParams]`, or `{first}: Run` for a workflow that never reads `run.params`"
@@ -218,7 +218,7 @@ def _hints(fn: Callable[..., object]) -> tuple[list[str], Mapping[str, object]]:
     except (NameError, TypeError) as error:
         raise InputError(
             f"the workflow {_written_at(fn)} has an annotation that cannot be resolved: {error}. "
-            f"Its first parameter is read for the params class it names (§3.3), so that annotation "
+            f"Its first parameter is read for the params class it names, so that annotation "
             f"has to name something importable where it is written - a class defined below the "
             f"function is fine, one that is never bound at all is not"
         ) from error

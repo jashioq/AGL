@@ -57,7 +57,7 @@ async def run(
         raise ConflictError(
             f"the branch {branch!r} already exists, so run {str(label)!r} cannot start: AGL would "
             f"attach this run to that line of work and carry on from wherever it got to, with "
-            f"whatever `--from` said ignored (§3.10). This is what an unfinished run leaves - "
+            f"whatever `--from` said ignored. This is what an unfinished run leaves - "
             f"`clear` keeps a branch whose work is not yet in the base ref, and takes that run's "
             f"records away with everything else, so there is nothing left here for `agl clear "
             f"{label} -f` to address. `git log {branch}` is what is on it, `git branch -D "
@@ -121,7 +121,7 @@ async def resume(
             f"run {str(label)!r} was started by {spec.workflow!r} version "
             f"{spec.workflow_version!r} and the installed {spec.workflow!r} is version "
             f"{wf.version!r}. A run stamps its workflow's version and AGL refuses a mismatch "
-            f"rather than migrating one (§3.11): every step already on this run's ledger was "
+            f"rather than migrating one: every step already on this run's ledger was "
             f"produced by the workflow as it was then. Install {spec.workflow_version!r} to finish "
             f"this run, or `agl clear {label} -f` and start it again on {wf.version!r}."
         )
@@ -189,8 +189,8 @@ def init(settings: Settings, cwd: Path, ask: Ask) -> Path:
     build = ask(_BUILD_PROMPT).strip()
     if not build:
         raise InputError(
-            "a build command is what AGL runs at the merge gate before a run's work is landed "
-            "(§3.10), so an empty one would make every gate pass without building anything. "
+            "a build command is what AGL runs at the merge gate before a run's work is landed, "
+            "so an empty one would make every gate pass without building anything. "
             "Nothing has been written - run `agl init` again and give the command this project is "
             "built and tested with. If it genuinely has none, that is a decision to make in the "
             "project's settings file rather than a value that arrives here empty"

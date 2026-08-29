@@ -4,7 +4,7 @@ one view that compare equal.
 `Terminal` itself is not touched here - not subclassed, not instantiated, not even as a null
 implementation - for `test_integration.py`'s reason: a suite that writes its own subject writes a
 subject that passes. The slot, the queues and preemption are asserted by the contract suite both
-implementations must pass, which is stage 3.5's, deliberately.
+implementations must pass, which is `tests/contracts/terminal.py`'s, deliberately.
 
 That leaves the components, and three things in them that are genuine logic rather than a dataclass
 doing its job. **The `str` -> `Text` coercion**, at both sites that take one, because "a bare string
@@ -26,14 +26,14 @@ from agl.ports.terminal import Choice, Component, Row, Rows, Screen, Text, TextI
 
 @dataclass(frozen=True, slots=True)
 class Approval:
-    """A workflow's own answer type, standing in for §3.7's."""
+    """A workflow's own answer type, standing in for a real one."""
 
     ok: bool
     feedback: str = ""
 
 
 def approve(prompt: str) -> Screen[Approval]:
-    """§3.7's interactive view, in shape: a `Choice`, a `TextInput`, and a lambda built per call."""
+    """An interactive view, in shape: a `Choice`, a `TextInput`, and a lambda built per call."""
     return Screen(
         body=Text(prompt),
         responses=[
@@ -74,7 +74,7 @@ def test_a_choice_s_value_is_compared() -> None:
 
 
 def test_a_bare_string_cell_is_a_text() -> None:
-    """§3.7's own board writes `Row(t.id, t.title, Text(...))` - both spellings in one call."""
+    """A ticket board writes `Row(t.id, t.title, Text(...))` - both spellings in one call."""
     assert Row("T-01", Text("wire the port")) == Row(Text("T-01"), Text("wire the port"))
     assert Row("T-01").cells == (Text("T-01"),)
 
@@ -94,8 +94,8 @@ def test_a_row_takes_its_cells_one_by_one_and_none_is_ordinary() -> None:
 
 
 def test_a_table_built_by_comprehension_equals_one_built_by_hand() -> None:
-    """`Rows` takes a sequence where `Row` takes varargs - §3.7's asymmetry - so a list arrives
-    here routinely and must be kept as the same tuple a hand-written one is."""
+    """`Rows` takes a sequence where `Row` takes varargs - a deliberate asymmetry - so a list
+    arrives here routinely and must be kept as the same tuple a hand-written one is."""
     built = Rows([Row(name) for name in ("a", "b")])
     assert built.rows == (Row("a"), Row("b"))
     assert built == Rows((Row("a"), Row("b")))

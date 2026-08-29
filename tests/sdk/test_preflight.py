@@ -1,6 +1,6 @@
-"""§3.2's preflight: what a run refuses before it starts, and what a step refuses after it has.
+"""Preflight: what a run refuses before it starts, and what a step refuses after it has.
 
-The suite over `sdk/_engine/preflight.py`, over the registry UF1.3 put in place of `@workflow`'s
+The suite over `sdk/_engine/preflight.py`, over the registry that stands in place of `@workflow`'s
 `roles=`, and over the one line it put into `sdk/_engine/steps.py`. Four properties carry it.
 
 **Nothing here constructs a real adapter, and that is a rule rather than a convenience.**
@@ -8,7 +8,7 @@ The suite over `sdk/_engine/preflight.py`, over the registry UF1.3 put in place 
 every runner below is either `container.fakes()`'s or `_Stub`, declared in this module. `scripts
 /check`'s paid-endpoint gate would catch a lapse; not writing one is cheaper than being caught.
 
-**"At second zero" is asserted mechanically and not by reading the source.** The stage's acceptance
+**"At second zero" is asserted mechanically and not by reading the source.** The acceptance
 criterion is that a role naming a harness that is missing, out of date or logged out fails with
 `UpstreamUnavailable` - and what makes that *second zero* rather than merely early is that nothing
 durable exists afterwards. So the refused run is asked two questions the ordering decides: is there
@@ -16,33 +16,33 @@ a record under `AGL_HOME`, and was `WorkspaceProvider.open` reached at all. The 
 a provider whose every member raises `AssertionError`, because a directory that is not there is also
 what a provider that failed would leave, and only a tripwire tells the two apart.
 
-**The registry is a module namespace, so several claims are claims about a whole module.** Since
-UF1.3, a workflow's roles are the `@role(model=…)` factories bound in the module its `def` was
-executed in, and since UF1.5 also the ones bound in any module bound there. This file is *one*
-namespace, and it holds six factories bound directly over two models - the right shape for dedup
-and ordering, and the wrong shape for every claim about what a namespace does not hold or about how
-a factory reaches it. `tests/instruments/preflight/` is where those four live, one module each: no
-factory at all, a factory imported and never used, a factory written below the workflow function,
-and a factory reached only as `roles.implementer()` through a bound module.
+**The registry is a module namespace, so several claims are claims about a whole module.** A
+workflow's roles are the `@role(model=…)` factories bound in the module its `def` was executed in,
+and also the ones bound in any module bound there. This file is *one* namespace, and it holds six
+factories bound directly over two models - the right shape for dedup and ordering, and the wrong
+shape for every claim about what a namespace does not hold or about how a factory reaches it.
+`tests/instruments/preflight/` is where those four live, one module each: no factory at all, a
+factory imported and never used, a factory written below the workflow function, and a factory
+reached only as `roles.implementer()` through a bound module.
 
 **The two halves are tested against each other, not separately.** The interesting case is a role
 that *passes* preflight and must still be refused: `implementer(on_question=handler)` is the
-spelling for §3.7's handler, which is a closure over the `Run`, so the role a module declares and
+spelling for a question handler, which is a closure over the `Run`, so the role a module declares
 the role a workflow steps with are different values. A suite that only checked what preflight saw
 would go green against an engine in which a handler-carrying role reaches a backend that cannot ask
 - which raises nothing, logs nothing, and reports a result (`sdk/roles.py`).
 
 **The refusals are pinned on the part of the message the reader acts on**, which for a capability
 miss is the member that is missing and, when a declaration put it there rather than the author, the
-word that declaration is spelled with - `on_question` for `MID_RUN_QUESTIONS`, and since 19.2
-`tools` for `TOOL_CALLING`. Those clauses are what `roles.py` asks stage 16 for by name: "otherwise
-the reader goes looking for a line that is not in their file." Each is conditioned on the trigger
-and not on the member, and there is a test for the negative of both: a role that typed its own
-requirement is told nothing about where it came from. For an unavailable provider it is now also
-*which factory in which module* asked for that model, because the namespace over-approximates and a
-person refused for a provider they never meant to use has otherwise no thread to pull.
+word that declaration is spelled with - `on_question` for `MID_RUN_QUESTIONS`, and `tools` for
+`TOOL_CALLING`. Those clauses are what `roles.py` asks for by name: "otherwise the reader goes
+looking for a line that is not in their file." Each is conditioned on the trigger and not on the
+member, and there is a test for the negative of both: a role that typed its own requirement is told
+nothing about where it came from. For an unavailable provider it is now also *which factory in which
+module* asked for that model, because the namespace over-approximates and a person refused for a
+provider they never meant to use has otherwise no thread to pull.
 
-## What moved at UF1.3, and why it is here rather than deleted
+## What moved when the registry replaced `roles=`, and why it is here rather than deleted
 
 **Capability containment left second zero with `roles=`.** It compares `role.requires` against what
 a backend reports, `requires` is on the `Role` a factory *returns*, and preflight may not call a
@@ -56,10 +56,10 @@ containment through `api.run` now measure it through `run.step`:
 
 Every one of those claims is unchanged - the class, the exit code and the sentence are the same. All
 that moved is the moment, and the moment is what they no longer assert: three of them used to assert
-that no record and no workspace existed afterwards, and that is exactly what UF1.3 gave up. The cost
-is not merely recorded in prose here - `test_a_negotiating_role_is_checked_at_the_step_it_is_handed
-_to` asserts the record is **present** when containment refuses, which is the same fact read from
-the other side.
+that no record and no workspace existed afterwards, and that is exactly what the move gave up. The
+cost is not merely recorded in prose here - `test_a_negotiating_role_is_checked_at_the_step_it_is
+_handed_to` asserts the record is **present** when containment refuses, which is the same fact read
+from the other side.
 
 What did not move is the provider half. A logged-out harness is still refused before anything
 durable exists, and the acceptance criterion is still met in as many words.
@@ -112,13 +112,13 @@ SCOPE: Final = RunScope(PROJECT, LABEL)
 # a hand-copied list quietly narrower than the thing it stands in for.
 EVERYTHING: Final = frozenset(Capability)
 
-# Everything except the one member §3.2's third check is about. The interesting backend in this
-# file, and the one `docs/codex-cli-findings.md` says is a live possibility rather than a fiction:
-# `MID_RUN_QUESTIONS` on that harness rests on an asking tool AGL registers itself.
+# Everything except the one member the third check is about. The interesting backend in this file,
+# and the one that is a live possibility rather than a fiction: `MID_RUN_QUESTIONS` on that harness
+# rests on an asking tool AGL registers itself.
 CANNOT_ASK: Final = EVERYTHING - {Capability.MID_RUN_QUESTIONS}
 
 
-# Everything except the member 19.2's second implication is about. A backend that cannot call a
+# Everything except the member the second folded implication is about. A backend that cannot call a
 # tool at all is the sharper of the two cases: the role's reporting tool never reaches the model,
 # so the agent cannot fire it, and `Run.step` ends the step with `RoleIncompleteError`.
 CANNOT_CALL: Final = EVERYTHING - {Capability.TOOL_CALLING}
@@ -132,7 +132,7 @@ class _Found:
 
 
 async def _answer(question: Question) -> Answer:
-    """§3.7's handler, reduced to the one thing this file needs of it: that it exists.
+    """A question handler, reduced to the one thing this file needs of it: that it exists.
 
     A role carrying one has `Capability.MID_RUN_QUESTIONS` folded into `requires` at declaration
     time (`sdk/roles.py`), and that is the whole of its part here - nothing below ever asks a
@@ -141,9 +141,9 @@ async def _answer(question: Question) -> Answer:
     return Answer(text="yes")
 
 
-# --- the roles, as the `@role(model=…)` factories §3.3 says a role is ----------------------------
+# --- the roles, as the `@role(model=…)` factories a role is declared by --------------------------
 #
-# Six of them, and since UF1.3 the fact that they are bound *in this module* is the whole of what
+# Six of them, and the fact that they are bound *in this module* is the whole of what
 # makes them the roles of every workflow declared below: there is no list on a decorator, and the
 # namespace is the registry. So this block is also the declaration the availability tests are about
 # - two distinct models over six factories, which is what "once per model, not once per role" needs
@@ -165,7 +165,7 @@ def implementer(*, on_question: QuestionHandler | None = None) -> Role:
 
 @role(model=OpenAI.SOL)
 def reviewer() -> Role:
-    """A second provider in one run, which is §3.2's motivating case and the reason dedup is
+    """A second provider in one run, which is the port's motivating case and the reason dedup is
     testable: two models in this namespace, so a run asks twice however many factories name them."""
     return Role(name="review", instructions="review it")
 
@@ -180,7 +180,7 @@ def repairer() -> Role:
 
 @role(model=Claude.OPUS)
 def builder() -> Role:
-    """Declares its requirement in as many words - §3.7's own example role does the same."""
+    """Declares its requirement in as many words - a negotiating role does the same."""
     return Role(
         name="build",
         instructions="run the build until it passes",
@@ -198,8 +198,8 @@ def proposer() -> Role:
 @role(model=Claude.OPUS)
 def reporter() -> Role[_Found]:
     """The same shape one implication over: declares no `requires` and needs `TOOL_CALLING` all the
-    same, because 19.2 folds it in behind `tools=`. §3.3's reporting step, in the smallest form
-    that has a payload at all."""
+    same, because it is folded in behind `tools=`. A reporting step, in the smallest form that
+    has a payload at all."""
     return Role(
         name="report",
         instructions="read the change, then report what you found",
@@ -216,7 +216,7 @@ def reporter() -> Role[_Found]:
 
 @workflow(version="1.1")
 async def two_providers(run: Run[NoParams]) -> None:
-    """§3.2's own case: this module names Claude and OpenAI, so one run asks both.
+    """The multi-vendor case: this module names Claude and OpenAI, so one run asks both.
 
     It takes no step, deliberately. What half one measures is what a run asks *before* it does
     anything, and a workflow with a body would put a second reason in every assertion below.
@@ -228,7 +228,7 @@ async def two_providers(run: Run[NoParams]) -> None:
 async def replacing(run: Run[NoParams]) -> None:
     """Steps with a role that requires asking, in a module whose factories require nothing.
 
-    **This is the workflow containment exists for**, and it is written the way §3.7 says a
+    **This is the workflow containment exists for**, and it is written the way a
     negotiating workflow is written: the handler is a closure over this `Run`, so the role carrying
     it is built here, by calling the factory with the one argument it exposes. Preflight saw a
     model; what runs is `implementer(on_question=…)`, which needs `MID_RUN_QUESTIONS`, and no scan
@@ -244,7 +244,7 @@ async def replacing(run: Run[NoParams]) -> None:
 
 
 def _point(name: str, target: str) -> EntryPoint:
-    """§3.3's `probe = "agl.workflows.probe:probe"`, pointed at this module or an instrument."""
+    """The `probe = "agl.workflows.probe:probe"` entry point, pointed here or at an instrument."""
     return EntryPoint(name=name, value=target, group=registry.GROUP)
 
 
@@ -331,14 +331,14 @@ class _Untouched(WorkspaceProvider):
 
     def hold(self, label: RunLabel) -> AbstractAsyncContextManager[None]:
         raise AssertionError(
-            "preflight refused this run and its claim on the trees root was taken anyway. §3.10's "
-            "run lock sits below preflight for the reason the record does: a refusal that costs "
-            "real turns is the last thing that can happen while the run has left nothing behind"
+            "preflight refused this run and its claim on the trees root was taken anyway. The run "
+            "lock sits below preflight for the reason the record does: a refusal that costs real "
+            "turns is the last thing that can happen while the run has left nothing behind"
         )
 
 
 def _fakes(tmp_path: Path) -> container.FakeServices:
-    """Target #8's deployment: one repository seeded with a file, one store, one frozen clock."""
+    """End-to-end on fakes alone: one repository seeded with a file, one store, one frozen clock."""
     return container.fakes(TreesRoot(tmp_path / "trees"), files={"src/a.txt": b"one\n"})
 
 
@@ -366,9 +366,9 @@ async def _no_record(harness: container.FakeServices) -> bool:
 
 @pytest.mark.asyncio
 async def test_a_role_whose_harness_is_missing_fails_at_second_zero(tmp_path: Path) -> None:
-    """**The stage's acceptance criterion.** A role names a provider whose harness is missing, out
-    of date or logged out, and the run dies with `UpstreamUnavailable` before anything durable
-    exists. UF1.3 changed where the model comes from and changed nothing about this.
+    """**The acceptance criterion.** A role names a provider whose harness is missing, out of date
+    or logged out, and the run dies with `UpstreamUnavailable` before anything durable exists. The
+    registry changed where the model comes from and changed nothing about this.
 
     Four assertions and each is a different failure. The adapter's own sentence is asserted to reach
     the caller **whole**, because it is the only thing that knows which of installed, current and
@@ -396,7 +396,7 @@ async def test_a_role_whose_harness_is_missing_fails_at_second_zero(tmp_path: Pa
 
 @pytest.mark.asyncio
 async def test_check_ready_is_asked_once_per_model_and_not_once_per_role(tmp_path: Path) -> None:
-    """§3.2's first check, over *distinct models*. Six factories in this module, two models, two
+    """The first check, over *distinct models*. Six factories in this module, two models, two
     questions.
 
     The dedup is not tidiness. `check_ready` costs a real turn on one of the two harnesses in view,
@@ -404,7 +404,7 @@ async def test_check_ready_is_asked_once_per_model_and_not_once_per_role(tmp_pat
     done. Two roles on one model are one question about the state of the world.
 
     Order is asserted along with the count: a refusal should arrive in the order the author wrote
-    their roles, which since UF1.3 is binding order in the module's namespace - a `dict`, and
+    their roles, which is binding order in the module's namespace - a `dict`, and
     therefore ordered - rather than the order of a list on a decorator.
     """
     harness = _fakes(tmp_path)
@@ -424,12 +424,12 @@ async def test_a_workflow_whose_module_names_no_role_asks_no_backend_anything(
     Not merely "it does not fail". `workflows/noop/` was the case this was written against, and a
     preflight that asked about some default model, or about every provider the bundle was assembled
     with, would have made `agl run noop` depend on a harness that workflow never named - when `noop`
-    existed precisely to prove the wiring with nothing else in the way. 19.1 deleted it and the
-    argument outlived it.
+    existed precisely to prove the wiring with nothing else in the way. It was deleted later and
+    the argument outlived it.
 
-    The workflow is `instruments/preflight/unstaffed.py`'s and cannot be this module's: since UF1.3
-    "declares no roles" is a fact about a whole namespace, and this file's namespace holds six
-    factories that every workflow written in it inherits.
+    The workflow is `instruments/preflight/unstaffed.py`'s and cannot be this module's: "declares
+    no roles" is a fact about a whole namespace, and this file's namespace holds six factories that
+    every workflow written in it inherits.
     """
     entered.clear()
     harness = _fakes(tmp_path)
@@ -466,15 +466,15 @@ async def test_a_factory_written_below_the_workflow_is_still_found(tmp_path: Pat
 
 @pytest.mark.asyncio
 async def test_a_role_reached_through_a_module_is_refused_at_second_zero(tmp_path: Path) -> None:
-    """**UF1.5's acceptance criterion**: a module-qualified workflow refuses at second zero.
+    """**The acceptance criterion**: a module-qualified workflow refuses at second zero.
 
-    `instruments/preflight/qualified.py` writes the two lines §3.3 puts in front of every author -
+    `instruments/preflight/qualified.py` writes the two lines an author ordinarily writes -
     `from . import roles`, then `await run.step(roles.implementer())` - and binds no `RoleFactory`
-    in its own namespace at all. UF1.3's scan read that namespace and only that namespace, so it
-    found nothing, asked **zero** backends anything, cleared second zero naming no provider, and
-    let the run die at its first step with whatever the adapter said. That is the failure §3.2
-    exists to prevent arriving with no warning, and it is worse than the over-approximation below
-    for one reason: it is silent. `@workflow(roles=[…])` could not have had it, because the list
+    in its own namespace at all. A scan of that namespace and only that namespace found nothing,
+    asked **zero** backends anything, cleared second zero naming no provider, and let the run die
+    at its first step with whatever the adapter said. That is the failure the provider check exists
+    to prevent arriving with no warning, and it is worse than the over-approximation below for one
+    reason: it is silent. `@workflow(roles=[…])` could not have had it, because the list
     named the roles.
 
     So the same four questions as the acceptance criterion above, because "at second zero" means
@@ -533,7 +533,7 @@ async def test_a_module_qualified_workflow_passes_on_the_model_reached_through_t
 
 @pytest.mark.asyncio
 async def test_a_role_imported_and_never_used_still_demands_its_provider(tmp_path: Path) -> None:
-    """The stage's "known cost, accepted", asserted rather than described.
+    """A known cost, accepted - asserted rather than described.
 
     `instruments/preflight/unused.py` imports `fix`'s OpenAI `reviewer` and steps with nothing at
     all, and this run asks OpenAI's backend whether it is ready. That is a demand the run does not
@@ -563,8 +563,8 @@ async def test_the_refusal_names_the_factory_and_the_modules_the_model_came_from
 
     A `fix`-shaped workflow refused because the Codex CLI is logged out has a fix it can act on. A
     workflow that never meant to run an OpenAI model at all has, from the adapter's message alone, a
-    provider name and nothing to pull on - the adapter cannot know why AGL asked, because since
-    UF1.3 the model came from a namespace scan rather than from a line the author wrote.
+    provider name and nothing to pull on - the adapter cannot know why AGL asked, because the
+    model came from a namespace scan rather than from a line the author wrote.
 
     So four things are asserted, and each is a step of the same reader's walk: the factory's own
     name, so they can find the `@role(model=…)` line; the module it was declared in, so they can
@@ -594,7 +594,7 @@ async def test_the_refusal_names_the_factory_and_the_modules_the_model_came_from
 async def test_preflight_asks_whether_a_backend_is_ready_and_never_what_it_can_do(
     tmp_path: Path,
 ) -> None:
-    """What UF1.3 took out of second zero, asserted as an absence at both of its ends.
+    """What left second zero with `roles=`, asserted as an absence at both of its ends.
 
     Containment used to run here too, over the roles `@workflow(roles=…)` declared, and it cannot:
     it needs `role.requires`, which lives on the `Role` a factory returns, and preflight may not
@@ -626,7 +626,7 @@ async def test_preflight_asks_whether_a_backend_is_ready_and_never_what_it_can_d
 
 # --- half two: containment, over the role a step is actually handed ------------------------------
 #
-# The four suites below measured the same claims through `api.run` until UF1.3. What moved is the
+# The four suites below measured the same claims through `api.run` once. What moved is the
 # moment and not the claim: same class, same exit code, same sentence, one `run.step` later. The
 # module docstring lists them and says what they stopped being able to assert.
 
@@ -635,7 +635,7 @@ async def test_preflight_asks_whether_a_backend_is_ready_and_never_what_it_can_d
 async def test_a_role_requiring_what_its_backend_lacks_is_refused_with_the_member_named(
     tmp_path: Path,
 ) -> None:
-    """§3.2's second check. `DeniedError` - exit 5 - and the message names the missing member.
+    """The second check. `DeniedError` - exit 5 - and the message names the missing member.
 
     **The class is the port's and not preflight's**, which is why it is pinned here by code as well
     as by name. `ports/errors.py` holds the one exception-to-exit-code table in the codebase and
@@ -670,12 +670,12 @@ async def test_a_role_requiring_what_its_backend_lacks_is_refused_with_the_membe
 async def test_a_missing_mid_run_questions_says_that_on_question_put_it_there(
     tmp_path: Path,
 ) -> None:
-    """§3.2's third check, which is §3.2's second check plus one clause in the message.
+    """The third check, which is the second check plus one clause in the message.
 
     `proposer()` declares `on_question` and no `requires` at all, so `mid_run_questions` is in its
     requirement because `Role.__post_init__` folded it in - and a reader told only that the role
     "requires mid_run_questions" goes looking for a line that is not in their file. `sdk/roles.py`
-    asks stage 16 for this sentence by name, and this is the test that keeps it there.
+    asks for this sentence by name, and this is the test that keeps it there.
     """
     harness = _fakes(tmp_path)
     stub = _Stub(offers=CANNOT_ASK)
@@ -691,7 +691,7 @@ async def test_a_missing_mid_run_questions_says_that_on_question_put_it_there(
 
 @pytest.mark.asyncio
 async def test_a_missing_tool_calling_says_that_tools_put_it_there(tmp_path: Path) -> None:
-    """The same clause one implication over, owed for the same reason and added at 19.2.
+    """The same clause one implication over, owed for the same reason.
 
     `reporter()` declares `tools=` and no `requires` at all, so `tool_calling` is in its requirement
     because `Role.__post_init__` folded it in - and "either the role names a model whose backend
@@ -736,9 +736,9 @@ async def test_a_role_that_typed_the_member_itself_gets_no_extra_clause(tmp_path
 
 @pytest.mark.asyncio
 async def test_a_negotiating_role_is_checked_at_the_step_it_is_handed_to(tmp_path: Path) -> None:
-    """**What makes §3.2's third check real, and what UF1.3 costs, in one run.**
+    """**What makes the third check real, and what the registry costs, in one run.**
 
-    §3.7's handler is a closure over the `Run`, so a workflow that negotiates calls its role's
+    A question handler is a closure over the `Run`, so a workflow that negotiates calls its role's
     factory - `declared(on_question=handler)` - inside its own function, and that value has a
     requirement no scan of a namespace could have seen: the value did not exist until the body ran.
     Preflight admitted a model, and the step is where the difference becomes visible.
@@ -748,10 +748,10 @@ async def test_a_negotiating_role_is_checked_at_the_step_it_is_handed_to(tmp_pat
     simply absent, the step reports a result, and nothing anywhere raises. That is the outcome
     `sdk/roles.py` spends four paragraphs refusing to accept.
 
-    **The record is asserted present, and since UF1.3 that assertion carries two meanings.** It is
-    still the contrast that makes this the other half rather than a copy of the first - preflight
-    passed, so the run exists and only one step of it was refused. It is now also the cost the stage
-    accepted written down where it can be checked: a capability mismatch is caught here, with a
+    **The record is asserted present, and that assertion carries two meanings.** It is still the
+    contrast that makes this the other half rather than a copy of the first - preflight passed, so
+    the run exists and only one step of it was refused. It is now also the accepted cost written
+    down where it can be checked: a capability mismatch is caught here, with a
     record written and a worktree opened, and no earlier - so this run needs an `agl clear` where
     one refused at second zero does not.
     """
@@ -783,7 +783,7 @@ async def _direct(harness: container.FakeServices, agents: AgentRunner) -> Run[N
     anyway, which is what `sdk/_engine/preflight.py` means by "containment needs no injection".
 
     The base is resolved through the bundle's own `History` rather than read off the repository,
-    because that is the value `api.run` pins into `RunSpec.base_sha` and hands `Run` (§3.6).
+    because that is the value `api.run` pins into `RunSpec.base_sha` and hands `Run`.
     """
     history = harness.services.history
     return Run(
@@ -801,18 +801,18 @@ async def test_the_step_time_check_costs_one_capabilities_call_per_model_per_run
     """One question per model for the whole run, children included - which is why `Capabilities` is
     a field on `Run` handed down by `_child` rather than something each namespace builds.
 
-    Four steps over two models in two namespaces, and two calls. §3.2 contracts the answer stable
+    Four steps over two models in two namespaces, and two calls. The port contracts it stable
     for the duration of a run, so a table per namespace would be asking a second time for an answer
     that cannot have changed - and the child is in this test because a per-namespace table passes
     every version of it that only steps in the root.
 
-    **Two models rather than one, since UF1.3.** The claim that two answers to a question contracted
-    to have one would let a run admit a role and refuse its twin used to be measured at second zero,
-    over the declared tuple; there is no such moment now, so it is measured here, where the calls
-    are. Order is asserted with the count for the same reason it is in half one.
+    **Two models rather than one.** The claim that two answers to a question contracted to have
+    one would let a run admit a role and refuse its twin used to be measured at second zero, over
+    the declared tuple; there is no such moment now, so it is measured here, where the calls are.
+    Order is asserted with the count for the same reason it is in half one.
 
-    Three calls on one role, since the call carries no name (§3.3): the first two share an address
-    and are separated by §3.6's counter, and the third is in a namespace of its own. What is counted
+    Three calls on one role, since the call carries no name: the first two share an address and are
+    separated by the counter, and the third is in a namespace of its own. What is counted
     here is dispatches and questions, neither of which the addresses decide.
     """
     harness = _fakes(tmp_path)

@@ -88,8 +88,13 @@ async def _halted(process: asyncio.subprocess.Process) -> int:
 
 
 def _signalled(process: asyncio.subprocess.Process, sign: signal.Signals) -> None:
-    with suppress(ProcessLookupError, PermissionError):
+    if process.returncode is not None:
+        return
+    try:
         os.killpg(process.pid, sign)
+    except (ProcessLookupError, PermissionError):
+        with suppress(ProcessLookupError):
+            process.send_signal(sign)
 
 
 def _text(captured: Sequence[bytes]) -> str:

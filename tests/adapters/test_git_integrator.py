@@ -2,22 +2,21 @@
 real processes show.
 
 The first class is the port in full: `IntegratorContract` with its three fixtures overridden and
-nothing else touched. Everything `Integrator` promises is asserted there, by a suite written at
-stage 3 against the port's docstrings and before this adapter existed - which is the inversion the
-build rests on (§1.9), and the reason nothing below re-asserts any of it.
+nothing else touched. Everything `Integrator` promises is asserted there, by a suite written
+against the port's docstrings and before this adapter existed - which is the inversion
+`tests/contracts/` rests on, and the reason nothing below re-asserts any of it.
 
 What is below is what that suite says outright it cannot see. Its own docstring lists ten gaps;
 these are the ones this adapter can close, in the order they matter:
 
   * **That the hold survives the process that took it** (gaps 2 and 8). "Nothing here can kill a
     process", and nothing inspects a held target, so a hold kept in an attribute passes every test
-    in that suite - and §3.4 says in as many words that it must not be one: *a run that dies
-    holding a target can only be released by a later invocation, so the hold has to be readable
-    from the repository*. That is asserted here across three real processes, one of which is killed
-    outright while holding.
+    in that suite - and it must not be one: *a run that dies holding a target can only be
+    released by a later invocation, so the hold has to be readable from the repository*. That is
+    asserted here across three real processes, one of which is killed outright while holding.
   * **What a resumed run is told when it lands into that inherited hold** (the same two gaps, from
-    the other side). §3.4 requires the answer to be a `Conflict` and forbids exit 70 on resume, and
-    the situation only exists across a process boundary - a lease keeps one process from reaching
+    the other side). The answer has to be a `Conflict`, never exit 70 on resume, and the
+    situation only exists across a process boundary - a lease keeps one process from reaching
     it - so the second test below kills a process holding and then offers the same child again from
     a fresh one.
   * **That a `retry` ever lands** (gap 1). "Only the conflicted case is exercised here... an
@@ -29,9 +28,9 @@ these are the ones this adapter can close, in the order they matter:
     is the other half: that it names the files that collided and *not* the ones that did not.
   * **That the user's own checkout is untouched.** Not in the suite's list at all, because from
     inside it there is no such thing: it holds two workspaces and knows nothing about a repository
-    they were cut from. §3.9's whole premise is that `git status` in `repo/` stays clean while a run
-    lands work, and a landing runs `git merge`, which is the one command in this package with an
-    obvious wrong place to run it.
+    they were cut from. The whole premise of a worktree layout is that `git status` in `repo/`
+    stays clean while a run lands work, and a landing runs `git merge`, which is the one command
+    in this package with an obvious wrong place to run it.
 
 Two more sit beside those, and neither is a gap in the suite - they are decisions this adapter made
 that nothing else would notice: that a person's own configuration cannot decide whether a landing
@@ -308,8 +307,8 @@ def _hooked(repository: Path, where: Path, root: Path) -> Path:
     """Give `repository` a hooks directory of its own, prove git runs what is in it, and hand back
     the file those hooks write to.
 
-    An operator's own hook is target-repo configuration reaching a run through a door §3.5 does not
-    name, and the two ways an arrangement like this passes while testing nothing are both closed
+    An operator's own hook is target-repo configuration reaching a run through a door AGL never
+    opened, and the two ways an arrangement like this passes while testing nothing are both closed
     here. `core.hooksPath` is set **absolute**, because git resolves a relative one against the
     working tree and a landing happens in a worktree, so a relative path would name a directory
     that is not there. And every hook is **made executable**, because git skips one that is not,
@@ -388,7 +387,7 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     sees them too, and so that the subprocesses started below inherit them in turn. The identity
     variables are set because a merge commit needs an author and this package invents none.
 
-    It is at `tmp_path/repo` with the trees root as its sibling, which is the layout §3.9 draws.
+    It is at `tmp_path/repo` with the trees root as its sibling, which is the layout a run uses.
     """
     for name in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"):
         monkeypatch.setenv(name, str(tmp_path / "nonexistent-git-config"))
@@ -451,7 +450,7 @@ class TestGitIntegrator(IntegratorContract):
 
     @pytest.fixture
     def base(self, repository: Path) -> str:
-        """A resolved commit id, which is the shape a run's own workspace is cut from (§3.6)."""
+        """A resolved commit id, which is the shape a run's own workspace is cut from."""
         return _git(repository, "rev-parse", "HEAD").strip()
 
 
@@ -460,7 +459,7 @@ async def _collide(
 ) -> tuple[Workspace, Workspace, str]:
     """Land one child, collide the next with it, and hand back the target, the sibling and the head.
 
-    §3.4's merge train, built the way the contract suite builds it and with this file's own names.
+    A merge train, built the way the contract suite builds it and with this file's own names.
     The head is the one the *first* landing left, which is where `abort` promises to put the target
     back - not the state the run started in.
     """
@@ -490,13 +489,13 @@ async def _collide(
 async def test_a_hold_taken_by_a_process_that_dies_is_found_and_released_by_later_ones(
     repository: Path, trees: TreesRoot, base: str, provider: WorkspaceProvider
 ) -> None:
-    """§3.4's durable hold, which is the one thing in this deliverable no contract suite can catch.
+    """The durable hold, which is the one thing in this deliverable no contract suite can catch.
 
     *The hold must be durable, not in-memory. A run that dies holding a target can only be released
     by a later invocation, so the hold has to be readable from the repository - an in-memory hold
-    makes a resumed run's `abort()` a silent no-op and leaves the target half-combined forever.* The
-    plan adds that a contract suite cannot catch this, since both implementations pass, and
-    `integration.py`'s own gap list says the same twice over: nothing inspects a held target, and
+    makes a resumed run's `abort()` a silent no-op and leaves the target half-combined forever.* No
+    contract suite can catch that, since both implementations pass, and `integration.py`'s own gap
+    list says the same twice over: nothing inspects a held target, and
     nothing there can kill a process.
 
     So this test is three processes. The first lands one child, collides the next with it, and is
@@ -536,8 +535,8 @@ async def test_a_hold_taken_by_a_process_that_dies_is_found_and_released_by_late
 
     assert found.returncode == 0, (
         f"a fresh process asked the target it inherited to retry the landing and could not: "
-        f"{found.stderr}. A hold that only the process which took it can see is the one §3.4 "
-        f"refuses - the run that dies holding a target is exactly the run that cannot release it"
+        f"{found.stderr}. A hold that only the process which took it can see is the one a "
+        f"durable hold refuses - the run that dies holding a target cannot release it"
     )
     looked = json.loads(found.stdout)
     assert looked["conflicted"] is True, (
@@ -573,12 +572,12 @@ async def test_a_hold_taken_by_a_process_that_dies_is_found_and_released_by_late
 async def test_a_resumed_run_landing_into_an_inherited_hold_is_told_so_rather_than_exit_70(
     repository: Path, trees: TreesRoot, base: str, provider: WorkspaceProvider
 ) -> None:
-    """§3.4's resumed hold, in the one shape that actually produces it: two real processes.
+    """The resumed hold, in the one shape that actually produces it: two real processes.
 
     *A resumed run must be able to find a hold it did not take. The durable hold is what makes a
     crash-during-conflict recoverable - but `integrate()` is not a step, so nothing journals it,
     and a resumed run calls `land()` into a target still holding the previous process's merge.*
-    The plan ends that paragraph with **not exit 70 on resume**, and this is the test of it: an
+    The rule that follows is **not exit 70 on resume**, and this is the test of it: an
     `InternalError` here is exit 70 out of a run that has done nothing wrong, about a repository
     the person can still put right with `retry` or `abort`.
 
@@ -595,8 +594,8 @@ async def test_a_resumed_run_landing_into_an_inherited_hold_is_told_so_rather_th
     both lines of work, the head has not moved, the sibling's own commit is still not in the
     target's past, and the hold is still there afterwards - `retry` conflicting again, which is the
     only question this port answers about a hold. Then this process releases it and the target is
-    back where the landing that *succeeded* left it, which is the whole of the recovery §3.4 says
-    the durable hold exists for.
+    back where the landing that *succeeded* left it, which is the whole of the recovery a durable
+    hold exists for.
     """
     situation = {
         "repository": str(repository),
@@ -623,7 +622,7 @@ async def test_a_resumed_run_landing_into_an_inherited_hold_is_told_so_rather_th
 
     assert resumed.returncode == 0, (
         f"a fresh process offered work to the target it inherited and could not be told what was "
-        f"in the way: {resumed.stderr}. §3.4 calls a hold nobody released a conflict and forbids "
+        f"in the way: {resumed.stderr}. A hold nobody released is a conflict, never "
         f"exit 70 on resume - the run that meets one has done nothing wrong, and the state is one "
         f"a person can still put right"
     )
@@ -656,7 +655,8 @@ async def test_a_resumed_run_landing_into_an_inherited_hold_is_told_so_rather_th
     )
     assert offered["pending"] is True, (
         "the hold was gone by the time the resumed process asked, so landing over it consumed the "
-        "collision somebody may be in the middle of resolving - which is the shortcut §3.4 forbids"
+        "collision somebody may be in the middle of resolving - the forbidden `abort`-first "
+        "shortcut"
     )
 
     target = await provider.open(LABEL, None, base)
@@ -684,7 +684,7 @@ async def test_a_retry_lands_once_the_collision_is_resolved_in_the_held_target(
 
     The contract suite cannot reach it, and says why: resolving a collision means putting the held
     target into a state the suite would have to know the shape of, which is the one piece of
-    knowledge §3.4 removed from this port on purpose. From out here it is what a person at the
+    knowledge this port was relieved of on purpose. From out here it is what a person at the
     workflow's conflict screen does - open the file, decide, and tell git the decision.
 
     What is asserted is that the landing actually completed rather than merely stopping conflicting:
@@ -792,9 +792,9 @@ async def test_the_conflict_names_the_files_that_collided_and_only_those(
 async def test_the_user_s_own_checkout_is_untouched_by_every_verb_on_this_port(
     integrator: Integrator, provider: WorkspaceProvider, base: str, repository: Path
 ) -> None:
-    """§3.9's premise, asserted against the one command in this package that could break it.
+    """The worktree premise, asserted against the one command in this package that could break it.
 
-    *AGL never writes into the target repo except through a `Workspace`* (§3.5), including its own
+    *AGL never writes into the target repo except through a `Workspace`*, including its own
     integration branch, which lives in a `_base` worktree rather than the user's checkout - and
     `git status` in `repo/` stays clean while a run is going. A landing is `git merge`, which writes
     a commit, moves a ref and rewrites a working tree, so where it runs is load-bearing in a way
@@ -817,14 +817,14 @@ async def test_the_user_s_own_checkout_is_untouched_by_every_verb_on_this_port(
 
     assert _git(repository, "symbolic-ref", "HEAD").strip() == on == f"refs/heads/{TRUNK}", (
         "the user's checkout is on a different branch than the one it was on before a run landed "
-        "anything, so AGL checked something out in the directory §3.9 says it never touches"
+        "anything, so AGL checked something out in the directory it never touches"
     )
     assert _git(repository, "rev-parse", "HEAD").strip() == base, (
         "the user's checkout is at a different commit than the one it was on. The run's own line "
         "of work advances with every landing, and it advances in a worktree of AGL's"
     )
     assert _git(repository, "status", "--porcelain").strip() == before == "", (
-        "a landing left the user's working directory dirty. §3.9's whole premise is that they can "
+        "a landing left the user's working directory dirty. The whole premise is that they can "
         "carry on working in it while a run is going"
     )
     assert not _git_answers(repository, "rev-parse", "--verify", "--quiet", "MERGE_HEAD"), (
@@ -884,8 +884,8 @@ async def test_a_resolution_recorded_on_this_machine_does_not_resolve_a_landing(
     With it on, git replays a conflict resolution recorded earlier *on this machine* and stages it,
     so the same two branches conflict on one developer's machine and land on another - and the
     combination the build gate then decides about was resolved by a cache nobody in this run saw.
-    §3.4 forbids exactly that: a conflict is "not resolved by guessing", and a resolution AGL cannot
-    show anybody is a guess from where the workflow is standing.
+    That is exactly what is forbidden: a conflict is not resolved by guessing, and a resolution
+    AGL cannot show anybody is a guess from where the workflow is standing.
 
     The recording is made the only way it can be, by having the collision once and resolving it
     with git directly, and then put back. What is asserted afterwards is that the landing still
@@ -998,12 +998,12 @@ async def test_a_landing_is_a_merge_commit_and_runs_no_program_a_person_configur
 async def test_a_branch_name_spelled_like_a_git_option_is_a_value_and_never_an_option(
     integrator: Integrator, provider: WorkspaceProvider, base: str, repository: Path, tmp_path: Path
 ) -> None:
-    """The audit 5.3 asked for, on the command in this package with the most to lose by it.
+    """The argv audit, on the command in this package with the most to lose by it.
 
     Argv discipline stops a value being read as *shell* syntax and does nothing about one being read
     as a git *option*. `git merge` takes `-F <path>`, which reads a file into the commit message, so
-    a branch spelled `--file=/etc/anything` is that file going into the target's history - the same
-    hazard 5.3 found on `diff-tree --output=` and reproduced.
+    a branch spelled `--file=/etc/anything` is that file going into the target's history - the
+    same hazard that was found and reproduced on `diff-tree --output=`.
 
     **The condition that makes it observable is an upstream on the target's branch**, and it is set
     here on purpose rather than waited for. An option that eats itself leaves `git merge` with no
@@ -1017,7 +1017,7 @@ async def test_a_branch_name_spelled_like_a_git_option_is_a_value_and_never_an_o
     branch named that would be a release. What is asserted is what was always asserted here - the
     hold is still there afterwards, which is what a value read as that option would have taken away
     - and only the answer to the call itself has changed, from `InternalError` to the conflicted
-    outcome stage 14 made a pre-existing hold (§3.4).
+    outcome a pre-existing hold now answers with.
 
     **That change moved what makes this half pass**, and saying so is worth more than leaving a
     reader to assume: `land` now answers a held target before it composes any argv at all, so the
@@ -1054,7 +1054,7 @@ async def test_a_branch_name_spelled_like_a_git_option_is_a_value_and_never_an_o
     over_the_hold = await integrator.land(_Renamed(child, "--abort"), target)
     assert over_the_hold.conflicted is True, (
         f"landing into a target that is already holding a landing answered with head "
-        f"{over_the_hold.head!r}. §3.4 makes that state a conflict rather than exit 70, and a head "
+        f"{over_the_hold.head!r}. That state is a conflict rather than exit 70, and a head "
         f"here would claim work went into a target that is still mid-landing"
     )
 

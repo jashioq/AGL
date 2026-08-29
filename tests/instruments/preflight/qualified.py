@@ -1,11 +1,12 @@
 """A workflow module that reaches its role through a module: `from . import roles`.
 
-The spelling UF1.3 could not see and UF1.5 is about. Nothing here binds a `RoleFactory` - the only
-name this module imports from next door is `roles`, a module - so a scan of `vars(sys.modules[...])`
-alone finds no factory, asks **zero** backends anything, clears second zero naming no provider, and
-lets the run die at its first step with whatever the adapter says. That is the failure §3.2 exists
-to prevent, arriving with no warning, and `@workflow(roles=[...])` could not have had it because
-the list named the roles.
+The spelling a scan of the workflow's own namespace cannot see. Nothing here binds a `RoleFactory`
+- the only name this module imports from next door is `roles`, a module - so a scan of
+`vars(sys.modules[...])` alone finds no factory, asks **zero** backends anything, clears second
+zero naming no provider, and lets the run die at its first step with whatever the adapter says.
+That is the failure `AgentRunner.check_ready` in `src/agl/ports/agent.py` exists to prevent,
+arriving with no warning, and `@workflow(roles=[...])` could not have had it because the list
+named the roles.
 
 It is a module of its own for `unused.py`'s reason: the claim is about a *namespace*, and
 `tests/sdk/test_preflight.py`'s own holds six factories bound directly. A workflow written there

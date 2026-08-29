@@ -1,7 +1,7 @@
 """The poisoned repository: one configuration per harness, and the obligation to ignore all of it.
 
-§3.5, in as many words: **the target repo contributes source code and nothing else.** Each harness
-discovers its own configuration differently, and the plan puts the assertion here, in the agent
+The rule, in as many words: **the target repo contributes source code and nothing else.** Each
+harness discovers its own configuration differently, so the assertion belongs here, in the agent
 port's contract suite, as a fixture repo carrying a poisoned config for *every* harness.
 
 **Every adapter runs against the whole poisoned repository and must ignore all of it, its own
@@ -36,8 +36,8 @@ a failure names which configuration leaked rather than reporting that something,
 
 **Against a fake runner this test is trivially satisfied**, because a fake reads no configuration at
 all: it never opens `CLAUDE.md`, so it cannot echo what is in it. That is not a reason to weaken the
-test. Its value is against the real adapters at stages 6 and 7, where the fixture is pointed at
-something that genuinely resolves a harness's configuration, and it is written to bite there.
+test. Its value is against the real adapters, where the fixture is pointed at something that
+genuinely resolves a harness's configuration, and it is written to bite there.
 
 **And the poison is instructions, so it only lands if the agent acts on it.** An adapter that hands
 a harness the whole of a target repo's configuration, in front of a model that then ignores it,
@@ -251,7 +251,7 @@ def _report(leaked: Sequence[str]) -> str:
     found = "\n  ".join(leaked)
     return (
         f"a configuration planted in the workspace reached the agent:\n  {found}\n"
-        f"§3.5: the target repo contributes source code and nothing else. A workspace is a "
+        f"the target repo contributes source code and nothing else. A workspace is a "
         f"checkout of somebody's repository, so an adapter that lets a checkout configure the "
         f"agent has let the target repo decide what AGL does - and this obligation is every "
         f"adapter's, for every harness's configuration, not only for the one it happens to drive."

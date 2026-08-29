@@ -26,11 +26,11 @@ observable - a live argument mutated after the call reaches the screen with no s
 response that did not exist when the view was registered can be picked - and that is what a workflow
 depends on when it passes the live dict of child runs.
 
-**No frame rate is encoded anywhere**, and none should be: §3.7's ~10 Hz is an implementation's
-choice and a terminal that redraws once a second is not breaking a promise. Every wait below is a
-deadline on hanging. The cost is stated in `terminal.py`'s gaps: an implementation that derives the
-screen from the registration only when somebody asks what is displayed passes these tests, because
-from outside it is indistinguishable from one that derives it on a timer.
+**No frame rate is encoded anywhere**, and none should be: a redraw loop's ~10 Hz is an
+implementation's choice and a terminal that redraws once a second is not breaking a promise. Every
+wait below is a deadline on hanging. The cost is stated in `terminal.py`'s gaps: an implementation
+that derives the screen from the registration only when somebody asks what is displayed passes
+these tests, because from outside it is indistinguishable from one that derives it on a timer.
 
 `TerminalContract` in `terminal.py` inherits this class. Implementers subclass that one, never this
 one, and the `terminal` and `driver` fixtures these tests take are declared there and in
@@ -74,7 +74,7 @@ from ._terminal_views import (
 _GROWN_RESPONSE: Final = 1
 
 # What a ticket with no run behind it yet shows in its activity cell. `Text`'s own docstring calls
-# an empty label ordinary, and §3.7's board writes exactly this.
+# an empty label ordinary, and a ticket board writes exactly this.
 _NOTHING_YET: Final = ""
 
 
@@ -194,7 +194,7 @@ class TerminalRegistrationContract:
     async def test_a_live_argument_reaches_the_slot_without_the_workflow_showing_anything_again(
         self, terminal: Terminal, driver: TerminalDriver
     ) -> None:
-        """§3.7's board, mutated in place: this is why arguments need not be values.
+        """A ticket board, mutated in place: this is why arguments need not be values.
 
         `show` registers the view **and its arguments**, so passing the live dict of child runs
         works - the lookup is evaluated again each time the view is invoked, and mutating something

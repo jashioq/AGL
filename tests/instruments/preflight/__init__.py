@@ -1,8 +1,9 @@
 """Four workflow *modules* for `tests/sdk/test_preflight.py`, because a namespace is the claim.
 
-Since UF1.3 a workflow's roles are the `@role(model=…)` factories bound in the module its `def` was
-executed in, and since UF1.5 also those bound in any module bound there - §3.11's "One declaration,
-not two" - so a claim about *which* roles preflight demands a provider for is a claim about a module
+A workflow's roles are the `@role(model=…)` factories bound in the module its `def` was executed
+in, and also those bound in any module bound there. That is one declaration and not two, which is
+why `@workflow` carries no `roles=` list - see `ARCHITECTURE.md`'s "Deliberately not built" - and
+it makes a claim about *which* roles preflight demands a provider for a claim about a module
 namespace. Four of that suite's claims therefore cannot be made inside it:
 `tests/sdk/test_preflight.py` is one namespace and holds six factories bound directly over two
 models, which is the right shape for the claims about dedup and ordering and the wrong shape for
@@ -12,15 +13,16 @@ So they live here, as four modules that are each nothing but the thing they are 
 
   * `unstaffed` - no role factory at all, so preflight asks no backend anything. `workflows/noop/`'s
     shape, and what keeps a workflow that runs no agent runnable on a machine with no harness.
-  * `unused` - one factory imported and never stepped with, which is the stage's "known cost,
-    accepted": the run is refused for a provider it was never going to use.
+  * `unused` - one factory imported and never stepped with, a known cost that was accepted: the
+    run is refused for a provider it was never going to use.
   * `late` - a factory written *below* the workflow function, which is not bound when the decorator
     runs and is bound by the time preflight reads the namespace.
   * `qualified` - a factory reached as `roles.implementer()` after `from . import roles`, so the
-    workflow's own namespace binds a **module** and no factory at all. UF1.5's defect, and the one
-    of the four whose failure was silent: the scan found nothing, asked nobody, and the run died at
-    its first step. Its role lives one file over in `roles.py`, which is a module and not a fifth
-    workflow - the binding is what is being measured, so there has to be something to bind.
+    workflow's own namespace binds a **module** and no factory at all. This is the regression that
+    made the scan one level deep necessary, and the one of the four whose failure was silent: the
+    scan found nothing, asked nobody, and the run died at its first step. Its role lives one file
+    over in `roles.py`, which is a module and not a fifth workflow - the binding is what is being
+    measured, so there has to be something to bind.
 
 They are modules on disk rather than `types.ModuleType` values built in a fixture, because what is
 being measured is what an author's own file does to a namespace. A synthetic module would need its

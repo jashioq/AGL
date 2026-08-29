@@ -1,8 +1,8 @@
 """`OpenAiRunner` against the `AgentRunner` contract, plus the clauses that suite cannot see.
 
 The first class is the port in full: `AgentContract` with its two fixtures overridden and nothing
-else touched. That suite was written at stage 3, against the port's docstrings and before any
-adapter existed (§1.9), which is why nothing below re-asserts any of it.
+else touched. That suite was written against the port's docstrings and before any adapter
+existed, which is the inversion `tests/contracts/` rests on and why nothing below re-asserts it.
 
 **Eight of its ten tests start a real agent, and none of them runs - anywhere, on any machine.**
 Seven of the eight read a *model's* conduct as their evidence: that it called a tool, that it
@@ -17,10 +17,11 @@ this test start an agent", which is a fact about the *port member* rather than a
 so no list here goes stale when a test in that suite is renamed. `capabilities` and `check_ready`
 are the real thing in both cases and run unconditionally.
 
-**No test in this file runs the harness's agent command.** That is the stage's rule and it is
-structural here rather than promised: the two things this module starts are a *stub* CLI it writes
-itself, and the real binary's model-free subcommands. `tests/conftest.py` additionally points
-`CODEX_HOME` at an empty directory for every test in the repository, so a real binary any test
+**No test in this file runs the harness's agent command.** No test in this repository spends
+tokens, and here that is structural rather than promised: the two things this module starts are a
+*stub* CLI it writes itself, and the real binary's model-free subcommands. `tests/conftest.py`
+additionally points `CODEX_HOME` at an empty directory for every test in the repository, so a real
+binary any test
 starts has no credential to spend - asserted below rather than believed.
 
 ## What is asserted for real, and with what
@@ -42,19 +43,21 @@ caught in a second on a laptop with no session.
 **The real binary, for the two questions it answers for free.** `login status` decides
 `check_ready` locally out of its own credential store, so this file exercises the refusing branch
 against the credential-free home `tests/conftest.py` installs. And `debug prompt-input` renders the
-model-visible prompt as JSON and contacts nothing, which makes §3.5 assertable without a model:
+model-visible prompt as JSON and contacts nothing, which makes hermeticity assertable with no
+model:
 the adapter's own configuration overrides are lifted off the command line it composed and handed to
 it in a poisoned repository, with a control run proving the poison was there to find.
 
 Both are gated on the binary being installed and on nothing else. There is deliberately no opt-in
-switch: neither subcommand reaches a model, both are named in the stage's own list of free
-instruments, and gating a free measurement behind a variable is how a measurement stops being made.
+switch: neither subcommand reaches a model, both are free instruments, and gating a free
+measurement behind a variable is how a measurement stops being made.
 
 ## What follows the contract subclass, in rough order
 
   * **The command line it composes** - the hermeticity overrides, the sandbox mode, the model, the
     servers, the prompt's absence from it, and the workspace's absence from it.
-  * **§3.5, three ways**: the composed prompt carries nothing the repository wrote; every override
+  * **Hermeticity, three ways**: the composed prompt carries nothing the repository wrote; every
+    override
     the adapter emits loads; and a poisoned repository reaches the model with none of its markers,
     including a `.codex/skills` row the contract suite's own table does not carry.
   * **The argv guards**, which the suite cannot provoke because it supplies neither value.
@@ -116,8 +119,8 @@ _SKIPPED: Final = (
     "raised, needs no conduct; it is deferred only because the contract suite's one knob is the "
     "runner and a real OpenAiRunner reports nothing without a harness to read, and it is asserted "
     "for real against the stub CLI further down this file. No test in this build spends tokens. "
-    "Run the other seven by hand against an authenticated CLI (see docs/manual-qa.md entries 8 and "
-    "9), or do not believe them. What did run is everything below the contract subclass: the "
+    "Run the other seven by hand against an authenticated CLI, or do not believe them. What did "
+    "run is everything below the contract subclass: the "
     "composed command line, the composed prompt, the whole stream reading, and every tool and "
     "question round trip driven against this adapter's own MCP server over real HTTP - plus, where "
     "the binary is installed, the hermeticity overrides checked against a poisoned repository with "
@@ -403,8 +406,8 @@ async def test_the_command_line_carries_every_setting_that_makes_a_session_agls(
     Read off what `run` handed over rather than off a reconstruction in this file: rebuilding the
     argument list here and asserting on the rebuild would assert that this file can build a list,
     which nobody doubts. Every token below closes something `runner.py`'s docstring names, and the
-    four §3.5 overrides are asserted by value because each of them has a default that reads the
-    target repository.
+    four hermeticity overrides are asserted by value because each of them has a default that
+    reads the target repository.
     """
     stub = Stub(tmp_path, steps=[{"say": said("done")}, {"say": started()}])
     repo = workspace(tmp_path)
@@ -453,7 +456,7 @@ async def test_the_command_line_carries_every_setting_that_makes_a_session_agls(
 async def test_the_workspace_is_the_working_directory_and_is_not_on_the_command_line(
     tmp_path: Path,
 ) -> None:
-    """§3.5: the one caller-supplied path this adapter handles never reaches an argument list.
+    """The one caller-supplied path this adapter handles never reaches an argument list.
 
     The harness offers a flag for it and this adapter uses the process's working directory
     instead - a `chdir` between fork and exec, which is never a string anything parses. Both halves
@@ -526,8 +529,8 @@ async def test_a_prompt_with_nothing_standing_around_it_is_the_instructions_verb
 
     The other half is asserted with it: standing context, the restrictions in words and `plan_only`
     all reach the agent, above the instructions, with the instructions still last. Read off the
-    stub's standard input, which is also where §3.5's argument lands - none of this text is on a
-    command line, because the prompt travels on the child's standard input.
+    stub's standard input, which is where a hostile value would land too - none of this text is
+    on a command line, because the prompt travels on the child's standard input.
     """
     repo = workspace(tmp_path)
     bare = Stub(tmp_path / "bare", steps=[{"say": started()}])
@@ -576,7 +579,7 @@ async def test_a_prompt_with_nothing_standing_around_it_is_the_instructions_verb
 async def test_the_prompt_names_the_asking_tool_exactly_when_somebody_can_answer(
     tmp_path: Path,
 ) -> None:
-    """§3.7: "The framework supplies the asking tool (agents are instructed to use it)".
+    """The framework supplies the asking tool, and agents are instructed to use it.
 
     Both halves, on one task run twice, because each is the other's control. A run with a handler
     is told what to call; a run without one is told nothing, since the tool is registered either
@@ -606,8 +609,8 @@ async def test_the_prompt_names_the_asking_tool_exactly_when_somebody_can_answer
     )
     assert f"`mcp__agl_ask__{advertised[0]['name']}`" in told.seen()["stdin"], (
         f"a run carrying a question handler was told nothing about how to ask: "
-        f"{told.seen()['stdin']!r}. §3.7 has the framework supplying the asking tool *and* the "
-        f"agent instructed to use it, and an agent that never learns the tool is there is a "
+        f"{told.seen()['stdin']!r}. The framework supplies the asking tool *and* instructs the "
+        f"agent to use it, and an agent that never learns the tool is there is a "
         f"workflow whose on_question is never called"
     )
     assert "agl_ask" not in untold.seen()["stdin"], (
@@ -616,7 +619,7 @@ async def test_the_prompt_names_the_asking_tool_exactly_when_somebody_can_answer
     )
 
 
-# --- §3.5: what the repository contributes, which is source code and nothing else ----------------
+# --- What the repository contributes, which is source code and nothing else ----------------------
 
 
 def poisoned(root: Path) -> Path:
@@ -664,8 +667,8 @@ async def test_no_marker_from_a_poisoned_repository_is_in_what_this_adapter_tell
 async def test_the_overrides_this_adapter_emits_load_and_silence_a_poisoned_repository(
     tmp_path: Path,
 ) -> None:
-    """§3.5 through the one window this harness opens for free: what it would put in front of a
-    model, rendered without a model.
+    """Hermeticity through the one window this harness opens for free: what it would put in
+    front of a model, rendered without a model.
 
     `debug prompt-input` prints the model-visible prompt as JSON and contacts nothing, and it takes
     the same configuration overrides a run does - so the overrides are lifted straight off the
@@ -686,8 +689,9 @@ async def test_the_overrides_this_adapter_emits_load_and_silence_a_poisoned_repo
     like the contract suite's, is to pass.
 
     What survives all of this, on a machine where it exists, is the *operator's* own
-    `$CODEX_HOME/AGENTS.md`. That is the second channel §3.5 names and §3.11 defers, and it is
-    absent here only because `tests/conftest.py` empties that directory for a different reason.
+    `$CODEX_HOME/AGENTS.md`. Silencing an operator's own machine configuration was deliberately
+    not built - it is theirs, not the repository's - and it is absent here only because
+    `tests/conftest.py` empties that directory for a different reason.
     """
     repo = poisoned(tmp_path)
     stub = Stub(tmp_path / "stub", steps=[{"say": started()}])
@@ -707,7 +711,7 @@ async def test_the_overrides_this_adapter_emits_load_and_silence_a_poisoned_repo
     leaked = [*markers_in(hermetic), *([SKILL_MARKER] if SKILL_MARKER in hermetic else [])]
     assert not leaked, (
         f"the prompt the harness would put in front of a model carries {leaked}, planted in the "
-        f"workspace. §3.5: the target repo contributes source code and nothing else, and these "
+        f"workspace. The target repo contributes source code and nothing else, and these "
         f"overrides are the whole of what stands between a checkout and the agent"
     )
 
@@ -749,7 +753,7 @@ def _rendered(repo: Path, overrides: Sequence[str]) -> str:
 # `True`, and unavoidably so - hermeticity has one right value and a working directory has one right
 # *property* - but it is the strongest thing readable at the call site, which is the same standard.
 CHOSEN: Final[Mapping[str, str]] = {
-    "workspace": "the run's own workspace, provisioned by WorkspaceProvider (§3.9)",
+    "workspace": "the run's own workspace, provisioned by WorkspaceProvider",
     "elsewhere": "a temporary directory of the readiness probe's own",
 }
 
@@ -771,9 +775,9 @@ def test_every_child_this_package_starts_is_started_somewhere_this_adapter_chose
     the same deliberate strictness: a value assembled elsewhere, a literal path, or `None` all fail,
     because a working directory a reviewer cannot see at the call site is one nobody checked.
 
-    Asserted by parsing the package rather than by running it, so that a third child added at a
-    later stage is covered the moment it exists. `tests/adapters/test_shell_verifier.py`
-    established the shape at stage 6, for the same kind of clause;
+    Asserted by parsing the package rather than by running it, so that a third child added later
+    is covered the moment it exists. `tests/adapters/test_shell_verifier.py` established the
+    shape, for the same kind of clause;
     `test_claude_code_runner.py::test_every_session_this_package_opens_is_opened_hermetically` is
     this test's sibling over the hermeticity options that package's sessions carry.
     """
@@ -812,13 +816,13 @@ def test_every_child_this_package_starts_is_started_somewhere_this_adapter_chose
     )
 
 
-# --- §3.5: a value that would parse as a flag -----------------------------------------------------
+# --- A value that would parse as a flag -----------------------------------------------------------
 
 MARKER: Final = "AGL-A-SHELL-EVALUATED-THE-PATH"
 
 # One path component that is a whole command line: a substitution that leaves a file behind, a
-# semicolon, a pipeline, quotes, spaces - and `--output=x`, which is the shape stage 5 found making
-# a read-only git port write a file. `/` and NUL are the only bytes a filename cannot hold.
+# semicolon, a pipeline, quotes, spaces - and `--output=x`, which is the shape that was found
+# making a read-only git port write a file. `/` and NUL are the only bytes a filename cannot hold.
 LOADED_NAME: Final = f"agl $(touch {MARKER}); echo leaked | cat & 'q' \"d\" --output=x tree"
 
 
@@ -867,7 +871,7 @@ async def test_a_workspace_whose_name_would_run_a_command_never_runs_it(
 
 
 def test_a_cli_path_that_would_parse_as_a_flag_is_refused_at_construction() -> None:
-    """§3.5's argv rule on the one value the composition root supplies.
+    """The argv rule on the one value the composition root supplies.
 
     `cli_path` reaches the command line as its own token, so a value beginning with `-` is a flag
     rather than a value - and this particular one names the flag that would switch off the sandbox
@@ -970,7 +974,7 @@ async def test_an_agent_that_said_nothing_answers_with_the_empty_string(tmp_path
 
 @pytest.mark.asyncio
 async def test_a_failed_turn_is_raised_with_the_harnesss_own_words(tmp_path: Path) -> None:
-    """§3.1: the adapter translates at its own boundary, and the CLI's words survive into it.
+    """The adapter translates at its own boundary, and the CLI's words survive into it.
 
     The contract suite's gap 7 says in as many words that it cannot provoke one - "nothing here can
     make a backend fail on demand" - and this is a case a person actually meets. It is also where
@@ -1055,7 +1059,7 @@ async def test_a_completed_turn_that_exits_non_zero_is_still_a_failure(tmp_path:
     the stream looked healthy, because the two ways of being wrong are not symmetrical. A run
     reported as failed when it merely exited oddly costs a step a person can see and re-run; a
     truncated answer returned as `COMPLETED` is a wrong result that looks like a right one, and
-    §3.6 then records it under a fingerprint saying nothing was amiss.
+    the ledger then records it under a fingerprint saying nothing was amiss.
     """
     stub = Stub(tmp_path, steps=[{"say": said("half an ans")}, {"say": started()}], exit=1)
 
@@ -1143,7 +1147,7 @@ async def test_an_event_larger_than_the_read_buffer_is_read_and_one_larger_than_
 async def test_activity_is_the_frames_own_kind_and_the_field_that_kind_is_about(
     tmp_path: Path,
 ) -> None:
-    """§3.7's line, formed by `translate.activity` and passed through untouched.
+    """The activity line, formed by `translate.activity` and passed through untouched.
 
     The contract suite can only assert that whatever arrives is a `str`, because it cannot know
     what the adapter meant to say. This one knows: a command renders as the command, a file change
@@ -1290,7 +1294,8 @@ async def test_a_call_the_server_cannot_carry_is_refused_back_into_the_conversat
 ) -> None:
     """Three malformed calls, and none of them ends the run or reaches a handler.
 
-    §3.3 decides the shape: by the time a call is wrong there is a session in flight holding all
+    The reject-back-to-the-agent rule decides the shape: by the time a call is wrong there is a
+    session in flight holding all
     the reasoning that produced it, and a protocol error is the one answer that gives the model
     nothing to correct. So each of these comes back as a *refused result*, in words, and the run
     carries on to its ordinary ending.
@@ -1323,7 +1328,7 @@ async def test_a_call_the_server_cannot_carry_is_refused_back_into_the_conversat
 
 @pytest.mark.asyncio
 async def test_two_questions_and_two_answers_inside_one_run(tmp_path: Path) -> None:
-    """§3.7: the answer is serialised back into the same session, so a negotiation is rounds.
+    """The answer is serialised back into the same session, so a negotiation is rounds.
 
     One `run`, one child, two tool round trips - which is the clause in the smallest form that can
     hold it. The `Question` handed to the handler is checked field by field, which the contract
@@ -1402,7 +1407,7 @@ async def test_a_question_handler_that_raises_ends_the_run_with_its_own_exceptio
 ) -> None:
     """A headless terminal raising on a view that needs an answer is a real path, not a hypothesis.
 
-    §3.7: a terminal that cannot take input raises `UpstreamUnavailable` on any screen, and a
+    A terminal that cannot take input raises `UpstreamUnavailable` on any screen, and a
     workflow's handler may raise `Stop`. The model is told an answer is not available so that it
     does not block either, and the run then ends on the handler's own exception as soon as the next
     frame arrives - rather than spending an hour of agent time on a run whose asker has failed.
@@ -1501,7 +1506,9 @@ async def test_a_tools_schema_reaches_the_model_as_the_workflow_declared_it(
     assert "title" in declared["inputSchema"], (
         "the fixture this test is pointed at no longer carries a `title`, so the assertion above "
         "no longer says anything about the annotation `sdk/tools.py::_object_schema` writes into "
-        "every derived payload schema - see `_NOTE_SCHEMA` and `docs/manual-qa.md` entry 15"
+        "every derived payload schema - see `_NOTE_SCHEMA`. `title` is a standard JSON Schema "
+        "annotation keyword with no validating behaviour in any draft, which is why it was chosen "
+        "over `$id` and `description` to carry a payload type's identity across the port"
     )
 
     schema = next(entry for entry in asking if entry["name"] == "ask")["inputSchema"]
@@ -1562,7 +1569,8 @@ def test_capabilities_are_the_ports_own_members_and_not_equivalent_strings() -> 
 
 
 def test_a_model_this_adapter_does_not_serve_is_refused_by_both_query_members() -> None:
-    """§3.2: "An adapter handed a `ModelId` it does not serve raises `InputError`."
+    """`src/agl/ports/agent.py`: an adapter handed a `ModelId` it does not serve raises
+    `InputError` and never silently substitutes.
 
     The contract suite can only ever name a model the adapter serves - it has one `model` fixture -
     so the refusal is invisible to it. Both members are asserted because a `capabilities` that
@@ -1601,7 +1609,7 @@ async def test_check_ready_refuses_with_the_clis_own_reason_when_it_is_not_logge
 ) -> None:
     """The refusing branch, and the one exception this member is allowed.
 
-    `tests/contracts/_agent_preflight.py` fails any other exception by name, because §3.2's first
+    `tests/contracts/_agent_preflight.py` fails any other exception by name, because the first
     preflight check catches `UpstreamUnavailable` and nothing else - anything else reaches the top
     of the CLI as exit 70 and tells a person to file a bug about their own logged-out session.
     """
@@ -1621,7 +1629,7 @@ async def test_check_ready_says_the_cli_is_missing_rather_than_raising_an_os_err
     """The other way this member is reached: there is no binary at all.
 
     An `OSError` out of here would escape as a framework bug rather than as a backend that is not
-    ready, which is the one distinction §3.2's preflight is built on.
+    ready, which is the one distinction preflight is built on.
     """
     with pytest.raises(UpstreamUnavailable) as raised:
         await OpenAiRunner(tmp_path / "no-such-binary").check_ready(OpenAI.TERRA)

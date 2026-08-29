@@ -3,10 +3,11 @@ ports.
 
 `tests/contracts/` holds both implementations to everything the three ports *say*. This file holds
 them to everything the ports leave open - and that is where a fake drifts, because a clause nobody
-wrote down is a clause no suite can assert. §1.9's rule is that a fake is a product feature:
-`--dry-run` and plan target #8 ("every command runs end-to-end on fakes alone - no network, no
-git") run on `FakeWorkspaceProvider`, `FakeHistory` and `FakeIntegrator`, so a fake that combines
-what git would reject turns a green all-fakes run into a real run that stops at a conflict screen,
+wrote down is a clause no suite can assert. A fake here is a product feature, not a test artifact:
+`--dry-run` and `tests/test_measurable_targets.py`'s target #8 ("every command runs end-to-end on
+fakes alone - no network, no git") run on `FakeWorkspaceProvider`, `FakeHistory` and
+`FakeIntegrator`, so a fake that combines what git would reject turns a green all-fakes run into a
+real run that stops at a conflict screen,
 with the difference invisible until the day somebody drops the `--dry-run`.
 
 Every test below asks both implementations the same question, in the same order, over two
@@ -43,8 +44,9 @@ test here rather than a discovery in production.
      alone; the fake records a checkout's files and lays a state back out over them, and has no
      ignore rules because ignore rules are one program's file format. Parsing one would put that
      program back inside the module whose whole claim is that there is none of it.
-  2. **A move that also edits.** 5.3 chose rename detection and pays git's default fifty-percent
-     similarity for it. The fake detects a move whose contents are byte-identical and nothing
+  2. **A move that also edits.** The real adapter detects renames and pays git's default
+     fifty-percent similarity for it. The fake detects a move whose contents are byte-identical
+     and nothing
      else, because a second similarity heuristic beside git's would agree in the easy cases and
      disagree near a boundary that moves with the file. Both ends of the band are asserted to
      agree - a pure move is a `RENAMED` from both, a move that rewrites past the threshold is the
@@ -75,7 +77,8 @@ Resource limits are out of scope for the word "divergence" here: a full disk, a 
 PATH_MAX, a repository the user may not write to. Those are the world's answers rather than the
 implementations', and only one of the two is standing in the world at all.
 
-**§3.10's run claim is not a seventh, and it was checked rather than assumed.** `hold` is `flock(2)`
+**The run-level hold is not a seventh divergence, and it was checked rather than assumed.**
+`hold` is `flock(2)`
 on the run's directory in one and a process-wide set in the other, and through the port they answer
 alike: a second claim on one label refuses while a first is open, a claim on another label does not,
 and both let go however the body ends - which is what `tests/contracts/_workspace_holding.py`
@@ -224,10 +227,10 @@ def pair(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Mapping[str, _Bundl
     them too, and the identity variables are set because a commit needs an author and this package
     invents none.
 
-    The two roots are siblings under one `tmp_path` and the layout is §3.9's - a repository, and a
-    trees root beside it - for each. The two bases are two different strings naming two states with
-    identical contents, which is exactly the relationship the ports promise and the reason nothing
-    below compares them.
+    The two roots are siblings under one `tmp_path` and the layout is a run's - a repository, and
+    a trees root beside it - for each. The two bases are two different strings naming two states
+    with identical contents, which is exactly the relationship the ports promise and the reason
+    nothing below compares them.
     """
     for name in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"):
         monkeypatch.setenv(name, str(tmp_path / "nonexistent-git-config"))
@@ -332,7 +335,7 @@ def _drop(workspace: Workspace, name: str) -> None:
 
 
 async def _three(bundle: _Bundle) -> tuple[Workspace, Workspace, Workspace]:
-    """§3.4's merge train: a run's own workspace, and two children of it cut from one base."""
+    """A merge train: a run's own workspace, and two children of it cut from one base."""
     return (
         await bundle.provider.open(LABEL, None, bundle.base),
         await bundle.provider.open(LABEL, CHILD, bundle.base),
@@ -427,8 +430,8 @@ async def test_two_children_that_wrote_incompatible_content_to_one_file_collide_
     Two children each create one path, with contents sharing not one line, and neither of them
     existed in the state both were cut from. There is no combination of those two states that is
     anybody's answer, so an implementation that produced one resolved by guessing - which is the
-    one thing §3.4 says a conflict may never be, and the way a merge train looks clean on fakes and
-    is rejected in anger.
+    one thing a conflict may never be, and the way a merge train looks clean on fakes and is
+    rejected in anger.
 
     `Conflict.paths` is compared whole rather than searched. The port lets an implementation report
     `()` when it cannot enumerate, and both of these can, so what is pinned is that they enumerate
@@ -484,7 +487,7 @@ async def test_two_children_that_edited_neighbouring_lines_of_one_file_collide_o
         assert answer is True, (
             "two edits with not one line between them did not collide. There is one stretch of "
             "the original that both sides rewrote, and combining it means choosing whose line to "
-            "throw away - which is the guess §3.4 says a conflict may never be"
+            "throw away - which is the guess a conflict may never be resolved by"
         )
 
 
@@ -538,7 +541,8 @@ async def test_a_move_is_a_rename_from_both_and_a_rewritten_move_is_a_pair_from_
 ) -> None:
     """Both ends of the rename band, which is what makes divergence 2 the narrow thing it is.
 
-    5.3 chose detection, so a byte-identical move comes back as one `RENAMED` carrying the name it
+    This adapter detects renames, so a byte-identical move comes back as one `RENAMED` carrying
+    the name it
     came from, and a move that also rewrites the file past git's default fifty-percent similarity
     comes back as the `DELETED` and `ADDED` pair it has become. Those are the two answers the
     framework will actually meet, and they have to be the same answer from both implementations or
@@ -574,7 +578,7 @@ async def test_a_move_is_a_rename_from_both_and_a_rewritten_move_is_a_pair_from_
 async def test_contains_agrees_including_the_reflexive_case(
     pair: Mapping[str, _Bundle],
 ) -> None:
-    """`clear`'s one question, in the four shapes it meets (§3.10).
+    """`agl clear`'s one question, in the four shapes it meets.
 
     The costs are asymmetric - a retained name is a stale ref, a deleted one is the entire run - so
     an implementation answering differently from the other decides differently between tidying up
@@ -610,7 +614,7 @@ async def test_contains_agrees_including_the_reflexive_case(
 async def test_restore_removes_untracked_leavings_on_both(
     pair: Mapping[str, _Bundle],
 ) -> None:
-    """§3.3's "moving the head alone is not enough", asked of both.
+    """Moving the head alone is not enough, asked of both.
 
     The two leavings are different shapes on purpose - one beside the recorded files and one
     inside a directory that was not there either - because an implementation that removes
@@ -641,7 +645,7 @@ async def test_restore_removes_untracked_leavings_on_both(
 async def test_reopening_carries_uncommitted_work_on_both(
     pair: Mapping[str, _Bundle],
 ) -> None:
-    """The clause §3.6's replay is built on, and the one a careless implementation passes weakly.
+    """The clause replay is built on, and the one a careless implementation passes weakly.
 
     An implementation that quietly re-provisions a clean checkout passes "opening twice does not
     raise", passes a comparison of paths, and destroys a resume: replay would find no entry for
@@ -765,18 +769,18 @@ async def test_landing_over_a_hold_nobody_released_is_the_same_conflict_from_bot
 
     **This test used to pin `InternalError` from both**, on the rule that the framework calls
     `land` only with the target free: every path out of a conflicted landing owes the target a
-    `retry` or an `abort`, so reaching this one meant AGL had lost track of a hold it took. Stage
-    14 changed the answer in both implementations and this changed with them, so the reason is
-    written here rather than left in a commit message.
+    `retry` or an `abort`, so reaching this one meant AGL had lost track of a hold it took. The
+    durable hold changed the answer in both implementations and this changed with them, so the
+    reason is written here rather than left in a commit message.
 
-    What broke the old rule is the hold outliving the process that took it. §3.4: *a resumed run
-    must be able to find a hold it did not take* - `integrate()` is not a step, so nothing journals
-    it, and a run resuming after a process died mid-conflict reaches the same call with the target
-    still held. `InternalError` there is exit 70 for a state a person can still put right, which
-    the plan refuses in as many words; the exit it names first is the one taken here, because the
-    state *is* a conflict and the workflow already knows how to route one. The rule did not go
-    away - §3.4's lease, which `sdk/_engine/integration.py` holds per integration target, is what
-    keeps a single process from reaching this over a hold of its own.
+    What broke the old rule is the hold outliving the process that took it: *a resumed run must be
+    able to find a hold it did not take* - `integrate()` is not a step, so nothing journals it, and
+    a run resuming after a process died mid-conflict reaches the same call with the target still
+    held. `InternalError` there is exit 70 for a state a person can still put right, which is
+    refused outright; the conflicted answer is the one taken here, because the state *is* a
+    conflict and the workflow already knows how to route one. The rule did not go away - the lease,
+    which `sdk/_engine/integration.py` holds per integration target, is what keeps a single process
+    from reaching this over a hold of its own.
 
     The parity claim is the same strength it was, and covers more of the answer than one error
     class could: both implementations conflict rather than raise, both enumerate the *pending*
@@ -842,8 +846,8 @@ async def test_landing_over_a_hold_nobody_released_is_the_same_conflict_from_bot
             released_to=True,
             holds_after_the_release=_body("the child's own work"),
         ), (
-            "landing into a target that is already holding a landing did not answer the way §3.4's "
-            "first exit says it must: a conflicted outcome naming the pending landing's unresolved "
+            "landing into a target that is already holding a landing did not answer the way a "
+            "pre-existing hold must: a conflicted outcome naming the pending landing's unresolved "
             "file and both lines of work, with the hold still standing, the target where the first "
             "landing left it, the offered work outside it, and `abort` still able to release it"
         )
@@ -943,8 +947,8 @@ async def test_landing_over_unrecorded_work_in_the_target_is_refused_by_both(
     A merge that would write over a file the target's checkout holds and has never recorded is
     refused before anything is touched. Without it a `--dry-run` would quietly destroy an agent's
     uncommitted work at exactly the moment a real run would have stopped and said so - which is
-    §1.9's drift with the sides swapped, and the reason `fake.py` implements the refusal rather
-    than pinning it as a seventh divergence.
+    the fake-drift failure with the sides swapped, and the reason `fake.py` implements the
+    refusal rather than pinning it as a seventh divergence.
     """
 
     async def over_unrecorded_work(bundle: _Bundle) -> object:
@@ -963,7 +967,8 @@ async def test_a_commit_message_git_cleans_away_to_nothing_is_refused_by_both(
     """`UpstreamUnexpected` on both sides of the boundary git's message cleanup actually draws.
 
     A `commit=` template that renders empty is how a workflow reaches this, and it is exactly the
-    §1.9 failure: the step passes `--dry-run` and dies in anger with `Aborting commit due to empty
+    fake-drift failure: the step passes `--dry-run` and dies in anger with `Aborting commit due to
+    empty
     commit message.` - which `GitWorkspaceProvider` hands to `UpstreamUnexpected`, exit 70, on a
     message the fake used to record without comment.
 
@@ -976,8 +981,8 @@ async def test_a_commit_message_git_cleans_away_to_nothing_is_refused_by_both(
     trimmed off. A fake reaching for `str.strip()` here would refuse three of those four, and a
     workflow's ordinary commit line would stop on fakes and land in anger.
 
-    What the two record it *as* is deliberately not compared, and since 19.2 that is a statement
-    about the port rather than about visibility. `History.message` reads a message back, so the
+    What the two record it *as* is deliberately not compared, and that is now a statement about
+    the port rather than about visibility. `History.message` reads a message back, so the
     cleaned form is no longer private business - but what that member promises is that **trailing
     whitespace is not part of a message**, which both implementations keep with one `rstrip` and
     which covers every message AGL writes, a `commit=` template rendering one line. Past that the
@@ -1018,7 +1023,8 @@ async def test_a_commit_message_git_cleans_away_to_nothing_is_refused_by_both(
                 f"the {name} implementation answered {head!r} for a commit under {message!r}, and "
                 f"git records that message: it is not whitespace to git's cleanup, whatever "
                 f"`str.isspace()` says about it. A fake stricter than the thing it stands in for "
-                f"stops a run anger would have carried through, which is §1.9 facing backwards"
+                f"stops a run anger would have carried through, which is that drift facing "
+                f"backwards"
             )
 
 
@@ -1095,14 +1101,14 @@ async def test_an_edited_but_unstaged_resolution_lands_on_the_fake_and_not_on_gi
 
     git records which paths are unresolved in its index and takes `git add` as the word that a
     person is finished with one, so a file edited and not staged is still a conflict. There is no
-    index here, and the `Integrator` port has no staging verb - deliberately, since §1.3's charge
-    was one tool's merge state machine written out as method names - so the only place outside
+    index here, and the `Integrator` port has no staging verb - deliberately, since that would be
+    one tool's merge state machine written out as method names - so the only place outside
     this package where a person's answer can be is the file, and the fake asks whether the markers
     it wrote are still in it.
 
-    The direction matters and is stated: the fake is the permissive one here, which is the shape
-    §1.9 warns about. What bounds it is that both implementations reach this only through a
-    `Conflict` a workflow put on a screen, and §3.4's build gate is what decides whether the
+    The direction matters and is stated: the fake is the permissive one here, which is the drift
+    direction that matters. What bounds it is that both implementations reach this only through a
+    `Conflict` a workflow put on a screen, and the build gate is what decides whether the
     resolution was any good either way.
     """
     answers: dict[str, bool] = {}
@@ -1172,9 +1178,9 @@ async def test_one_state_has_one_identity_on_the_fake_and_one_per_recording_on_g
     an implementation whose answer depends on the clock and one whose answer does not are two
     different things even where they happen to coincide.
 
-    Nothing in AGL is known to depend on either answer - a head is opaque and §3.6 chains entries
-    off the value it recorded - which is why this is a divergence to know about rather than one to
-    close. Closing it would mean putting a counter into a content hash.
+    Nothing in AGL is known to depend on either answer - a head is opaque and the ledger chains
+    entries off the value it recorded - which is why this is a divergence to know about rather
+    than one to close. Closing it would mean putting a counter into a content hash.
     """
     answers: dict[str, bool] = {}
     for name, bundle in pair.items():

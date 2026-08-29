@@ -1,15 +1,15 @@
 """`MemoryStore` against the `Store` contract, plus the clauses only the fake can be asked about.
 
 The first class is the whole of the port: `StoreContract` with its one fixture overridden and
-nothing else touched, the same nineteen tests `FilesystemStore` runs. That is the mechanism §1.9
-asks for - the real adapter and the fake held to one suite, written at stage 3 before either
+nothing else touched, the same nineteen tests `FilesystemStore` runs. That is what
+`tests/contracts/` is for - the real adapter and the fake held to one suite, written before either
 existed - and nothing below re-asserts any of it.
 
 **Copy-in used to be asserted here and is now three clauses of that suite**, where both stores run
-it: §3.6 has the store copy any mapping it is handed, the clause needs no knowledge of what a store
-is made of, and a fake proved to honour it beside a real adapter that was never asked is the drift
-§1.9's Rule 3 exists to stop. The suite's own list of what it cannot see named this and no longer
-does.
+it: a `Store` copies any mapping it is handed, the clause needs no knowledge of what a store is
+made of, and a fake proved to honour it beside a real adapter that was never asked is exactly the
+drift a shared contract suite exists to stop. The suite's own list of what it cannot see named this
+and no longer does.
 
 What is left below is what that suite still deliberately cannot see. One of the two it lists in its
 own docstring as a gap, and the other is a property a store holding its state in a process has that

@@ -3,7 +3,7 @@
 There is no contract suite here and there should not be: `AgentContract` is written against
 `AgentRunner`, and this module implements no port. It is the vendor boundary underneath one - four
 pure functions - so what is asserted below is what those functions produce, and the suite that
-asserts what an `AgentRunner` owes runs against `runner.py` and `fake.py` at 7.2 and 7.3.
+asserts what an `AgentRunner` owes runs against `runner.py` and `fake.py` instead.
 
 **What these tests can and cannot be.** The restriction half of the module is a claim about
 another program's behaviour, and no test in this repository can settle it: asserting that
@@ -167,8 +167,9 @@ class TestRestrictionsObeyThePermissionGrammar:
         They are documented as equivalent and are not: the colon form is matched as a literal
         prefix against the command, while the space form is matched with runs of whitespace
         collapsed - so `git  commit -m x`, with two spaces, defeats the first and not the second.
-        The module docstring has the evidence. §1.1 quotes the colon form, which is exactly why a
-        future reader copying the plan's literal into this module needs a test to stop them.
+        The module docstring has the evidence. The colon form is the one an earlier version of
+        this adapter carried and the one a reader is most likely to copy back in, which is exactly
+        why it needs a test to stop them.
         """
         for rule in restraint(frozenset(Restriction)).denied_tools:
             assert ":*" not in rule, (
@@ -213,8 +214,9 @@ class TestRestrictionsObeyThePermissionGrammar:
         """One rule per restriction that the whole thing is pointless without.
 
         Not a golden copy of the tuples - that would be the same list twice, agreeing because one
-        person edited both. These are the specific rules the plan and the reference name:
-        `Bash(git commit *)` is §1.1's constant in its new home, `Edit(//**)` is what an output
+        person edited both. These are the specific rules that have to be there:
+        `Bash(git commit *)` is the git-write constant in its new home, `Edit(//**)` is what an
+        output
         redirect's target is checked against, and the bare names are the ones the live probe
         watched disappear from a session's tool list.
         """
@@ -248,7 +250,7 @@ class TestModelNames:
 
     @pytest.mark.parametrize("model", list(OpenAI))
     def test_a_model_this_adapter_does_not_serve_is_refused(self, model: ModelId) -> None:
-        """§3.2: refuse, and never substitute.
+        """`src/agl/ports/agent.py`: refuse, and never substitute.
 
         `adapters/routing.py` dispatches on `task.model.provider` and should never send one of
         these here, so arriving is already a bug - but the honest answer to it is a refusal naming
@@ -288,7 +290,8 @@ class TestVendorExceptions:
     def test_each_class_maps_to_its_meaning(
         self, error: ClaudeSDKError, expected: type[Exception]
     ) -> None:
-        """The mapping §3.1 asks for, by what a reader of the exit code should do.
+        """The mapping `src/agl/ports/errors.py` asks for, by what a reader of the exit code
+        should do.
 
         `MessageParseError` is in the list and is deliberately not named in `translate.py`: the SDK
         keeps it in `_errors` and does not export it, so the module leans on the base branch, which
@@ -344,8 +347,9 @@ class TestVendorExceptions:
     def test_a_readiness_probe_always_answers_unavailable(self, error: ClaudeSDKError) -> None:
         """`check_ready`'s one refusal, for every way the SDK can fail a probe.
 
-        The contract suite fails an adapter whose `check_ready` raises anything else, because §3.2's
-        first preflight check catches `UpstreamUnavailable` and nothing else - anything else reaches
+        The contract suite fails an adapter whose `check_ready` raises anything else, because the
+        first preflight check catches `UpstreamUnavailable` and nothing else - anything else
+        reaches
         the top of the CLI as exit 70 and tells the reader to file a bug about their own logged-out
         session. The two classes `translated` would call `UpstreamUnexpected` are in the list, since
         those are the ones a naive `unready = translated` would get wrong.
@@ -382,7 +386,7 @@ class TestActivityStrings:
     def test_the_first_string_in_the_payload_is_the_subject(
         self, name: str, payload: dict[str, Any], expected: str
     ) -> None:
-        """§3.7's own examples, produced by a rule that has never heard of any of these tools.
+        """Four worked examples, produced by a rule that has never heard of any of these tools.
 
         The rule is "the first string value, in arrival order", which is a tool's schema order,
         which puts the argument the call is about first. Four different tools with four differently
@@ -390,7 +394,7 @@ class TestActivityStrings:
         """
         assert activity(_call(name, payload), _WORKSPACE) == expected
 
-    def test_the_edit_example_from_the_plan(self) -> None:
+    def test_an_edit_inside_the_workspace_is_shown_relative_to_it(self) -> None:
         """`Edit: domain/usecase.kt` - the path shortened against the task's own workspace.
 
         The shortening is a rule about a prefix and not about which tools take paths: the value is
@@ -416,9 +420,10 @@ class TestActivityStrings:
     def test_a_tool_this_module_has_never_heard_of_formats_anyway(self) -> None:
         """The proof that there is no table: an invented tool, an invented argument name.
 
-        §3.7 forbids "a framework lookup table", and the adapter-level version of the same mistake
-        is a table here. A name nobody could have listed, formatted correctly, is what says there
-        is not one - and an MCP tool's `mcp__server__name` passes through verbatim for the same
+        A framework lookup table of tool names is forbidden, and the adapter-level version of the
+        same mistake is a table here. A name nobody could have listed, formatted correctly, is what
+        says there is not one - and an MCP tool's `mcp__server__name` passes through verbatim for
+        the same
         reason, since interpreting it would be the first entry in the table that must not exist.
         """
         assert activity(_call("Frobnicate", {"widget": "left"}), _WORKSPACE) == "Frobnicate: left"

@@ -2,9 +2,8 @@
 
 The first class is the whole of both ports: `WorkspaceContract` with its two fixtures overridden
 and nothing else touched. Everything `WorkspaceProvider` and `Workspace` promise is asserted
-there, by a suite written at stage 3 against the ports' docstrings and before this adapter
-existed - which is the inversion the build rests on (§1.9), and the reason nothing below
-re-asserts any of it.
+there, by a suite written against the ports' docstrings and before this adapter existed - which
+is the inversion `tests/contracts/` rests on, and the reason nothing below re-asserts any of it.
 
 What is below is what that suite says it deliberately cannot see, because it is written against a
 port and a port has no git in it. Its own docstring lists the gaps; these are the ones a real
@@ -12,11 +11,11 @@ repository can close:
 
   * **The branch names that actually get created.** The suite treats a branch as an opaque string
     and compares it only to other branches, on purpose - a workspace reports the name it carries
-    rather than the name today's scheme would compute. So the one thing it cannot see is the thing
-    §3.9 spent a paragraph on: `agl/<label>` and `agl/_work/<label>/<ns>` coexisting as refs in one
+    rather than the name today's scheme would compute. So the one thing it cannot see is the
+    branch scheme itself: `agl/<label>` and `agl/_work/<label>/<ns>` coexisting as refs in one
     repository, in either creation order, where the obvious scheme cannot exist at all.
-  * **That the user's own checkout is untouched.** Gap 7 in the suite: "§3.9's 'AGL never touches
-    the user's working directory' is a promise about a directory this suite has no handle on."
+  * **That the user's own checkout is untouched.** Gap 7 in the suite: "'AGL never touches the
+    user's working directory' is a promise about a directory this suite has no handle on."
     This file has the handle.
   * **The lock.** Gap 2: the suite drives one provider in one process and cannot start a second.
     A `threading.Lock` would satisfy every test it can write and protect nothing, so the lock is
@@ -69,15 +68,15 @@ WORK: Final = "agl-acceptance.txt"
 IGNORED_DIR: Final = "build-output"
 IGNORED: Final = f"{IGNORED_DIR}/artifact.bin"
 
-# §3.9's lock file, named here so that this file asserts *where* it is rather than reading the
-# implementation's constant back to itself. A test importing that constant would agree with the
-# adapter whatever either of them said.
+# The worktree registry's lock file, named here so that this file asserts *where* it is rather
+# than reading the implementation's constant back to itself. A test importing that constant would
+# agree with the adapter whatever either of them said.
 LOCK: Final = "worktrees.lock"
 
 # Takes the lock the way another `agl` invocation would - a second process, not a second thread -
 # announces that it has it, and holds it for as long as it was told to. Written as a script and
 # not a thread on purpose: an in-process lock would pass against a `threading.Lock` and prove
-# nothing, and this is the one claim §3.9 makes that the contract suite cannot reach.
+# nothing, and a cross-process lock is the one claim of this kind the contract suite cannot reach.
 HOLDER: Final = """
 import fcntl, os, sys, time
 lock, announcement, seconds = sys.argv[1], sys.argv[2], float(sys.argv[3])
@@ -130,7 +129,7 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     which inherits the environment, and says so - sees them too, and the identity variables are
     set because `commit_all` deliberately does not invent one.
 
-    It is at `tmp_path/repo` and the trees root is its sibling, which is the layout §3.9 draws.
+    It is at `tmp_path/repo` and the trees root is its sibling, which is the layout a run uses.
     Nesting the trees root inside the working tree would make every worktree AGL creates show up
     in the user's own `git status`, and one of the tests below is that it does not.
     """
@@ -199,7 +198,7 @@ class TestGitWorkspace(WorkspaceContract):
 async def test_the_run_branch_and_a_child_branch_coexist_as_refs_in_either_creation_order(
     provider: WorkspaceProvider, repository: Path, base: str
 ) -> None:
-    """§3.9's paragraph, and stage 5's acceptance criterion, asserted through the adapter.
+    """The branch scheme, asserted through the adapter.
 
     `agl/<label>` and `agl/<label>/<ns>` cannot both exist in git - `refs/heads/agl/auth` would
     have to be a file and a directory at once - and `git check-ref-format` passes each name on its
@@ -208,9 +207,9 @@ async def test_the_run_branch_and_a_child_branch_coexist_as_refs_in_either_creat
     is pinned here is that this adapter creates exactly those names and that the pair really does
     survive in a repository, in whichever order a run happens to ask for it.
 
-    The two checkouts being siblings is the other half of §3.9 in the same observation: worktree
-    directories are flat however deep the namespaces nest, because a worktree inside another
-    worktree's working tree shows up in that one's `git status` and in its build gate.
+    The two checkouts being siblings is the other half of the layout in the same observation:
+    worktree directories are flat however deep the namespaces nest, because a worktree inside
+    another worktree's working tree shows up in that one's `git status` and in its build gate.
     """
     run = await provider.open(LABEL, None, base)
     child = await provider.open(LABEL, CHILD, base)
@@ -219,7 +218,7 @@ async def test_the_run_branch_and_a_child_branch_coexist_as_refs_in_either_creat
     assert child.branch == worktree_branch(LABEL, CHILD)
     assert child.path.parent == run.path.parent, (
         "the run's own checkout and its child are not siblings, so one of them is inside the "
-        "other's working tree - which §3.9 flattens the trees root specifically to prevent"
+        "other's working tree - which a flat trees root exists specifically to prevent"
     )
 
     reversed_child = await provider.open(OTHER, CHILD, base)
@@ -239,7 +238,7 @@ async def test_the_run_branch_and_a_child_branch_coexist_as_refs_in_either_creat
 async def test_the_users_own_checkout_is_untouched_and_stays_clean_while_a_run_works(
     provider: WorkspaceProvider, repository: Path, base: str
 ) -> None:
-    """§3.9's promise: AGL never writes into the target repository except through a workspace.
+    """The promise: AGL never writes into the target repository except through a workspace.
 
     Including its own integration branch, which lives in `_base` rather than in the user's
     checkout - so a run provisions two places, commits in both, and the directory the user has
@@ -272,17 +271,17 @@ async def test_the_users_own_checkout_is_untouched_and_stays_clean_while_a_run_w
 async def test_the_registry_lock_is_a_file_in_the_trees_root_and_is_let_go_of_afterwards(
     provider: WorkspaceProvider, trees: TreesRoot, base: str
 ) -> None:
-    """Where §3.9 says it goes, and held for no longer than the two operations it guards.
+    """Where the lock goes, and held for no longer than the two operations it guards.
 
     A lock still held once `open` has returned would be a lock spanning a merge, a build or a
-    person deciding something - the thing §3.9 says it must never be - and nothing about the
-    provider's return value would show it. Asked by another process actually taking it.
+    person deciding something - the thing it must never be - and nothing about the provider's
+    return value would show it. Asked by another process actually taking it.
     """
     await provider.open(LABEL, CHILD, base)
 
     lock = trees.path / LOCK
     assert lock.is_file(), (
-        f"there is no lock file at {lock}. §3.9 puts it in the trees root, which is the root this "
+        f"there is no lock file at {lock}. It belongs in the trees root, which is the root this "
         f"provider was built with, so that nothing has to resolve the repository to find it"
     )
     assert _taken(lock), (
@@ -328,8 +327,8 @@ async def test_a_second_process_holding_the_registry_lock_makes_provisioning_wai
 
     assert waited > WAITED, (
         f"provisioning took {waited:.3f}s while another process held the worktree lock for "
-        f"{HELD:g}s, so it did not wait for it. §3.9's mutex is cross-process - a lock that only "
-        f"holds within one process protects nothing about two `agl run` invocations"
+        f"{HELD:g}s, so it did not wait for it. The registry mutex is cross-process - one that "
+        f"holds only within one process protects nothing about two `agl run` invocations"
     )
     assert workspace.path.is_dir(), "and it did provision once the lock came free"
 

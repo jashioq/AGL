@@ -3,13 +3,13 @@
 Split out of `workspace.py` along a line the port draws itself. `WorkspaceProvider` makes and
 unmakes isolated places; `Workspace` is "one isolated checkout, already provisioned: where it is,
 what it is called, and the three things a step does to it". Those three - `head`, `commit_all` and
-`restore` - are what §3.6's replay is made of, and they are here together because a test for any one
+`restore` - are what replay is made of, and they are here together because a test for any one
 of them has to use the other two to see anything at all: a commit is visible as a head that moved,
 and a restore is visible as a head that moved back and a file that came back with it.
 
 Two of these tests are the reason the deliverable exists.
 
-**`restore` leaves nothing behind.** Stage 2 collapsed reset-and-clean into one method so that
+**`restore` leaves nothing behind.** Reset-and-clean is one method, deliberately, so that
 "restored but not cleaned" is a state no caller can reach by forgetting a line. The test therefore
 dirties a workspace in both ways at once - a tracked file edited, and two files that were never
 recorded, one of them inside a directory that did not exist - because an implementation that resets
@@ -17,7 +17,7 @@ tracked files and stops passes every weaker version of this test, and untracked 
 exact case the method exists for.
 
 **`commit_all` is a no-op when nothing is dirty.** The port says so in as many words, and it is what
-lets §3.3's framework do one predictable thing at the end of every effect step without inspecting
+lets the framework do one predictable thing at the end of every effect step without inspecting
 whether anything moved. It is also, through this interface, the only way to see that a workspace is
 *clean*: there is deliberately no `is_dirty`, so "committing again returns the same head" is what
 "nothing was left behind" looks like from outside.
@@ -168,7 +168,7 @@ class WorkspaceStepContract:
         )
         assert await workspace.head() == recorded, (
             "`head()` disagrees with what `commit_all` just answered. They are the same value "
-            "asked for two ways, and §3.6 writes one of them into the entry it then resets to"
+            "asked for two ways, and one of them is written into the entry the run then resets to"
         )
         assert await workspace.commit_all("nothing is left to record") == recorded, (
             "committing twice in a row answered with two different heads, so the first commit "
@@ -181,11 +181,12 @@ class WorkspaceStepContract:
     async def test_committing_a_workspace_with_nothing_dirty_answers_with_the_unchanged_head(
         self, provider: WorkspaceProvider, base: str
     ) -> None:
-        """§3.6's exact sentence, and the whole reason §3.3 does not have to look before it commits.
+        """The port's exact sentence, and the whole reason nothing has to look before it commits.
 
         Every effect step ends with this call whether or not the agent changed anything, because
         the alternative is the framework inspecting whether the head moved and branching on what
-        the role declared - a branch §3.3 deliberately does not have. A step whose agent changed
+        the role declared - a branch the framework deliberately does not have. A step whose agent
+        changed
         nothing is not an error and is not a special case: it records the head it started from and
         replay carries on from there.
         """
@@ -207,15 +208,15 @@ class WorkspaceStepContract:
 
         The message carries quotes, an ampersand, a pipe, a semicolon, `$(...)`, a blank line and
         two non-ASCII scripts - not to be difficult, but because a workflow author writes the
-        sentence that describes the work and §3.3 narrowed the charset of *names* precisely so that
-        argv discipline would not be the only thing standing between an invented string and
+        sentence that describes the work and the charset of *names* was narrowed precisely so
+        that argv discipline would not be the only thing standing between an invented string and
         something that later grows a shell. Names got narrower; messages did not, so this is where
         an implementation that pastes one into a command line comes apart.
 
         What is *not* asserted here is that the message was stored, or that a reader later sees
         it: this suite holds a `WorkspaceProvider` and nothing that reads a past, so the clause it
         can see is that the message is accepted as written and the commit happens. The other half
-        is `HistoryContract`'s since 19.2, where `History.message` puts this same string through a
+        is `HistoryContract`'s, where `History.message` puts this same string through a
         round trip - which is why it is a module-level constant in `_workspace_files.py` and not a
         literal here.
         """
@@ -237,16 +238,16 @@ class WorkspaceStepContract:
     ) -> None:
         """One method, both halves, and the second half is the one that gets forgotten.
 
-        §3.3 is explicit that moving the head alone is not enough, because untracked files survive
-        it - and untracked leavings are the exact case this exists for: a reviewer's scratch file,
+        Moving the head alone is not enough, because untracked files survive it - and untracked
+        leavings are the exact case this exists for: a reviewer's scratch file,
         an agent's cache directory, a half-written patch. So the workspace is dirtied in both ways
         at once. An implementation that resets tracked files and stops passes a test that only
         edits a tracked file, and the two leavings below are different shapes on purpose: one
         beside the tracked files, one inside a directory that was not there before it.
 
-        §3.6 and §3.3 reach this same primitive at two moments - before re-running a step whose
-        entry is missing, and on the way out of a step that passed no `commit=` - and neither of
-        them looks at what it is throwing away first.
+        Replay and step-ending reach this same primitive at two moments - before re-running a
+        step whose entry is missing, and on the way out of a step that passed no `commit=` - and
+        neither of them looks at what it is throwing away first.
         """
         workspace = await provider.open(LABEL, CHILD, base)
         assert_absent(workspace, TRACKED, SCRATCH, CACHED)
@@ -284,7 +285,7 @@ class WorkspaceStepContract:
     async def test_restore_moves_the_head_back_across_a_commit_it_is_throwing_away(
         self, provider: WorkspaceProvider, base: str
     ) -> None:
-        """§3.6's reset-before-rerun: `last_good` may be several states behind where the tree is.
+        """The reset before a re-run: `last_good` may be several states behind where the tree is.
 
         A crashed attempt leaves no entry, so the next run resets to the last head it recorded and
         starts clean - and an attempt that got as far as committing before it died leaves a head
@@ -304,7 +305,7 @@ class WorkspaceStepContract:
 
         assert await workspace.head() == first, (
             f"restoring to {first!r} left the workspace at something else. `head` changes under "
-            f"`restore` - the port says so - and §3.6 chains the next fingerprint off this value"
+            f"`restore` - the port says so - and the next fingerprint is chained off this value"
         )
         assert read(workspace, TRACKED) == body("first"), "the file is back at the restored state"
         assert read(workspace, ALPHA) is None, (

@@ -184,9 +184,9 @@ def check_trees_root(path: Path, repo: Path, trees_root: Path) -> None:
         f"{path}: {_TREES_ROOT} is inside {_REPO}. {_TREES_ROOT} resolves to {inside} and {_REPO} "
         f"to {around}, so AGL's working checkouts would be cut inside the repository they are cut "
         f"*from* - present in your `git status`, swept up by `git add -A`, and walked by whatever "
-        f"your build walks. AGL lives outside the target repository (§3.5) and keeps its own state "
-        f"under AGL_HOME so that it never appears there (§3.10). Point {_TREES_ROOT} at a "
-        f"directory beside the repository rather than under it"
+        f"your build walks. AGL lives outside the target repository and keeps its own state under "
+        f"AGL_HOME so that it never appears there. Point {_TREES_ROOT} at a directory beside the "
+        f"repository rather than under it"
     )
 
 

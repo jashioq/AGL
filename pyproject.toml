@@ -81,8 +81,9 @@ mypy_path = "src"
 target-version = "py314"
 line-length = 100
 src = ["src", "tests"]
-# `reference/` holds read-only extracts from the previous implementation; never lint it.
-extend-exclude = ["reference"]
+# `reference/` holds read-only extracts from the previous implementation, `scratchpad/` throwaway
+# working files. Neither is part of the package, and a stray `.py` in either fails the lint gate.
+extend-exclude = ["reference", "scratchpad"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

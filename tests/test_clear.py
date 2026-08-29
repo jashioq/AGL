@@ -1,7 +1,7 @@
 """`agl clear <label> [-f]` from the library side: `git branch -d` semantics, and the order.
 
-The stage's acceptance criterion is one sentence - "`clear` on an unmerged branch warns and keeps
-it; `-f` deletes" - and both halves are asked of `FakeServices.repository`, which is the shared
+The acceptance criterion is one sentence - "`clear` on an unmerged branch warns and keeps it; `-f`
+deletes" - and both halves are asked of `FakeServices.repository`, which is the shared
 `FakeRepository` behind all three git fakes. "The branch is still there" and "the branch is gone"
 are therefore questions about the same object `api.clear` acted on through the ports, rather than
 about a note some test double took.
@@ -13,9 +13,9 @@ milliseconds. The workflows are declared in this module and reached through hand
 
 **The runs are real runs.** Nothing below writes a namespace into the store by hand: `nesting`
 takes a worktree and a worktree inside that one and steps in each, so the scopes `clear` traverses
-are the ones §3.6 recorded, at the depths it recorded them at. That matters because the traversal is
-the deliverable's one real algorithm - `Store.namespaces` answers about immediate children and the
-caller recurses - and a test that arranged a flat pair of entries would never walk it.
+are the ones the run recorded, at the depths it recorded them at. That matters because the
+traversal is the one real algorithm here - `Store.namespaces` answers about immediate children and
+the caller recurses - and a test that arranged a flat pair of entries would never walk it.
 
 ## Three claims are worth naming, because each fails silently
 
@@ -36,16 +36,16 @@ it answers "merged" exactly when the run committed nothing - the branch decision
 unmerged and merged tests below are the same run with `main` moved between them, so a `clear` that
 asked about `base_sha` would fail the second and pass the first.
 
-## §3.10's two locks, and the two tests that are about them
+## Two locks, and the two tests that are about them
 
-**AGL's own, which is 17.0's and which the fakes can answer.** §3.10 ends with "It refuses while a
-run holds a lock" and had nothing behind that sentence: no durable "this run is live" record, §3.11
-refusing stored status by name, §3.4's leases in-process. `WorkspaceProvider.hold` is the mechanism
-now - `api.run` and `api.resume` take it across everything durable they do and `api.clear` takes it
-around its removals - and the two tests that drive it issue the `clear` **from inside the
-workflow**, which is the only way one process can be two invocations. The fakes can answer that
-because their claim is a process-wide set; what they cannot answer is release-on-death, and
-`adapters/git/fake.py` says which half is which.
+**AGL's own, which the fakes can answer.** "`clear` refuses while a run holds a lock" had nothing
+behind it for a long time: no durable "this run is live" record, `ARCHITECTURE.md`'s "Deliberately
+not built" refusing stored status by name, and leases in-process. `WorkspaceProvider.hold` is the
+mechanism now - `api.run` and `api.resume` take it across everything durable they do and
+`api.clear` takes it around its removals - and the two tests that drive it issue the `clear` **from
+inside the workflow**, which is the only way one process can be two invocations. The fakes can
+answer that because their claim is a process-wide set; what they cannot answer is release-on-death,
+and `adapters/git/fake.py` says which half is which.
 
 **git's own `worktree lock`, which no fake can grow honestly.** `worktree prune` silently skips a
 locked entry even after its directory has gone, so the registration survives `remove`, and `git
@@ -97,9 +97,9 @@ LABEL: Final = RunLabel("auth")
 SCOPE: Final = RunScope(PROJECT, LABEL)
 
 # The run's two lines of work below `_base`, at two depths: `sub-b` is `T-01`'s child in the store
-# and `T-01`'s sibling in the trees root, which is §3.9's asymmetry and what makes the traversal
-# below a traversal. `_BASE` is the trees layout's own word for the run's own checkout, written out
-# because these tests read the call sequence and `namespace=None` has to appear in it as something.
+# and `T-01`'s sibling in the trees root, which is the asymmetry that makes the traversal below a
+# traversal. `_BASE` is the trees layout's own word for the run's own checkout, written out because
+# these tests read the call sequence and `namespace=None` has to appear in it as something.
 CHILD: Final = Namespace("T-01")
 GRANDCHILD: Final = Namespace("sub-b")
 _BASE: Final = "_base"
@@ -162,12 +162,12 @@ refused: Final[list[ConflictError]] = []
 async def clearing(run: Run[NoParams]) -> None:
     """Clears itself, from inside itself, which is the one way one process can be two invocations.
 
-    §3.10's sentence is about a `clear` in a second `agl` while a run is live in a first, and a
-    suite cannot start a second process and drive `api` in it. What it can do is call `api.clear`
-    at a moment when `api.run` is demonstrably still inside its own claim - which is exactly here,
-    since this function is what `api.run` awaits inside it - and assert that the claim is what
-    refused. The `except` is the test's, not AGL's: `api` catches nothing, so the refusal has to be
-    caught by whoever wants to look at it afterwards.
+    The sentence is about a `clear` in a second `agl` while a run is live in a first, and a suite
+    cannot start a second process and drive `api` in it. What it can do is call `api.clear` at a
+    moment when `api.run` is demonstrably still inside its own claim - which is exactly here, since
+    this function is what `api.run` awaits inside it - and assert that the claim is what refused.
+    The `except` is the test's, not AGL's: `api` catches nothing, so the refusal has to be caught
+    by whoever wants to look at it afterwards.
     """
     try:
         await api.clear(run.services, PROJECT, LABEL)
@@ -176,7 +176,7 @@ async def clearing(run: Run[NoParams]) -> None:
 
 
 def _point(name: str, attribute: str) -> EntryPoint:
-    """§3.3's `probe = "agl.workflows.probe:probe"`, pointed at this module instead."""
+    """A `probe = "agl.workflows.probe:probe"` line, pointed at this module instead."""
     return EntryPoint(name=name, value=f"{__name__}:{attribute}", group=registry.GROUP)
 
 
@@ -242,12 +242,12 @@ def _merged(harness: container.FakeServices) -> None:
     harness.repository.move("main", tip)
 
 
-# --- the stage's acceptance criterion -------------------------------------------------------------
+# --- the acceptance criterion ---------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_clear_on_an_unmerged_branch_warns_and_keeps_it(tmp_path: Path) -> None:
-    """Half one of the criterion, and §3.10's asymmetry: "a retained branch costs a stale ref, a
+    """Half one of the criterion, and the asymmetry: "a retained branch costs a stale ref, a
     deleted one costs the entire run".
 
     The warning is asserted to *be* the answer rather than to have been printed - `api.clear`
@@ -265,7 +265,7 @@ async def test_clear_on_an_unmerged_branch_warns_and_keeps_it(tmp_path: Path) ->
     kept = await _clear(harness)
 
     assert harness.repository.tip(branch) is not None, (
-        "the run's own branch was deleted although the base ref does not contain it yet. §3.10 "
+        "the run's own branch was deleted although the base ref does not contain it yet. A clear "
         "deletes `agl/<label>` only if merged into the base ref, and the cost of getting this "
         "wrong is the entire run"
     )
@@ -343,12 +343,12 @@ async def test_a_run_that_committed_nothing_is_contained_and_goes_quietly(tmp_pa
 
 @pytest.mark.asyncio
 async def test_every_namespace_at_every_depth_comes_away(tmp_path: Path) -> None:
-    """§3.6 nests arbitrarily, so `clear` recurses through `RunScope.inside` (`ports/store.py`).
+    """A run nests arbitrarily, so `clear` recurses through `RunScope.inside` (`ports/store.py`).
 
     A child and a grandchild, asserted as three things each: the checkout is gone, the line of work
     is gone, and - because the trees root is flat and every checkout in a run is a sibling -
     `.trees/auth/` itself is gone, which is the `rmdir` `_trees.tidied` does once the last one has
-    been taken away. §3.10 asks for exactly that directory by name.
+    been taken away. That directory is asked for by name.
 
     **This is also where "the records go last" is falsifiable.** `Store.namespaces` is the only
     enumeration of what a run used, and `MemoryStore.remove` at depth zero deletes the entries it
@@ -371,13 +371,13 @@ async def test_every_namespace_at_every_depth_comes_away(tmp_path: Path) -> None
             f"it after removing the records would find nothing to take back"
         )
         assert harness.repository.tip(worktree_branch(LABEL, namespace)) is None, (
-            f"the line of work under {str(namespace)!r} survived. §3.10 removes the "
+            f"the line of work under {str(namespace)!r} survived. A clear removes the "
             f"`agl/_work/<label>/*` child branches unconditionally - their work has either been "
             f"landed into the run's own line or deliberately abandoned"
         )
     assert not base_worktree(trees, LABEL).exists()
     assert not run_trees_dir(trees, LABEL).exists(), (
-        "`.trees/auth/` is still there, and §3.10 asks for it by name. It goes when the last "
+        "`.trees/auth/` is still there, and it is asked for by name. It goes when the last "
         "checkout in it does, which is one `rmdir` inside `WorkspaceProvider.remove`"
     )
     assert await harness.store.namespaces(SCOPE) == ()
@@ -410,7 +410,7 @@ class _Recording(WorkspaceProvider):
         await self._provider.discard(label, namespace)
 
     def hold(self, label: RunLabel) -> AbstractAsyncContextManager[None]:
-        """Both edges of §3.10's run claim, because both are ordering claims about `clear`.
+        """Both edges of the run claim, because both are ordering claims about `clear`.
 
         Taking it late would leave the removals it exists to guard outside it, and letting go of it
         early would leave the last of them outside; neither shows up in a list that only records
@@ -492,9 +492,9 @@ async def test_the_order_is_enumerate_then_the_checkouts_then_the_records(tmp_pa
         namespace rather than by a name, because `_base` is not a `Namespace` anything can build.
       * **The records go last**, because they are the enumeration this whole sequence was read out
         of. Removing them first strands every checkout they name.
-      * **§3.10's run claim is around all of it.** `hold` is first and `release` is last, so a
+      * **The run claim is around all of it.** `hold` is first and `release` is last, so a
         `clear` racing a live run refuses before it has taken anything and does not let go until
-        the last removal is done - the two halves of the sentence §3.10 had no mechanism for.
+        the last removal is done - the two halves of the sentence that had no mechanism for years.
 
     The run is arranged as merged first, so the sequence below is the ordinary unforced path with
     the containment question answered "yes" - rather than the shorter one `-f` takes.
@@ -533,14 +533,14 @@ async def test_the_order_is_enumerate_then_the_checkouts_then_the_records(tmp_pa
 
 @pytest.mark.asyncio
 async def test_a_kept_branch_refuses_the_next_run_until_the_branch_goes(tmp_path: Path) -> None:
-    """§3.10's defect, closed end to end: the retained side of the asymmetry, and its real price.
+    """The defect, closed end to end: the retained side of the asymmetry, and its real price.
 
     "A retained branch costs a stale ref" is what the `git branch -d` decision is argued on, and
-    §3.10 then says that side is worse than that - a later `agl run ... -n auth --from main` takes
-    `open`'s attaching path and starts from the old tip with `--from` silently ignored, because
-    "`base` is consulted only when provisioning". The fix is `api.run` refusing the label outright,
-    and this is the whole loop: an unmerged clear keeps the branch, the next run under that label
-    is refused rather than misdirected, `-f` deletes it, and the label works again.
+    the retained side is worse than that - a later `agl run ... -n auth --from main` takes `open`'s
+    attaching path and starts from the old tip with `--from` silently ignored, because "`base` is
+    consulted only when provisioning". The fix is `api.run` refusing the label outright, and this
+    is the whole loop: an unmerged clear keeps the branch, the next run under that label is refused
+    rather than misdirected, `-f` deletes it, and the label works again.
 
     The last three lines are what make this a test about the branch. Without them a `run` that
     refused every second invocation for any reason at all would pass, and the sentence being
@@ -559,7 +559,7 @@ async def test_a_kept_branch_refuses_the_next_run_until_the_branch_goes(tmp_path
 
     assert kept is not None and branch in kept
     assert f"-n {LABEL}" in kept, (
-        "the warning does not say that the label is now taken. §3.10 priced this branch as a stale "
+        "the warning does not say that the label is now taken. This branch was priced as a stale "
         "ref; what it actually costs is the next run under this label, and that is what an "
         "operator has to be able to act on"
     )
@@ -584,13 +584,13 @@ async def test_a_kept_branch_refuses_the_next_run_until_the_branch_goes(tmp_path
 
 @pytest.mark.asyncio
 async def test_a_clear_aimed_at_a_live_run_refuses_and_takes_nothing(tmp_path: Path) -> None:
-    """§3.10's last sentence, which had no mechanism behind it until 17.0.
+    """The last sentence, which had no mechanism behind it for a long time.
 
     "It refuses while a run holds a lock" - and there was nothing to refuse with: no durable "this
-    run is live" record, §3.11 refusing stored status by name, and §3.4's leases in-process. So a
-    `clear` aimed at a run live in another `agl` took its checkouts away underneath it and said
-    nothing. What closes it is `WorkspaceProvider.hold`, taken by `api.run` across everything
-    durable it does and by `api.clear` around its removals.
+    run is live" record, `ARCHITECTURE.md`'s "Deliberately not built" refusing stored status by
+    name, and leases in-process. So a `clear` aimed at a run live in another `agl` took its
+    checkouts away underneath it and said nothing. What closes it is `WorkspaceProvider.hold`,
+    taken by `api.run` across everything durable it does and by `api.clear` around its removals.
 
     The `clear` is issued from inside the workflow, which is the only way one process can be two
     invocations - `api.run` is demonstrably still inside its own claim while it is awaiting this.
@@ -599,8 +599,8 @@ async def test_a_clear_aimed_at_a_live_run_refuses_and_takes_nothing(tmp_path: P
 
     Two assertions carry it. The refusal is `ConflictError` at exit 4, naming the run - not some
     other failure the timing happened to produce - and everything the run held is **still there**
-    afterwards, which is the half §3.10 actually cares about: a `clear` that refused after removing
-    two of three checkouts would satisfy the first assertion and destroy the run.
+    afterwards, which is the half that actually matters: a `clear` that refused after removing two
+    of three checkouts would satisfy the first assertion and destroy the run.
 
     The last two lines are what make it a test about the claim rather than about `clear` refusing:
     the same `clear`, over the same run, succeeds once the run has ended and let go.
@@ -611,7 +611,7 @@ async def test_a_clear_aimed_at_a_live_run_refuses_and_takes_nothing(tmp_path: P
     await _start(harness, "clearing")
 
     assert len(refused) == 1, (
-        "a `clear` issued while the run was live did not refuse. §3.10's sentence is that it "
+        "a `clear` issued while the run was live did not refuse. The sentence is that it "
         "refuses; without the claim it takes the run's checkouts away underneath it and says "
         "nothing, which is the failure this test exists for"
     )
@@ -625,7 +625,7 @@ async def test_a_clear_aimed_at_a_live_run_refuses_and_takes_nothing(tmp_path: P
     )
     assert base_worktree(_trees(tmp_path), LABEL).is_dir(), (
         "the refused `clear` took the live run's own checkout away anyway - which is exactly the "
-        "sentence §3.10 wrote and had no mechanism for"
+        "sentence that had no mechanism behind it"
     )
 
     assert await _clear(harness) is None
@@ -636,8 +636,8 @@ async def test_a_clear_aimed_at_a_live_run_refuses_and_takes_nothing(tmp_path: P
 async def test_a_clear_aimed_at_a_live_resume_refuses_too(tmp_path: Path) -> None:
     """The same claim, taken by the other verb that walks a run.
 
-    `api.resume` is a run being walked again, so it is live in exactly the sense §3.10's sentence
-    is about - and it is the invocation the sentence matters most for, because a resume is what
+    `api.resume` is a run being walked again, so it is live in exactly the sense the sentence is
+    about - and it is the invocation the sentence matters most for, because a resume is what
     somebody starts hours later on a run they have half forgotten, which is also when somebody else
     is most likely to try to tidy it up. Without a claim here, `run` would hold one and `resume`
     would not, and the same `clear` would be refused or destructive depending on which verb was
@@ -674,9 +674,9 @@ async def test_a_clear_aimed_at_a_live_resume_refuses_too(tmp_path: Path) -> Non
 async def test_a_label_with_no_record_is_a_not_found_and_reads_as_the_third_of_three(
     tmp_path: Path,
 ) -> None:
-    """§3.10's refusals, read as the set they are: `run` says the label is taken and names the two
-    verbs that free it, `resume` says it is free and names the verb that takes it, and `clear` says
-    it is free and there is therefore nothing to take away.
+    """The three refusals, read as the set they are: `run` says the label is taken and names the
+    two verbs that free it, `resume` says it is free and names the verb that takes it, and `clear`
+    says it is free and there is therefore nothing to take away.
 
     All three messages are asserted here, in one test, because the claim is about the vocabulary
     rather than about any one sentence. A change to one of them that stopped them reading as one
@@ -722,7 +722,7 @@ async def test_clearing_the_same_run_twice_refuses_the_second_time(tmp_path: Pat
 async def test_a_run_whose_checkouts_were_never_cut_is_cleared_without_raising(
     tmp_path: Path,
 ) -> None:
-    """§3.10: "`clear` after a crash is the ordinary case rather than the exceptional one".
+    """`clear` after a crash is the ordinary case rather than the exceptional one.
 
     The state is the one `api.run` writes its two durable lines in a particular order to guarantee:
     a record naming a run whose `_base` was never provisioned, which is what a crash between
@@ -764,8 +764,8 @@ async def test_a_run_whose_checkouts_were_never_cut_is_cleared_without_raising(
 async def test_a_clear_over_checkouts_something_already_took_back_succeeds(tmp_path: Path) -> None:
     """The other shape of absence: the run happened, and its places were given back by hand first.
 
-    This is a crash between the teardown and the record removal, and the recovery §3.10 relies on -
-    both verbs, on both kinds of address, over what is already gone. The assertion at the end is
+    This is a crash between the teardown and the record removal, and the recovery `clear` relies on
+    - both verbs, on both kinds of address, over what is already gone. The assertion at the end is
     what makes it non-vacuous: the clear really did finish, so the second pass over the absent
     checkouts was tolerated rather than skipped.
     """
@@ -781,7 +781,7 @@ async def test_a_clear_over_checkouts_something_already_took_back_succeeds(tmp_p
     assert not run_trees_dir(_trees(tmp_path), LABEL).exists()
 
 
-# --- the one sentence in §3.10 that needs real git ------------------------------------------------
+# --- the one sentence that needs real git ---------------------------------------------------------
 
 
 def _git(where: Path, *argv: str) -> str:
@@ -801,8 +801,8 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     The `GIT_CONFIG_*` variables are what make this the same test everywhere - a developer with
     `commit.gpgsign` on, a `core.hooksPath` of their own or a template directory would otherwise be
     running a different one - and they go through `monkeypatch` so the adapters, which inherit the
-    environment, see them too. It sits beside `tmp_path/trees` rather than under it: §3.9's trees
-    root is not the repository.
+    environment, see them too. It sits beside `tmp_path/trees` rather than under it: the trees root
+    is not the repository.
     """
     for name in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"):
         monkeypatch.setenv(name, str(tmp_path / "nonexistent-git-config"))
@@ -858,16 +858,17 @@ def _branch_exists(repository: Path, branch: str) -> bool:
 async def test_a_locked_worktree_is_what_refuses_a_clear(
     repository: Path, tmp_path: Path
 ) -> None:
-    """§3.10's last sentence - "It refuses while a run holds a lock" - and the only mechanism in
-    v1.1 that makes it true.
+    """The last sentence - "It refuses while a run holds a lock" - and the only mechanism in v1.1
+    that makes it true.
 
-    There is no durable "this run is live" record in AGL: §3.11 refuses stored status by name, and
-    §3.4's leases are in-process, so a second `agl` invocation cannot see one. §3.9's registry mutex
-    is cross-process but is held for milliseconds around `worktree prune` and refuses only on a
-    deadline. What is left is git's own `worktree lock`, and it really does refuse: `prune` skips a
-    locked entry even after its directory has gone, so the registration survives `remove`, and
-    `git branch -D` then refuses the branch that registration holds - which `GitWorkspaceProvider
-    .discard` re-raises as `ConflictError` after asking whether the branch is still there.
+    There is no durable "this run is live" record in AGL: `ARCHITECTURE.md`'s "Deliberately not
+    built" refuses stored status by name, and leases are in-process, so a second `agl` invocation
+    cannot see one. The registry mutex is cross-process but is held for milliseconds around
+    `worktree prune` and refuses only on a deadline. What is left is git's own `worktree lock`, and
+    it really does refuse: `prune` skips a locked entry even after its directory has gone, so the
+    registration survives `remove`, and `git branch -D` then refuses the branch that registration
+    holds - which `GitWorkspaceProvider.discard` re-raises as `ConflictError` after asking whether
+    the branch is still there.
 
     A fake cannot be asked any of this, which is why this one test builds a repository; the module
     docstring argues the exception. The second half is what makes it a test about a lock: the same

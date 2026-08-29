@@ -1,8 +1,8 @@
-"""What §3.3's params model promises: named flags in, a frozen instance and a record out.
+"""What the params model promises: named flags in, a frozen instance and a record out.
 
-Four properties carry this suite. **The plan's own example** is parsed literally - `TicketsParams`
-as §3.3 writes it, from what `agl run tickets -n auth -r "add oauth" -c 4` leaves behind - so a
-change breaking the documented shape breaks a test quoting it. **Every refusal is an `InputError`**,
+Four properties carry this suite. **The worked example** is parsed literally - `TicketsParams`
+below, from what `agl run tickets -n auth -r "add oauth" -c 4` leaves behind - so a change breaking
+that shape breaks a test quoting it. **Every refusal is an `InputError`**,
 asserted on the class and never on "it raised": `argparse` refuses by calling `sys.exit(2)`, so a
 suite accepting a `SystemExit` would pass against exactly the bug this module exists to prevent.
 **No positional ever reaches `argparse`**, asserted against the built parser and not against a parse
@@ -10,7 +10,7 @@ that happened to work - a parse proves only that nothing needed one. And **what 
 survives `json.dumps` and `RunSpec`**, because a parameter that cannot be written down is a run that
 cannot resume.
 
-16.2 adds the fifth, one direction over: **`from_json` is `to_json`'s inverse and refuses everything
+A fifth arrived one direction over: **`from_json` is `to_json`'s inverse and refuses everything
 that is not it.** `agl resume <label>` reads the record instead of a command line, so the read side
 is what makes "params come from `run.json`" true - and it is a refusal point rather than a coercion
 point, which is a claim only a test that hands it `"4"` where a record held `4` can hold still. The
@@ -36,7 +36,7 @@ from agl.sdk.params import RefusingParser, arg, from_json, parse, parser_for, to
 
 @dataclass(frozen=True)
 class TicketsParams:
-    """Plan §3.3's example, copied rather than adapted. Every assertion below is about this."""
+    """The worked example. Every assertion below is about this one declaration."""
 
     request: str = arg("-r", "--request", help="what to build")
     concurrent: int = arg("-c", "--concurrent", default=3)
@@ -54,7 +54,7 @@ class Mixed:
 
 @dataclass(frozen=True)
 class NoParams:
-    """A workflow that takes nothing - `noop` at 10.5, and every workflow before it needs one."""
+    """A workflow that takes nothing - `noop`'s shape, and every workflow needs one anyway."""
 
 
 @dataclass(frozen=True)
@@ -80,12 +80,13 @@ class Unstorable:
     tags: list[str] = arg("--tags")
 
 
-# --- §3.3's example ------------------------------------------------------------------------------
+# --- the worked example --------------------------------------------------------------------------
 
 
-def test_the_plans_example_parses_as_the_plan_writes_it() -> None:
+def test_the_worked_example_parses_as_it_is_written() -> None:
     """`agl run tickets -n auth -r "add oauth" -c 4`, minus what the generic parser already took.
-    §3.3 says "mypy knows `run.params.concurrent` is an `int`", so the runtime has to agree."""
+    The promise is that "mypy knows `run.params.concurrent` is an `int`", so the runtime has to
+    agree."""
     params = parse(TicketsParams, ["-r", "add oauth", "-c", "4"])
     assert params == TicketsParams(request="add oauth", concurrent=4)
     assert type(params.concurrent) is int
@@ -108,7 +109,7 @@ def test_a_workflow_with_no_parameters_parses_an_empty_argv() -> None:
 
 
 def test_a_missing_required_flag_is_an_input_error() -> None:
-    """A field with no default is a required flag, and §3.3 refuses before anything runs."""
+    """A field with no default is a required flag, and the parse refuses before anything runs."""
     with pytest.raises(InputError, match="--request"):
         parse(TicketsParams, ["-c", "4"])
 
@@ -133,7 +134,7 @@ def test_an_abbreviated_flag_is_not_a_flag() -> None:
 
 
 def test_the_refusing_parser_raises_where_argparse_would_exit() -> None:
-    """Exported for 10.4's generic parser, so pinned here directly and not only through a params
+    """Exported for the generic `run` parser, so pinned here directly and not only through a params
     class. The usage line rides with the message: a refusal listing the flags is worth more."""
     with pytest.raises(InputError, match="usage"):
         RefusingParser(prog="agl run").error("something the caller typed")
@@ -143,7 +144,7 @@ def test_the_refusing_parser_raises_where_argparse_would_exit() -> None:
 
 
 def test_a_declared_positional_is_refused_where_it_is_written() -> None:
-    """§1.2's mirror charge: `agl run <workflow>` already occupies that position."""
+    """`agl run <workflow>` already occupies that position, so a flagless field is refused."""
     with pytest.raises(InputError, match="positional"):
         arg("request")
 
@@ -232,7 +233,7 @@ def test_a_field_whose_annotation_cannot_be_resolved_is_refused() -> None:
 
 
 def test_the_built_parser_holds_no_positional_action() -> None:
-    """The property §3.3 rests on, asserted against the parser and not against a lucky parse.
+    """No positional ever reaches `argparse`, asserted against the parser and not a lucky parse.
     `_actions` is private and there is no public accessor; the alternative is to assert nothing."""
     parser = parser_for(Mixed)
     assert [action for action in parser._actions if not action.option_strings] == []
@@ -280,7 +281,7 @@ def test_the_rendered_mapping_is_the_fields_by_name() -> None:
 
 
 def test_the_rendered_mapping_round_trips_through_json_and_into_a_run_spec() -> None:
-    """§3.3: params are "persisted into `run.json`, which is why `agl resume auth` takes no flags".
+    """Params are "persisted into `run.json`, which is why `agl resume auth` takes no flags".
     `RunSpec.params` receives this and `json` writes it, so both are exercised rather than assumed:
     a mapping this module is happy with and `json` is not is a run never written down."""
     rendered = to_json(parse(TicketsParams, ["-r", "add oauth", "-c", "4"]))

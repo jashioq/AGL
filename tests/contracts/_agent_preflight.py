@@ -5,8 +5,8 @@ these two are asked *about* one, both take a `ModelId`, and both are async for t
 answer depends on the world, and probing it at construction time would break the composition root
 for every run, including the ones that never touch this backend.
 
-They are deliberately not one member. §3.2 asks them at preflight one after the other and does
-different things with the answers: a missing capability is permanent and the workflow must change,
+They are deliberately not one member. Preflight asks them one after the other and does different
+things with the answers: a missing capability is permanent and the workflow must change,
 while not being ready is a state of the world that a login fixes in ten seconds. A single call
 reporting both would have to invent a way of saying which of the two it meant, and the caller would
 have to unpick it to know whether to tell the author or the operator.
@@ -79,7 +79,7 @@ class AgentPreflightContract:
 
         Two legal outcomes and no third. Returning is checked by `mypy`, which is why nothing here
         assigns the result - a value out of a `-> None` member is a type error, in the adapter,
-        where it belongs. The raise is what this test is for: §3.2's first preflight check is this
+        where it belongs. The raise is what this test is for: the first preflight check is this
         call over every provider a workflow's roles name, and it can only kill a run at second zero
         if the exception is the one the framework catches. Anything else escapes to the top of the
         CLI as exit 70, telling the reader to file a bug about their own logged-out session.

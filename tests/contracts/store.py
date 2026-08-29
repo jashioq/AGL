@@ -8,8 +8,8 @@ Subclass it once per implementation, override the one fixture, and add nothing:
             return TheStoreIWrote(...)
 
 The real adapter and the fake both run this class, which is the whole mechanism keeping a fake
-from drifting into fiction (§1.9). It is written here, at stage 3, before either exists, because a
-subagent that writes its own tests writes tests that pass.
+from drifting into fiction. It is written against the port alone, before either implementation
+exists, because a subagent that writes its own tests writes tests that pass.
 
 `StoreContract` is one class assembled from three modules, and only this name is public.
 `_store_documents` holds the addresses and documents every test is built from; `_store_scopes`
@@ -85,15 +85,15 @@ level deep; that an overwrite may not be observed as a momentary absence; and th
 under a scope that recorded nothing answers with an empty tuple rather than raising - `clear`
 after a crash is its one caller, which settles it.
 
-There is a fourth, and it was of a different kind: **the three copy-in clauses were §3.6's and not
-the port's**, asserted here against a design decision `ports/store.py` did not carry. The port
-stated the read-side half ("a read hands back something the caller owns") and, on the way in, said
-only why a `Mapping` is accepted - a courtesy to the caller, silent on what the store then does
-with it. A suite here is otherwise written against a port's docstring and against nothing else, so
-that was the one place the rule bent, and the fix on offer was a sentence in `ports/store.py`
-rather than a quieter suite. 19.3 wrote it: the port now states the copy-in clause and the *when*
-of it in its own words, and names §3.6 as where the clause was decided. These three are written
-against the port again, and the paragraph they answer is the one after "`Mapping` on the way in".
+There is a fourth, and it was of a different kind: **the three copy-in clauses came from the
+persistence design and not from the port**, asserted here against a decision `ports/store.py` did
+not carry. The port stated the read-side half ("a read hands back something the caller owns") and,
+on the way in, said only why a `Mapping` is accepted - a courtesy to the caller, silent on what the
+store then does with it. A suite here is otherwise written against a port's docstring and against
+nothing else, so that was the one place the rule bent, and the fix on offer was a sentence in
+`ports/store.py` rather than a quieter suite. That sentence was then written: the port states the
+copy-in clause and the *when* of it in its own words. These three are written against the port
+again, and the paragraph they answer is the one after "`Mapping` on the way in".
 """
 
 import asyncio
@@ -162,7 +162,7 @@ class StoreContract(StoreScopeContract, StoreConcurrencyContract):
     async def test_a_run_with_nothing_recorded_answers_none_to_every_read(
         self, store: Store
     ) -> None:
-        """`None` is the whole of replay's decision (§3.6) and of what `resume` refuses on."""
+        """`None` is the whole of replay's decision and of what `resume` refuses on."""
         assert await store.read_record(RUN) is None
         assert await store.read_entry(RUN, STEP, digest("nothing")) is None
         assert await store.read_entry(RUN.inside(CHILD), STEP, digest("nothing")) is None
@@ -266,8 +266,8 @@ class StoreContract(StoreScopeContract, StoreConcurrencyContract):
     async def test_editing_the_mapping_a_write_was_handed_does_not_change_what_a_read_returns(
         self, store: Store
     ) -> None:
-        """§3.6: the store copies any mapping it is handed, so a caller reusing a builder dict
-        cannot silently edit an entry already on the ledger.
+        """The store copies any mapping it is handed, so a caller reusing a builder dict cannot
+        silently edit an entry already on the ledger.
 
         The edits below go three deep - the top-level mapping, the nested `params` object, the list
         inside it, and an object inside *that* list - because a top-level copy passes an assertion
@@ -300,7 +300,7 @@ class StoreContract(StoreScopeContract, StoreConcurrencyContract):
     async def test_editing_the_mapping_an_entry_was_written_from_does_not_change_the_entry(
         self, store: Store
     ) -> None:
-        """The same clause on the write §3.6's ledger rests on, where getting it wrong is worse.
+        """The same clause on the write the ledger rests on, where getting it wrong is worse.
 
         A step's status is derived from whether its entry exists, so an entry that quietly changes
         after it was recorded is a completed step whose recorded result is not what the step
@@ -363,8 +363,8 @@ class StoreContract(StoreScopeContract, StoreConcurrencyContract):
         the reader loops - and the machinery it needs is one task and one yield, not those.
 
         Both writes, in that order and for the reason the second sibling gives: the entry is the
-        write §3.6's ledger rests on, and a copy taken late there is a completed step whose result
-        is not what the step produced.
+        write the ledger rests on, and a copy taken late there is a completed step whose result is
+        not what the step produced.
         """
         rows: list[JsonValue] = [{"id": "T-01", "blocked_by": []}]
         params: dict[str, JsonValue] = {"request": "add oauth", "tickets": rows}
@@ -428,8 +428,8 @@ class StoreContract(StoreScopeContract, StoreConcurrencyContract):
     async def test_writing_where_a_value_already_sits_supersedes_it_and_nothing_beside_it(
         self, store: Store
     ) -> None:
-        """A second write is not refused - §3.10 refuses a taken label long before this port sees
-        it, and a refusal here would make an interrupted first write unrecoverable. Entries at
+        """A second write is not refused - `agl run` refuses a taken label long before this port
+        sees it, and a refusal here would make an interrupted first write unrecoverable. Entries at
         other digests are untouched: a superseded entry is what answers "why did this re-run".
         """
         await store.write_record(RUN, record("first"))
@@ -447,7 +447,7 @@ class StoreContract(StoreScopeContract, StoreConcurrencyContract):
     ) -> None:
         """Eight addresses, each differing from the run's in exactly one part of the address.
 
-        The same step name under two children is two entries (§3.6), which is why `steps/` is
+        The same step name under two children is two entries, which is why `steps/` is
         nested per worktree rather than pooled; a re-run against changed inputs gets its own
         digest and its own entry beside the old one; and a label means one run in one project.
         """

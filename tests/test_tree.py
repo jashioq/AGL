@@ -8,8 +8,8 @@ make the tree unimportable, because there is nothing under it to import.
 
 ## Why that clause is written here rather than the one that was here before
 
-Until 19.2 this file asserted that **every** directory under `src/agl/` carried an `__init__.py`,
-full stop - and §3.7's sanctioned prompt layout is a `prompts/` subdirectory of markdown inside the
+This file used to assert that **every** directory under `src/agl/` carried an `__init__.py`, full
+stop - and the sanctioned prompt layout is a `prompts/` subdirectory of markdown inside the
 workflow's own package, which every workflow has and no workflow can import. `fix` and `split` each
 carried a `prompts/__init__.py` whose docstring existed to explain that it existed, and
 `fix/prompts/__init__.py` assigned the finding rather than living with it: "The finding belongs to
@@ -26,19 +26,19 @@ that matters, because `rglob` reaches a directory whose own contents are only su
 `src/agl/a/` holding nothing but `b/mod.py` is caught here and was caught before, and would not be
 by a rule about `.py` files sitting directly inside.
 
-So the two prompt packages are gone, and the layout §3.7 writes needs no apology beside it. Nothing
-else had to move: `prompt_file()` resolves a relative path against the directory of the module that
-called it, which is `workflows/fix/roles.py`, and a directory does not have to be a package to have
-a file in it. `tests/workflows/test_fix.py` and `test_split.py` read both workflows' prompts by
-importing their roles, so the resolution is exercised by every one of those files.
+So the two prompt packages are gone, and that layout needs no apology beside it. Nothing else had
+to move: `prompt_file()` resolves a relative path against the directory of the module that called
+it, which is `workflows/fix/roles.py`, and a directory does not have to be a package to have a file
+in it. `tests/workflows/test_fix.py` and `test_split.py` read both workflows' prompts by importing
+their roles, so the resolution is exercised by every one of those files.
 
 **The packaging half was measured rather than reasoned about, and it is a gap in this suite.**
 `[tool.hatch.build.targets.wheel] packages = ["src/agl"]` is a rule about a *directory*, not about
-importable packages: hatchling copies what is under it. A wheel built at 19.2 with these two files
-deleted carries `agl/workflows/fix/prompts/review.md`, `implement.md` and `split`'s two, and 113
-entries where the previous wheel had 115 - the two `__init__.py` files and nothing else. Nothing in
-this suite would notice if that stopped being true, because noticing costs a build; that is stated
-here rather than covered, since a workflow whose prompts did not ship would fail at import with
+importable packages: hatchling copies what is under it. A wheel built with these two files deleted
+carries `agl/workflows/fix/prompts/review.md`, `implement.md` and `split`'s two, and 113 entries
+where the previous wheel had 115 - the two `__init__.py` files and nothing else. Nothing in this
+suite would notice if that stopped being true, because noticing costs a build; that is stated here
+rather than covered, since a workflow whose prompts did not ship would fail at import with
 `prompt_file`'s own `InputError` naming the missing path, which is a legible failure and not a
 silent one.
 """
@@ -81,11 +81,11 @@ def test_every_directory_holding_python_under_src_agl_is_a_package() -> None:
 def test_a_directory_holding_no_python_is_left_alone() -> None:
     """The other half of the clause, asserted rather than left as an absence.
 
-    §3.7 puts a workflow's prompts in a `prompts/` subdirectory of its own package, so every
-    workflow there will ever be has at least one directory of data files under `src/agl/`. The rule
-    above has to be indifferent to those, and a test that only ever asserted the positive would go
-    on passing if somebody restored the blanket version - with the evidence being two `__init__.py`
-    files nobody could explain, which is where 19.2 found this.
+    A workflow's prompts live in a `prompts/` subdirectory of its own package, so every workflow
+    there will ever be has at least one directory of data files under `src/agl/`. The rule above
+    has to be indifferent to those, and a test that only ever asserted the positive would go on
+    passing if somebody restored the blanket version - with the evidence being two `__init__.py`
+    files nobody could explain, which is how this was found.
     """
     data = [
         directory

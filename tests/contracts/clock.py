@@ -9,14 +9,14 @@ Subclass it once per implementation, override the one fixture, and add nothing:
             return TheClockIWrote(...)
 
 The real adapter and the fake both run this class, which is the whole mechanism keeping a fake from
-drifting into fiction (§1.9).
+drifting into fiction.
 
-**Two assertions, and the value is the parity rather than the coverage.** Plan target #7 reads
-"every port has a contract suite its real adapter and its fake both pass - *every* port, including
-ones that promise little", and then names this one: "`Clock`'s suite is two assertions". A rule that
-admitted an exception would admit it exactly here, at the port whose ABC is one sync method and
-whose suite is therefore short - so writing the short suite is what keeps the rule a rule. Stage 3
-built this package and wrote no clock suite; this is that omission closed, and nothing else.
+**Two assertions, and the value is the parity rather than the coverage.** Every port has a contract
+suite its real adapter and its fake both pass - *every* port, including ones that promise little,
+and `Clock`'s is two assertions. A rule that admitted an exception would admit it exactly here, at
+the port whose ABC is one sync method and whose suite is therefore short - so writing the short
+suite is what keeps the rule a rule. This package was once built with no clock suite at all; this is
+that omission closed, and nothing else.
 
 One class in one module, for `verifier.py`'s reason: the port is one method and draws no seam to
 split along. Every other suite in this package is assembled out of two or three modules only
@@ -33,7 +33,7 @@ test pytest quietly skips.
 
 ## Why these two, argued from the port
 
-A `Clock` exists so that the framework's own stamping of `at` (§3.6) can be handed a different
+A `Clock` exists so that the framework's own stamping of an entry's `at` can be handed a different
 source of the current time, and so that a run can be produced twice. That purpose decides both
 tests, and there is no third that the port would license.
 
@@ -65,9 +65,9 @@ made to reveal, not a test somebody forgot.
 
 2. **That the reading is the current time.** Nothing here knows what time it is. Finding out needs
    a second clock, which is the same question one layer out, and a threshold, which fails honest
-   implementations on a loaded machine. A clock stuck at plan §3.6's example moment passes this
-   suite - and that is exactly what `ManualClock` does by default, which is why it is not a gap
-   that could be closed by trying harder.
+   implementations on a loaded machine. A clock stuck at one fixed moment passes this suite - and
+   that is exactly what `ManualClock` does by default, which is why it is not a gap that could be
+   closed by trying harder.
 
 3. **Any particular offset.** The port grants every one: "any offset will do; UTC is not required
    here", because normalising is `run.py`'s job and every aware spelling denotes one instant. So
@@ -96,13 +96,13 @@ from agl.ports.clock import Clock
 from agl.ports.ids import RunLabel
 from agl.ports.run import RunSpec
 
-# Plan §3.6's `run.json` pin, doubled to a full sha1: `RunSpec` refuses an abbreviated one, which
+# A `run.json` base pin, doubled to a full sha1: `RunSpec` refuses an abbreviated one, which
 # is a fact about that type and about nothing this suite is asking a clock.
 _SHA: Final = "8c19f7ae4d2b0913e5f6" * 2
 
 
 def _record_at(moment: datetime) -> RunSpec:
-    """Plan §3.6's run record, stamped with `moment` - the one thing every reading ends up in.
+    """A run record, stamped with `moment` - the one thing every reading ends up in.
 
     Built here rather than asked of a fixture, and deliberately: every field but `created_at` is
     scenery, and an implementer given a say over the record would be given a say over whether the
@@ -171,7 +171,7 @@ class ClockContract:
         )
 
     def test_a_reading_is_a_moment_the_run_record_accepts_and_keeps(self, clock: Clock) -> None:
-        """What a `Clock` is for: §3.6 stamps a record from one, and this is that record.
+        """What a `Clock` is for: the framework stamps a run record from one, and this is it.
 
         The awareness clause exists *because* a reading ends up in `run.json`, so the assertion
         that says a reading is usable is this one and not the type check above it. `RunSpec` is the

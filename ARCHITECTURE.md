@@ -7,14 +7,21 @@ Eight layers, one dependency rule, one composition root. For the gates, see `CLA
 **`ports/`** — The ABCs AGL is written against and the plain types they speak: `Store`,
 `Workspace`, `WorkspaceProvider`, `Integrator`, `History`, `Verifier`, `Terminal`, `Clock`,
 `AgentRunner`, plus `RunSpec`, the `AglError` hierarchy with the one exception-to-exit-code table
-in the codebase, and the id types in `ids.py`, which compare through an NFC-plus-casefold
-`collision_key` because two names differing only in case are one directory on a case-insensitive
-filesystem. It imports nothing but stdlib: everything imports `ports`, so what `ports` drags in
-reaches every layer at once.
+in the codebase, and the id types in `ids.py`, which expose a casefold-then-NFC `collision_key` and
+do **not** compare through it — `RunLabel("T-01") != RunLabel("t-01")`, and a caller that must not
+collide asks for the key, because two names differing only in case are one directory on a
+case-insensitive filesystem. It imports nothing but stdlib and its own ring: everything imports
+`ports`, so what `ports` drags in reaches every layer at once.
 
 **`adapters/`** — The implementations. Anything that imports a vendor SDK, opens a socket or
-shells out lives here and only here. Each package ships a real implementation and a fake beside
-it, and both are held to the same suite under `tests/contracts/`.
+shells out lives here and only here. What holds of every one of them is the grading: each class
+here that implements a port is subclassed into a suite under `tests/contracts/`, which is what
+keeps a stand-in from drifting from the thing it stands in for. "A fake beside a real" does not.
+Four packages spell one `fake.py`, `filesystem/`'s is `memory_store.py`, `system_clock.py` is one
+module holding both clocks and no package at all, and `rich_terminal/` has none: it ships three
+terminals across two suites — `RichTerminal` for `real()`, `ScriptedTerminal` for `answering()`,
+`HeadlessTerminal` for `fakes()` — no one of them a stand-in for another. And a fake here fakes
+the *port*, never the vendor: `openai/fake.py` starts no process at all.
 
 **`sdk/`** — What a workflow author builds from: `@workflow`, the `Run` a workflow is handed,
 `@role`, `Tool`, `arg()`, the terminal components, `Stop`. `sdk/__init__.py` is the front door and
@@ -25,7 +32,9 @@ otherwise write it themselves.
 **`workflows/`** — One package per workflow, found through the `agl.workflows` entry points in
 `pyproject.toml`; no central table to edit. `fix` is one worktree run sequentially, Claude
 implementing and OpenAI reviewing; `split` is N chunks run concurrently, each landed into the
-run's base. A workflow imports `sdk` and `ports` — never an adapter, never `config`.
+run's base. A workflow imports `sdk` — never an adapter, never `config`. `ports` sits below it and
+is permitted, and neither shipped workflow names it: the authoring surface re-exports what a
+workflow speaks.
 
 **`config/`** — Settings and the composition root. `sources.py` resolves flags > env > file >
 defaults once into an immutable object, `toml_file.py` is the only module that knows TOML,
@@ -51,9 +60,10 @@ it — a second caller of `api`.
 ```
 
 `sdk` and `adapters` are siblings and may not import each other; so are `cli` and `testing`.
-`config` may import anything. `.importlinter` holds six contracts and `lint-imports` enforces
-them: the layering above, the inner ring (a pure type never imports the ABC that speaks it),
-vendor containment, adapter independence, the composition root, and workflows-build-on-`sdk`-alone.
+`config` may import everything under it and nothing above it, and only `config/container.py` may
+name an adapter. `.importlinter` holds six contracts and `lint-imports` enforces them: the layering
+above, the inner ring (a pure type never imports the ABC that speaks it), vendor containment,
+adapter independence, the composition root, and workflows-build-on-`sdk`-alone.
 
 **One clause cannot be a contract.** "`ports` imports nothing but stdlib" is an *allow* list, and
 every import-linter contract type names what is forbidden or how modules are ordered — saying it
@@ -64,8 +74,8 @@ instead by `tests/test_ports_stdlib_only.py`, an AST scan over every import unde
 ## Vendor containment
 
 `claude_agent_sdk` may be imported only inside `agl.adapters.claude_code`, `rich` only inside
-`agl.adapters.rich_terminal`; both are contracts. The OpenAI adapter shells out to the Codex CLI
-binary and has no import to contain, so its *name* is guarded by a grep gate in `scripts/check`
+`agl.adapters.rich_terminal`; one contract holds both. The OpenAI adapter shells out to the Codex
+CLI binary and has no import to contain, so its *name* is guarded by a grep gate in `scripts/check`
 that fails on any mention in a `.py` under `src/` outside `agl/adapters/openai/`. The asymmetry is
 deliberate: the two SDKs are pip extras, the Codex CLI is installed separately and resolved at
 preflight, and installing one vendor never drags in the other's.
@@ -78,15 +88,17 @@ by costing a re-run. **Three of them destroy work.**
 **A step with no `commit=` wipes its worktree.** `Journal._ending` in `sdk/_engine/journal.py`
 ends every step by committing everything or calling `Workspace.restore(last_good)` — `git reset
 --hard` then `git clean -ffd`. Tracked edits, untracked files and any commit the agent made itself
-all go, and none of it is on the ledger, because no entry was written. Nothing checks the pairing.
-A step whose role can touch the worktree must pass `commit=`; the only two that omit it are `fix`'s
-reviewer and `split`'s planner, and both roles declare `Restriction.NO_FILE_WRITES`.
+all go, and none of it is on the ledger either: an entry is still written, and the head it records
+is the one the worktree was restored to. Nothing checks the pairing. A step whose role can touch
+the worktree must pass `commit=`; the only two that omit it are `fix`'s reviewer and `split`'s
+planner, and both roles declare `Restriction.NO_FILE_WRITES`.
 
 **A landing must be handed back to the parent's chain.** `Integration._concluded` in
-`sdk/_engine/integration.py` ends with `self._journal.advance(head)`. A child's landing moves the
-parent's real head, but `last_good` is chained from step *entries* and `integrate()` writes none,
-so skipping that call leaves the parent believing it is where its last step ended. The next step
-to miss its fingerprint restores to that stale head and resets past every landing at once.
+`sdk/_engine/integration.py` settles a clean landing with `self._journal.advance(head)`. A child's
+landing moves the parent's real head, but `last_good` is chained from step *entries* and
+`integrate()` writes none, so skipping that call leaves the parent believing it is where its last
+step ended. The next step to miss its fingerprint restores to that stale head and resets past every
+landing at once.
 
 **A red build gate discards a hand-resolved conflict.** `Integration._gated` reverts a landing
 with `restore(self._before)` when the verifier fails. If a person resolved a merge by hand and
@@ -146,13 +158,22 @@ The reasoning is the point — without it these get re-proposed.
 - **No fan-out or parallelism helper.** The framework never spawns a task for a workflow; steps
   serialise within a namespace, so real concurrency is more worktrees, and a helper would wrap
   `asyncio.TaskGroup` while owning nothing.
-- **No general subprocess helper.** Three modules run children and disagree on seven axes — shell
-  or exec, buffered or streamed, stdin, stderr, process or group signalling, deadline, failure
-  signal — so a helper would take a flag per axis to say which caller it was being.
+- **No general subprocess helper.** Four modules run children — `shell/verifier.py`,
+  `git/_runner.py`, `openai/runner.py`, `openai/_session.py` — and disagree on six axes of how one
+  is *started and read*: shell or exec, buffered or streamed, stdin, stderr, deadline, failure
+  signal. A helper would take a flag per axis to say which caller it was being. Stopping is not a
+  seventh axis, because it is where two of them agree on purpose: `verifier.py`'s `_signalled` and
+  `_session.py`'s `_signal` escalate SIGTERM, grace, SIGKILL behind the same `returncode` guard and
+  the same `send_signal` fallback, and differ on the one line that names the group. They agree
+  because `verifier.py` was brought into line — a difference there was a defect, not a caller's
+  business — and the other two follow from how they start: `git/_runner.py` gave its child no
+  session of its own and so signals the process, and `openai/runner.py`'s readiness probe stops
+  nothing at all. The helper would also have nowhere to live: the adapter-independence contract in
+  `.importlinter` forbids one adapter importing another.
 - **No `Integrator.revert()`.** Undoing a landing that succeeded is `Workspace.restore(head)`,
   which already exists; a second spelling would be owed by every integrator.
 - **`Store` has six members and no more.** No `exists`, because a read returning `None` is that
-  question already answered; no listing, because replay computes the digest it wants; no
+  question already answered; no listing of entries, because replay computes the digest it wants; no
   transaction, because a batch needs a boundary and a flush would admit to a buffer.
 - **No retry or exit-status cleverness on the build gate.** A dead daemon, an OOM kill and a real
   test failure are not distinguishable from an exit code, so an OOM reads as a failed build and

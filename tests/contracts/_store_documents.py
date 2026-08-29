@@ -15,7 +15,7 @@ lowercase hexadecimal, which is what the journal produces. A suite that addresse
 `"abc"` would be refused by a correct implementation, and the refusal would read like the
 implementation's bug.
 
-**The documents are shaped like the two AGL really stores**: §3.6's four entry fields, and
+**The documents are shaped like the two AGL really stores**: an entry's four fields, and
 `run.json`'s. Not because this port ever looks inside them - it does not, and no test asserts
 that it does - but because a suite is also the documentation somebody writes an adapter from, and
 what arrives at `write_entry` in anger should be what arrives at it here.
@@ -34,7 +34,7 @@ from agl.ports.ids import Namespace, ProjectName, RunLabel, StepName
 from agl.ports.run import JsonValue
 
 # One project, two runs in it, and a third run in a second project: enough to ask whether a label
-# is scoped to its project, which §3.6 says it is.
+# is scoped to its project, which it is.
 _PROJECT: Final = ProjectName("myapp")
 RUN: Final = RunScope(_PROJECT, RunLabel("auth"))
 SIBLING_RUN: Final = RunScope(_PROJECT, RunLabel("payments"))
@@ -50,7 +50,7 @@ GRANDCHILD: Final = Namespace("sub-b")
 STEP: Final = StepName("implement")
 OTHER_STEP: Final = StepName("review_quality")
 
-# An entry's `at` is never read for control flow (§3.6); one constant is enough for every
+# An entry's `at` is never read for control flow; one constant is enough for every
 # document here, and a document that differs from another differs somewhere that matters.
 _AT: Final = "2026-08-18T09:16:41Z"
 
@@ -65,7 +65,7 @@ def digest(seed: str) -> str:
 
 
 def entry(marker: str, *, value: JsonValue = None) -> dict[str, JsonValue]:
-    """One step entry, §3.6's four fields, every one of them derived from `marker`.
+    """One step entry, its four fields, every one of them derived from `marker`.
 
     `value` defaults to `None` because that is what an effect step records, and because an entry
     whose value is null is the case the "nothing recorded is not a recorded null" clause turns on.
@@ -79,7 +79,7 @@ def entry(marker: str, *, value: JsonValue = None) -> dict[str, JsonValue]:
 
 
 def record(marker: str) -> dict[str, JsonValue]:
-    """One run record, shaped like §3.6's `run.json`, carrying a nested `params`.
+    """One run record, shaped like `run.json`, carrying a nested `params`.
 
     `params` is workflow-defined and so is the field a caller is most likely to reach into after
     reading - which is what makes it the right place to try to edit the store through.
@@ -97,7 +97,7 @@ def record(marker: str) -> dict[str, JsonValue]:
 
 
 # Every shape `JsonValue` admits, as one document. The unicode string carries a character AGL
-# refuses in a *name* (§3.3) on purpose: names are ASCII and values are not, and an
+# refuses in a *name* on purpose: names are ASCII and values are not, and an
 # implementation that confused the two would encode a value the way it encodes an address.
 EVERY_JSON_SHAPE: Final[dict[str, JsonValue]] = {
     "null": None,

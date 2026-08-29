@@ -1,4 +1,4 @@
-"""The grammar `agl init`, and the stage's acceptance criterion: reachable and working end to end.
+"""The grammar `agl init`, and its acceptance criterion: reachable and working end to end.
 
 `tests/test_init.py` drives `api.init` from the library side, where the ordering between the
 refusals and the question is asserted. This module drives the real entry point - the real parser,
@@ -99,11 +99,12 @@ def _init_parser() -> RefusingParser:
 def test_agl_init_registers_a_repository_that_had_no_project_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The stage's criterion: `agl init` reachable and working end to end, in a fresh repository.
+    """The criterion: `agl init` reachable and working end to end, in a fresh repository.
 
-    Reachable is the half 11.0 bought and this is where it is spent - stage 10 composed the project
-    and the container before the dispatch chose a command, so in this directory `main` would have
-    refused with `NotFoundError` before `init` was reached, however well `init` was written.
+    Reachable is the half per-command composition bought and this is where it is spent - the
+    project and the container were once built before the dispatch chose a command, so in this
+    directory `main` would have refused with `NotFoundError` before `init` was reached, however
+    well `init` was written.
 
     Working is the round trip: `read_project` takes the file by name and `resolve_project` finds it
     by walking up from inside the repository, which are the two ways every later command reaches a
@@ -136,7 +137,7 @@ def test_agl_init_registers_a_repository_that_had_no_project_file(
 def test_a_run_in_that_repository_now_composes_where_it_could_not_before(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """§3.10: "Afterwards every workflow works with no further setup." The half `init` is for.
+    """Afterwards every workflow works with no further setup - the half `init` is for.
 
     Before it, `Invocation.registered()` raises `NotFoundError` naming `agl init`; after it, the
     same callable resolves a project and builds a container. That is the whole claim of the command,
@@ -162,7 +163,7 @@ def test_a_run_in_that_repository_now_composes_where_it_could_not_before(
 def test_a_second_init_in_the_same_repository_exits_four(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """§3.10 runs `init` once per repo. Exit 4 is `run`'s class for a world that already holds it.
+    """`init` runs once per repo. Exit 4 is `run`'s class for a world that already holds it.
 
     The settings are asserted intact afterwards, because that is what the refusal is *for*: somebody
     who edited `build` by hand and ran `agl init` again must not lose the edit.
@@ -200,7 +201,7 @@ def test_init_outside_a_git_repository_exits_three(
 def test_a_trees_root_a_symlink_puts_inside_the_repository_exits_two(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """16.1's `check_trees_root`, reached from the writer's side, through argv.
+    """`check_trees_root`, reached from the writer's side, through argv.
 
     `<repo's parent>/.agl-trees` is beside the repository as written and a symlink is what makes
     that a lie. Refused at exit 2 with nothing written, so the operator fixes the link rather than
@@ -221,7 +222,7 @@ def test_a_trees_root_a_symlink_puts_inside_the_repository_exits_two(
 
 
 def test_the_init_parser_holds_no_arguments_at_all(tmp_path: Path) -> None:
-    """§3.10's line for this verb is one word. Everything `init` needs it works out for itself.
+    """The line for this verb is one word. Everything `init` needs it works out for itself.
 
     `-h` is argparse's own and is the only option on it; a positional here would be a repository or
     a name typed twice, and both are facts about where the command was run.
@@ -236,9 +237,9 @@ def test_the_init_parser_holds_no_arguments_at_all(tmp_path: Path) -> None:
 
 
 def test_the_command_calls_exactly_one_api_function() -> None:
-    """"Commands stay dumb" (§1.4), made mechanical - and this is a command that charge names.
+    """"Commands stay dumb", made mechanical - and this is a command the rule was written for.
 
-    §1.4 charges `_cmd_init` with build-tool detection, TOML rendering and template writing in ~150
+    The command this replaces did build-tool detection, TOML rendering and template writing in ~150
     lines. The same scan the other command suites make: a second `api.` name here is that use case
     starting to come back, and a `toml_file.` or a `Path(` would be the real thing.
     """
@@ -256,7 +257,7 @@ def test_the_command_calls_exactly_one_api_function() -> None:
 def test_the_command_never_asks_for_a_registered_repository(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """§3.10: `init` "takes settings alone", and this is the half of that a test can measure.
+    """`init` takes settings alone, and this is the half of that a test can measure.
 
     `registered()` resolves the very file this command writes, so a clause that called it would make
     `agl init` refuse in every repository it exists for. The counter is on the `Invocation`, which
@@ -321,11 +322,11 @@ def test_an_argument_on_an_init_line_is_refused_and_points_at_the_two_commands_t
 ) -> None:
     """`_dispatch`'s tail refusal, reached by the third command to share it, and re-worded for it.
 
-    16.3's version explained that a run's arguments are read back from the record `agl run` wrote,
-    which is true of `resume` and `clear` and says nothing about a command addressed to no run. What
-    survives is a fact about `agl run` - it is the only command that names a workflow - and the
-    signpost to `agl workflows <workflow>`, which is where a person who typed a workflow's flag on
-    the wrong line finds out what that workflow actually takes.
+    An earlier version explained that a run's arguments are read back from the record `agl run`
+    wrote, which is true of `resume` and `clear` and says nothing about a command addressed to no
+    run. What survives is a fact about `agl run` - it is the only command that names a workflow -
+    and the signpost to `agl workflows <workflow>`, which is where a person who typed a workflow's
+    flag on the wrong line finds out what that workflow actually takes.
     """
     home = _home(tmp_path, monkeypatch)
     repo = _repository(tmp_path)

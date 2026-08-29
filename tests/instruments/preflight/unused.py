@@ -1,8 +1,8 @@
-"""A workflow module importing a role it never steps with: the stage's known cost, in one file.
+"""A workflow module importing a role it never steps with: preflight's known cost, in one file.
 
 `reviewer` is `fix`'s own OpenAI role. It is imported here, called by nothing, and the workflow
 below takes no step at all - so the single reason a run of it demands a Codex CLI is the import line
-above. That is a **false refusal**, and the stage records it as accepted rather than as a defect:
+above. That is a **false refusal**, and it was accepted rather than treated as a defect:
 the registry is a namespace, which of a module's roles a run actually reaches is decided by the
 workflow's body, and the body has not run when preflight asks. Erring toward refusing early is the
 right direction, because the failure it replaces is silent and expensive where this one is loud and

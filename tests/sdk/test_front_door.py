@@ -1,12 +1,12 @@
 """The SDK's front door: `agl.sdk` re-exports the authoring surface, and this is what keeps it true.
 
-16.5 made `from agl.sdk import Screen` true - `ARCHITECTURE.md` §5 and `ports/terminal.py` had both
-written that line since stage 3, and until then it raised `ImportError`. What a package-level
-re-export costs is a second list to keep in step with seven others, and this file is what notices
-when they stop agreeing. `tests/test_contract_listings.py` is the precedent and the argument is its
-own: "the silence is the defect, not the gap" - a name missing from `sdk/__init__.py` is not an
-error, it is a name an author imports from `agl.ports` instead, which is the thing the facades exist
-to prevent.
+`from agl.sdk import Screen` became true late: `ARCHITECTURE.md`'s "The layers" and
+`ports/terminal.py` had both written that line for most of the build, and until then it raised
+`ImportError`. What a package-level re-export costs is a second list to keep in step with seven
+others, and this file is what notices when they stop agreeing. `tests/test_contract_listings.py` is
+the precedent and the argument is its own: "the silence is the defect, not the gap" - a name missing
+from `sdk/__init__.py` is not an error, it is a name an author imports from `agl.ports` instead,
+which is the thing the facades exist to prevent.
 
 ## Four claims about the door, and none of them hardcodes the surface
 
@@ -45,7 +45,7 @@ unclassified fails here.
 
 ## And a fifth claim, about the facade that takes part of its port
 
-`sdk/errors.py` arrived at 18.0 and is whole-on-the-door like the other five, so the four claims
+`sdk/errors.py` arrived late and is whole-on-the-door like the other five, so the four claims
 above cover it - but it is the first facade whose *port* module it takes only part of, `ports/
 errors.py` holding the hierarchy and the exit-code table both. That cut is checked separately and
 in both directions, over `ports.errors.__all__` rather than over a list here, so a tenth class on
@@ -97,7 +97,8 @@ _NOT_ON_THE_ERROR_FACADE: Final[Mapping[str, str]] = {
     "exit_code_for": "the CLI's, for the same reason, and the only supported way to read that "
     "table",
     "Stop": "already on the door through `sdk/workflow.py`, beside the `Run` it is raised out of "
-    "(§3.3's 'six members, plus `Stop`') - one name does not get two import paths into one door",
+    "- the surface is `Run`'s six members, plus `Stop` - one name does not get two import paths "
+    "into one door",
 }
 
 # Names a submodule in `_DOOR` exports that the door deliberately does not, each with the reason.
@@ -276,7 +277,7 @@ def test_stop_reaches_the_door_through_the_workflow_module_and_not_through_the_f
 
 
 def test_the_two_sentences_the_repository_writes_about_this_are_true() -> None:
-    """`ARCHITECTURE.md` §5, `ports/terminal.py` and `sdk/questions.py` all spell the short import.
+    """`ARCHITECTURE.md`'s "The layers", `ports/terminal.py` and `sdk/questions.py` all spell it.
 
     Asserted as identity against `ports/` rather than as "the attribute exists", because what those
     sentences promise is that an author never reaches into `ports` - which is only worth anything if

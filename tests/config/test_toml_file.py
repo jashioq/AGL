@@ -75,10 +75,10 @@ def _repo(tmp_path: Path, name: str, *, marker: str = "dir") -> Path:
 def _beside(tmp_path: Path) -> tuple[Path, TreesRoot]:
     """A repository and a trees root laid out the way `agl init` lays them out: siblings.
 
-    `<parent>/myapp` and `<parent>/.agl-trees/myapp`, which is §3.10's example. The pair is a helper
-    because every write below needs one that survives `check_trees_root` - the reader refuses a
-    nested trees root, so a writer test that used `tmp_path` for both would fail on the way back in
-    and would be measuring the reader.
+    `<parent>/myapp` and `<parent>/.agl-trees/myapp`, which is the shape `agl init` picks. The pair
+    is a helper because every write below needs one that survives `check_trees_root` - the reader
+    refuses a nested trees root, so a writer test that used `tmp_path` for both would fail on the
+    way back in and would be measuring the reader.
     """
     dev = tmp_path.resolve() / "dev"
     return dev / "myapp", TreesRoot(dev / ".agl-trees" / "myapp")
@@ -88,7 +88,7 @@ def _beside(tmp_path: Path) -> tuple[Path, TreesRoot]:
 
 
 def test_the_global_file_round_trips_a_nested_section_per_connector(tmp_path: Path) -> None:
-    """§1.10's repair: `[agent.<connector>]`, which the flat file could not express."""
+    """Per-connector nesting: `[agent.<connector>]`, which a flat file could not express."""
     home = _home(tmp_path)
     _settings_file(
         home,
@@ -114,7 +114,7 @@ def test_a_missing_global_file_is_silence_and_not_a_refusal(tmp_path: Path) -> N
 
 
 def test_a_section_the_file_omits_says_nothing_rather_than_saying_off(tmp_path: Path) -> None:
-    """`None` is silence. Deciding what silence means is 9.2's, and it needs to see the silence."""
+    """`None` is silence. Deciding what it means is `sources.py`'s job, and it needs to see it."""
     home = _home(tmp_path)
     _settings_file(home, "[agent.claude]\nenabled = true\n")
     settings = read_settings(home)
@@ -131,9 +131,10 @@ def test_an_empty_section_and_an_absent_one_are_the_same_answer(tmp_path: Path) 
 def test_the_file_names_its_sections_exactly_as_the_settings_object_names_its_fields() -> None:
     """The one mapping that must not drift: `[agent.<x>]` fills `AgentSettings.<x>`.
 
-    The table is `agent` and the field is `agents` on purpose (§1.10's spelling against 9.1's), and
-    that is the only difference this module is allowed to introduce. A third provider adds a field
-    to `AgentSettings` and must add a section here in the same commit; this is what notices.
+    The table is `agent` and the field is `agents` on purpose - the file's own spelling against the
+    settings object's - and that is the only difference this module is allowed to introduce. A
+    third provider adds a field to `AgentSettings` and must add a section here in the same commit;
+    this is what notices.
     """
     assert tuple(field.name for field in fields(FileSettings)) == ("claude", "openai")
     assert tuple(field.name for field in fields(FileSettings)) == tuple(
@@ -227,7 +228,8 @@ def test_a_file_that_cannot_be_read_is_an_input_error_and_not_a_missing_file(
 
 
 def test_a_relative_path_is_refused_wherever_a_file_holds_one(tmp_path: Path) -> None:
-    """The rule the 9.1 types state in their own constructors, said here with the file and key."""
+    """The rule the `schema.py` types state in their own constructors, said here with the file
+    and key."""
     home = _home(tmp_path)
     path = _settings_file(home, '[agent.claude]\ncli_path = "bin/claude"\n')
     with pytest.raises(InputError) as raised:
@@ -239,8 +241,8 @@ def test_a_relative_path_is_refused_wherever_a_file_holds_one(tmp_path: Path) ->
 # --- The project file -------------------------------------------------------------------------
 
 
-def test_the_project_file_round_trips_the_five_keys_the_plan_writes(tmp_path: Path) -> None:
-    """§3.10 prints this file in full. `trees_root` becomes `trees_root`; 9.1's field is `trees`."""
+def test_the_project_file_round_trips_the_five_keys_init_writes(tmp_path: Path) -> None:
+    """All five keys. `trees_root` keeps its name here; `schema.Project` calls it `trees`."""
     home = _home(tmp_path)
     _project_file(
         home,
@@ -334,7 +336,7 @@ def test_a_project_that_was_never_registered_is_not_found(tmp_path: Path) -> Non
 
 # --- The writer, which is only interesting as the reader's inverse ------------------------------
 #
-# 16.4 put `write_project` beside `read_project` because this is "the only module that knows TOML",
+# `write_project` sits beside `read_project` because this is "the only module that knows TOML",
 # and the whole of what that buys is one property: a file `agl init` writes is a file `agl run`
 # reads. So the tests below assert the round trip rather than the bytes - a test comparing the
 # rendered text against a literal would pass while agreeing with nothing, and would have to be
@@ -342,7 +344,7 @@ def test_a_project_that_was_never_registered_is_not_found(tmp_path: Path) -> Non
 
 
 def test_a_file_the_writer_writes_is_one_the_reader_accepts(tmp_path: Path) -> None:
-    """The round trip, which is the writer's entire contract. §3.10's file, written and read back.
+    """The round trip, which is the writer's entire contract: the file written and read back.
 
     All five keys, `build_timeout` included, and the expected value is spelled as the constant
     rather than as `600.0`: the number has one home in `sources.DEFAULT_BUILD_TIMEOUT`, `api.init`
@@ -384,7 +386,7 @@ def test_a_build_command_holding_the_format_s_own_punctuation_round_trips(tmp_pa
 
 
 def test_the_writer_never_writes_over_a_project_file_that_is_already_there(tmp_path: Path) -> None:
-    """§3.10's `agl init` runs once per repo, and running it twice must not take a file away.
+    """`agl init` runs once per repo, and running it twice must not take a file away.
 
     `ConflictError` - exit 4, the class `api.run` answers a taken label with - and the file is
     asserted untouched afterwards, which is the assertion with teeth: a writer that refused *after*
@@ -439,12 +441,12 @@ def test_the_writer_makes_the_projects_directory_when_there_is_none(tmp_path: Pa
     assert read_project(home, ProjectName("myapp")).build == "make"
 
 
-# --- A trees root inside the repository, which is §3.5 read as a refusal -------------------------
+# --- A trees root inside the repository, refused -------------------------------------------------
 #
-# Stage 9 declined this check because seeing it needs `Path.resolve()` and `schema.Project` is a
-# pure type - "the same values answer the same way on any machine, with any filesystem underneath".
-# 16.1 put it here, where a `Project` comes out of a file and where the git-root walk already reads
-# the filesystem, and exported it so that 16.4's `init` refuses the same file when it writes one.
+# `schema.Project` cannot make this check, because seeing it needs `Path.resolve()` and that type is
+# pure - "the same values answer the same way on any machine, with any filesystem underneath".
+# It lives here instead, where a `Project` comes out of a file and where the git-root walk already
+# reads the filesystem, and is exported so that `init` refuses the same file when it writes one.
 
 
 def _nested(tmp_path: Path, trees: str) -> Path:
@@ -456,13 +458,13 @@ def _nested(tmp_path: Path, trees: str) -> Path:
 
 
 def test_a_trees_root_inside_the_repository_is_refused(tmp_path: Path) -> None:
-    """§3.5's "AGL lives outside the target repo", as the one refusal a project file earns that is
+    """AGL lives outside the target repo, and this is the one refusal a project file earns that is
     about two values rather than one.
 
     What it costs to allow is not subtle: `.trees/<label>/_base/` is a real checkout with a real
     working tree, so AGL's own worktrees would sit inside the repository they were cut from - in the
     operator's `git status`, swept up by `git add -A`, and walked by whatever their build walks.
-    §3.10 keeps AGL's state under `AGL_HOME` for exactly that reason.
+    AGL keeps its own state under `AGL_HOME` for exactly that reason.
 
     The message is asserted to carry the file, both keys and both resolved paths, because a reader
     holding it has to decide which of the two to move.
@@ -489,8 +491,8 @@ def test_a_trees_root_that_is_the_repository_itself_is_refused(tmp_path: Path) -
 def test_a_trees_root_that_only_resolution_shows_to_be_inside_is_refused(tmp_path: Path) -> None:
     """**Why this could not live in `schema.Project.__post_init__`.** Spelled through a symlink and
     a `..`, the value looks like a sibling and is not one, and nothing short of following the link
-    can tell. That read is what makes the check impure, and impure is what stage 9 refused to put
-    into a type whose whole promise is that it answers the same way on any filesystem."""
+    can tell. That read is what makes the check impure, and impure is what cannot go into a type
+    whose whole promise is that it answers the same way on any filesystem."""
     repo = tmp_path.resolve() / "myapp"
     repo.mkdir()
     (repo / "inside").mkdir()
@@ -504,9 +506,9 @@ def test_a_trees_root_that_only_resolution_shows_to_be_inside_is_refused(tmp_pat
 
 
 def test_a_trees_root_beside_the_repository_is_accepted(tmp_path: Path) -> None:
-    """The control, and §3.10's own example file is exactly this shape - `/Users/jan/dev/myapp` and
+    """The control, and what `agl init` lays out is exactly this shape - `/Users/jan/dev/myapp` and
     `/Users/jan/dev/.agl-trees/myapp`. A refusal that fired on a sibling would refuse every project
-    the plan prints."""
+    `agl init` writes."""
     _nested(tmp_path, str(tmp_path.resolve() / ".agl-trees" / "myapp"))
     project = read_project(_home(tmp_path), ProjectName("myapp"))
     assert project.trees_root == TreesRoot(tmp_path.resolve() / ".agl-trees" / "myapp")
@@ -514,15 +516,15 @@ def test_a_trees_root_beside_the_repository_is_accepted(tmp_path: Path) -> None:
 
 def test_a_file_that_names_only_one_of_the_two_paths_is_not_refused(tmp_path: Path) -> None:
     """Silence is not a value here (the module's own rule), and a rule about how two paths sit
-    relative to each other has nothing to say when the file supplied one of them. Which silence is
-    itself a problem is 9.2's to decide, when it applies the layer below the file."""
+    relative to each other has nothing to say when the file supplied one of them. Which silence
+    is itself a problem is `sources.py`'s to decide, when it applies the layer below the file."""
     home = _home(tmp_path)
     _project_file(home, "myapp", 'trees_root = "/tmp/agl-trees/myapp"\n')
     assert read_project(home, ProjectName("myapp")).repo is None
 
 
 def test_the_check_is_exported_so_that_init_can_refuse_before_it_writes(tmp_path: Path) -> None:
-    """16.4 writes the very file the tests above read, and it must refuse the same pair.
+    """`init` writes the very file the tests above read, and it must refuse the same pair.
 
     Exported rather than folded into `_project`, so that one helper serves the reader and the
     writer: a nested trees root is refused when the file is written as well as when it is read, and

@@ -77,7 +77,7 @@ def _resolve_both(environ: Mapping[str, str], repo: Path) -> None:
 
 
 def _project_file(home: AglHome, repo: Path, *, keys: str = "") -> Path:
-    """§3.10's file, with `name`, `repo` and `trees_root` always present and the rest per case."""
+    """The project file: `name`, `repo` and `trees_root` always present and the rest per case."""
     return _write(
         project_config(home, ProjectName(_NAME)),
         f'name = "{_NAME}"\n'
@@ -110,7 +110,7 @@ def test_home_falls_from_the_environment_to_the_default_under_the_user_home(
 
 
 def test_home_has_no_file_layer_because_the_file_lives_inside_it(tmp_path: Path) -> None:
-    """The missing fourth layer and 9.3's dedicated refusal are one fact. This is the other half."""
+    """The missing fourth layer and the reader's own refusal are one fact. This is the other."""
     home = _home(tmp_path)
     path = _settings_file(home, 'home = "/elsewhere"\n')
     with pytest.raises(InputError) as raised:
@@ -158,7 +158,8 @@ def test_enabled_falls_flag_then_environment_then_file_then_true(tmp_path: Path)
 
 
 def test_enabled_defaults_to_true_because_configured_is_not_available(tmp_path: Path) -> None:
-    """§3.2.1: whether a harness is installed is `check_ready`'s answer, not a settings default."""
+    """`src/agl/ports/agent.py`: whether a harness is installed is `check_ready`'s answer, not a
+    settings default."""
     agents = resolve_settings(Overrides(), _env(_home(tmp_path))).agents
     assert agents.claude.enabled
     assert agents.openai.enabled
@@ -206,17 +207,17 @@ def test_every_one_of_the_seven_variables_is_spelled_as_the_rule_says(tmp_path: 
     assert (project.build, project.build_timeout) == ("make check", 12.5)
 
 
-# --- the acceptance criterion -------------------------------------------------------------------
+# --- one setting, all four layers ----------------------------------------------------------------
 
 
-def test_the_stage_criterion_build_timeout_from_flag_then_env_then_file_then_default(
+def test_build_timeout_falls_from_flag_then_env_then_file_then_default(
     tmp_path: Path,
 ) -> None:
-    """One setting, four layers, in order of preference. This is stage 9.2's acceptance criterion.
+    """One setting, four layers, in order of preference.
 
     The same `build_timeout` is resolved from a flag; then with the flag gone, from the
     environment; then with the variable gone as well, from the project file; then with all three
-    gone, from the default §3.10's example file writes as `build_timeout = 600`.
+    gone, from `sources.DEFAULT_BUILD_TIMEOUT`, which `agl init` also writes into a new file.
     """
     home = _home(tmp_path)
     repo = _repo(tmp_path)
@@ -362,7 +363,7 @@ def test_a_relative_cli_path_variable_is_refused_naming_the_variable(tmp_path: P
 
 
 def test_a_build_timeout_out_of_range_is_still_the_schema_refusal(tmp_path: Path) -> None:
-    """This layer's job is that a number arrives; one copy of the range rule lives in 9.1."""
+    """This layer's job is that a number arrives; the range rule has one home, in `schema.py`."""
     home = _home(tmp_path)
     repo = _repo(tmp_path)
     _project_file(home, repo, keys='build = "make"\n')
@@ -390,7 +391,7 @@ def test_the_pure_core_ignores_the_process_environment_entirely(
 def test_resolve_reads_the_environment_once_and_downstream_sees_that_snapshot(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The contract §1.10 asks for: after this returns, the answer is fixed for the invocation."""
+    """Resolved once: after this returns, the answer is fixed for the invocation."""
     home = _home(tmp_path)
     repo = _repo(tmp_path)
     _project_file(home, repo, keys='build = "make"\n')

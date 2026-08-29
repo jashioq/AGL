@@ -1,5 +1,5 @@
 """Structural test: every contract in `.importlinter` refuses the violation it was written to
-refuse. Six contracts, and until 19.1 nothing in this suite had ever watched one of them say no.
+refuse. Six contracts, and before this file nothing in this suite had watched one of them say no.
 
 `tests/test_contract_listings.py` next door checks that the hand-maintained *listings* inside three
 of the contracts still agree with the tree they police. That is a weaker and different claim: a
@@ -8,8 +8,8 @@ that no longer exists, if an `ignore_imports` expression quietly swallows the wh
 if a later edit turns a `forbidden` contract into one whose `source_modules` and `forbidden_modules`
 overlap - import-linter skips overlapping pairs in silence, which is exactly how contract 2 comes to
 have no opinion about `agl.ports` itself. **A contract nobody has seen break is a contract nobody
-has seen work.** Stage 4 found four contracts failing open by inspection; this file is what would
-have found them by measurement.
+has seen work.** Four of the six were once found failing open by inspection; this file is what
+would have found them by measurement.
 
 So each probe below fabricates the import that contract exists to catch, and asserts that *that*
 contract, named by its stable number, goes from kept to broken. Both halves matter. "Something
@@ -74,10 +74,10 @@ a fabrication plus the reason the fabrication is the right shape - the reason be
 later reader needs and the part no mechanism can hold. Splitting the table off from the machinery
 that runs it would put the argument for a row one file away from the assertion that prints it, and
 buy nothing: what is left is two fixtures, one loop and the failure messages. This file stood over
-the ceiling while the gate counted every line; since 19.5 it counts code, and 243 of these 472
-lines are code, so the warning that prompted this section no longer fires. The section stays
-because the question it answers - why is the table not its own module - is asked by the file's
-shape, not by the gate.
+the ceiling while the gate counted every line; the gate counts code now, and 243 of these 472 lines
+are code, so the warning that prompted this section no longer fires. The section stays because the
+question it answers - why is the table not its own module - is asked by the file's shape, not by
+the gate.
 """
 
 import copy
@@ -107,11 +107,11 @@ CONTRACT_CLASSES: Final[Mapping[str, type[Contract]]] = {
     "independence": IndependenceContract,
 }
 
-# Contract numbers are stable - `.importlinter`'s header says so, and stage briefs cite them by
+# Contract numbers are stable - `.importlinter`'s header says so, and failure reports cite them by
 # number - and the type is half of what a number means: contract 4 becoming a `forbidden` contract
 # would leave every probe below still running and no longer probing what it says it does. This is
 # where all six numbers are pinned, `tests/test_contract_listings.py` having handed over the four
-# it used to pin when 19.1 stopped it reading contract 1.
+# it used to pin when it stopped reading contract 1.
 CONTRACT_TYPES: Final[Mapping[str, str]] = {
     "1": "layers",
     "2": "forbidden",
@@ -170,7 +170,7 @@ PROBES: Final[tuple[Probe, ...]] = (
     ),
     # The independence half, first pair. `agl.cli | agl.testing` is the spelling that says these
     # two are one level and may not import each other, and independence is the half of contract 1 a
-    # rewrite is most likely to lose - 19.1's `containers` rewrite was checked against exactly this
+    # rewrite is most likely to lose - the `containers` rewrite was checked against exactly this
     # row.
     Probe(
         contract="1",
@@ -179,11 +179,12 @@ PROBES: Final[tuple[Probe, ...]] = (
         rule="the CLI importing the harness - independent siblings, which `|` is what says",
         breaks=frozenset({"1"}),
     ),
-    # The independence half, second pair - `agl.sdk | agl.adapters`, ARCHITECTURE.md §2's "siblings
-    # and may not import each other". 19.1 gave contract 1 three probes and this was not one of
-    # them: the row above was the only independence probe there was, so this pair was enforced by
-    # nothing that anything checked. Respelling it `:` left `lint-imports` at six kept, zero broken,
-    # and the whole suite green - which is this file's own thesis arriving one row short.
+    # The independence half, second pair - `agl.sdk | agl.adapters`, which is `ARCHITECTURE.md`'s
+    # "The dependency rule": "siblings and may not import each other". Contract 1 once had three
+    # probes and this was not one of them: the row above was the only independence probe there was,
+    # so this pair was enforced by nothing that anything checked. Respelling it `:` left
+    # `lint-imports` at six kept, zero broken, and the whole suite green - which is this file's own
+    # thesis arriving one row short.
     #
     # **The direction is forced, and a probe the other way round would pass for the wrong reason.**
     # Contract 5 forbids `agl.* -> agl.adapters` and so already catches `sdk -> adapters` on its
@@ -356,7 +357,7 @@ def test_the_named_contract_breaks_on_the_violation_it_exists_to_catch(
     assert probe.contract in contracts, (
         f"there is no contract {probe.contract} in {CONFIG_FILE}. Contract numbers are stable by "
         f"policy - see that file's header - so a renumbering is a change to this file, to "
-        f"tests/test_contract_listings.py, and to every stage brief that cites a number."
+        f"tests/test_contract_listings.py, and to every failure report that cites a number."
     )
     for endpoint in (probe.importer, probe.imported):
         assert endpoint in graph.modules, (
@@ -386,15 +387,15 @@ def test_the_named_contract_breaks_on_the_violation_it_exists_to_catch(
 def test_contract_1_breaks_on_a_top_level_member_no_layer_declares(
     contracts: Mapping[str, Contract], graph: grimp.ImportGraph
 ) -> None:
-    """Contract 1's third claim, and the one it did not make before 19.1.
+    """Contract 1's third claim, and the one it did not always make.
 
     `layers =` used to name absolute modules and had no opinion about a module it did not mention,
     so a new top-level package was not at the bottom of the stack but outside it - free to import
     `agl.ports` and `agl.adapters` directly, and be imported by anything, with all six contracts
     reported kept. A hand-maintained comparison in `tests/test_contract_listings.py` was what
-    noticed. 19.1 replaced it with `containers = agl` plus `exhaustive = True`, which is the linter
-    saying the same thing natively, and this is that rule under the same discipline as the rest of
-    this file: it is not enough that the flag is in the config, the failure has to happen.
+    noticed. That was replaced with `containers = agl` plus `exhaustive = True`, which is the
+    linter saying the same thing natively, and this is that rule under the same discipline as the
+    rest of this file: it is not enough that the flag is in the config, the failure has to happen.
 
     The fabrication is a module and not an import, because that is the shape of the defect - a
     package that imports nothing at all is still outside the stack. `add_module` is also the one

@@ -1,25 +1,25 @@
-"""§3.7's two priorities, driven by a workflow: the conflict that preempts, and the queue behind it.
+"""The two priorities, driven by a workflow: the conflict that preempts, and the queue behind it.
 
-15.1 wired `run.terminal` and 15.2 proved the mid-run question path end to end. What is left is the
-thing those two make possible for the first time - **two priorities live at once**, with a person in
-front of them and the framework's own merge queue behind them - and §3.4's conflict snippet, which
-no deliverable before this one could execute.
+`run.terminal` was wired first and the mid-run question path was proved end to end after it. What
+is left is the thing those two make possible for the first time - **two priorities live at once**,
+with a person in front of them and the framework's own merge queue behind them - and the conflict
+loop, which no earlier deliverable could execute.
 
-Stage 6 built the slot, the two queues, preemption, `pending` and the fallback order.
+The slot, the two queues, preemption, `pending` and the fallback order were built in the adapter.
 `tests/adapters/test_rich_terminal_queues.py` and `tests/contracts/_terminal_queues.py` own every
 one of those mechanics against `Screens` and against both implementations, and nothing here
 re-proves any of it. The subject of this file is a **workflow** driving them, which is the only
 place they mean anything: the questions are asked by agents in two children, the conflict comes out
-of a real landing, the priorities are the two §3.7 writes down, and the person is a scripted
+of a real landing, the priorities are the two that are written down, and the person is a scripted
 keyboard.
 
-## Preemption is not cosmetic, and stage 14 is what made that literal
+## Preemption is not cosmetic, and the lease is what makes that literal
 
-§3.7: "`integrate()` holds the target lease while a conflict is unresolved, so a conflict screen
-queued behind two agent questions would stall the merge queue on something unrelated. That is the
-entire justification for one level of preemption." Stage 14 made it sharper than the plan states,
-and `sdk/_engine/integration.py` says so where it happens: `Leases.claim` takes the lease **and the
-target namespace's step lock**, because a landing is a second writer of a checkout §3.6 promises is
+`integrate()` holds the target lease while a conflict is unresolved, so a conflict screen queued
+behind two agent questions would stall the merge queue on something unrelated. That is the entire
+justification for one level of preemption, and the engine is sharper than that:
+`sdk/_engine/integration.py` says so where it happens - `Leases.claim` takes the lease **and the
+target namespace's step lock**, because a landing is a second writer of a checkout that is promised
 single-threaded. So an undecided conflict does not merely hold up other landings - it holds up the
 **parent's own next step**.
 
@@ -32,9 +32,9 @@ Here the questions are left unanswered on purpose, and the parent's step is asse
 on anyway - which is "the merge queue did not stall on something unrelated", written as an
 assertion.
 
-## `pending` excludes what is on screen, and §3.7's own example is asserted exactly
+## `pending` excludes what is on screen, and the documented example is asserted exactly
 
-`{5: 2, 10: 0}` is written into the plan as a specification, and this file reproduces it from a run
+`{5: 2, 10: 0}` is the map the port specifies, and this file reproduces it from a run
 rather than from a `Screens` built by hand: two agent questions waiting, a conflict displayed, and
 the `10: 0` there because the priority has been asked for and its one entry is on screen rather than
 queued. There is no `0:` key, because the board is a passive `show` and `queues.py` decided a
@@ -53,7 +53,7 @@ the whole point of the `Keys` seam is that the real adapter can be driven withou
 is a plain `Console(file=StringIO())` and deliberately not `force_terminal=True`, which takes
 `_display.py`'s appending path and so leaves `sys.stdout` and `sys.stderr` alone inside pytest.
 
-**The substitution is `harness.with_terminal(...)` and not `dataclasses.replace`, and 16.5 is why.**
+**The substitution is `harness.with_terminal(...)` and not `dataclasses.replace`, for a reason.**
 `container.fakes()` holds one terminal under two names - `services.terminal` and the sibling
 `FakeServices.terminal` - and a `replace(harness.services, terminal=...)` moved only the first, so
 `harness.terminal` afterwards named the `HeadlessTerminal` that had just been discarded. Nothing
@@ -73,7 +73,7 @@ cut before the parent's own step, both creating one file, sharing not a line. Th
 and the module is not imported, for the rule the rest of `tests/` keeps: no test module imports
 another.
 
-**Every await is bounded, and it has to be.** §3.7 has no timeouts anywhere - "an unanswered
+**Every await is bounded, and it has to be.** There are no timeouts anywhere - "an unanswered
 question blocks its step indefinitely" - so a mistake in any test below is a hang rather than a
 failure. Each wait carries its own deadline and a message naming what it was waiting for, what was
 on screen and what `pending` said; the outer `asyncio.timeout` is the net under everything the
@@ -87,19 +87,20 @@ records are what the workflow hands back.
 
 ## Not here, and each for its own reason
 
-**Timeouts and part-typed input are left alone.** §3.7 lists both as known and accepted for v1.1:
+**Timeouts and part-typed input are left alone.** Both are known and accepted for v1.1:
 preemption loses text a person was part-way through typing, and there are no question timeouts.
 Nothing below builds either, and the tests are written so that the second one costs a bounded
 failure rather than a hung suite.
 
-**The question round trip is 15.2's** - that the `Question` the agent asked is the object the
+**The question round trip is elsewhere** - that the `Question` the agent asked is the object the
 handler was given, that the answer goes back into the round it was asked from, and that a
 negotiation is one task, one dispatch and one entry. Questions are asked here because two of them
 have to be waiting; what is asserted about them is where they sit in a queue.
 
-**The five decisions around `integrate()` are 14's** - the advance, the lease, the containment
-check, the root refusal and the merge gate, all in `tests/sdk/test_run_integrate.py`. What is added
-here is the middle line of §3.3's snippet, which that file could build both halves of and never run.
+**The five decisions around `integrate()` are elsewhere too** - the advance, the lease, the
+containment check, the root refusal and the merge gate, all in `tests/sdk/test_run_integrate.py`.
+What is added here is the middle line of the conflict loop, which that file could build both halves
+of and never run.
 """
 
 import asyncio
@@ -136,7 +137,7 @@ LABEL: Final = RunLabel("auth")
 
 AGENT: Final = 5
 CONFLICT: Final = 10
-"""§3.7's own two priorities, quoted as the plan writes them:
+"""The two priorities, in the shape a workflow writes them:
 
     await term.show(views.agent_question, question=q,            priority=5)
     await term.show(views.conflict,       conflict=out.conflict, priority=10)
@@ -144,7 +145,7 @@ CONFLICT: Final = 10
 The numbers are what is being quoted; the parameter is not what this file passes, and `deciding`
 says why. Named here so that the two numbers a workflow shows at and the two keys `pending` is
 asserted with are one pair. They are plain `int`s and nothing below treats them as anything else -
-§3.7 refuses named levels because `MEDIUM` and `HIGH` would encode "agent question" and "merge
+named levels are refused because `MEDIUM` and `HIGH` would encode "agent question" and "merge
 conflict", which are one workflow's concepts and not the framework's."""
 
 # The repository's seed and the files these runs move about. `CONTESTED` is the one two lines of
@@ -209,7 +210,7 @@ class NoParams:
 class _Scene:
     """One test's two rendezvous points with the workflow it is driving.
 
-    A workflow function takes a `Run` and returns `None` (§3.3), so there is no argument to pass a
+    A workflow function takes a `Run` and returns `None`, so there is no argument to pass a
     handle through and no return value to read one out of - `tests/sdk/test_run_integrate.py` meets
     the same wall and answers it with a module-level cell and a `_Pause`. These are events rather
     than sleeps for that file's reason: nothing here waits on a scheduler, so a green run spends no
@@ -245,11 +246,11 @@ answered: Final[list[str]] = []
 part: "with the two questions still unanswered" is this list being empty."""
 
 decided: Final[list[Integration]] = []
-"""The live `Integration` a workflow is deciding about, published before §3.4's snippet reads it, so
+"""The live `Integration` a workflow is deciding about, published before the loop reads it, so
 that a test can read the summary that is on the screen while the screen is still up."""
 
 boards: Final[list[Mapping[str, str]]] = []
-"""One entry per `show` of the board. It counts registrations and nothing else: §3.7's "no extra
+"""One entry per `show` of the board. It counts registrations and nothing else: "no extra
 machinery" is that the dashboard comes back **with no second `show`**, and the only way to assert
 "no second one" is for the workflow to say how many it made."""
 
@@ -263,23 +264,23 @@ answered is a write made behind a screen the board was not on."""
 
 # --- the views a workflow shows ------------------------------------------------------------------
 
-# Built out of `agl.sdk.terminal`, which is the front door §5 put there for exactly this: a workflow
+# Built out of `agl.sdk.terminal`, which is the front door for exactly this: a workflow
 # author writing a view never reaches into `agl.ports`. Every name it re-exports is the object
 # `ports/terminal.py` defines, so this is a spelling and not a second set of classes.
 
 
 def board(lines: Mapping[str, str]) -> Screen:
-    """§3.7's board: one row per thing the run is doing, over a mapping the workflow keeps.
+    """The board: one row per thing the run is doing, over a mapping the workflow keeps.
 
     Passive - no responses - which is what sends it to the slot rather than to a queue, and what
     makes it the screen everything else falls back to.
 
-    **It takes the live dict and not a copy**, which is the whole of §3.7's per-frame design: "this
+    **It takes the live dict and not a copy**, which is the whole of the per-frame design: "this
     is why arguments need not be values ... mutating a `Ticket` in place shows up for the same
     reason". The workflow re-`show`s only to change *which* view is on screen, and never to change
     what one says.
 
-    Pure, as §3.7 requires of every view: invoked again ten times a second for as long as it is on
+    Pure, as every view must be: invoked again ten times a second for as long as it is on
     screen, reading nothing but what it was handed.
     """
     return Screen(Rows([Row(name, state) for name, state in lines.items()]))
@@ -290,7 +291,7 @@ def choose(question: Question) -> Screen[str]:
 
     Interactive, so it joins a queue at whatever priority the handler showed it with. It returns the
     option a person picked, and the workflow's handler maps that down to an `Answer` at its own
-    layer - which is where §3.7 puts that mapping.
+    layer - which is where that mapping belongs.
     """
     return Screen(
         body=Text(question.prompt),
@@ -313,15 +314,15 @@ _SETTLED: Final = "this landing has already been decided"
 
 
 def conflict(outcome: Integration) -> Screen[bool]:
-    """§3.4's conflict view, in the workflow's own words and out of the outcome's own summary.
+    """The conflict view, in the workflow's own words and out of the outcome's own summary.
 
-    §3.4: "On conflict the framework does not ask. It returns a `Conflict` outcome and holds the
+    "On conflict the framework does not ask. It returns a `Conflict` outcome and holds the
     lease; the workflow shows its own screen and decides." This is that screen. The framework
     contributes the sentence on it - `Conflict.summary` is "the only part of a `Conflict`
     guaranteed to say anything" - and everything else here is the workflow's: which words the two
     buttons carry, what picking one produces, and that there are two of them at all.
 
-    **The outcome is passed whole, and §3.4 names that as a defect in a workflow's view.** The
+    **The outcome is passed whole, which is a defect in a workflow's view.** The
     sanctioned parameters are `conflict=outcome.conflict, build=outcome.verdict` - what a screen
     renders - because a workflow author's view annotated against `Integration` carries
     `sdk/_engine`'s private type in its signature and holds both verbs. `workflows/split/views/
@@ -347,7 +348,7 @@ def conflict(outcome: Integration) -> Screen[bool]:
 
 @role(model=Claude.SONNET)
 def _role(name: str, instructions: str) -> Role[None]:
-    """An effect role: its result is `None` and its effect is commits (§3.3).
+    """An effect role: its result is `None` and its effect is commits.
 
     No reporting tool anywhere in this file, because nothing here reads a step's value - what these
     steps are for is the files they leave, the lock they hold and the questions they ask.
@@ -357,9 +358,9 @@ def _role(name: str, instructions: str) -> Role[None]:
 
 @role(model=Claude.SONNET)
 def _asking(instructions: str, handler: QuestionHandler) -> Role[None]:
-    """The same role with §3.7's callback on it, which is why the handler is a factory parameter.
+    """The same role with the callback on it, which is why the handler is a factory parameter.
 
-    A role's declaration is a factory (§3.3) and the handler cannot be written into it, because it
+    A role's declaration is a factory and the handler cannot be written into it, because it
     "is a closure over the workflow's `Run`, keeping its signature to one parameter" - so this one
     cannot exist before a run does, and the parameter list is what lets a call site supply it
     without being able to supply anything else. Passing it also folds `MID_RUN_QUESTIONS` into
@@ -375,8 +376,8 @@ AFTER: Final = _role("after", "the parent's own next step, taken while a child i
 ASK_FIRST: Final = "implement T-01, and ask which way before deciding"
 ASK_SECOND: Final = "implement T-02, and ask which way before deciding"
 """The two asking roles' instructions, kept as strings because their `Role`s are built inside the
-workflow. Distinct on purpose: the fake is handed no namespace and no step name (§3.3 keeps both off
-`AgentTask`), so the prompt is the only thing that tells one dispatch from another."""
+workflow. Distinct on purpose: the fake is handed no namespace and no step name - `AgentTask`
+carries neither - so the prompt is the only thing that tells one dispatch from another."""
 
 QUESTIONS: Final[Mapping[str, Question]] = {
     ASK_FIRST: Question(
@@ -401,7 +402,7 @@ _WRITES: Final[Mapping[str, Mapping[str, bytes]]] = {
 }
 """Which files each agent leaves behind, keyed by the instructions it was dispatched with. The two
 asking roles write nothing: their steps take no `commit=`, so anything they left would be wiped on
-the way out anyway (§3.3), and what they are here for is the question."""
+the way out anyway, and what they are here for is the question."""
 
 
 class _Agent:
@@ -456,30 +457,30 @@ def _agent(record: _Agent) -> Script:
 
 @workflow(version="1")
 async def deciding(run: Run[NoParams]) -> None:
-    """§3.4's conflict snippet, run - and the middle line of it is what 15.3 is.
+    """The conflict loop, run - and the middle line of it is what this file is for.
 
         outcome = await run.integrate()
-        if outcome.conflicted:                       # NOT §3.4's spelling - see below
+        if outcome.conflicted:                       # NOT the sanctioned spelling - see below
             if await run.terminal.show(conflict, outcome=outcome, priority=CONFLICT):
                 await outcome.retry()
             else:
                 await outcome.abort()
 
-    **This is the plan's snippet with two deliberate departures, and neither is what a workflow
-    should copy.** §3.4 writes `while outcome.conflicted:` with a `break` after the abort, and
-    hands the view `conflict=outcome.conflict, build=outcome.verdict`; `workflows/split/` is where
-    that spelling ships and `sdk/_engine/integration.py` is where it is argued. Both departures are
-    this *file's*, taken for reasons that do not survive outside it:
+    **The snippet above departs from the shipped spelling twice, and neither departure is what a
+    workflow should copy.** The loop is `while outcome.conflicted:` with a `break` after the abort,
+    and hands the view `conflict=outcome.conflict, build=outcome.verdict`; `workflows/split/` is
+    where that spelling ships and `sdk/_engine/integration.py` is where it is argued. Both
+    departures are this *file's*, taken for reasons that do not survive outside it:
 
       * **`outcome` whole, rather than the two members.** This file's own `conflict` view takes an
         `Integration` so that the screen re-reads a *live* outcome every frame - its docstring
         argues that, and `test_pending...` and the board test both read what is drawn while the
-        outcome is still unsettled. §3.4's objection is about a **workflow author's** view carrying
+        outcome is still unsettled. The objection is about a **workflow author's** view carrying
         `sdk/_engine`'s private type in its signature; this view is a test's, in a module that
         already imports `Integration` to annotate `decided`.
       * **`if` rather than `while`.** Every scene here scripts exactly one keystroke, and a `while`
         over a view that reads the live outcome would put the same screen back up in the abort
-        case, where `conflicted` deliberately stays true. §3.4's `break` is what closes that, and
+        case, where `conflicted` deliberately stays true. The `break` is what closes that, and
         the `break` needs the loop - so this file takes neither rather than half of the pair.
 
     What the `if` costs elsewhere is the lease: a person who retries without having fixed anything
@@ -515,17 +516,17 @@ async def deciding(run: Run[NoParams]) -> None:
 async def contested(run: Run[NoParams]) -> None:
     """Two children asking, a third one landing, and the parent's own next step behind all of it.
 
-    §3.3's `drive` in the small: a board shown once and live over everything, children opened as
+    A `drive` loop in the small: a board shown once and live over everything, children opened as
     worktrees, and each of them running its own agent concurrently. What is added is the arrangement
-    §3.7's justification for preemption describes and no test has ever built - two agent questions
+    the justification for preemption describes and no test has ever built - two agent questions
     queued at 5, a conflict arriving at 10 while both are unanswered, and the merge queue's own
     victim, `run.step` in the target namespace, waiting behind the landing.
 
     **The parent's step is started and not awaited**, which is the shape that makes the claim
     visible: `Leases.claim` holds the target's step lock for as long as it holds the lease, so this
     task sits inside `journal.step`'s `async with` - before any agent is dispatched - until the
-    conflict is decided. A workflow would more usually reach that state by gathering, and §3.3 says
-    a `gather` over a parent's step and a child's landing "is legal and simply does not overlap".
+    conflict is decided. A workflow would more usually reach that state by gathering, and a
+    `gather` over a parent's step and a child's landing "is legal and simply does not overlap".
 
     The last line is the test's, and the module docstring says why: `api.run` shuts the terminal
     down on the way out, so a frame has to be read while the run is still alive.
@@ -536,7 +537,7 @@ async def contested(run: Run[NoParams]) -> None:
     await run.terminal.show(board, lines=lines)
 
     async def answering(question: Question) -> Answer:
-        """§3.7's handler, spelled as §3.7 spells it: show it, and answer with what came back."""
+        """The handler, spelled the sanctioned way: show it, and answer with what came back."""
         asked.append(question)
         picked = await run.terminal.show(choose, question=question, priority=AGENT)
         answered.append(picked)
@@ -565,7 +566,7 @@ async def contested(run: Run[NoParams]) -> None:
 
     await behind
     # Written into the board's own argument while both questions are still on the queue - so the
-    # slot is being updated with nothing drawing it, which is §3.7's "no extra machinery".
+    # slot is being updated with nothing drawing it, which is "no extra machinery".
     lines[LANDING_CHILD] = AFTER_ROW
     under.append(len(answered))
     await questions
@@ -573,7 +574,7 @@ async def contested(run: Run[NoParams]) -> None:
 
 
 def _point(name: str) -> EntryPoint:
-    """§3.3's `probe = "agl.workflows.probe:probe"`, pointed at this module instead."""
+    """The `probe = "agl.workflows.probe:probe"` entry point, pointed at this module."""
     return EntryPoint(name=name, value=f"{__name__}:{name}", group=registry.GROUP)
 
 
@@ -626,7 +627,7 @@ async def _head(harness: container.FakeServices, namespace: Namespace | None) ->
 
 
 def _target_dir(tmp_path: Path) -> Path:
-    """`.trees/auth/_base/` - the run's own checkout, which is what children land into (§3.9)."""
+    """`.trees/auth/_base/` - the run's own checkout, which is what children land into."""
     return tmp_path / "trees" / "auth" / "_base"
 
 
@@ -674,7 +675,7 @@ def _rows(screen: Screen[object] | None) -> tuple[str, ...]:
 async def _until(terminal: RichTerminal, ready: Callable[[], bool], what: str) -> None:
     """Wait for `ready`, and say what was still waiting if it never comes.
 
-    Every wait in this file goes through here, and the deadline is the point of it: §3.7 has no
+    Every wait in this file goes through here, and the deadline is the point of it: there are no
     timeouts, so a question nobody answers blocks its step forever *by design* and a test that gets
     one wrong hangs rather than fails. The message carries the two things that decide which of the
     possible mistakes it was - what the terminal last drew, and what it thinks is queued.
@@ -689,18 +690,18 @@ async def _until(terminal: RichTerminal, ready: Callable[[], bool], what: str) -
         f"waited {DEADLINE:.0f}s for {what}, and it never happened. The terminal last wrote "
         f"{_text(terminal.written)!r} (rows {_rows(terminal.written)}), `pending` reports "
         f"{dict(terminal.pending)}, {len(asked)} question(s) have been asked and {len(answered)} "
-        f"answered. §3.7 has no timeouts anywhere, so this is a wait that would otherwise never end"
+        f"answered. There are no timeouts anywhere, so this is a wait that would never end"
     )
 
 
-# --- §3.3's conflict snippet, both branches -------------------------------------------------------
+# --- the conflict loop, both branches -------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_a_person_who_resolves_the_collision_and_retries_lands_the_work(
     tmp_path: Path, terminal: RichTerminal, keys: Typing
 ) -> None:
-    """§3.3's snippet end to end, on the branch a person takes when they have fixed the collision.
+    """The loop end to end, on the branch a person takes when they have fixed the collision.
 
     Every layer of this is the real one: a real landing that would not combine, the workflow's own
     view built out of `Conflict.summary`, `RichTerminal` drawing it, a reader taking a line off a
@@ -730,7 +731,7 @@ async def test_a_person_who_resolves_the_collision_and_retries_lands_the_work(
         outcome = decided[0]
         assert outcome.conflicted is True, (
             "two lines of work that both created one file, sharing not a line and neither having "
-            "seen the other, were combined anyway - which §3.4 forbids in as many words"
+            "seen the other, were combined anyway - which is forbidden in as many words"
         )
         assert outcome.conflict is not None
         summary = outcome.conflict.summary
@@ -832,7 +833,7 @@ async def test_a_person_who_gives_up_at_the_conflict_screen_puts_the_target_back
 
 
 async def _reached_the_conflict(terminal: RichTerminal, keys: Typing, scene: _Scene) -> None:
-    """Drive `contested` to the moment §3.7 describes: a conflict on screen, two questions behind.
+    """Drive `contested` to the moment described: a conflict on screen, two questions behind.
 
     Three waits, and the order between them is the arrangement rather than a convenience.
 
@@ -844,7 +845,7 @@ async def _reached_the_conflict(terminal: RichTerminal, keys: Typing, scene: _Sc
     The second is the person. `RichTerminal` reads only while something answerable is on screen, so
     a read being in flight is the terminal genuinely sitting in front of the first question - and
     waiting for it here is what makes the preemption below happen *underneath somebody*, which is
-    the case §3.7 is describing and the only one in which "preemption is not cosmetic" is a claim
+    the case being described and the only one in which "preemption is not cosmetic" is a claim
     about the answer path rather than about the drawing. Without it, whether the reader had started
     its read before the conflict arrived would be a matter of which of two tasks the loop got to
     first, and the sharp case would be exercised some of the time.
@@ -870,12 +871,12 @@ async def _reached_the_conflict(terminal: RichTerminal, keys: Typing, scene: _Sc
 async def test_a_conflict_preempts_two_agent_questions_and_the_parents_step_goes_on(
     tmp_path: Path, terminal: RichTerminal, keys: Typing
 ) -> None:
-    """§3.7's justification for preemption, as an arrangement that fails when it is not honoured.
+    """The justification for preemption, as an arrangement that fails when it is not honoured.
 
     "`integrate()` holds the target lease while a conflict is unresolved, so a conflict screen
     queued behind two agent questions would stall the merge queue on something unrelated. That is
-    the entire justification for one level of preemption." Stage 14 made the sentence bigger than it
-    reads: `Leases.claim` takes the target namespace's **step lock** behind the lease, so what an
+    the entire justification for one level of preemption." The lease made that sentence bigger than
+    it reads: `Leases.claim` takes the target namespace's **step lock** behind the lease, so what an
     undecided conflict holds up is not only other landings but the parent's own next step.
 
     So the run below is built to have all four things true at once, and then asserts about the one
@@ -916,8 +917,8 @@ async def test_a_conflict_preempts_two_agent_questions_and_the_parents_step_goes
 
         assert answered == [], (
             f"{answered} had been answered by the time the conflict took the screen. Both agent "
-            f"questions are meant to be waiting underneath it, which is the whole arrangement §3.7 "
-            f"justifies preemption with"
+            f"questions are meant to be waiting underneath it, which is the whole arrangement "
+            f"preemption is justified with"
         )
 
         # The parent's own step, behind the landing's hold on the target namespace's step lock.
@@ -926,7 +927,7 @@ async def test_a_conflict_preempts_two_agent_questions_and_the_parents_step_goes
             "the parent's own step ran while a conflicted landing into its namespace was still "
             "undecided. `Leases.claim` takes that namespace's step lock behind the lease, because "
             "a landing writes the whole checkout, moves the branch and reads the head - which is "
-            "every one of the things §3.6's serialization exists to keep two writers from doing at "
+            "every one of the things the serialization exists to keep two writers from doing at "
             "once, and none of the ways it goes wrong raises anything"
         )
 
@@ -973,20 +974,19 @@ async def test_a_conflict_preempts_two_agent_questions_and_the_parents_step_goes
     assert len(record.heard) == 2, (
         f"{len(record.heard)} of the two agents were answered in the end. Both were, eventually, "
         f"which is what makes 'still unanswered' above a statement about *when* rather than about "
-        f"a run that never got past them - the round trip itself is 15.2's and is not re-proved"
+        f"a run that never got past them - the round trip itself is elsewhere, not re-proved here"
     )
 
 
 @pytest.mark.asyncio
-async def test_pending_is_the_plans_own_map_with_the_conflict_displayed(
+async def test_pending_is_the_specified_map_with_the_conflict_displayed(
     tmp_path: Path, terminal: RichTerminal, keys: Typing
 ) -> None:
-    """§3.7's `{5: 2, 10: 0}`, produced by a run rather than declared.
+    """The `{5: 2, 10: 0}` map, produced by a run rather than declared.
 
-    The plan states that map as a specification and the port repeats it: "the zero is the
-    specification: the map reports every priority this terminal has been asked for, not only the
-    ones with something waiting". Every part of it is a different decision, and this arrangement
-    exercises all three at once:
+    The port states that map as a specification: "the zero is the specification: the map reports
+    every priority this terminal has been asked for, not only the ones with something waiting".
+    Every part of it is a different decision, and this arrangement exercises all three at once:
 
       * **`5: 2`** - two agent questions are waiting, and one of them is waiting *again*, having
         been displaced from the screen by the conflict. A displaced question is queued, not lost.
@@ -1017,7 +1017,7 @@ async def test_pending_is_the_plans_own_map_with_the_conflict_displayed(
 
         assert dict(terminal.pending) == {AGENT: 2, CONFLICT: 0}, (
             f"`pending` reports {dict(terminal.pending)} with a conflict on screen and two agent "
-            f"questions behind it. §3.7 writes that state out as `{{5: 2, 10: 0}}`: the two are "
+            f"questions behind it. That state is written out as `{{5: 2, 10: 0}}`: the two are "
             f"waiting, the conflict is displayed and so counts as nothing, the priority it arrived "
             f"at keeps its key, and the board underneath contributes no key at all"
         )
@@ -1037,7 +1037,7 @@ async def test_pending_is_the_plans_own_map_with_the_conflict_displayed(
 async def test_the_board_that_comes_back_shows_what_changed_while_it_was_off_screen(
     tmp_path: Path, terminal: RichTerminal, keys: Typing
 ) -> None:
-    """§3.7's "no extra machinery", from the workflow's side and with the value moving underneath.
+    """"No extra machinery", from the workflow's side and with the value moving underneath.
 
     "The slot keeps updating while a question is displayed - `show` re-registers, the terminal
     simply isn't drawing it - so when the queue empties, the current dashboard appears."
@@ -1091,7 +1091,7 @@ async def test_the_board_that_comes_back_shows_what_changed_while_it_was_off_scr
         await running
 
     assert len(boards) == 1, (
-        f"the workflow showed the board {len(boards)} times. §3.7's claim is that the dashboard "
+        f"the workflow showed the board {len(boards)} times. The claim is that the dashboard "
         f"comes back with **no extra machinery** - the slot is a register that is written whether "
         f"or not anything is drawing it - so a second `show` would be the workflow doing by hand "
         f"the thing the design says it does not have to"

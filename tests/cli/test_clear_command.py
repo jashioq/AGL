@@ -4,23 +4,23 @@
 `git branch -d`'s two answers are asserted. This module drives the real entry point for what argv
 means, and there are four claims to make about it:
 
-**It holds a label and one flag, and nothing else.** §3.10's line for this verb, read off the parser
+**It holds a label and one flag, and nothing else.** The line for this verb, read off the parser
 object rather than off a sentence - which is `params.parser_for`'s own argument for being public and
 `cli/commands/run.py`'s for returning its subparser.
 
-**`-f` reaches `api.clear`.** The stage's acceptance criterion is about a flag changing an outcome,
-so the pin is the outcome: the same run, cleared twice over, keeps its branch without the flag and
-loses it with one. A test asserting that the parser has a `--force` would pass against a command
-that never passed it on.
+**`-f` reaches `api.clear`.** The acceptance criterion is about a flag changing an outcome, so the
+pin is the outcome: the same run, cleared twice over, keeps its branch without the flag and loses
+it with one. A test asserting that the parser has a `--force` would pass against a command that
+never passed it on.
 
 **A kept branch is a message and not a failure.** Exit 0, the finished line on stdout, the warning
-on stderr - §3.8's "logs to stderr, data to stdout". A status of its own would make every wrapper
-script treat a tidy-up decision as an error, and `ports/errors.py`'s table maps exceptions to codes
-and holds no row for success.
+on stderr - logs to stderr, data to stdout. A status of its own would make every wrapper script
+treat a tidy-up decision as an error, and `ports/errors.py`'s table maps exceptions to codes and
+holds no row for success.
 
 **A tail is refused, and refused where the tail is produced.** `main` parses with
 `parse_known_args`, once, for `run`'s sake, so an unrecognised argument on a `clear` line arrives at
-the dispatch. 16.2 wrote that refusal for a grammar that is a label and nothing else; this command
+the dispatch. That refusal was written for a grammar that is a label and nothing else; this command
 has a flag on it legitimately, so what the helper says had to become true of both.
 
 The bundle is substituted through `main`'s one seam and nothing is monkeypatched, exactly as
@@ -85,7 +85,7 @@ async def working(run: Run[NoParams]) -> None:
 
 
 def _point(name: str) -> EntryPoint:
-    """§3.3's registration line, pointed at this module: a name, a `module:attr`, and a group."""
+    """A registration line, pointed at this module: a name, a `module:attr`, and a group."""
     return EntryPoint(name=name, value=f"{__name__}:{name}", group=registry.GROUP)
 
 
@@ -147,11 +147,11 @@ def _merged(harness: container.FakeServices) -> None:
 
 
 def test_the_clear_parser_holds_one_positional_and_the_force_flag() -> None:
-    """§3.10's line for this verb, read off the object: `agl clear <label> [-f]`.
+    """The line for this verb, read off the object: `agl clear <label> [-f]`.
 
     Both spellings of the flag, because `-f` is what an operator types and `--force` is what a
-    script does, and §3.10 writes the semantics as `git branch -d` versus `-D` - which is git's own
-    short spelling and the reason this one is not `-F` or `--yes`.
+    script does, and the semantics are `git branch -d` versus `-D` - which is git's own short
+    spelling and the reason this one is not `-F` or `--yes`.
     """
     parser = _clear_parser()
 
@@ -163,9 +163,9 @@ def test_the_clear_parser_holds_one_positional_and_the_force_flag() -> None:
 
 
 def test_the_force_flag_defaults_to_off() -> None:
-    """The asymmetry §3.10 states runs one way: a retained branch costs a stale ref, a deleted one
-    costs the entire run. A destructive default is that asymmetry ignored, and `store_true` is what
-    makes the safe answer the one an operator gets by not saying anything."""
+    """The asymmetry runs one way: a retained branch costs a stale ref, a deleted one costs the
+    entire run. A destructive default is that asymmetry ignored, and `store_true` is what makes the
+    safe answer the one an operator gets by not saying anything."""
     parsed = _clear_parser().parse_args(["auth"])
 
     assert parsed.force is False
@@ -192,10 +192,10 @@ def test_abbreviation_is_off_on_the_clear_subparser(tmp_path: Path) -> None:
 
 
 def test_the_command_calls_exactly_one_api_function() -> None:
-    """"Commands stay dumb" (§1.4), made mechanical - and this is the command that charge is about.
+    """"Commands stay dumb", made mechanical - and this is the command the rule is about.
 
-    §1.4 names `_cmd_clean` for iterating worktrees, deleting branches and calling `shutil.rmtree`
-    past the `Store` port. The same scan `tests/cli/test_run_command.py` and
+    The command this replaces iterated worktrees, deleted branches and called `shutil.rmtree` past
+    the `Store` port. The same scan `tests/cli/test_run_command.py` and
     `tests/cli/test_resume_command.py` make, and a second `api.` name appearing here is that use
     case moving back into the CLI in the one place it was charged with living.
     """
@@ -218,10 +218,11 @@ def test_a_clear_takes_the_run_away_and_names_it_the_way_the_others_do(
 ) -> None:
     """One line, on stdout, quoting the label the way every other `agl` line quotes it.
 
-    §3.10's refusal reads `run 'auth' already exists`, `agl run` says `run 'auth' finished` and
-    `agl resume` says `resume 'auth' finished`; this is that shape with the verb the operator typed.
-    Nothing on stderr, because this run's work is in the base ref and there is nothing to warn
-    about - which is what makes the test below about a warning rather than about a banner.
+    The refusal for a taken label reads `run 'auth' already exists`, `agl run` says `run 'auth'
+    finished` and `agl resume` says `resume 'auth' finished`; this is that shape with the verb the
+    operator typed. Nothing on stderr, because this run's work is in the base ref and there is
+    nothing to warn about - which is what makes the test below about a warning rather than about a
+    banner.
     """
     harness = _fakes(tmp_path)
     assert _main(harness, "run", "working", "-n", "auth") == 0
@@ -240,14 +241,13 @@ def test_a_clear_takes_the_run_away_and_names_it_the_way_the_others_do(
 def test_an_unmerged_branch_is_kept_and_said_on_stderr_at_a_zero_exit(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The stage's acceptance criterion through argv: "`clear` on an unmerged branch warns and
-    keeps it".
+    """The acceptance criterion through argv: `clear` on an unmerged branch warns and keeps it.
 
     Three things at once, and each is a separate way to get this wrong: the status is 0, because a
     kept branch is a decision rather than a failure and `ports/errors.py` has no row for success;
     the finished line is still on stdout, because the command did what it was asked; and the warning
-    is on stderr, which is §3.8's "logs to stderr, data to stdout" - a script reading `agl clear`'s
-    output should not have to filter a diagnostic out of what it asked for.
+    is on stderr, which is the split - logs to stderr, data to stdout - a script reading `agl
+    clear`'s output should not have to filter a diagnostic out of what it asked for.
     """
     harness = _fakes(tmp_path)
     assert _main(harness, "run", "working", "-n", "auth") == 0
@@ -300,9 +300,9 @@ def test_clearing_a_label_with_no_record_exits_three(
     """`NotFoundError` out of `api.clear`, resolved to 3 out of the one table, printed with nothing
     added but the program's name.
 
-    A typo'd label is what this refusal is for - §3.10 keeps `run` and `resume` as separate verbs
-    so that a mistyped one is loud, and a `clear` that shrugged at a name nobody used would be the
-    one command where a typo says "done".
+    A typo'd label is what this refusal is for - `run` and `resume` are separate verbs so that a
+    mistyped one is loud, and a `clear` that shrugged at a name nobody used would be the one
+    command where a typo says "done".
     """
     harness = _fakes(tmp_path)
 
@@ -350,9 +350,9 @@ def test_a_workflow_flag_on_a_clear_line_is_refused_and_says_where_flags_went(
     refusal happens before `registered()` is called: a clear refused this way has not resolved a
     repository, let alone deleted anything.
 
-    The message is asserted not to have kept 16.2's wording. "takes a label and nothing else" was
-    exact while `resume` was the only caller and is false of a grammar with `-f` in it, so the one
-    helper says what is true of both instead of forking into two sentences kept in agreement by
+    The message is asserted not to have kept its original wording. "takes a label and nothing else"
+    was exact while `resume` was the only caller and is false of a grammar with `-f` in it, so the
+    one helper says what is true of both instead of forking into two sentences kept in agreement by
     nobody.
     """
     harness = _fakes(tmp_path)

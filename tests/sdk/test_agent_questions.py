@@ -1,13 +1,13 @@
-"""§3.7's mid-run question path, end to end: an agent asks, a person answers, the run goes on.
+"""The mid-run question path, end to end: an agent asks, a person answers, the run goes on.
 
 The framework's half of "agent questions are a callback on the Role". Both adapter halves already
-exist - stage 7 built AGL's own MCP asking tool for Claude Code and stage 8 the equivalent for
-Codex, and each is held to the port by `tests/contracts/_agent_questions.py` - so what is left for
-this file is the part no adapter can see: a `Role`'s handler reaching the workflow that declared it,
+exist - AGL's own MCP asking tool for Claude Code and the equivalent for Codex, and each is held to
+the port by `tests/contracts/_agent_questions.py` - so what is left for this file is the part no
+adapter can see: a `Role`'s handler reaching the workflow that declared it,
 the answer coming back into the call the agent asked from, and the whole negotiation staying inside
 **one** step and one session.
 
-Every test below goes through `api.run`, which is not ceremony. §3.7's handler is a closure over the
+Every test below goes through `api.run`, which is not ceremony. The handler is a closure over the
 workflow's own `Run`, so it does not exist until a workflow is running; and the terminal it shows on
 is only legal inside the context `api.run` opens (`ports/terminal.py` makes a `show` outside it an
 `InternalError`). A test that built a `Run` by hand could still exercise the callback, but it could
@@ -19,10 +19,10 @@ not exercise the thing this deliverable is about, which is that all of it compos
     receives, and the answer the handler produced is the object the agent receives - asserted by
     identity, in both directions, because that is the only spelling with teeth. A framework that
     normalised a `Question`, dropped an option it had no view for, or re-wrapped an `Answer` would
-    satisfy every value comparison and would be an opinion about presentation in the one layer §3.7
-    says has none.
+    satisfy every value comparison and would be an opinion about presentation in the one layer
+    that is meant to have none.
   * **One session, N rounds.** The load-bearing one, and the reason it counts rather than checking
-    the outcome: §3.7 forbids an approval loop that re-invokes a step, because a fresh session per
+    the outcome: an approval loop that re-invokes a step is forbidden, because a fresh session per
     round "discards the reasoning that produced the proposal". A workflow loop written that way
     reaches the same final answer - it is not a wrong answer, it is a wrong bill and a lost
     argument - so the assertion is one `AgentTask`, one dispatch, one journal entry.
@@ -42,9 +42,9 @@ declaration** is pinned by `tests/sdk/test_roles.py` in four tests and is not re
 test_run_step.py::test_a_roles_question_handler_reaches_the_runner_and_its_answer_returns`, one
 round and prompt-only; what is added here is the two fields that test's question does not carry and
 the identity that its value comparison cannot make. **Priority, preemption and the conflict screen**
-are 15.3's. `priority=5` is written below because §3.7's own example writes it and a handler that
-omitted it would be modelling something no workflow does, but nothing here asserts a thing about
-what it means.
+are elsewhere. `priority=5` is written below because the standing example writes it and a handler
+that omitted it would be modelling something no workflow does, but nothing here asserts a thing
+about what it means.
 
 ## The arrangement, and why each half of it is real
 
@@ -62,7 +62,7 @@ do. The other three ports here have no sibling field and are still a plain `repl
 **A third `Terminal` was not written *here***, and that is the decision rather than a convenience:
 a hand-rolled queueing terminal in a test file would be under `tests/contracts/terminal.py`'s eye
 nowhere at all, and the input port exists precisely so the real adapter can be driven without a tty.
-18.0 did add a third implementation - `adapters/rich_terminal/scripted.py`, which
+A third implementation did arrive - `adapters/rich_terminal/scripted.py`, which
 `agl.testing.answering([...])` builds - and it is a third *adapter* that runs the contract suite
 rather than a mock, which is the whole difference this paragraph was about. **This file stays on
 the real one deliberately**: what it grades is the engine's question path against the terminal a
@@ -77,7 +77,7 @@ takes `_display.py`'s appending path, with no `rich.Live` and so no process-glob
 `tests/adapters/test_rich_terminal.py`'s - so the animating path would buy a takeover and nothing
 else.
 
-**Every await is bounded.** §3.7 has no timeouts anywhere: "an unanswered question blocks its step
+**Every await is bounded.** There are no timeouts anywhere: "an unanswered question blocks its step
 indefinitely, so 'stuck' and 'waiting for you' look alike from outside". That is the design, and it
 makes an honest mistake in any of these tests a hang rather than a failure, so each one runs under
 `asyncio.timeout` and the expiry is the failure.
@@ -125,8 +125,8 @@ SCOPE: Final = RunScope(PROJECT, LABEL)
 STEP: Final = "decide"
 """The name every role below carries, and so the one step every workflow below takes. Named once,
 because "one journal entry" is read out of `steps/<name>/` and a test naming that directory
-separately from the declaration would be checking its own spelling. It is on the role since UF1.1
-took the name off `run.step` (§3.3)."""
+separately from the declaration would be checking its own spelling. It is on the role, because
+`run.step` carries no name of its own."""
 
 
 @dataclass(frozen=True)
@@ -144,8 +144,8 @@ class Summary:
 REPORT: Final = reporting_tool("report", "report what you decided", Summary)
 
 PROMPT: Final = "propose, ask for approval, revise until approved, then report"
-"""§3.7's own instruction to the agent, shortened. It is never read by anything - the fake does not
-read `task.instructions`, on purpose - and it is here because a role's prompt is what makes a
+"""The standing instruction to the agent, shortened. It is never read by anything - the fake does
+not read `task.instructions`, on purpose - and it is here because a role's prompt is what makes a
 negotiating agent a negotiating agent rather than a detail this file invented."""
 
 # --- what the agents ask --------------------------------------------------------------------------
@@ -186,7 +186,7 @@ the return type rather than a sentence because a script is not a model and canno
 class Verdict:
     """What answering one of these screens produces: the workflow's own type, in shape.
 
-    §3.7: "the workflow's own answer type carries more than this and goes on carrying it: a
+    The rule: "the workflow's own answer type carries more than this and goes on carrying it: a
     `Screen[T]` returns its `T`, and the workflow's handler maps that down to a string on the way
     out". One field here, because the mapping is what matters and not how rich the type is.
     """
@@ -195,7 +195,7 @@ class Verdict:
 
 
 def approve(question: Question) -> Screen[Verdict]:
-    """§3.7's approval screen, built out of whatever the agent asked.
+    """The approval screen, built out of whatever the agent asked.
 
     **It reads all three fields of the `Question`**, which is what makes them load-bearing rather
     than recorded: the options become the choices, in the order the agent offered them, and
@@ -203,7 +203,7 @@ def approve(question: Question) -> Screen[Verdict]:
     screen a person sees is a function of the question, and the digit that answers round one means
     something different in round two - which no view built from a constant could arrange.
 
-    A pure function of its arguments, as §3.7 requires of every view: it is invoked again ten times
+    A pure function of its arguments, as every view must be: it is invoked again ten times
     a second for as long as it is on screen, and it reads nothing but what it was handed.
     """
     responses: list[Response[Verdict]] = [
@@ -226,9 +226,9 @@ reported: Final[list[Summary]] = []
 
 
 # The three workflows below share one role, and the difference this file is about is the one
-# argument its factory takes. Before UF1.2 they were three `Role(...)` literals, on the argument
-# that "a factory taking `on_question=` as an argument would put that difference behind a default
-# value in a signature nobody reads" - which §3.3 has since decided the other way: a role *is* a
+# argument its factory takes. They were once three `Role(...)` literals, on the argument that "a
+# factory taking `on_question=` as an argument would put that difference behind a default value in
+# a signature nobody reads" - which was since decided the other way: a role *is* a
 # `@role(model=…)` factory, and its parameter list is the whole of what a call site may vary. What
 # survives of the objection is why the call is written out at each `run.step` below rather than
 # parametrised once: the difference between these three is meant to be visible at the line that
@@ -239,7 +239,7 @@ reported: Final[list[Summary]] = []
 def deciding(*, on_question: QuestionHandler | None = None) -> Role[Summary]:
     """The one role this file drives, in its three states.
 
-    `deciding(on_question=…)` is what a negotiating workflow steps with - §3.7's handler is a
+    `deciding(on_question=…)` is what a negotiating workflow steps with - the handler is a
     closure over the `Run`, so it can only arrive here as an argument - and `deciding()` is the
     same role with nothing to answer it, which is the third workflow below and the case
     `sdk/roles.py` says costs a workflow its approval gate silently.
@@ -251,7 +251,7 @@ def deciding(*, on_question: QuestionHandler | None = None) -> Role[Summary]:
 async def negotiating(run: Run[NoParams]) -> None:
     """A role whose handler answers from the workflow, without showing anybody anything.
 
-    §3.7 allows exactly this - "the handler routes it to a view, or to a log, or answers it from a
+    This is allowed - "the handler routes it to a view, or to a log, or answers it from a
     policy without showing anybody anything - all three are a workflow's business" - and it is the
     right shape for the two tests that are about routing and counting rather than about a person.
     A terminal in those would be a second thing able to fail.
@@ -271,7 +271,7 @@ async def negotiating(run: Run[NoParams]) -> None:
 
 @workflow(version="1")
 async def approving(run: Run[NoParams]) -> None:
-    """§3.7's own example, spelled out: the handler shows the question and returns what came back.
+    """The standing example, spelled out: the handler shows the question and returns what came back.
 
         async def approve(q: Question) -> Answer:
             return await run.terminal.show(views.approve_backlog, question=q, priority=5)
@@ -279,7 +279,7 @@ async def approving(run: Run[NoParams]) -> None:
     A closure over this `Run` and nothing else, which is why `Role` can be built here and not at
     module level, and why `QuestionHandler` takes one parameter. The `Verdict` a person's response
     produced is mapped down to `Answer.text` here - at the workflow's layer, in the workflow's own
-    language - because `Answer` carries one string and §3.7 puts that mapping on this side of the
+    language - because `Answer` carries one string and that mapping belongs on this side of the
     port on purpose.
     """
 
@@ -298,14 +298,14 @@ async def unattended(run: Run[NoParams]) -> None:
 
     `sdk/roles.py` names what this costs and this is what it looks like from outside: "preflight
     passes, the run starts, and the agent asks into an adapter that must not block... The workflow's
-    approval gate is then simply absent, and §3.7's 'propose, ask for approval, revise until
+    approval gate is then simply absent, and 'propose, ask for approval, revise until
     approved' becomes an agent approving itself."
     """
     reported.append(await run.step(deciding()))
 
 
 def _point(name: str) -> EntryPoint:
-    """§3.3's `probe = "agl.workflows.probe:probe"`, pointed at this module instead."""
+    """The `probe = "agl.workflows.probe:probe"` entry point, pointed at this module."""
     return EntryPoint(name=name, value=f"{__name__}:{name}", group=registry.GROUP)
 
 
@@ -335,7 +335,7 @@ class _Agent:
 def _asks(record: _Agent, *rounds: Question) -> Script:
     """An agent that asks each of `rounds` in turn and then reports what it was told.
 
-    §3.7's negotiating agent in the only vocabulary the port has: it asks, it uses the answer, it
+    A negotiating agent in the only vocabulary the port has: it asks, it uses the answer, it
     asks again, and it reports once - so the step returns exactly once, at the end, and everything
     before that happened inside one session. Each answer is written into the report *in the order
     it arrived*, which is what makes "the answer came back into the round it was asked from" a
@@ -424,8 +424,8 @@ async def _ran(services: Services, name: str) -> None:
     """`api.run` over one of the workflows above, bounded.
 
     The bound is not a performance assertion and every test needs it: an unanswered question blocks
-    its step forever by design (§3.7 has no timeouts), so the difference between a failing test and
-    a hung suite is this line.
+    its step forever by design - there are no timeouts - so the difference between a failing test
+    and a hung suite is this line.
     """
     async with asyncio.timeout(DEADLINE):
         await api.run(services, PROJECT, name, LABEL, (), points=POINTS)
@@ -461,7 +461,7 @@ def _nothing_carried_over() -> None:
 async def test_the_question_the_agent_asked_is_the_one_the_handler_is_given(
     repository: Path, tmp_path: Path, terminal: RichTerminal
 ) -> None:
-    """§3.7: the framework "maps whatever payload the vendor produced into a `Question`, and calls
+    """The framework "maps whatever payload the vendor produced into a `Question`, and calls
     the workflow's handler. The framework has no opinion on presentation."
 
     Both halves of that are asserted here as identity, which is the only spelling that can tell an
@@ -482,7 +482,7 @@ async def test_the_question_the_agent_asked_is_the_one_the_handler_is_given(
     await _ran(services, "negotiating")
 
     assert asked and asked[0] is ASKED, (
-        f"the handler was given {asked!r}. §3.7's `Question` crosses the port as the value the "
+        f"the handler was given {asked!r}. A `Question` crosses the port as the value the "
         f"adapter built out of what the model produced, and this layer's whole job with it is to "
         f"hand it to the role's own handler - so anything but the same object is a framework that "
         f"read it, decided something about it, and passed on its own reading"
@@ -503,7 +503,7 @@ async def test_the_question_the_agent_asked_is_the_one_the_handler_is_given(
 async def test_three_rounds_of_one_negotiation_are_one_task_one_dispatch_and_one_entry(
     repository: Path, tmp_path: Path, terminal: RichTerminal
 ) -> None:
-    """§3.7's "negotiation stays inside one step and one session", asserted as a count.
+    """Negotiation stays inside one step and one session, asserted as a count.
 
     "An approval loop is **not** a workflow loop re-invoking a step. That would start a fresh agent
     session per round, discarding the reasoning that produced the proposal and re-deriving from the
@@ -516,7 +516,7 @@ async def test_three_rounds_of_one_negotiation_are_one_task_one_dispatch_and_one
     So the outcome is asserted last and the counts first. One `AgentTask`, because the task is
     composed inside `Steps.step`'s worker and a second one means the worker ran twice. One dispatch,
     which is the same fact read off the script: a script is entered once per `AgentRunner.run`. One
-    entry under `steps/decide/`, which is §3.6's record of a step having happened and is the half a
+    entry under `steps/decide/`, which is the record of a step having happened and is the half a
     resume would replay.
 
     The transcript is the fourth assertion and it is what makes the other three about *questions*
@@ -531,13 +531,13 @@ async def test_three_rounds_of_one_negotiation_are_one_task_one_dispatch_and_one
 
     assert len(record.tasks) == 1, (
         f"the agent was dispatched {len(record.tasks)} times for one step. A negotiation is N "
-        f"rounds inside one session (§3.7); N dispatches is a workflow loop re-invoking the step, "
+        f"rounds inside one session; N dispatches is a workflow loop re-invoking the step, "
         f"which reaches the same answer, bills for three agents and discards the reasoning behind "
         f"every proposal but the last"
     )
     assert len(_entries(tmp_path)) == 1, (
         f"the ledger holds {len(_entries(tmp_path))} entries under steps/{STEP}/. One step that "
-        f"asked three times is one entry - §3.7 accepts in writing that the fingerprint covers the "
+        f"asked three times is one entry - the fingerprint deliberately covers the "
         f"final outcome only, and that a crash mid-negotiation re-runs the step and re-asks"
     )
     assert len(asked) == len(ROUNDS) and len(given) == len(ROUNDS), (
@@ -560,7 +560,7 @@ async def test_three_rounds_of_one_negotiation_are_one_task_one_dispatch_and_one
 async def test_the_handler_shows_the_question_and_the_answer_is_what_a_person_picked(
     repository: Path, tmp_path: Path, terminal: RichTerminal, keys: Typing
 ) -> None:
-    """The whole of §3.7 in one run: agent asks, workflow shows, person answers, agent carries on.
+    """The whole path in one run: agent asks, workflow shows, person answers, agent carries on.
 
     This is the path the deliverable exists for, and every layer of it is the real one - `api.run`
     opening the terminal, a `Role` built inside a workflow with a handler closed over its `Run`,

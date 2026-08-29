@@ -1,4 +1,4 @@
-"""What the settings types promise: the plan's fields, per-connector nesting, and no defaults.
+"""What the settings types promise: a project's fields, per-connector nesting, and no defaults.
 
 Three of these tests are about absences, which is unusual enough to say why. `Project` holding
 exactly five fields, `AgentSettings` holding exactly one section per `Provider`, and no field
@@ -47,8 +47,8 @@ _PROJECT: Final = Project(
 # --- The shapes -------------------------------------------------------------------------------
 
 
-def test_a_project_holds_exactly_the_five_fields_the_plan_writes_into_the_file() -> None:
-    """§3.10 prints that file in full. A sixth field is a sixth thing every project answers for."""
+def test_a_project_holds_exactly_the_five_fields_init_writes_into_the_file() -> None:
+    """`agl init` writes that file. A sixth field is a sixth thing every project answers for."""
     assert tuple(field.name for field in fields(Project)) == (
         "name",
         "repo",
@@ -71,7 +71,8 @@ def test_settings_holds_the_home_and_the_agent_sections_and_nothing_from_a_proje
 
 
 def test_there_is_one_agent_section_per_provider_member() -> None:
-    """§1.10's fix: a provider with no section is a provider nothing can configure."""
+    """The fix for flat, single-sourced configuration: a provider with no section is a provider
+    nothing can configure."""
     assert {field.name for field in fields(AgentSettings)} == {str(one) for one in Provider}
     assert _SETTINGS.agents.claude is _CLAUDE
     assert _SETTINGS.agents.openai is _OPENAI

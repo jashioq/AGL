@@ -1,9 +1,9 @@
 """`FilesystemStore` against the `Store` contract, plus the clauses only a filesystem can show.
 
 The first class is the whole of the port: `StoreContract` with its one fixture overridden and
-nothing else touched. Everything the port promises is asserted there, by a suite written at stage
-3 against the port's docstring and before this adapter existed, which is the inversion the build
-rests on (§1.9) - so nothing below re-asserts any of it.
+nothing else touched. Everything the port promises is asserted there, by a suite written against
+the port's docstring and before this adapter existed, which is the inversion `tests/contracts/`
+rests on - so nothing below re-asserts any of it.
 
 What is below is what that suite deliberately cannot see, because it is written against the port
 and a port has no filesystem in it. Four things:
@@ -55,8 +55,9 @@ CHILD: Final = Namespace("T-01")
 STEP: Final = StepName("implement")
 DIGEST: Final = hashlib.sha256(b"one").hexdigest()
 
-# §3.6's four fields, with a value carrying a character no *name* may hold (§3.3): names are ASCII
-# and values are not, and the file on disk is asserted to keep the difference.
+# An entry's four fields, with a value carrying a character no *name* may hold - names run through
+# `_ALLOWED_CHARACTERS` in `src/agl/ports/ids.py` and are ASCII, values are not, and the file on
+# disk is asserted to keep the difference.
 DOCUMENT: Final[dict[str, JsonValue]] = {
     "fingerprint": DIGEST,
     "value": {"tickets": ["T-01"], "note": "café 日本語"},
@@ -315,8 +316,9 @@ async def test_namespaces_skips_what_agl_could_not_have_written(
     """Every write into this tree goes through a `Namespace`, so a name one refuses is foreign.
 
     Raising on it would make `clear` - this member's one caller - fail on something AGL did not
-    write and would not have deleted. `_base` is refused because §3.3 reserves it, `.hidden`
-    because a name may not start with a dot, and a plain file is not a line of work at all.
+    write and would not have deleted. `_base` is refused because it is the reserved worktree
+    directory name - `_BASE_WORKTREE_DIRNAME` in `src/agl/ports/ids.py` - `.hidden` because a name
+    may not start with a dot, and a plain file is not a line of work at all.
     """
     await store.write_entry(RUN.inside(CHILD), STEP, DIGEST, DOCUMENT)
     container = scope_dir(home, RUN.inside(CHILD)).parent
@@ -340,9 +342,9 @@ async def test_namespaces_answers_sorted_by_name(store: Store) -> None:
 async def test_an_entry_on_disk_is_indented_utf8_json_a_person_can_read(
     store: Store, home: AglHome
 ) -> None:
-    """§3.6 keeps superseded entries because they answer "why did this re-run", and keeps them for
-    a person rather than for the framework - which is the whole of the argument for an indent and
-    for `ensure_ascii=False`. A minified line of `\\u`-escapes satisfies every other clause here
+    """Superseded entries stay on disk because they answer "why did this re-run", and they are kept
+    for a person rather than for the framework - which is the whole of the argument for an indent
+    and for `ensure_ascii=False`. A minified line of `\\u`-escapes satisfies every other clause here
     and defeats the one reason the file is still on disk."""
     await store.write_entry(RUN, STEP, DIGEST, DOCUMENT)
 

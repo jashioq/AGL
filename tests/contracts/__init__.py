@@ -1,8 +1,8 @@
 """Contract suites: one reusable pytest class per port, subclassed once per implementation.
 
 A suite here is written against a port's docstring and against nothing else, before any of the
-implementations it will be pointed at exists. That order is the point (§1.9): a subagent that
-writes its own tests writes tests that pass, and stages 4-8 each end with "the contract suite
+implementations it will be pointed at exists. That order is the point: a subagent that writes its
+own tests writes tests that pass, and every implementation here shipped against "the contract suite
 passes" - a sentence worth something only when the suite was written by someone with no stake in
 the implementation.
 
@@ -20,7 +20,7 @@ network.
 
 The first rule has exactly one exception and the second has three, every one of them argued where it
 is taken. `_agent_hermeticity` writes the literal filenames a harness reads - `CLAUDE.md`,
-`.claude/`, `AGENTS.md`, `.codex/` - because §3.5's poisoned repository *is* those filenames, and a
+`.claude/`, `AGENTS.md`, `.codex/` - because the poisoned repository *is* those filenames, and a
 suite that could not name them could not plant them. That exception is the table and reaches nothing
 else: no test branches on which adapter it is talking to, and no assertion is conditional on one.
 `_agent_tasks` builds a real directory, because `AgentTask.workspace` is a `Path` that the port

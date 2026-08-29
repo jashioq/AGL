@@ -3,19 +3,22 @@
 `tests/sdk/test_integrate_acceptance.py` needs two things no in-process test can arrange, and this
 module is the half of them that has to live somewhere else.
 
-**A hold that outlives the process that took it.** §3.4: *the hold must be durable, not in-memory. A
-run that dies holding a target can only be released by a later invocation.* §3.4 then asks the
-question this instrument exists to answer - *a resumed run must be able to find a hold it did not
-take* - and forbids the answer that used to be given: `integrate()` is not a step, so nothing
-journals it, and a run that resumes reaches the same `integrate()` with the target still held. That
-state is a `Conflict` and never exit 70. Neither half of it exists inside one interpreter: an
+**A hold that outlives the process that took it.** The hold must be durable, not in-memory: a run
+that dies holding a target can only be released by a later invocation, so the hold has to be
+readable from the repository. That is what makes the question this instrument exists to answer
+answerable - *a resumed run must be able to find a hold it did not take* - and it forbids the answer
+that used to be given: `integrate()` is not a step, so nothing journals it, and a run that resumes
+reaches the same `integrate()` with the target still held. That state is a `Conflict` and never
+exit 70. Neither half of it exists inside one interpreter: an
 `asyncio.Lock` keeps one process from ever meeting its own hold, and `adapters/git/fake.py` says
 outright that a `FakeRepository` dies with its process, so the hold a resumed run would find was
 never there to find.
 
-**An integration that replays.** §3.6's one rule for authors is enforced by a contract test - "run
-to completion, kill at every step boundary, resume, assert identical final state" - and
-`tests/instruments/replay.py` is that test's driver for *steps*. Nothing journals an integration, so
+**An integration that replays.** The one rule replay places on authors - branch only on step
+results, under `ARCHITECTURE.md`'s "Invariants where a mistake is silent" - is enforced by a
+contract test: run to completion, kill at every step boundary, resume, assert identical final
+state. `tests/instruments/replay.py` is that test's driver for *steps*. Nothing journals an
+integration, so
 a landing is the one thing in a run that a resume has to reproduce with no entry to read: it
 re-walks the same `integrate()` call and offers the same child into a target that already has it.
 Whether that lands twice, lands once, or destroys the first landing is a question about two
@@ -24,10 +27,10 @@ processes.
 **The kill is `os._exit`, and the distinction is the whole point.** An exception would run `finally`
 blocks, `atexit` handlers and asyncio's cancellation path - and `api.run`'s `finally` is precisely
 what gives the lease back, so a driver that raised would be testing the tidy exit rather than the
-one §3.4 is about. `_Driver.kill` returns to the kernel, and this module registers both an `atexit`
-hook and a `finally` clause that append a marker to the log for the only reason such a marker is
-ever worth writing: the parent asserts they are **absent** after a kill and present after a clean
-finish.
+crash a durable hold exists for. `_Driver.kill` returns to the kernel, and this module registers
+both an `atexit` hook and a `finally` clause that append a marker to the log for the only reason
+such a marker is ever worth writing: the parent asserts they are **absent** after a kill and
+present after a clean finish.
 
 **The exit status is mapped rather than reported.** `main` catches `Exception` and hands it to
 `cli/exit_codes.exit_status`, which is the function `cli/main.py` uses, so the number the parent
@@ -41,10 +44,10 @@ terminal, one of which wants an extra and neither of which a programme with no v
 use for - which is `replay.py`'s reason, one adapter over.
 
 **The `Run` is built the way `api.run` builds one**, and not through `api.run`, because `api.run`
-refuses a label that already has a record (§3.10, exit 4) and `api.resume` is deliberately unbuilt
-until 16.2. So the record is written, `_base` is provisioned, a `Leases` is constructed above the
-workflow and released in a `finally` - the four things that function does around the workflow's own
-body - and the second process does the identical four over the same `AGL_HOME`.
+refuses a label that already has a record - a `ConflictError`, exit 4 in `src/agl/ports/errors.py`.
+So the record is written, `_base` is provisioned, a `Leases` is constructed above the workflow and
+released in a `finally` - the four things that function does around the workflow's own body - and
+the second process does the identical four over the same `AGL_HOME`.
 
 Run as `python tests/instruments/landing.py '<json>'`. The configuration arrives as one JSON object
 on argv so that a reader of a failing test can copy the command out of the assertion and run it.
@@ -140,12 +143,12 @@ REPORT: Final = reporting_tool("report", "report what you did", Summary)
 
 @role(model=Claude.SONNET)
 def _role(name: str, instructions: str) -> Role[Summary]:
-    """A reporting role, carrying the name its entries are recorded under (§3.3: the call carries
-    none). One value per prompt, and the prompt is the only thing a script is handed that says
-    which step it is serving (§3.3).
+    """A reporting role, carrying the name its entries are recorded under - the call site carries
+    none. One value per prompt, and the prompt is the only thing a script is handed that says which
+    step it is serving.
 
-    A factory taking the two terms that differ, which is what §3.3 says a role declaration is: the
-    model is on the decorator and no call site can reach it."""
+    A factory taking the two terms that differ, which is what a role declaration is: the model is on
+    the decorator and no call site can reach it."""
     return Role(
         name=name,
         instructions=instructions,
@@ -160,7 +163,7 @@ IMPLEMENT: Final = _role("implement", "implement the ticket")
 AFTERWARDS: Final = _role("afterwards", "say what the run has landed so far")
 
 # Which files each prompt's agent leaves behind. Keyed on the prompt, because `AgentTask` carries no
-# namespace and no step name - deliberately (§3.3), and it is what makes one script serve a run.
+# namespace and no step name - deliberately - and that is what makes one script serve a run.
 _WRITES: Final[Mapping[str, Mapping[str, str]]] = {
     PREPARE.instructions: {CONTESTED: PARENT_TEXT},
     COLLIDE.instructions: {CONTESTED: CHILD_TEXT},
@@ -184,9 +187,9 @@ class Config:
     conflicting programme is a process that dies **holding**, and for the clean one is a process
     that dies having landed and journalled nothing about it.
 
-    `decision` is what the workflow does with a conflicted outcome, which is the half §3.3 gives to
-    the workflow and stage 15 gives a screen: `retry` after resolving the collision by hand, `abort`
-    to give up, or `none` for a run that walks away from it.
+    `decision` is what the workflow does with a conflicted outcome, which is the half the workflow
+    owns rather than the framework: `retry` after resolving the collision by hand, `abort` to give
+    up, or `none` for a run that walks away from it.
     """
 
     home: str
@@ -266,8 +269,8 @@ class _Driver:
 
     Everything a programme needs and nothing a programme decides. The two things worth reading twice
     are that the agent's script appends a line **per invocation** - "the worker was not called" is
-    the whole of what a replay hit is (§3.6), so that list is how the parent tells a replayed step
-    from a re-run one - and that `kill` is `os._exit` rather than anything that unwinds.
+    the whole of what a replay hit is, so that list is how the parent tells a replayed step from a
+    re-run one - and that `kill` is `os._exit` rather than anything that unwinds.
     """
 
     def __init__(self, config: Config) -> None:
@@ -302,7 +305,7 @@ class _Driver:
 
     @property
     def target(self) -> Path:
-        """The run's own `_base` checkout - what every landing here goes into (§3.9)."""
+        """The run's own `_base` checkout - what every landing here goes into."""
         return base_worktree(self.trees, self.label)
 
     def resolve_by_hand(self) -> None:
@@ -362,8 +365,8 @@ class _Driver:
 
         The record, the `_base` checkout, the `Leases` built above the workflow, and the `finally`
         that gives back whatever it was still holding. Written out rather than delegated because
-        `api.run` refuses a label that already has a record and `api.resume` is 16.2 - the module
-        docstring argues it - and because the second process has to do the identical four.
+        `api.run` refuses a label that already has a record - the module docstring argues it - and
+        because the second process has to do the identical four.
         """
         spec = RunSpec(
             workflow="landing",
@@ -407,10 +410,10 @@ async def _conflict(driver: _Driver, run: Run[None]) -> None:
     which `CONTESTED` does not exist and neither has ever seen the other's version - the shape
     `tests/contracts/_integration_targets.py` requires of a conflict a suite causes on purpose.
 
-    `kill_at="integrated"` leaves this process dead with the target held, which is §3.4's
-    recoverable state. A second process walking these same calls replays both steps, reaches this
-    same `integrate()`, and offers the same child into a target still holding the first process's
-    merge.
+    `kill_at="integrated"` leaves this process dead with the target held, which is the recoverable
+    state a durable hold exists for. A second process walking these same calls replays both steps,
+    reaches this same `integrate()`, and offers the same child into a target still holding the first
+    process's merge.
     """
     child = run.worktree(CHILD)
     await run.step(PREPARE, commit="prepare the parent")
@@ -430,11 +433,12 @@ async def _conflict(driver: _Driver, run: Run[None]) -> None:
 async def _clean(driver: _Driver, run: Run[None]) -> None:
     """A child that lands, and a parent step after it - the replay question in its smallest shape.
 
-    Nothing journals an integration (§3.6), so a resume re-walks this `integrate()` with the child's
-    work already in the target. What that must not do is land it twice, and what the step after it
-    must not do is re-run - its fingerprint is taken over the parent's chain, which the landing
-    advanced, and a resume that rebuilt the chain differently would miss and restore past the
-    landing.
+    Nothing journals an integration, so a resume re-walks this `integrate()` with the child's work
+    already in the target. What that must not do is land it twice, and what the step after it must
+    not do is re-run - its fingerprint is taken over the parent's chain, which the landing advanced,
+    and a resume that rebuilt the chain differently would miss and restore past the landing. That
+    is the landing-handed-back-to-the-parent's-chain invariant, under `ARCHITECTURE.md`'s
+    "Invariants where a mistake is silent".
     """
     child = run.worktree(CHILD)
     await run.step(PREPARE, commit="prepare the parent")

@@ -241,7 +241,7 @@ def _still_not_in(source: str, target: str, head: str) -> str:
     return (
         f"{target!r} is at {head!r} after landing {source!r} into it a second time, and that state "
         f"still does not contain {source!r}. The first answer was somebody else's landing being "
-        f"concluded (§3.4: a resumed run finds a hold it did not take), which this re-landing is "
+        f"concluded - a resumed run finds a hold it did not take - which this re-landing is "
         f"the answer to - so a second one that still leaves the work out is not a case to try "
         f"again through, it is AGL and the integrator disagreeing about what landed. Nothing has "
         f"been advanced: the parent's chain still names the state it did before this integration"

@@ -1,12 +1,12 @@
 """`RoutingAgentRunner`: the right adapter for every model, and a loud refusal for every other.
 
-The stage's named acceptance is two sentences - correct provider dispatch, and an unknown provider
-failing loudly - and everything below is one of them, one of the port's own promises surviving the
-trip through this class, or one of the constructor's refusals.
+This class has two acceptances - correct provider dispatch, and an unknown provider failing loudly
+- and everything below is one of them, one of the port's own promises surviving the trip through
+this class, or one of the constructor's refusals.
 
 ## Yes, the contract suite runs here, and it runs over fakes
 
-§1.9's rule is that every implementation of a port passes that port's contract suite, and
+Every implementation of a port passes that port's suite under `tests/contracts/`, and
 `RoutingAgentRunner` is an implementation of `AgentRunner` - in fact the *only* one a workflow ever
 holds, since `config/container.py` puts this in the services bundle and the vendor runners behind
 it. Declining the suite on the grounds that this class is "only a dispatcher" would leave the one
@@ -21,8 +21,8 @@ the suite blesses as "the honest way to cover them all". Ten tests, six models: 
 end to end through the dispatch path, once per member of both enums.
 
 **Over fakes, and never over the vendor runners.** Forty-eight harness sessions is a bill and a
-wait, and no test in this repository spends a token or starts a process; the fakes are what stage 7
-and stage 8 built for exactly this. Nothing is lost, because what is under test here is dispatch,
+wait, and no test in this repository spends a token or starts a process; the two vendor fakes were
+built for exactly this. Nothing is lost, because what is under test here is dispatch,
 and dispatching to a fake exercises this module identically to dispatching to a subprocess. What a
 green run here does *not* say is anything about the vendor adapters - `test_claude_code_fake.py`,
 `test_openai_fake.py` and the two runner files are where those are held to the same suite.
@@ -43,15 +43,16 @@ Every use below is qualified by its module. The two `Conversation` classes are u
 happen to share a name, which is why `Ran` further down carries two methods holding the same two
 lines twice: a `Script` is `(Conversation) -> Awaitable[AgentOutcome]` in both modules, over two
 classes no annotation can unify, and one method would have to lie about one of them.
-`config/container.py` inherits this constraint at stage 11, where it compiles a workflow-level
-scripting vocabulary into one callable per provider.
+`config/container.py` inherits this constraint where it compiles a workflow-level scripting
+vocabulary into one callable per provider.
 
 ## Nothing in this file implements `AgentRunner` except the class under test
 
 A recording stub runner is the obvious way to see which adapter a call reached, and it is
 deliberately absent. A third implementation of this port, written by the author of the tests that
-read it and held to the contract suite by nobody, is the fiction §1.9 exists to keep out of a
-codebase - and it would be a fourth `AgentRunner` whose agreement with the port nothing checks.
+read it and held to the contract suite by nobody, is the fiction `tests/contracts/` exists to keep
+out of a codebase - and it would be a fourth `AgentRunner` whose agreement with the port nothing
+checks.
 
 What a router dispatched to is observed through two things that already exist instead. **A script**,
 which is the fakes' own sanctioned extension point and an agent's conduct in the only vocabulary the
@@ -229,7 +230,7 @@ MEMBERS: Final[Mapping[str, Member]] = {
 async def test_a_task_is_run_by_the_adapter_registered_for_its_providers_key(
     provider: Provider, tmp_path: Path
 ) -> None:
-    """The stage's first acceptance: `task.model.provider` decides, and one adapter runs.
+    """The first acceptance: `task.model.provider` decides, and one adapter runs.
 
     Both halves are asserted from one record. That the right fake ran is the pair's first element;
     that the *other* fake did not is the list holding one entry, which a test asserting only "the
@@ -270,7 +271,8 @@ async def test_the_outcome_handed_back_is_the_one_the_adapter_answered_with(tmp_
     assert outcome is answered, (
         "the outcome that came back is not the object the adapter answered with. A router that "
         "rebuilds one has somewhere to put a field of its own, and 'which adapter served this' is "
-        "exactly the field §1.1 caught this port carrying before"
+        "exactly the kind of vendor session identity this port carried, as `session_id`, before it "
+        "was rewritten"
     )
 
 
@@ -329,7 +331,7 @@ async def test_one_router_serves_two_providers_at_once(tmp_path: Path) -> None:
 async def test_a_provider_with_no_adapter_is_refused_as_input_and_never_substituted(
     member: str, tmp_path: Path
 ) -> None:
-    """The stage's second acceptance, on all three members, with the exit code asserted.
+    """The second acceptance, on all three members, with the exit code asserted.
 
     `InputError`, so exit 2, so the reader is sent to the configuration that decides which providers
     this run was assembled with. Everything the caller supplied is well-formed - the model exists,

@@ -12,16 +12,17 @@ Subclass it once per implementation, override the two fixtures, and add nothing:
             return "..."          # a state of that repository to cut from
 
 The real adapter and the fake both run this class, which is the whole mechanism keeping a fake from
-drifting into fiction (§1.9). It is written here, at stage 3, before either exists, because a
-subagent that writes its own tests writes tests that pass - and stage 5 ends with "the contract
-suite passes", a sentence worth something only when the suite had no stake in the outcome.
+drifting into fiction. It is written against the port alone, before either implementation exists,
+because a subagent that writes its own tests writes tests that pass - and an adapter ships only
+once "the contract suite passes", a sentence worth something only when the suite had no stake in
+the outcome.
 
 `WorkspaceContract` is one class assembled from four modules, and only this name is public. Its own
 tests are `open` - provisioning, reopening, and the two addresses a run has. The halves it inherits
 follow seams the ports draw themselves: `_workspace_steps` is `Workspace`, "one isolated checkout,
 already provisioned: where it is, what it is called, and the three things a step does to it",
-`_workspace_teardown` is the two verbs that unmake one, which `clear` needs apart (§3.10), and
-`_workspace_holding` is `hold`, §3.10's claim that this process is walking this run - a member that
+`_workspace_teardown` is the two verbs that unmake one, which `clear` needs apart, and
+`_workspace_holding` is `hold`, the claim that this process is walking this run - a member that
 makes no place and unmakes none, which is why it is neither of the other two.
 `_workspace_files` under all of them holds the names and the files every test is built from, and
 argues there why a suite for this port writes into a directory when the store suite refuses to.
@@ -46,23 +47,22 @@ An honest gap is worth more than a test that looks like coverage, so here is wha
 not entitle anybody to believe. Every one of these is a limit of what the port's own surface can be
 made to reveal, not a test somebody forgot.
 
-1. **That `open` ever raises `ConflictError`.** The clause is real - §3.10 has `run` refuse an
-   existing label rather than adopt it, because adopting it is how a typo'd label silently continues
+1. **That `open` ever raises `ConflictError`.** The clause is real - `agl run` refuses an existing
+   label rather than adopting it, because adopting it is how a typo'd label silently continues
    somebody else's work - and **this suite cannot provoke the state it names**. It needs a line of
    work under this name that is *not* this workspace's, and the only thing making lines of work here
    is the provider under test, under a label and namespace for which `open` is required to hand back
    what is already there. Reaching the state would mean either a second provider over the same
    repository, which the fixtures do not offer, or writing a line of work directly, which means
    knowing what one is made of - the exact knowledge this suite must not have. An implementation
-   that never raises `ConflictError` passes this suite. Refusing a taken label is asserted where the
-   framework actually does it, at stage 10, whose acceptance criterion is a second `agl run` on one
-   label exiting 4.
+   that never raises `ConflictError` passes this suite. Refusing a taken label is asserted where
+   the framework actually does it: a second `agl run` on one label exits 4.
 
-2. **Anything about two processes.** Two `agl` invocations sharing one repository are what §3.9's
+2. **Anything about two processes.** Two `agl` invocations sharing one repository are what the
    cross-process `flock` on the worktree registry exists for, and this suite drives one provider
    object in one process. It cannot start a second, because the fixture hands over an already-built
    provider and there is no way to ask it for another over the same repository. That is also the
-   limit on what `_workspace_holding` can show about §3.10's claim - the exclusion is asserted
+   limit on what `_workspace_holding` can show about the run claim - the exclusion is asserted
    between two claims in one process, and release-on-death is stated there as a gap.
 
 3. **Anything about two things happening at once.** The port states no concurrency clause, so
@@ -80,12 +80,12 @@ made to reveal, not a test somebody forgot.
 
 6. **That a commit message was recorded.** Not from here: this suite holds a `WorkspaceProvider`
    and nothing else, so what it can see is that an awkward message is *taken* and the commit
-   happens. Since 19.2 the other half is visible one port over - `History.message` reads one back,
-   and `HistoryContract` puts the same `AWKWARD_MESSAGE` through a round trip - so the gap is now
-   about which suite can see it rather than about nothing being able to.
+   happens. The other half is visible one port over - `History.message` reads one back, and
+   `HistoryContract` puts the same `AWKWARD_MESSAGE` through a round trip - so the gap is about
+   which suite can see it rather than about nothing being able to.
 
-7. **That a workspace is isolated from the user's own checkout.** §3.9's "AGL never touches the
-   user's working directory" is a promise about a directory this suite has no handle on. Isolation
+7. **That a workspace is isolated from the user's own checkout.** That AGL never touches the
+   user's working directory is a promise about a directory this suite has no handle on. Isolation
    is asserted between the checkouts the suite provisioned, which is the half it can see.
 
 8. **That `restore` is atomic, or what one racing a write does.** The port says nothing about that
@@ -138,7 +138,7 @@ from ._workspace_holding import WorkspaceHoldingContract
 from ._workspace_steps import WorkspaceStepContract
 from ._workspace_teardown import WorkspaceTeardownContract
 
-# The run's own worktree directory in the trees layout (§3.9), spelled here because the test below
+# The run's own worktree directory in the trees layout, spelled here because the test below
 # asserts that no `Namespace` can spell it. That is what makes `namespace=None` a name rather than
 # an encoding: `ids.py` refuses this word at construction, in every spelling, so a caller cannot
 # build the value that would otherwise be the obvious way to address the run's own workspace.
@@ -222,8 +222,8 @@ class WorkspaceContract(
         the provisioning would race with the run's own concurrency. So opening twice must not
         raise - but "does not raise" is the weak half of the clause and the half that is easy. The
         port's sentence is that **an existing workspace is returned exactly as it stands, with
-        whatever the previous attempt left in it**, and §3.6's replay is what then decides whether
-        to keep that state or `restore` past it.
+        whatever the previous attempt left in it**, and replay is what then decides whether to
+        keep that state or `restore` past it.
 
         That is why the assertions below are about a file nobody committed. An implementation that
         quietly re-provisions a clean checkout passes "opening twice does not raise", passes a
@@ -253,8 +253,8 @@ class WorkspaceContract(
         )
         assert read(again, TRACKED) == body("edited by the attempt that then crashed"), (
             "an edit the previous attempt had not committed is gone from the reopened workspace. "
-            "An existing workspace is returned exactly as it stands - §3.6's replay is what "
-            "decides whether to keep that state or restore past it, and it cannot decide about "
+            "An existing workspace is returned exactly as it stands - replay is what decides "
+            "whether to keep that state or restore past it, and it cannot decide about "
             "something already thrown away"
         )
         assert read(again, SCRATCH) == body("left behind by the attempt that then crashed"), (
@@ -314,11 +314,11 @@ class WorkspaceContract(
     async def test_the_run_s_own_workspace_is_addressed_by_none_and_by_nothing_else(
         self, provider: WorkspaceProvider, base: str
     ) -> None:
-        """§3.9's `_base`, and `None` is the only way to name it.
+        """The run's own `_base` checkout, and `None` is the only way to name it.
 
         The first assertion is about a pure type rather than about the implementation, and it is
-        here because it is what makes `None` a name instead of an arbitrary encoding: §3.3 reserves
-        that word for the run's own checkout, `ids.py` refuses it at construction in every
+        here because it is what makes `None` a name instead of an arbitrary encoding: that word is
+        reserved for the run's own checkout, `ids.py` refuses it at construction in every
         spelling, and so there is deliberately no `Namespace` value a caller could pass instead.
         A reader who wonders why this parameter is `Namespace | None` gets the answer in one line,
         and an implementation that grew a magic namespace of its own would be reachable by nobody.
@@ -336,8 +336,8 @@ class WorkspaceContract(
 
         assert run.path != child.path, (
             "the run's own workspace and a child of it are at one path. They are two checkouts of "
-            "one repository, and §3.9 is explicit that a checkout inside another checkout's "
-            "working tree shows up in that one's changes"
+            "one repository, and a checkout inside another checkout's working tree shows up in "
+            "that one's changes"
         )
         assert run.branch != child.branch, (
             "the run's own workspace and a child of it are on one line of work, so a child's "

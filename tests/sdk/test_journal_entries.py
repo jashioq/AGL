@@ -2,8 +2,8 @@
 
 The other half of `sdk/_engine/journal.py`. `test_journal.py` holds the fingerprint - two
 computations that must agree, or two that must differ - and this file holds the file that
-fingerprint names: the four fields §3.6 gives it, the two directions of its wire form, and the two
-accessors the replay walk will read and write it through. (A second test file for one module has
+fingerprint names: its four fields, the two directions of its wire form, and the two accessors
+the replay walk will read and write it through. (A second test file for one module has
 precedent in `tests/adapters/test_filesystem_store.py` and `test_filesystem_no_lock.py`; here the
 seam is the module's own, the two halves sharing nothing but a digest.)
 
@@ -60,7 +60,7 @@ from agl.sdk._engine.journal import Entry, read_entry, write_entry
 RUN: Final = RunScope(ProjectName("myapp"), RunLabel("auth"))
 STEP: Final = StepName("implement")
 
-# The step name that also reads as a worktree's, which is the collision §3.6's sibling subtrees
+# The step name that also reads as a worktree's, which is the collision the sibling subtrees
 # exist to make impossible.
 REVIEW: Final = StepName("review")
 
@@ -73,7 +73,7 @@ SECOND: Final = hashlib.sha256(b"second").hexdigest()
 # checks only that it is non-empty; a head that is not one is git's to refuse, at `restore`.
 HEAD: Final = "4a91c07f2b3e8d15c6a0b7f31d92e8054c6a0f13"
 
-# §3.6's own example timestamp, and the moment every entry below is stamped with unless the test
+# A fixed example timestamp, and the moment every entry below is stamped with unless the test
 # is about `at` itself.
 AT: Final = datetime(2026, 8, 18, 9, 16, 41, tzinfo=UTC)
 
@@ -122,7 +122,7 @@ def _entry(digest: str, *, value: JsonValue = None, head: str = HEAD, at: dateti
 )
 @pytest.mark.asyncio
 async def test_an_entry_written_is_the_entry_read_back(store: Store, value: JsonValue) -> None:
-    """Every shape §3.6 says a `value` can be: a tool's payload, a human's answer, or null.
+    """Every shape a `value` can be: a tool's payload, a human's answer, or null.
 
     Equality is over all four fields, so this is also the assertion that nothing is lost on the way
     down and nothing is invented on the way up - a `head` that came back truncated or an `at` that
@@ -166,7 +166,7 @@ async def test_a_recorded_null_is_an_entry_and_not_an_absence(store: Store) -> N
 
 @pytest.mark.asyncio
 async def test_a_fingerprint_that_disagrees_with_the_path_is_a_miss(store: Store) -> None:
-    """§3.6: "match on path **and** fingerprint, else re-run" - and this is the `and`.
+    """Match on path **and** fingerprint, else re-run - and this is the `and`.
 
     The filename already is the digest, so AGL never writes the two apart; a disagreement means a
     ledger written by another version of AGL, corrupted, or hand-edited. The answer is `None` and
@@ -193,7 +193,7 @@ async def test_a_fingerprint_that_disagrees_with_the_path_is_a_miss(store: Store
 async def test_nothing_in_the_read_path_branches_on_at(store: Store) -> None:
     """The claim, stated: **`at` is recorded and never read for control flow.**
 
-    §3.6 gives `at` to debugging and to the view, and `ports/clock.py` rests its whole argument for
+    `at` belongs to debugging and to the view, and `ports/clock.py` rests its whole argument for
     an injectable clock on that - a fake clock changes what is written down and cannot change what
     happens. So two entries identical but for their timestamps, one stamped years stale and one
     stamped in the future, are both readable, each carries its own moment back, and neither the age
@@ -227,9 +227,9 @@ async def test_a_step_and_a_worktree_of_one_name_are_two_entries(store: Store) -
     """`step("review", ...)` in a run and `step("review", ...)` inside `worktree("review")`.
 
     Same step name, same digest - which is what concurrent siblings produce by construction - and
-    different scopes. §3.6 nests `steps/` inside each worktree rather than pooling them precisely
-    so that these two cannot be one address. If they were, the second write would supersede the
-    first and the run would replay the child's review as its own.
+    different scopes. The layout nests `steps/` inside each worktree rather than pooling them
+    precisely so that these two cannot be one address. If they were, the second write would
+    supersede the first and the run would replay the child's review as its own.
     """
     inside = RUN.inside(Namespace("review"))
     at_the_run = _entry(FIRST, value="what the run's own review found")
@@ -247,7 +247,7 @@ async def test_a_step_and_a_worktree_of_one_name_are_two_entries(store: Store) -
 
 @pytest.mark.asyncio
 async def test_two_concurrent_siblings_each_land_their_own_entry(store: Store) -> None:
-    """§3.6's own case: `T-01` and `T-02` both finish `implement` at the same moment.
+    """The concurrent case: `T-01` and `T-02` both finish `implement` at the same moment.
 
     Their digests are *identical* - same role, no inputs, same parent head - and their namespaces
     are not, which is the whole reason the counter is scoped per namespace (rule 1 of
@@ -290,7 +290,7 @@ async def test_two_concurrent_runs_of_one_step_land_at_their_own_digests(store: 
 async def test_a_superseded_entry_stays_readable_beside_the_one_that_replaced_it(
     store: Store,
 ) -> None:
-    """§3.6 keeps them on purpose: they are what answers "why did this re-run".
+    """Superseded entries are kept on purpose: they are what answers "why did this re-run".
 
     Sequential rather than concurrent, and a different claim from the test above - not that two
     writes both land, but that a later one does not tidy an earlier one away. Nothing in AGL prunes
@@ -310,7 +310,7 @@ async def test_a_superseded_entry_stays_readable_beside_the_one_that_replaced_it
 # --- The wire form, held still --------------------------------------------------------------------
 
 
-def test_the_wire_shape_is_the_four_fields_section_3_6_names() -> None:
+def test_the_wire_shape_is_the_four_fields_fingerprint_value_head_and_at() -> None:
     """The published shape, spelled out here rather than read off `Entry`'s own fields.
 
     A record compared against itself agrees with itself, which is why `tests/test_api.py` pins
@@ -410,11 +410,11 @@ def test_an_empty_fingerprint_or_head_names_nothing() -> None:
 
 @pytest.mark.asyncio
 async def test_the_two_subtrees_really_are_siblings_on_disk(tmp_path: Path) -> None:
-    """§3.6's layout, checked against `home_layout` rather than only against the store's answers.
+    """The layout, checked against `home_layout` rather than only against the store's answers.
 
     The behavioural test above would pass against any store that kept the two apart for any reason
-    at all, including one that happened to hash the scope into a key. This one spells out the
-    diagram the plan draws - `<run>/steps/review/<digest>.json` beside
+    at all, including one that happened to hash the scope into a key. This one spells the layout
+    out - `<run>/steps/review/<digest>.json` beside
     `<run>/worktrees/review/steps/review/<digest>.json` - asserts `step_entry` composes exactly
     that, and then asserts a real write put a file at each. The last assertion is the claim in its
     sharpest form: the worktree's entries are not anywhere underneath the run's `steps/`.
@@ -440,7 +440,7 @@ async def test_the_two_subtrees_really_are_siblings_on_disk(tmp_path: Path) -> N
 async def test_one_file_per_step_named_by_its_digest(tmp_path: Path) -> None:
     """Two entries under one step name are two files, which is what makes a completion one write.
 
-    §3.6's alternative is the one worth naming: a single `steps.json` would need a
+    The alternative is the one worth naming: a single `steps.json` would need a
     read-modify-write under a mutex on every completion, and the two writes above would be a queue
     rather than two independent renames. The directory listing is that design, visible.
     """

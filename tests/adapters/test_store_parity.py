@@ -2,10 +2,11 @@
 
 `tests/contracts/store.py` holds both stores to everything the port *says*. This file holds them to
 everything the port leaves open - and that is where a fake drifts, because a clause nobody wrote
-down is a clause no suite can assert. §1.9's rule is that a fake is a product feature: `--dry-run`
-and plan target #8 ("every command runs end-to-end on fakes alone") run on `MemoryStore`, so a fake
-that accepts a document the real store refuses turns a green all-fakes run into a real run that
-crashes, with the difference invisible until the day somebody drops the `--dry-run`.
+down is a clause no suite can assert. A fake here is a product feature, not a test artifact:
+`--dry-run` and `tests/test_measurable_targets.py`'s target #8 ("every command runs end-to-end on
+fakes alone") run on `MemoryStore`, so a fake that accepts a document the real store refuses turns
+a green all-fakes run into a real run that crashes, with the difference invisible until the day
+somebody drops the `--dry-run`.
 
 Every test below asks both stores the same question and asserts they answered alike. `_alike` is
 what makes that one line: it runs the call against each store, compares the answers, and hands them
@@ -90,7 +91,8 @@ DIGEST: Final = hashlib.sha256(b"one").hexdigest()
 DOCUMENT: Final[dict[str, JsonValue]] = {"fingerprint": DIGEST, "value": None, "at": "2026-08-18"}
 
 # Every shape `JsonValue` admits, in one document, built here rather than imported for the reason
-# above. The unicode string carries a character no *name* may hold (§3.3): names are ASCII and
+# above. The unicode string carries a character no *name* may hold - `_ALLOWED_CHARACTERS` in
+# `src/agl/ports/ids.py` admits ASCII letters, digits and `._-` only - so names are ASCII and
 # values are not, and a store that confused the two would encode a value the way it encodes an
 # address. Non-finite floats are absent because they have their own test, being a refusal.
 EVERY_SHAPE: Final[dict[str, JsonValue]] = {
@@ -495,7 +497,7 @@ async def test_removing_a_scope_two_deep_leaves_its_parent_named_by_the_real_sto
 async def test_removing_a_run_leaves_the_two_agreeing_exactly(
     stores: Mapping[str, Store],
 ) -> None:
-    """The bound on divergence 3, and the case `clear` actually runs (§3.10).
+    """The bound on divergence 3, and the case `agl clear` actually runs.
 
     At depth zero `remove` takes the run's own directory, so no parent survives to be listed and
     the real store's non-pruning cannot show. Asserted so that the divergence above is pinned as

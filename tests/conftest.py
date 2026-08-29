@@ -16,8 +16,8 @@ nothing below is a fixture a suite *reads*: it is a fixture no suite can decline
 opposites. A guard that protects by default is exactly the thing that cannot be declared in the
 module it protects. A module-scoped autouse fixture guards the file it is written in and no other,
 so the next test file added inherits it only if somebody remembers - and "somebody remembers" is the
-mechanism this file exists to replace. Stage 7.1 wrote that fixture in
-`tests/adapters/test_claude_code_runner.py`; stage 8 added a second adapter test file, and the
+mechanism this file exists to replace. That fixture was first written in
+`tests/adapters/test_claude_code_runner.py`; a second adapter test file arrived later, and the
 Codex CLI has the identical dangerous shape - subscription auth plus a redirectable endpoint.
 
 **What is being guarded against, measured rather than argued.** Point `ANTHROPIC_BASE_URL` at a
@@ -44,10 +44,9 @@ redirect for Codex here. `codex --help` documents no endpoint environment variab
 configuration (`chatgpt_base_url`, `openai_base_url`, `model_providers.<id>.base_url`), and proving
 that redirecting any of them actually diverts a request costs a `codex exec`, which is a paid turn.
 A named variable that turned out to be the wrong one would be worse than none, because the fixture
-would then read as protection it was not providing. That measurement belongs to deliverable 8.0, the
-Codex capability findings, and `scripts/check`'s paid-endpoint gate repeats the caveat where a
-reader will meet it. Until then, Codex is protected by having no credential and not by where it
-would send one.
+would then read as protection it was not providing. That measurement is not made here, and
+`scripts/check`'s paid-endpoint gate repeats the caveat where a reader will meet it. Until it is,
+Codex is protected by having no credential and not by where it would send one.
 """
 
 from collections.abc import Iterator
@@ -98,7 +97,7 @@ def _one_test_at_a_time(loopback: Loopback) -> Iterator[None]:
     Both halves used to live in `tests/adapters/test_claude_code_runner.py` and both had to move,
     for different reasons.
 
-    The teardown is the credential-leak measurement, and it is the half the stage asked to be made
+    The teardown is the credential-leak measurement, and it is the half that had to be made
     repo-wide: every request every test caused is checked for an `Authorization` header, which is
     what the CLI sends when it falls back to the operator's own subscription credential, and which
     therefore appears the moment the dummy key stops being set - whatever anyone believed about it.

@@ -27,7 +27,7 @@ each a choice this port explicitly leaves to whoever implements it.
 `RENAMED` carrying both names, or the `DELETED` and `ADDED` pair it is made of - and nothing else.
 
 Rename detection is a similarity heuristic in every implementation that has one, with a threshold
-nobody in this plan ever specified; a system that records moves explicitly has it for free, and one
+nobody ever specified; a system that records moves explicitly has it for free, and one
 comparing two snapshots of a tree has no way to produce it that is not guesswork. Requiring it here
 would mean this suite inventing a promise the port declines to make: `changed_files` is careful to
 say what it does *not* fix - "its order is the implementation's, and nothing here promises one" -
@@ -224,7 +224,7 @@ class HistoryChangeContract:
 
         The empty tuple is the port's own type answering honestly; an implementation that raised
         here would make every consumer wrap a comparison of a step's before and after in a `try`,
-        and a step whose agent changed nothing is explicitly not an error anywhere in this plan.
+        and a step whose agent changed nothing is explicitly not an error anywhere in AGL.
 
         `diff` is asserted to hold nothing rather than to *be* `""`, because pinning the exact
         string would pin whether a trailing newline is part of an empty patch - which is format,

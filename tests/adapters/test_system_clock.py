@@ -3,8 +3,9 @@ asked.
 
 The two classes at the top are the whole of the port: `ClockContract` with its one fixture
 overridden and nothing else touched, the same two assertions against each implementation. That is
-the mechanism §1.9 asks for - the real adapter and the fake held to one suite written by somebody
-with no stake in either - and plan target #7 admits no exception for a port that promises little.
+what `tests/contracts/` is for - the real adapter and the fake held to one suite written by
+somebody with no stake in either - and `tests/test_measurable_targets.py`'s target #7 admits no
+exception for a port that promises little.
 **Both subclasses live here**, because both clocks live in one adapter module
 (`agl/adapters/system_clock.py`) and this file is named for that module: the convention in
 `tests/adapters/` is one test file per adapter module, which is also why `MemoryStore` and
@@ -27,7 +28,7 @@ it, and it is `ClockContract`'s second assertion for the same reason. The port's
 naive" section exists because a clock reading ends up in `run.json`, and `RunSpec` is where a value
 that is not a moment is refused - so a unit test on `tzinfo` alone would still pass on a reading
 that record rejects. What this file adds past the suite is the *wire* half: which text `to_json`
-produces, and that `ManualClock`'s default is plan §3.6's own `created_at`.
+produces, and that `ManualClock`'s default is the `created_at` a run record carries.
 
 `Clock.now()` is sync, so these tests are sync and carry no asyncio marker; there is no
 `pytestmark` here for that reason and its absence is deliberate rather than forgotten. The suite
@@ -52,11 +53,11 @@ from agl.ports.ids import RunLabel
 from agl.ports.run import RunSpec
 from contracts.clock import ClockContract
 
-# Plan §3.6's `run.json` pin, doubled to a full sha1: `RunSpec` refuses an abbreviated one.
+# A `run.json` base pin, doubled to a full sha1: `RunSpec` refuses an abbreviated one.
 _SHA: Final = "8c19f7ae4d2b0913e5f6" * 2
 
-# The plan's own `created_at`, which is also `ManualClock`'s default, spelled out here rather than
-# imported: a test that reads the constant it is checking agrees with any value it happens to hold.
+# `ManualClock`'s default `created_at`, spelled out here rather than imported: a test that reads
+# the constant it is checking agrees with any value it happens to hold.
 _MOMENT: Final = datetime(2026, 8, 18, 9, 14, 2, tzinfo=UTC)
 _WIRE_MOMENT: Final = "2026-08-18T09:14:02Z"
 
@@ -86,7 +87,7 @@ class _Placeless(tzinfo):
 
 
 def _record_at(moment: datetime) -> RunSpec:
-    """Plan §3.6's run record, stamped with `moment` - the one thing every reading ends up in."""
+    """A run record, stamped with `moment` - the one thing every reading ends up in."""
     return RunSpec(
         workflow="tickets",
         workflow_version="1.0.0",
@@ -176,9 +177,9 @@ def test_a_system_clock_reading_carries_nothing_of_the_machines_local_timezone(
 def test_a_system_clock_reading_is_a_moment_the_run_record_accepts_and_keeps() -> None:
     """The assertion the port's awareness clause is actually about.
 
-    §3.6 stamps `created_at` from a clock, and `RunSpec` is what refuses a value that is not a
-    moment - so this, and not the `tzinfo` check above, is what says the reading is usable. The
-    third assertion is that the record holds *this* reading, to the precision it can hold one:
+    A run record stamps `created_at` from a clock, and `RunSpec` is what refuses a value that is
+    not a moment - so this, and not the `tzinfo` check above, is what says the reading is usable.
+    The third assertion is that the record holds *this* reading, to the precision it can hold one:
     the instant surviving the trip is how you know the record kept the clock's answer.
     """
     reading = SystemClock().now()
@@ -260,14 +261,15 @@ def test_the_fake_hands_back_the_moment_it_was_given_neither_normalised_nor_trun
 def test_a_fake_reading_is_a_moment_the_run_record_accepts_too() -> None:
     """A fake usable anywhere the real clock is, or it is not a `Clock`.
 
-    Both readings go into the same record: the default, which is plan §3.6's own `created_at` and
-    so is what an all-fakes run writes, and one at another offset, which the record normalises to
-    the same instant. One wire value from two is the division of labour in a line - the clock
+    Both readings go into the same record: the default, which is `ManualClock`'s own `created_at`
+    and so is what an all-fakes run writes, and one at another offset, which the record
+    normalises to the same instant. One wire value from two is the division of labour in a line -
+    the clock
     keeps the offset it was given, and the record is what decides UTC.
     """
     spec = _record_at(ManualClock().now())
     assert RunSpec.from_json(spec.to_json()) == spec
-    assert spec.to_json()["created_at"] == _WIRE_MOMENT, "the default is not the plan's example"
+    assert spec.to_json()["created_at"] == _WIRE_MOMENT, "the default is not `_MOMENT`"
 
     elsewhere = _record_at(ManualClock(_ELSEWHERE).now())
     assert RunSpec.from_json(elsewhere.to_json()) == elsewhere
@@ -329,9 +331,10 @@ def test_both_are_clocks_and_the_port_itself_cannot_be_constructed() -> None:
 def test_neither_clock_offers_a_member_the_port_refused_to_promise() -> None:
     """No monotonic reading, no elapsed-time helper, no ordering, no sleep, no schedule.
 
-    The port lists the first and the last under "considered and excluded", with reasons, and §3.6
-    keeps `at` out of control flow entirely - so a member of that shape would break no other test
-    here and would quietly hand the framework a way to branch on the time. The fake's two extra
+    The port lists the first and the last under "considered and excluded", with reasons, and an
+    entry's `at` is kept out of control flow entirely - so a member of that shape would break no
+    other test here and would quietly hand the framework a way to branch on the time. The fake's
+    two extra
     members move it and read nothing back, which is why they are not of that shape.
     """
     assert _public(SystemClock) == {"now"}

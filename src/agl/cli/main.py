@@ -165,7 +165,7 @@ def _severally(group: ExceptionGroup[Exception]) -> str:
     return (
         f"this run's concurrent children raised, and they do not resolve to one exit status - so "
         f"the run exits {status}. A run that failed several different ways is not attributable to "
-        f"one code (§3.1), and `InternalError`'s is the honest answer rather than a guess at which "
+        f"one code, and `InternalError`'s is the honest answer rather than a guess at which "
         f"of them was the real one, so read this {status} as 'these disagreed' and not as its "
         f"usual 'file a bug'. All of them, with the status each resolves to on its own:\n{named}"
     )

@@ -17,14 +17,14 @@ _FROM_ON_QUESTION: Final = (
     f"`on_question`: `sdk/roles.py` folds it in at declaration time, so there is no line in the "
     f"workflow to go looking for. A backend that cannot ask would not block on the question - it "
     f"would tell the agent no answer is available, leaving the approval gate silently absent and "
-    f"the step reporting a result anyway (§3.7)"
+    f"the step reporting a result anyway"
 )
 
 _FROM_TOOLS: Final = (
     f". {str(Capability.TOOL_CALLING)!r} is in this role's `requires` because it declares `tools`: "
     f"`sdk/roles.py` folds it in at declaration time, so there is no line in the workflow to go "
     f"looking for. Either this role names a model whose backend can call a tool, or it offers none "
-    f"- and a role with no tools is an effect step, whose result is `null` (§3.3)"
+    f"- and a role with no tools is an effect step, whose result is `null`"
 )
 
 
@@ -59,9 +59,10 @@ def _declared_beside(declared_by: _Declaration) -> tuple[RoleFactory[..., Any], 
         raise InternalError(
             f"the workflow function {declared_by.__qualname__!r} says it was written in "
             f"{declared_by.__module__!r}, and that module is not in `sys.modules`. "
-            f"Preflight reads a workflow's role factories out of the namespace its `def` ran in "
-            f"(§3.11), and an entry point is what imported that module, so there is no supported "
-            f"way to reach this line"
+            f"Preflight reads a workflow's role factories out of the namespace its `def` ran in - "
+            f"`@workflow` takes no `roles=`, for the reason `ARCHITECTURE.md`'s 'Deliberately not "
+            f"built' gives - and an entry point is what imported that module, so there is no "
+            f"supported way to reach this line"
         )
     beside = tuple(vars(written_in).values())
     return tuple(bound for bound in beside if isinstance(bound, RoleFactory)) + tuple(
@@ -88,8 +89,8 @@ def _not_ready(
         f"factory `{factory.name}`, declared in {factory.__module__!r} and reached from "
         f"{workflow_module!r}, which is the module this run's workflow is written in. Preflight "
         f"reads the `@role(model=…)` factories in that namespace - and in any module bound in it - "
-        f"and asks each distinct model's backend whether it is ready, without calling any of them "
-        f"(§3.2). That scan over-approximates, deliberately: a role imported into a workflow's "
+        f"and asks each distinct model's backend whether it is ready, without calling any of "
+        f"them. That scan over-approximates, deliberately: a role imported into a workflow's "
         f"module and never stepped with still demands its provider here, and so does every other "
         f"role of a module imported for one of them, which is the known cost of one declaration "
         f"instead of two. If nothing in {workflow_module!r} steps with `{factory.name}`, this is a "
@@ -107,9 +108,8 @@ def _unmet(
     message = (
         f"the role handed to step {step!r} cannot run on {str(role.model)!r}: it requires "
         f"{wanted}, which the backend serving that model does not offer - it reports {offered}. "
-        f"A capability "
-        f"is what a backend can be asked for at all (§3.2), so this does not clear up on its own: "
-        f"either the role names a model whose backend has it, or it stops requiring it"
+        f"A capability is what a backend can be asked for at all, so this does not clear up on "
+        f"its own: either the role names a model whose backend has it, or it stops requiring it"
     )
     if Capability.MID_RUN_QUESTIONS in missing and role.on_question is not None:
         message += _FROM_ON_QUESTION

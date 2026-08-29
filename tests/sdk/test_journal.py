@@ -23,12 +23,12 @@ varied. Without it, a day when the seeds stop differing is a day these two tests
 proving anything while staying green - which is the move `scripts/check`'s paid-endpoint gate makes
 when it poisons the environment before running its probe rather than reading a fixture's tick.
 
-The counter is pinned against §3.6's own arithmetic, `sha256(base + ":" + str(n))`, written out here
+The counter is pinned against the arithmetic itself, `sha256(base + ":" + str(n))`, written out here
 rather than imported, so the suite is not checking the module against itself. And the fingerprint's
 terms are pinned exhaustively: every one of role, instructions, model, restrictions, each of a
 tool's three contributed fields, every input and the head changes the base, and the same arguments
 twice do not - because a term that quietly stopped counting would be a step that replays across an
-edit that should have re-run it, which is the failure §3.6 says fingerprinting exists to prevent.
+edit that should have re-run it, which is the failure fingerprinting exists to prevent.
 """
 
 import hashlib
@@ -47,10 +47,10 @@ from typing import Final
 import pytest
 
 from agl.ports.agent import Claude, ModelId, Restriction, Tool, ToolResult
-from agl.ports.errors import InputError
+from agl.ports.errors import InputError, exit_code_for
 from agl.ports.home_layout import AglHome, RunScope, step_entry
 from agl.ports.ids import Namespace, ProjectName, RunLabel, StepName
-from agl.ports.run import JsonValue
+from agl.ports.run import JsonValue, RunSpec
 from agl.sdk._engine.journal import Fingerprints, base_of, canonical_json
 
 _SCOPE: Final = RunScope(ProjectName("myapp"), RunLabel("auth"))
@@ -62,8 +62,8 @@ _HEAD: Final = "4a91c07f2b3e8d15c6a0b7f31d92e8054c6a0f13"
 _BASE: Final = "9f2c4e" + "b" * 54 + "a71b"
 
 # `sha256(_BASE + ":0")`, typed out rather than computed, and the one number in this file that is
-# not derived from anything. UF1.6 folded the counter's key; this is what a lowercase step name at
-# `n = 0` addressed before that change and addresses after it, which is the whole of "no digest
+# not derived from anything. The counter's key was later folded; this is what a lowercase step name
+# at `n = 0` addressed before that change and addresses after it, which is the whole of "no digest
 # moved". See the test that spends it.
 _UNMOVED: Final = "7306ba76493375197951fdd5b434cb08750602dc6e0c226b5997346c5037e46d"
 
@@ -117,14 +117,14 @@ def _base(
 
 
 def _digest(base: str, count: int) -> str:
-    """§3.6's third line, written out rather than imported: `sha256(base + ":" + str(n))`."""
+    """The digest line, written out rather than imported: `sha256(base + ":" + str(n))`."""
     return hashlib.sha256(f"{base}:{count}".encode()).hexdigest()
 
 
 def _take(counter: Fingerprints, scope: RunScope, step: StepName, base: str = _BASE) -> str:
     """One address, and the claim that follows an entry landing at it.
 
-    `Journal.step` spends `digest` and `claimed` a whole step apart - §3.6's "the counter advances
+    `Journal.step` spends `digest` and `claimed` a whole step apart - "the counter advances
     when an entry is written, not when a step is called" - and the two tests below this section's
     heading are the ones about that gap. Everything under "Rule 1" is about the counter's *key*
     instead, so it takes the pair together and reads the way one invocation reads.
@@ -141,7 +141,7 @@ def test_asking_for_an_address_twice_is_the_same_address_twice() -> None:
     """`digest` is a query and asking it is not an event.
 
     This is what lets `Journal.step` take the address once, before its first suspension, and spend
-    the one string on both the read and the write - and it is half of §3.6's "the counter advances
+    the one string on both the read and the write - and it is half of "the counter advances
     when an entry is written, not when a step is called". A `digest` that advanced by being called
     would put a step's write at a different address from its read, so every step would miss its own
     entry on the very next walk.
@@ -152,7 +152,7 @@ def test_asking_for_an_address_twice_is_the_same_address_twice() -> None:
 
 
 def test_a_step_that_claims_nothing_leaves_the_next_call_at_the_same_address() -> None:
-    """The other half, and §3.6's own reason for it: a step that crashed consumed no slot.
+    """The other half, and the reason for it: a step that crashed consumed no slot.
 
     "A step that crashes and is retried within one run must not consume a slot - the crash is not
     journalled, so a retry landing at `n = 1` is a slot a later resume asks for at `n = 0`, misses,
@@ -174,7 +174,7 @@ def test_a_step_that_claims_nothing_leaves_the_next_call_at_the_same_address() -
 
 
 def test_two_concurrent_siblings_both_get_n_zero_rather_than_racing_for_it() -> None:
-    """The failure a per-invocation counter produces, and the one §3.6 spells out.
+    """The failure a per-invocation counter produces, and the reason the counter is scoped.
 
     `T-01` and `T-02` both call `step(implementer)` with the same role, no inputs of
     their own and the same parent head, so their bases are identical by construction. A counter
@@ -211,7 +211,7 @@ def test_the_order_two_siblings_happen_to_run_in_does_not_decide_either_digest()
 
 
 def test_a_retry_loop_in_one_scope_counts_up_so_it_cannot_hit_its_own_cache() -> None:
-    """§3.6's "why the counter": same role, no inputs, no commits, and nothing else varying."""
+    """Why the counter: same role, no inputs, no commits, and nothing else varying."""
     counter = Fingerprints()
     digests = [_take(counter, _SCOPE, _STEP) for _ in range(3)]
     assert digests == [_digest(_BASE, 0), _digest(_BASE, 1), _digest(_BASE, 2)]
@@ -234,7 +234,7 @@ def test_two_step_names_in_one_scope_count_independently() -> None:
 def test_two_spellings_of_one_step_name_count_as_one_ledger_because_they_are_one_directory() -> (
     None
 ):
-    """UF1.6, in the arithmetic: the counter key is folded, so the second spelling is `n = 1`.
+    """In the arithmetic: the counter key is folded, so the second spelling is `n = 1`.
 
     `steps/Review/` and `steps/review/` are one directory on a case-insensitive volume, which is
     macOS by default, so they are one ledger and have to be one count. The test above is the
@@ -259,7 +259,7 @@ def test_two_spellings_of_one_step_name_count_as_one_ledger_because_they_are_one
 def test_folding_the_counter_key_moves_no_digest_a_single_spelling_ever_wrote() -> None:
     """The fold is not a stored-format change, and this is the proof rather than the claim.
 
-    `n` is never persisted (§3.6) and the digest is a function of `n`'s *value*, not of the key it
+    `n` is never persisted and the digest is a function of `n`'s *value*, not of the key it
     was counted under - so the only way folding the key could move a digest already on a ledger is
     by changing some name's count. `collision_key` of an all-lowercase name is that name, which
     makes the mapping from names to counts identical for any corpus that uses one spelling per
@@ -370,7 +370,7 @@ def test_a_set_of_restrictions_fingerprints_the_same_in_every_process() -> None:
 def test_a_dataclass_in_inputs_fingerprints_the_same_in_every_process() -> None:
     """Rule 3, and the same argument: one object's `id()` does not move while it is alive.
 
-    §3.3's tickets example passes `findings=highs`, a list of the workflow's own dataclasses, and
+    The tickets example passes `findings=highs`, a list of the workflow's own dataclasses, and
     `repr()` is the one-line way to make that hashable. `@dataclass(repr=False)` gives these
     instances `object.__repr__`, which is what the default `repr` of anything without one embeds -
     a heap address. The second assertion is again the non-vacuous half: a `repr()` shortcut is only
@@ -395,10 +395,10 @@ def test_a_dataclass_in_inputs_fingerprints_the_same_in_every_process() -> None:
 def test_a_value_the_walker_cannot_take_names_its_type_and_the_path_to_it() -> None:
     """`inputs.findings[0].deadline is a datetime` - the type alone would not be findable.
 
-    A value three levels down a list of the workflow's own dataclasses is the shape §3.3 actually
-    passes, and rule 6's walker hands a `datetime` field on as the `datetime` it is. It is an
-    `InputError` and not an `InternalError`: this came from a workflow author's `**inputs`, so exit
-    2 sends them to their own declaration rather than to a bug report about the framework.
+    A value three levels down a list of the workflow's own dataclasses is the shape a workflow
+    actually passes, and rule 6's walker hands a `datetime` field on as the `datetime` it is. It is
+    an `InputError` and not an `InternalError`: this came from a workflow author's `**inputs`, so
+    exit 2 sends them to their own declaration rather than to a bug report about the framework.
     """
 
     @dataclass(frozen=True)
@@ -445,13 +445,87 @@ def test_the_walkers_other_refusals_each_name_what_they_found() -> None:
         canonical_json({"finding": Finding})
 
 
+# The one lone surrogate both modules below are asked about - built with `chr`, and deliberately not
+# written as the escape `"\ud800"`.
+#
+# **A module-level `Final` holding a surrogate *literal* crashes `mypy --strict` outright**, which
+# costs a gate rather than a test. 2.3.1 keeps a `Final`'s value as a `Literal` type and writes it
+# into its cache through `mypy/cache.py:write_literal`, which encodes as UTF-8 - so the type checker
+# walks into the same wall this test is about and exits with `INTERNAL ERROR` and no message naming
+# a file. `Final[str]` does not help; the value is still tracked. `chr(0xD800)` is a call and not a
+# literal, so nothing is stored, and it is how the test just above spells its surrogate pair
+# already. An escape *inside a function body* is fine - `tests/ports/test_run.py` and
+# `tests/adapters/test_store_parity.py` both use one - and only a module constant is affected.
+_LONE_SURROGATE: Final = chr(0xD800)
+
+# A `run.json` record, minimal and valid, whose only job is to carry `params` into `RunSpec`'s own
+# `_checked_text`. `_HEAD` doubles as the base pin: it is already the forty lowercase hex characters
+# a resolved commit is, which is what that field refuses anything else for.
+_RECORD: Final[dict[str, JsonValue]] = {
+    "workflow": "tickets",
+    "workflow_version": "1.0.0",
+    "label": "auth",
+    "base_ref": "main",
+    "base_sha": _HEAD,
+    "branch": "agl/auth",
+    "params": {},
+    "created_at": "2026-08-18T09:14:02Z",
+}
+
+
+def test_both_surrogate_checks_in_agl_answer_one_string_with_one_exit_code() -> None:
+    """`_checked_text` is written twice, and the two copies must not disagree about the verdict.
+
+    This module holds one and `agl.ports.run` holds the other, with a character-for-character
+    identical `unicodedata.category(character) == "Cs"` loop in each. The duplication is not an
+    accident to be folded away: `ports` may not import `sdk`, and the two refusals name different
+    consequences that are both true - here the canonical text escapes a lone surrogate to the same
+    characters as the astral code point it stands for, so two different inputs would share a
+    fingerprint and one would replay the other's result; there the store cannot encode it, so the
+    record refuses it at the call that still knows what it handed over.
+
+    What they may not differ on is the **verdict**, and they did. This one raised `InputError` and
+    that one `InternalError`, which is exit 2 against exit 70 for one string - decided by nothing
+    but which module happened to inspect it first. A lone surrogate reaches AGL from outside:
+    `sys.argv` is decoded with `surrogateescape`, so a single undecodable byte on a command line
+    mints exactly one of these, and an agent's tool payload is the other door. That is malformed
+    input, and 70 would tell a user their tooling is broken when what is broken is their data.
+
+    The exit code is asserted against 2 on each side rather than the two being compared to each
+    other, because equality alone would stay green on the day both drifted together. The two
+    messages are asserted to still differ, because unifying the class was never a reason to lose
+    either explanation.
+    """
+    with pytest.raises(InputError, match="surrogate") as canonicalised:
+        canonical_json({"summary": _LONE_SURROGATE})
+    with pytest.raises(InputError, match="surrogate") as recorded:
+        RunSpec.from_json({**_RECORD, "params": {"summary": _LONE_SURROGATE}})
+
+    for where, caught in (("journal", canonicalised), ("ports.run", recorded)):
+        assert exit_code_for(caught.value) == 2, (
+            f"{where}'s `_checked_text` answered a lone surrogate with exit "
+            f"{exit_code_for(caught.value)}. Both copies of this check answer 2: the string came "
+            f"from outside - a command-line byte, a value an agent produced - so it is malformed "
+            f"input, and 70 would send whoever hit it to file a bug against AGL instead"
+        )
+
+    assert "share a fingerprint" in str(canonicalised.value), (
+        "the canonicaliser's refusal no longer says what a surrogate costs *here* - two inputs "
+        "collapsing to one canonical text, and one step replaying the other's recorded result"
+    )
+    assert "refuses the write" in str(recorded.value), (
+        "the record's refusal no longer says what a surrogate costs *there* - a store that cannot "
+        "encode the document, refused at the call that still knows what it handed over"
+    )
+
+
 # --- Rule 6: a dataclass contributes its qualified type name -------------------------------------
 
 # Two pairs of twins, and the pairs differ in where the swap is. `Finding`/`Ticket` are the pair
-# §3.6 names; `Inner`/`Other` exist to be *nested* inside an outer type that does not change, which
-# is the half a tag applied at the top level alone would miss. Every twin is declared with the same
-# field names in the same order and is only ever built with the same values, so the sole difference
-# between the two canonical texts is the one rule 6 puts there.
+# rule 6 names; `Inner`/`Other` exist to be *nested* inside an outer type that does not change,
+# which is the half a tag applied at the top level alone would miss. Every twin is declared with the
+# same field names in the same order and is only ever built with the same values, so the sole
+# difference between the two canonical texts is the one rule 6 puts there.
 
 
 @dataclass(frozen=True)
@@ -513,7 +587,7 @@ class _Smuggled:
 
 
 def test_two_dataclasses_with_one_shape_are_two_fingerprints() -> None:
-    """§3.6's own pair, and the one failure in this file that is a false cache **hit**.
+    """Rule 6's own pair, and the one failure in this file that is a false cache **hit**.
 
     "`asdict` erases the type, so `Finding("T-01", 3)` and `Ticket("T-01", 3)` fingerprint
     identically and changing an input's type while keeping its shape replays the old result."
@@ -713,7 +787,7 @@ def test_a_set_nested_inside_inputs_is_sorted_too_and_not_only_restrictions() ->
 
 def test_every_term_of_the_role_inputs_and_head_changes_the_fingerprint() -> None:
     """Nine terms, each varied alone. A term that stopped counting is a step that replays across
-    the edit it should have re-run for - which is the whole of what §3.6 says fingerprints buy."""
+    the edit it should have re-run for - which is the whole of what fingerprints buy."""
     schema: Mapping[str, JsonValue] = {"type": "object", "properties": {"tickets": {}}}
     bases = {
         "baseline": _base(),

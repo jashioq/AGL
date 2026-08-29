@@ -8,8 +8,8 @@ machine with nothing installed, and it is the case that cannot be asserted from
 
 Not merely "it does not fail". A preflight that asked about some default model, or about every
 provider the bundle was assembled with, would make such a run depend on a harness the workflow never
-named - which is exactly what `workflows/noop/` existed to disprove until 19.1 deleted it, and the
-argument outlived the package.
+named - which is exactly what a `workflows/noop/` package existed to disprove until it was
+deleted, and the argument outlived the package.
 """
 
 from agl.sdk import Run, workflow

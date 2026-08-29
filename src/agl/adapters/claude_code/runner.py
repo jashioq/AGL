@@ -157,7 +157,7 @@ def _inert(value: str, what: str) -> str:
         raise InputError(
             f"the Claude Code adapter will not use {value!r} as its {what}: it begins with '-', "
             f"and this value reaches the CLI as its own argument, where a leading dash makes it a "
-            f"flag rather than a value. §3.5: every value reaching a command line is hostile "
+            f"flag rather than a value. Every value reaching a command line is hostile "
             f"regardless of where it came from"
         )
     return value

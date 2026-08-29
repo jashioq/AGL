@@ -8,15 +8,15 @@ any bundle that happens to have been built correctly - what matters is the *decl
 is what every consumer above sees and what would let a module branch on which implementation it got.
 One comparison covers all nine fields, and a tenth added without being written down breaks it. The
 ninth is `build`, which is not a port and is kept in a list of its own for that reason: a `str` on
-this class has to be a deliberate act, and 14.0's argument for the one there is that
-`Verifier.verify` takes the build command as a parameter and its only caller is above the edge.
+this class has to be a deliberate act, and the argument for the one there is that `Verifier.verify`
+takes the build command as a parameter and its only caller is above the edge.
 
 **Construction is eager but inert.** The real bundle below is built with a home, a repository and a
 trees root that do not exist, and every one of the paths handed in is a directory nothing has
-created. It builds anyway. That is the property stage 7 leaned on when it argued `check_ready` onto
-the agent port - a container cannot `await`, so it cannot ask whether a harness is installed or
-whether a directory is a git repository, and preflight is where a run finds out. No test here
-starts a process, opens a socket or runs git, and none of them needs a `.git` anywhere.
+created. It builds anyway. That is the property that put `check_ready` on the agent port - a
+container cannot `await`, so it cannot ask whether a harness is installed or whether a directory is
+a git repository, and preflight is where a run finds out. No test here starts a process, opens a
+socket or runs git, and none of them needs a `.git` anywhere.
 
 **The three git fakes are one repository**, asserted by making a change through one and reading it
 back through the others. Identity would pass against three fakes wired to three repositories the
@@ -196,7 +196,7 @@ def test_the_fakes_bundle_needs_no_extra_installed(
 
 
 def test_the_real_bundle_carries_the_projects_configured_build_command(tmp_path: Path) -> None:
-    """The route §3.11 leaves open, closed at the one place both ends are in scope.
+    """The route nothing else can close, closed at the one place both ends are in scope.
 
     `Verifier.verify` takes the command, its only caller is the merge gate inside `integrate()`, and
     `Project.build` is where the command is written down - so something has to carry it across, and
@@ -398,7 +398,8 @@ def _task(workspace: Path, model: ModelId) -> AgentTask:
 def test_a_missing_claude_extra_refuses_and_names_the_pip_install(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`UpstreamUnavailable`, because §3.2.1 settles the class: a missing harness is not an input.
+    """`UpstreamUnavailable`, because `src/agl/ports/agent.py` settles the class: a missing harness
+    is not an input.
 
     The operator's configuration is correct - they enabled a backend they meant to enable - so an
     `InputError` would send them to edit a setting that is already right. What is absent is the
@@ -427,7 +428,8 @@ def test_a_disabled_claude_connector_never_imports_the_adapter_that_needs_the_ex
 def test_a_missing_terminal_extra_refuses_rather_than_falling_back_to_headless(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """§3.11 refuses display selection, so there is no second branch here to take.
+    """`ARCHITECTURE.md`'s "Deliberately not built" refuses a `Display` port, so there is no
+    second surface here to fall back to.
 
     The fallback is the plausible bug and this is what forbids it: `HeadlessTerminal` would build
     happily and then raise `UpstreamUnavailable` at the first screen carrying a question, turning
@@ -439,7 +441,7 @@ def test_a_missing_terminal_extra_refuses_rather_than_falling_back_to_headless(
     assert "agl[terminal]" in str(refused.value)
 
 
-# --- 16.5: substituting through the bundle, and compiling the workflow-facing vocabulary ---------
+# --- Substituting through the bundle, and compiling the workflow-facing vocabulary ---------------
 
 
 class _Recording(Terminal):
@@ -490,7 +492,7 @@ class _Watching(FakeVerifier):
 
 
 def test_with_terminal_moves_both_views_of_the_bundle_at_once(tmp_path: Path) -> None:
-    """16.5's first carried finding, as the regression test for it.
+    """The first of the two findings these verbs answer, as the regression test for it.
 
     `FakeServices` holds one terminal under two names, and the substitution this replaced -
     `dataclasses.replace(harness.services, terminal=...)` - moved only `services.terminal`, leaving
@@ -532,13 +534,14 @@ def test_with_store_moves_both_views_of_the_bundle_at_once(tmp_path: Path) -> No
 
 
 def test_with_verifier_moves_both_views_of_the_bundle_at_once(tmp_path: Path) -> None:
-    """18.3's carried finding, and the third verb 19.2 added because of it.
+    """The third of these verbs, and the finding that bought it.
 
     The merge gate is the only hook a workflow's own test has *inside* a landing - the lease and the
     target's step lock are held from `integrate()` to settlement, and `Verifier.verify` is the one
-    framework call in that window - so a test that wants to see two landings serialised, or to drive
-    §3.4's conflict loop off a red gate, substitutes a verifier. Until this verb existed the only
-    way was `replace(fakes, services=replace(fakes.services, verifier=...))`, which is exactly the
+    framework call in that window - so a test that wants to see two landings serialised, or to
+    drive the conflict loop off a red gate that `ARCHITECTURE.md`'s "Invariants where a mistake is
+    silent" names as work-destroying, substitutes a verifier. Until this verb existed the only way
+    was `replace(fakes, services=replace(fakes.services, verifier=...))`, which is exactly the
     two-views defect the two tests above are about, written out by hand at every call site that
     needed it. The second assertion is the one that spelling failed.
 
@@ -600,11 +603,11 @@ def test_a_substitution_carries_every_other_object_across_by_identity(tmp_path: 
 
 @pytest.mark.asyncio
 async def test_one_agent_serves_both_providers(tmp_path: Path) -> None:
-    """The compilation stage 7 left here, and the reason `agent=` is one parameter and not two.
+    """One callable behind both fakes, and the reason `agent=` is one parameter and not two.
 
     A `sdk.testing.Agent` is written in ports vocabulary and names no vendor, so the same function
     has to reach both fakes - which is what lets a workflow author write one agent for a run that
-    addresses two providers, as §3.3's `fix` does. It dispatches on `task.model`, which is the
+    addresses two providers, as `fix` does. It dispatches on `task.model`, which is the
     handle `sdk/testing.py` names, and each answer is one only that provider's dispatch produces.
     """
 
@@ -688,15 +691,16 @@ async def test_a_reply_is_performed_as_activity_then_questions_then_calls(tmp_pa
 
 @pytest.mark.asyncio
 async def test_an_async_agent_is_awaited_and_a_sync_one_is_not(tmp_path: Path) -> None:
-    """19.2's widening: `Agent` is `(AgentTask) -> Reply | Awaitable[Reply]`, and both arms work.
+    """`Agent` is `(AgentTask) -> Reply | Awaitable[Reply]`, and both arms work.
 
     **The awaitable arm is not a convenience.** A rendezvous - two agents that each wait until the
     other has arrived - is the only arrangement that can distinguish real concurrency from a
     framework that ran everything in order, and it is the property `split` exists to demonstrate. A
     synchronous callable cannot await a barrier, and a threading primitive on one event loop
-    deadlocks rather than waits, so every concurrency test in stage 18 fell out of `agent=` and into
-    the raw per-provider escape hatch. The barrier below is the smallest form of that: two parties,
-    one of them the test, so the agent cannot return until this function has arrived.
+    deadlocks rather than waits, so a concurrency test written against a synchronous `agent=` fell
+    out of it and into the raw per-provider escape hatch. The barrier below is the smallest form of
+    that: two parties, one of them the test, so the agent cannot return until this function has
+    arrived.
 
     **The synchronous arm has to survive it**, which is the second assertion and the reason the type
     is a union rather than a coroutine: `sdk/testing.py` argues that `lambda task: Reply(...)` being

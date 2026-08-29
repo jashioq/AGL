@@ -3,8 +3,8 @@ cannot see.
 
 The first class is the port in full for a terminal that cannot take input:
 `HeadlessTerminalContract` with its single fixture overridden and nothing else touched. Four
-headless rules and three lifecycle ones, all seven written at stage 3 against the port's docstrings
-and before any implementation of it existed - which is the inversion the build rests on (§1.9), and
+headless rules and three lifecycle ones, all seven written against the port's docstrings and
+before any implementation of it existed - which is the inversion `tests/contracts/` rests on, and
 the reason nothing below re-asserts any of them. There is no `driver` fixture because there is
 nothing to drive: this terminal displays nothing and answers nothing, which the suite argues is the
 design rather than a convenience.
@@ -42,7 +42,8 @@ hours, so a per-`show` leak that nobody would notice on a laptop is the deployme
 
 One more is neither: **entering twice is refused**, which the port does not discuss and which
 `RichTerminal` decides. It is here because a fake more permissive than the adapter is the drift
-§1.9 forbids - the difference would first be visible on the day somebody dropped the `--dry-run`.
+a shared contract suite exists to forbid - the difference would first be visible on the day
+somebody dropped the `--dry-run`.
 
 The views are this file's own rather than `tests/contracts/_terminal_views.py`'s, as
 `test_rich_terminal.py`'s are: reusing them would couple this file to a suite this deliverable may
@@ -102,8 +103,8 @@ LATE: Final = "the question that was asked second"
 RUNNING: Final = "two children running"
 LANDED: Final = "one child landed, one still running"
 
-# §3.7's two priorities: an agent question and a merge conflict. Two integers that differ, never a
-# vocabulary - the port refuses named levels and so does this file.
+# The two priorities a workflow uses: an agent question and a merge conflict. Two integers that
+# differ, never a vocabulary - the port refuses named levels and so does this file.
 AGENT: Final = 5
 CONFLICT: Final = 10
 
@@ -115,7 +116,7 @@ def dashboard(line: str) -> Screen:
 
 
 def question(label: str) -> Screen[str]:
-    """§3.7's approval screen: a body to read, a choice to pick and a field to type into.
+    """An approval screen: a body to read, a choice to pick and a field to type into.
 
     Both response kinds, because they are the two routes to one `T` - and because the refusal must
     not depend on which of them is offered. What the terminal dispatches on is whether `responses`
@@ -135,7 +136,7 @@ class Activity:
 
     A plain class rather than a `dict` or a `str`, for the second reason: the builtins a workflow
     would naturally pass do not support weak references, and the test that asks whether an argument
-    outlived the `show` that carried it needs one that does. What it stands for is §3.7's own live
+    outlived the `show` that carried it needs one that does. What it stands for is a live
     argument - the thing a view reads again on every invocation.
     """
 
@@ -282,7 +283,7 @@ async def test_neither_a_dropped_board_nor_a_refused_question_keeps_hold_of_a_vi
 ) -> None:
     """The other half of retention, and the half a state comparison cannot reach.
 
-    §3.7's mechanism is that `show` registers the view function **and its arguments** rather than a
+    The mechanism is that `show` registers the view function **and its arguments** rather than a
     value, which is what lets a live dict of child runs reach a display with no second `show`. The
     terminal that draws holds both for as long as the screen is up, and must. This one draws
     nothing, so holding either is holding it forever: a workflow passing the live `Run` of every
@@ -307,8 +308,8 @@ async def test_neither_a_dropped_board_nor_a_refused_question_keeps_hold_of_a_vi
         assert not held, (
             f"this terminal is still holding {held} after the `show` calls that passed them "
             f"returned. It has nothing to draw and nothing queued, so a view or an argument alive "
-            f"in here is alive for the rest of the run - and the arguments §3.7 has a workflow "
-            f"pass are the live objects of every child it is running"
+            f"in here is alive for the rest of the run - and the arguments a workflow passes "
+            f"are the live objects of every child it is running"
         )
 
 
@@ -374,7 +375,7 @@ async def test_a_passive_show_finishes_on_its_first_step_and_a_thousand_of_them_
     all - a lock, a sleep, a queue, a yield to the loop - hands back a value instead.
 
     That is worth pinning rather than assuming. A workflow shows its board on every pass through its
-    own loop, and §3.7's slot "keeps updating while a question is displayed" precisely so that a
+    own loop, and the slot keeps updating while a question is displayed precisely so that a
     workflow updating its board behind a question it is itself blocked on does not deadlock. A
     headless terminal has no question to be behind, and a `show` that suspended here would still
     make a workflow's progress depend on the scheduler for a call that does nothing.
@@ -457,7 +458,7 @@ async def test_entering_a_second_time_is_refused_the_way_the_terminal_that_draws
     The port says nothing about entering twice, and the suite's gap 8 declines even the neighbouring
     question of re-entering after leaving: "The framework opens one, once, and a suite that demanded
     either answer would be inventing a clause." So this is not a rule - it is `RichTerminal`'s
-    decision, made here for the reason §1.9 gives.
+    decision, made here because the fake and the adapter are held to one standard.
 
     `RichTerminal` refuses a second `__aenter__` because it would start a second redraw loop and a
     second reader over the same queues, and the first pair would keep drawing after the terminal was

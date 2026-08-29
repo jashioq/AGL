@@ -28,7 +28,7 @@ thing this terminal has that the port does not know about:
   * **A gesture that arrives before the question waits in the script for it.** `respond` appends and
     drains rather than answering directly, so an early gesture and a scripted one are one mechanism
     with one set of rules.
-  * **The board is readable behind a question.** §3.7's slot keeps being written while a question is
+  * **The board is readable behind a question.** The slot keeps being written while a question is
     displayed, and `slot()` is how a test asserts that without answering the question first - which
     would change the state it was asking about.
   * **What the script has left outlives the terminal**, and a question still waiting when it closes
@@ -97,7 +97,7 @@ RUNNING: Final = "two children running"
 LANDED: Final = "one child landed, one still running"
 
 AGENT: Final = 5
-"""§3.7's agent-question priority. One integer, never a vocabulary: the port refuses named levels
+"""The agent-question priority. One integer, never a vocabulary: the port refuses named levels
 and so does this file."""
 
 
@@ -108,7 +108,7 @@ def dashboard(line: str) -> Screen:
 
 
 def question(label: str) -> Screen[str]:
-    """§3.7's approval screen: a body to read, a choice to pick and a field to type into.
+    """An approval screen: a body to read, a choice to pick and a field to type into.
 
     Both response kinds, because they are the two routes to one `T` and a script must reach either.
     The answer carries `label`, so a test can say *which* `show` call was answered rather than only
@@ -314,7 +314,7 @@ async def test_a_gesture_that_arrives_before_the_question_waits_in_the_script_fo
 async def test_the_board_is_readable_behind_a_question_and_keeps_being_written_while_it_is_up(
     terminal: ScriptedTerminal,
 ) -> None:
-    """§3.7's slot, read directly: what the workflow is saying, while a person is looking elsewhere.
+    """The slot, read directly: what the workflow is saying while a person looks elsewhere.
 
     `displayed()` answers "what would a person see" and `slot()` answers "what is the workflow
     saying about itself", and the two differ exactly while a question is up. The port has no member
@@ -338,7 +338,7 @@ async def test_the_board_is_readable_behind_a_question_and_keeps_being_written_w
         assert _body(term.slot()) == Text(LANDED), (
             f"the board was re-shown while a question was up and `slot()` reports "
             f"{term.slot()!r}. The slot is a register that is written whether or not anything is "
-            f"drawing it - that is §3.7's 'no extra machinery', and it is why a workflow updating "
+            f"drawing it, which needs no extra machinery, and it is why a workflow updating "
             f"its board behind a question it is itself blocked on does not deadlock"
         )
         assert _body(term.displayed()) == Text(EARLY), (

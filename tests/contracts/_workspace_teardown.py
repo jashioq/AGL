@@ -2,7 +2,7 @@
 
 Split out of `workspace.py` along a line the port draws itself. `remove` takes the isolated place
 back and leaves the line of work it carried; `discard` deletes the line of work itself. They are
-separate because `clear` needs them apart (§3.10): it takes back every isolated place a run holds
+separate because `clear` needs them apart: it takes back every isolated place a run holds
 unconditionally, deletes the child lines of work unconditionally, and deletes the run's own line of
 work **only if** `History` says it is already contained in the base ref. A single teardown verb
 could not express that, and this port holds no policy about which of the two is right when.
@@ -87,7 +87,7 @@ class WorkspaceTeardownContract:
             f"after a remove, reopening handed back a workspace at {reopened!r} rather "
             f"than at {landed!r}, the head its line of work was committed to. `remove` takes the "
             f"place back and the line of work survives - the verb that deletes the line of work "
-            f"is `discard`, and §3.10 has `clear` call it only under a condition this one ignores"
+            f"is `discard`, and `clear` calls it only under a condition this one ignores"
         )
         assert read(again, TRACKED) == body("work that outlives its checkout"), (
             "the committed work is not in the reopened checkout, so it was cut from somewhere "

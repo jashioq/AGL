@@ -2,27 +2,28 @@
 
 Two halves, and the line between them is whether a claim needs a `Run` to be seen at all. The first
 half is every value this package declares, asserted by importing it; the second - from *driving the
-whole workflow* down - is 17.3, which runs `fix` on an all-fakes bundle, interrupts it at every step
-boundary, resumes it and asserts the final state is the one an uninterrupted run leaves. The three
-`commit=` decisions, the branch over `findings.high()`, the `request=` input, the two `show` calls
-and the `implementer(on_question=…)` that gives the implementer a handler are reachable *only* from
-the second half: they are arguments to calls, and nothing imports an argument.
+whole workflow* down - runs `fix` on an all-fakes bundle, interrupts it at every step boundary,
+resumes it and asserts the final state is the one an uninterrupted run leaves. The three `commit=`
+decisions, the branch over `findings.high()`, the `request=` input, the two `show` calls and the
+`implementer(on_question=…)` that gives the implementer a handler are reachable *only* from the
+second half: they are arguments to calls, and nothing imports an argument.
 
 The three things worth pinning in the first half, in the order this package's own docstrings argue
 them:
 
-* **`Findings.high()`**, because §3.3's `if findings.high():` is the workflow's only branch and this
+* **`Findings.high()`**, because `if findings.high():` is the workflow's only branch and this
   is the comparison behind it. A filter that answered `()` for a review that found something high
   would skip the repair pass, report success, and raise nothing.
 * **The severity vocabulary, in both directions.** Forwards: it reaches the model as `severity`'s
-  own `description` in the derived schema, interpolated from `SEVERITIES`, which is 19.2's
-  `describe()` and is what stopped this package paying §3.6 rule 6's price for checking a fixed set
-  of strings - a description is schema, and schema is fingerprint. Backwards: a severity outside the
-  set reaches the model as a *rejection*, because `Finding.__post_init__` is still the only thing
-  that can refuse one. That mechanism - `__post_init__` raising, `sdk/tools.py` catching it, the
-  text going back into the same conversation - is the one this package leans on and does not own.
-* **The pairing between `reviewer` and the step that runs it**, which §3.3 calls the author's job
-  and which nothing in the framework checks. Half of it is a role declaration; the other half is the
+  own `description` in the derived schema, interpolated from `SEVERITIES`, which is `describe()`
+  and is what stopped this package paying the qualified-type-name rule's price for checking a fixed
+  set of strings - a description is schema, and schema is fingerprint. Backwards: a severity
+  outside the set reaches the model as a *rejection*, because `Finding.__post_init__` is the only
+  thing that can refuse one. That mechanism - `__post_init__` raising, `sdk/tools.py` catching it,
+  the text going back into the same conversation - is the one this package leans on and does not
+  own.
+* **The pairing between `reviewer` and the step that runs it**, which is the author's job and
+  which nothing in the framework checks. Half of it is a role declaration; the other half is the
   missing `commit=` on the `review` call, and that half is asserted in the second half of this file,
   as a commit that is not on the branch and a scratch file that is not on disk.
 
@@ -30,21 +31,21 @@ them:
 
 **A view is a pure function of its arguments**, so every assertion about one is a call and a
 comparison against the `Screen` it returned - no display, no redraw loop, no gestures, and nothing
-that could block. That is the whole of what makes the two screens below testable here rather than at
-17.3: what a person would have been shown is the half this package owns, and reading it needs no
-terminal at all. **Nothing in this first half answers a screen**, and that is now a division of
-labour rather than a limit - 18.0 shipped `testing.answering([...])`, so answering one is possible,
-and it belongs in the second half where there is a run to answer *inside of*. A view's own shape is
-the cheaper claim and is worth keeping cheap: an assertion about `agent_question`'s free-text field
+that could block. That is the whole of what makes the two screens below testable here rather than
+in a run: what a person would have been shown is the half this package owns, and reading it needs
+no terminal at all. **Nothing in this first half answers a screen**, and that is a division of
+labour rather than a limit - `testing.answering([...])` exists, so answering one is possible, and
+it belongs in the second half where there is a run to answer *inside of*. A view's own shape is the
+cheaper claim and is worth keeping cheap: an assertion about `agent_question`'s free-text field
 that had to drive a whole run to see it would fail for a dozen reasons that are not about the view.
 
 The board is the one that costs something, and the cost is now the harness's rather than this
-file's: it takes a `Run`, because §3.7's board reads `run.activity` out of a live object rather
-than being handed a string that would be frozen at the moment of the `show`. A `Run` is on the
-SDK's front door as a *type* and is not constructible from it - `services`, `scope` and `base` are
-`_engine`, `ports` and the framework's. Stage 17 built one here by hand and wrote the activity
+file's: it takes a `Run`, because the board reads `run.activity` out of a live object rather than
+being handed a string that would be frozen at the moment of the `show`. A `Run` is on the SDK's
+front door as a *type* and is not constructible from it - `services`, `scope` and `base` are
+`_engine`, `ports` and the framework's. This file used to build one by hand and write the activity
 through `_steps._activity`, a private attribute of a private engine class, and reported the pair as
-a finding; 18.0 closed it with `testing.a_run(harness, params, activity=...)` and its companion
+a finding; that was closed by `testing.a_run(harness, params, activity=...)` and its companion
 `testing.reports(run, line)`, so `_run` below is one call, watching a board *move* is one more, and
 the reach is in the harness, once, where it is argued.
 
@@ -84,9 +85,9 @@ how a `Terminal` behaves and this one deliberately does not - and it is written 
 alone, `Terminal` being on the front door. `tests/sdk/test_run_terminal.py::_Recording` is the same
 object for the same reason one layer down.
 
-**A question can now be answered, and both endings are worth pinning.** 17.2 recorded a gap - AGL
+**A question can now be answered, and both endings are worth pinning.** There was once a gap - AGL
 shipped no input-capable `Terminal` an external author could drive, so a workflow's `on_question`
-handler could be driven to the *refusal* and not to an answer - and 18.0(i) closed it with
+handler could be driven to the *refusal* and not to an answer - and it was closed by
 `testing.answering([...])`, a third `Terminal` that runs `tests/contracts/terminal.py`'s
 input-capable half. So there are two tests down there and neither replaces the other. The refusal
 is still exactly what an unattended run does and is sharper than it sounds: `UpstreamUnavailable`
@@ -191,11 +192,11 @@ def test_high_findings_survive_the_fingerprint_that_the_repair_step_takes_over_t
     """`high()`'s docstring claims its result can be passed straight into `run.step(implementer,
     findings=...)`, which means `_canonical` has to be able to walk it.
 
-    That is the claim worth checking here rather than at 17.3: it is about the *shape* this module
-    chose - a tuple of frozen dataclasses, where §3.3's own example passes a list - and it fails as
-    an `InputError` at the step rather than as anything a reader would trace back to this file. The
-    qualified type name in the output is §3.6 rule 6, and it is what stops a `Finding` and a
-    same-shaped type of another name fingerprinting alike.
+    That is the claim worth checking here rather than in a run: it is about the *shape* this module
+    chose - a tuple of frozen dataclasses, where the sanctioned example passes a list - and it
+    fails as an `InputError` at the step rather than as anything a reader would trace back to this
+    file. The qualified type name in the output is `tests/sdk/test_journal.py`'s rule 6, and it is
+    what stops a `Finding` and a same-shaped type of another name fingerprinting alike.
     """
     encoded = canonical_json({"findings": Findings((_finding("high"),)).high()})
 
@@ -236,25 +237,26 @@ def test_a_missing_findings_list_is_a_rejection_and_an_empty_one_is_a_result() -
 
 
 def test_the_two_roles_carry_the_names_their_entries_are_filed_under() -> None:
-    """The declaration UF1.1 moved here from the call sites, pinned where it is written.
+    """The declaration that moved here from the call sites, pinned where it is written.
 
-    A step takes no name of its own (§3.3), so these two strings are the whole of what decides
-    where this workflow's entries land - `steps/implement/` and `steps/review/` - and renaming one
-    moves that workflow's ledger without moving one digest inside it. Two roles and three steps, so
-    one of these names is spent twice; that is the section near the bottom of this file.
+    A step takes no name of its own, so these two strings are the whole of what decides where this
+    workflow's entries land - `steps/implement/` and `steps/review/` - and renaming one moves that
+    workflow's ledger without moving one digest inside it. Two roles and three steps, so one of
+    these names is spent twice; that is the section near the bottom of this file.
     """
     assert (implementer().name, reviewer().name) == ("implement", "review")
 
 
 def test_the_reviewer_is_declared_read_only_beside_a_step_that_will_wipe_its_worktree() -> None:
-    """§3.3's pairing, half of it. The `review` call passes no `commit=`, so the framework restores
+    """The pairing, half of it. The `review` call passes no `commit=`, so the framework restores
     the checkout and deletes everything not in it when the step ends - whatever the agent did. The
     role that gets run there has to be one that was never going to commit.
 
-    Nothing in the framework checks this combination, and §3.3 names it as one of three places in
-    AGL where a mistake destroys work rather than merely costing a re-run. The other half - that the
-    call in `__init__.py` really does omit `commit=` - is 17.3's, because seeing it means running
-    the workflow.
+    Nothing in the framework checks this combination, and `ARCHITECTURE.md`'s "Invariants where a
+    mistake is silent" names it as one of the three places in AGL where a mistake destroys work
+    rather than merely costing a re-run. The other half - that the call in `__init__.py` really
+    does omit `commit=` - is the second half of this file's, because seeing it means running the
+    workflow.
     """
     assert Restriction.NO_VCS_WRITES in reviewer().restrictions
     assert Restriction.NO_FILE_WRITES in reviewer().restrictions
@@ -295,16 +297,16 @@ def test_the_reviewer_reports_through_one_tool_and_the_implementer_through_none(
 
 def test_each_role_requires_what_its_prompt_actually_asks_of_a_backend() -> None:
     """`requires` is compared against what a provider can do at the first step that uses the role -
-    §3.2's containment, which UF1.3 left at `run.step` and nowhere earlier, a `requires` being on a
-    `Role` and unreachable without calling the factory preflight may not call. So an
-    over-declaration refuses a backend that would have worked, and an under-declaration is a run
-    that dies later than it needed to, or - when the member left out is `MID_RUN_QUESTIONS` and
-    `sdk/roles.py` had no `on_question` to fold it in from - does not die at all.
+    the containment left at `run.step` and nowhere earlier, a `requires` being on a `Role` and
+    unreachable without calling the factory preflight may not call. So an over-declaration refuses
+    a backend that would have worked, and an under-declaration is a run that dies later than it
+    needed to, or - when the member left out is `MID_RUN_QUESTIONS` and `sdk/roles.py` had no
+    `on_question` to fold it in from - does not die at all.
 
     `MID_RUN_QUESTIONS` is on the implementer and not on the reviewer, and neither half is
-    incidental: the implementer is the role the workflow hands a handler to, and the reviewer is the
-    one §3.7 names as running on the backend with no second asking mechanism, where declaring a
-    handler is the case preflight's third check exists to refuse.
+    incidental: the implementer is the role the workflow hands a handler to, and the reviewer is
+    the one running on the backend with no second asking mechanism, where declaring a handler is
+    the case preflight's third check exists to refuse.
     """
     assert implementer().requires == frozenset(
         {Capability.FILE_EDIT, Capability.SHELL, Capability.MID_RUN_QUESTIONS}
@@ -315,7 +317,7 @@ def test_each_role_requires_what_its_prompt_actually_asks_of_a_backend() -> None
 
 
 def test_both_roles_hold_their_prompt_text_and_not_a_path_to_it() -> None:
-    """§3.7's rule, and the failure it prevents is silent: a role holding `"prompts/review.md"`
+    """The rule, and the failure it prevents is silent: a role holding `"prompts/review.md"`
     fingerprints the filename, so editing the prompt moves no digest and a resume replays what the
     old wording produced. `Role` cannot refuse it - the field is a `str` either way - so the only
     place this can be caught is here."""
@@ -325,9 +327,9 @@ def test_both_roles_hold_their_prompt_text_and_not_a_path_to_it() -> None:
 
 def test_the_review_prompt_names_the_commit_message_the_workflow_writes() -> None:
     """The one coupling in this package that nothing enforces. A commit message is outside the
-    fingerprint (§3.6: it is cosmetic), so editing `commit="implement fix"` re-runs nothing and
-    quietly stops agreeing with the prompt that tells the reviewer which commit to read. This is
-    what notices."""
+    fingerprint, being cosmetic, so editing `commit="implement fix"` re-runs nothing and quietly
+    stops agreeing with the prompt that tells the reviewer which commit to read. This is what
+    notices."""
     assert "implement fix" in reviewer().instructions
 
 
@@ -340,8 +342,8 @@ def test_the_review_prompt_promises_no_inputs_block_because_the_step_passes_none
 
 
 def test_the_request_is_a_required_named_flag_and_there_are_no_positionals() -> None:
-    """§3.3's "named flags only", and `--request` required because a `fix` run with nothing to fix
-    has no honest default."""
+    """Named flags only, and `--request` required because a `fix` run with nothing to fix has no
+    honest default."""
     assert sdk_params.parse(FixParams, ["-r", "the retry loop drops the last error"]) == FixParams(
         request="the retry loop drops the last error"
     )
@@ -353,9 +355,9 @@ def test_the_request_is_a_required_named_flag_and_there_are_no_positionals() -> 
 
 
 def test_the_workflow_declares_its_params_and_its_version_and_no_roles_at_all() -> None:
-    """What `@workflow` hands the framework, which since UF1.3 is nothing about roles, since UF2.1
-    is no name at all - `fix` is what `pyproject.toml`'s entry point calls this workflow, and the
-    decorator holds no second copy of that - and since UF2.2 is `version="1.1"` and the function.
+    """What `@workflow` hands the framework: nothing about roles, no name at all - `fix` is what
+    `pyproject.toml`'s entry point calls this workflow, and the decorator holds no second copy of
+    that - and `version="1.1"` and the function.
 
     `fix.params` is still `FixParams` and the assertion below did not move, but what it asserts did:
     the class is now read off `async def fix(run: Run[FixParams])` rather than off a second copy of
@@ -367,7 +369,8 @@ def test_the_workflow_declares_its_params_and_its_version_and_no_roles_at_all() 
     reviewer` is what makes those two roles the ones this run's providers are checked for. The
     second assertion is that line, read back the way the framework reads it - a `fix` that stopped
     importing `reviewer` beside its workflow would start passing preflight on a machine with no
-    Codex CLI and then die at the review step, which is exactly what §3.2 exists to prevent."""
+    Codex CLI and then die at the review step, which is exactly what preflight exists to
+    prevent."""
     assert fix.version == "1.1"
     assert fix.params is FixParams
     bound = {
@@ -380,9 +383,9 @@ def test_the_workflow_declares_its_params_and_its_version_and_no_roles_at_all() 
 
 def test_the_severity_the_workflow_branches_on_is_one_of_the_ones_it_asks_for() -> None:
     """A consistency check between the constant `high()` compares against and what the model is
-    actually told, which since 19.2 is `severity`'s own `description` in the derived schema rather
-    than a sentence inside the tool's. They are two spellings of one decision and they are on one
-    screen, but the failure if they part is a review that can never produce a repair.
+    actually told, which is `severity`'s own `description` in the derived schema rather than a
+    sentence inside the tool's. They are two spellings of one decision and they are on one screen,
+    but the failure if they part is a review that can never produce a repair.
 
     Read out of `payload_schema` and not off the source, because the schema is what crosses to the
     vendor and what `base_of` hashes: a `describe()` that never reached the derivation would leave
@@ -400,11 +403,11 @@ def test_the_severity_the_workflow_branches_on_is_one_of_the_ones_it_asks_for() 
 
 
 def test_the_vocabulary_reaching_the_model_is_a_term_in_the_reviewers_fingerprint() -> None:
-    """Stage 17's finding, closed, measured against this workflow rather than against the SDK.
+    """A finding this file recorded, closed, measured against this workflow rather than the SDK.
 
-    §3.6 rule 6 says a `__post_init__` is invisible to a derived schema, so `fix` used to record
-    that editing `SEVERITIES` changed what converts while moving no digest - an entry written under
-    the old vocabulary could stop converting with its fingerprint still matching, surfacing as
+    A `__post_init__` is invisible to a derived schema, so `fix` used to record that editing
+    `SEVERITIES` changed what converts while moving no digest - an entry written under the old
+    vocabulary could stop converting with its fingerprint still matching, surfacing as
     `InternalError` out of `ReportingTool.read` on a resume. Interpolating the tuple into
     `severity`'s `describe()` puts it in the schema, and the schema is a term of `base_of`, so the
     stale entry is discarded instead. `tests/sdk/test_tools.py` measures the mechanism; this
@@ -413,7 +416,7 @@ def test_the_vocabulary_reaching_the_model_is_a_term_in_the_reviewers_fingerprin
     """
     assert ", ".join(SEVERITIES) in _severity_description(), (
         "the severity vocabulary is not in `fix`'s derived schema verbatim, so editing "
-        "`SEVERITIES` would move no digest and this workflow would be paying rule 6's price again"
+        "`SEVERITIES` would move no digest and this workflow would be paying that price again"
     )
     declared = next(tool for tool in reviewer().tools if tool.name == report_findings.name)
     assert dict(declared.payload_schema) == dict(report_findings.payload_schema), (
@@ -444,7 +447,7 @@ def _run(where: Path, activity: str | None = None) -> Run[FixParams]:
     """A `Run` to show a board over, with an activity line on it if the test wants one.
 
     One call, and the whole of what this file needs to say about building one. `testing.a_run` is
-    18.0's answer to the finding this helper used to carry: a `Run` needs a `services` bundle and a
+    the answer to the finding this helper used to carry: a `Run` needs a `services` bundle and a
     `RunScope`, neither of which `agl.sdk` exports or could, and its activity is a private cell of
     a private engine that only an adapter inside a running step writes for real. Both reaches are
     in the harness now, once, where they are argued - so what is left here is a workflow author's
@@ -474,7 +477,7 @@ def test_the_board_shows_the_request_and_the_line_the_adapter_last_reported(tmp_
 def test_the_board_shows_an_empty_cell_when_nothing_is_running(tmp_path: Path) -> None:
     """`run.activity` is `None` between steps, before an adapter's first line, and for the whole of
     a step replayed from the journal - where nothing is running and reporting anything would be a
-    lie. An empty cell is what §3.7's own board renders for a ticket with no run behind it, and the
+    lie. An empty cell is what a board renders for a ticket with no run behind it, and the
     alternative - "idle", "waiting" - would be this view asserting a state the framework never
     reported."""
     assert views.board(_run(tmp_path), REQUEST) == Screen(
@@ -494,8 +497,8 @@ def test_the_board_reads_the_activity_again_on_every_frame(tmp_path: Path) -> No
 
     `testing.reports` is what plays the adapter here: the cell behind `run.activity` is written for
     real by a backend reporting from inside a running step, and this is the harness's stand-in for
-    that call. Until 18.0 this line was `run._steps._activity = ...`, a private attribute of a
-    private engine class written from a workflow's own test file.
+    that call. This line used to be `run._steps._activity = ...`, a private attribute of a private
+    engine class written from a workflow's own test file.
     """
     run = _run(tmp_path, activity="Read: src/retry.py")
     first = views.board(run, REQUEST)
@@ -560,8 +563,8 @@ def test_a_question_with_no_options_is_answered_in_a_persons_own_words() -> None
     """The open question - "empty is ordinary", and what every backend that can ask at all can ask.
 
     One response, and it must be there: a screen built from this question with no responses on it
-    would be shown, would be un-dismissable, and would block its step forever, §3.7 having no
-    timeouts anywhere.
+    would be shown, would be un-dismissable, and would block its step forever, the terminal having
+    no timeouts anywhere.
     """
     screen = views.agent_question(Question(prompt="What should the retry limit be?"))
 
@@ -614,16 +617,16 @@ def test_the_declared_implementer_requires_what_the_negotiating_one_will(tmp_pat
     `fix` hands `run.step` an `implementer(on_question=answer)`, and `sdk/roles.py` folds
     `MID_RUN_QUESTIONS` into that role's `requires` as it is built - so the role that runs needs a
     backend able to ask whether or not `roles.py` says so. `roles.py` says so anyway, and since
-    UF1.3 that is no longer about *when* the refusal lands: preflight reads models off factories and
+    that is no longer about *when* the refusal lands: preflight reads models off factories and
     never a `requires`, so containment happens at the first `run.step` either way.
 
-    What the declaration buys is that the two values agree. §3.11 makes a factory's parameter list
-    "the whole of the override surface", which is only worth reading if what it exposes cannot
-    change what the role demands - and `on_question` is the one knob `implementer` exposes. This
-    comparison is that property measured rather than trusted: `implementer()` is what a reader of
-    `roles.py` sees, `implementer(on_question=…)` is what the workflow runs, and if the declared set
-    were ever the smaller one, the requirement a reader could find would be weaker than the one a
-    run is refused on. The implication runs one way - `sdk/roles.py` folds members in and never out
+    What the declaration buys is that the two values agree. A factory's parameter list is the whole
+    of the override surface, which is only worth reading if what it exposes cannot change what the
+    role demands - and `on_question` is the one knob `implementer` exposes. This comparison is that
+    property measured rather than trusted: `implementer()` is what a reader of `roles.py` sees,
+    `implementer(on_question=…)` is what the workflow runs, and if the declared set were ever the
+    smaller one, the requirement a reader could find would be weaker than the one a run is refused
+    on. The implication runs one way - `sdk/roles.py` folds members in and never out
     - so this can only break by somebody editing the `requires=` line, which is exactly the edit it
     is here to catch.
     """
@@ -636,7 +639,7 @@ def test_the_declared_implementer_requires_what_the_negotiating_one_will(tmp_pat
 
 # --- driving the whole workflow on fakes ------------------------------------------------------
 #
-# Everything from here down is 17.3. It drives `fix` the way its author would - `testing.harness`,
+# Everything from here down drives `fix` the way its author would - `testing.harness`,
 # `harness.run`, `harness.resume`, `harness.recorded`, `harness.fakes` - and asserts the decisions
 # that live in the workflow function's own body, which is the one place in this package that
 # importing something cannot reach.
@@ -682,10 +685,10 @@ Named as tuples of step names because that is what `harness.recorded` is compare
 because their *lengths* are what the kill-point sweep sweeps over.
 
 **The third name is `implement` and not `repair`**, and that is not a typo. A step carries no name
-of its own since UF1.1 (§3.3, §3.11): the address is `role.name`, the repair pass runs the same
-`implementer`, so both land under `steps/implement/` and both say `implement` here. What tells them
-apart is their inputs, and the section below is where that is asserted as two digests in one
-directory rather than inferred from two rows with one name."""
+of its own: the address is `role.name`, the repair pass runs the same `implementer`, so both land
+under `steps/implement/` and both say `implement` here. What tells them apart is their inputs, and
+the section below is where that is asserted as two digests in one directory rather than inferred
+from two rows with one name."""
 
 MUST_FIX: Final = _finding("high", CHANGED)
 WORTH_KNOWING: Final = _finding("medium", CHANGED)
@@ -773,8 +776,8 @@ async def _record(harness: testing.Harness) -> Mapping[str, object]:
     `agl.testing`'s own docstring sanctions the read - "its `store` is the recording one this
     harness wrapped, which delegates every call, so reading `run.json` back through it reads the
     same ledger the run wrote" - and it is where the branch name and the base commit come from.
-    Composing either here instead would mean this file holding a second copy of §3.9's naming
-    scheme, which is the thing it wants the run to have got right.
+    Composing either here instead would mean this file holding a second copy of the naming scheme,
+    which is the thing it wants the run to have got right.
     """
     record = await harness.fakes.store.read_record(harness.scope)
     assert record is not None, "the run wrote no run.json, so it never started"
@@ -800,13 +803,13 @@ def _files(where: Path) -> dict[str, bytes]:
 async def _committed(harness: testing.Harness) -> tuple[str, frozenset[str]]:
     """What this run's branch is called at its tip, and every file that differs from its base.
 
-    **This is how a commit message is asserted, and since 19.2 it is a read rather than a
-    recomputation.** Stage 17 recorded the finding here: a workflow author's whole step-ending
-    decision is `commit=` (§3.3), §3.11 keeps the message the workflow's own domain vocabulary
-    rather than something AGL generates, and no port would say a word about it - so this file
-    built the chain the run was *supposed* to have made, out of `FakeRepository.record`'s
-    content-addressed ids, and compared that against the tip. It worked, and it was a fake's
-    internal vocabulary being spent on a question the ports did not answer.
+    **This is how a commit message is asserted, and it is a read rather than a recomputation.** A
+    finding was recorded here: a workflow author's whole step-ending decision is `commit=`, the
+    message stays the workflow's own domain vocabulary rather than something AGL generates, and no
+    port would say a word about it - so this file built the chain the run was *supposed* to have
+    made, out of `FakeRepository.record`'s content-addressed ids, and compared that against the
+    tip. It worked, and it was a fake's internal vocabulary being spent on a question the ports did
+    not answer.
 
     `History.message` answers it now, and both halves below go through the port: the message the
     tip carries, and `changed_files` between the base and the tip, which is what the run committed
@@ -816,8 +819,8 @@ async def _committed(harness: testing.Harness) -> tuple[str, frozenset[str]]:
 
     **What the recomputation asserted and this does not** is the *number* of links, which the old
     chain got for free because a fake addresses a state by the digest of its parents. No port
-    counts commits or walks parents - §3.10 forbids the listing that would be the general form of
-    it - and nothing is lost here, because the only extra link `fix` could grow is a `review` that
+    counts commits or walks parents, there being no listing that would be the general form of it -
+    and nothing is lost here, because the only extra link `fix` could grow is a `review` that
     committed, and a `review` that committed puts `SCRATCH` in the tree that `changed_files`
     reports. The claim is made on content instead of on shape, through a port, for both runs.
 
@@ -853,9 +856,9 @@ class _Outcome:
     something the operator or the next agent would actually meet:
 
     * `entries` is the ledger - every step that recorded a result, in order, with the payload it
-      recorded. A step that re-ran across two invocations appears here twice, which is §3.6's replay
-      stated as an assertion: a replay "returns the stored value without running", writing nothing.
-    * `head` is where `agl/<label>` points, and §3.3 makes that branch the deliverable of this
+      recorded. A step that re-ran across two invocations appears here twice, which is replay
+      stated as an assertion: a replay returns the stored value without running, writing nothing.
+    * `head` is where `agl/<label>` points, and that branch is the deliverable of this
       workflow - nothing is merged into anything, so the branch *is* the result. It is comparable
       between two runs in two directories because the fake repository addresses a state by the
       digest of its content, its parents and its message, exactly as git does.
@@ -864,7 +867,7 @@ class _Outcome:
       it.
     * `dispatches` is how many times an agent was paid for. Not part of the state, and in the
       comparison anyway, because a resume that recomputed a fingerprint would produce an identical
-      final state and a doubled bill - which is the failure §3.6 calls loud in the bill and silent
+      final state and a doubled bill - which is the failure that is loud in the bill and silent
       everywhere else.
 
     `at` timestamps are not here and neither is anything else off the entry: `Recorded` carries the
@@ -931,7 +934,8 @@ async def test_a_whole_run_implements_reviews_and_repairs_on_fakes_alone(tmp_pat
 async def test_a_review_that_found_nothing_high_ends_the_run_after_two_steps(
     tmp_path: Path,
 ) -> None:
-    """The other side of §3.6's one rule for authors, driven rather than declared.
+    """The other side of the one rule for authors - `ARCHITECTURE.md`'s "Invariants where a
+    mistake is silent" says a workflow branches only on step results - driven rather than declared.
 
     The reviewer reports a medium finding - so the review found *something*, and the workflow still
     does not pay for a repair pass. That is what makes this test the pair of the one above rather
@@ -939,9 +943,9 @@ async def test_a_review_that_found_nothing_high_ends_the_run_after_two_steps(
     both of the `Findings.high()` unit tests above, run the repair here, and be wrong only in the
     bill and in what lands on the branch.
 
-    The branch is over a value that came out of the ledger, which is the only kind of branch §3.6
-    permits - so this test and the one above are the same run of the same function differing in one
-    step result, and nothing else about them could have differed.
+    The branch is over a value that came out of the ledger, which is the only kind of branch a
+    workflow may make - so this test and the one above are the same run of the same function
+    differing in one step result, and nothing else about them could have differed.
     """
     seen: list[testing.AgentTask] = []
     harness = testing.harness(tmp_path, agent=_agent(seen, found=(WORTH_KNOWING,)), files=SEED)
@@ -957,11 +961,12 @@ async def test_a_review_that_found_nothing_high_ends_the_run_after_two_steps(
 
 # --- one role, two steps, one directory ----------------------------------------------------------
 #
-# The assertion UF1.1 is built around, and the one this workflow is the shipped instance of. `fix`
-# runs `implementer` twice and `run.step` carries no name, so both calls address `steps/implement/`
-# and everything rests on what separates them inside it. The instrument is the real
-# `FilesystemStore`, because the claim is about *paths* and neither `Store` nor `Recorded` hands one
-# out - see the import at the top of this file for why that reach is here and nowhere else.
+# The assertion this section is built around, and the one this workflow is the shipped instance of.
+# `fix` runs `implementer` twice and `run.step` carries no name, so both calls address
+# `steps/implement/` and everything rests on what separates them inside it. The instrument is the
+# real `FilesystemStore`, because the claim is about *paths* and neither `Store` nor `Recorded`
+# hands one out - see the import at the top of this file for why that reach is here and nowhere
+# else.
 
 
 def _on_disk(
@@ -985,11 +990,11 @@ def _on_disk(
 def _filed(home: AglHome, step: str) -> list[Mapping[str, object]]:
     """Every entry this run wrote under `steps/<step>/`, parsed, in filename order.
 
-    The filename **is** the digest (§3.6), so "how many files" is "how many digests" and the two
-    claims below are one directory listing. Found by walking rather than by composing a path,
-    because a path composed here would be this file's second copy of the layout - what is asserted
-    is that the entries are under a directory named `step` which is itself under `steps/`, which is
-    the sentence, and `ports/home_layout.py` owns the rest of the address.
+    The filename **is** the digest, so "how many files" is "how many digests" and the two claims
+    below are one directory listing. Found by walking rather than by composing a path, because a
+    path composed here would be this file's second copy of the layout - what is asserted is that
+    the entries are under a directory named `step` which is itself under `steps/`, which is the
+    sentence, and `ports/home_layout.py` owns the rest of the address.
     """
     return [
         json.loads(path.read_text(encoding="utf-8"))
@@ -1009,9 +1014,9 @@ async def test_the_implement_and_repair_steps_are_two_digests_in_one_directory(
 ) -> None:
     """One role, two steps, one address - and what keeps the two apart inside it.
 
-    §3.3 took the per-call-site name off `run.step`, so `implementer` serving both the implement
-    and the repair pass means both entries are filed under `steps/implement/`. The whole of what
-    then separates them is the fingerprint, and both of its moving terms differ here: the inputs
+    There is no per-call-site name on `run.step`, so `implementer` serving both the implement and
+    the repair pass means both entries are filed under `steps/implement/`. The whole of what then
+    separates them is the fingerprint, and both of its moving terms differ here: the inputs
     (`request=` against `findings=`, and `**inputs` are terms) and the head each call started from
     (the repair starts after the implement commit). Two files, two fingerprints, two heads.
 
@@ -1063,7 +1068,7 @@ async def test_the_implement_and_repair_steps_are_two_digests_in_one_directory(
     assert len(seen) == 3, "the resume paid for an agent whose result was already on the ledger"
     assert [entry.step for entry in harness.recorded] == list(HIGH_RUN), (
         "the resume wrote an entry, so one of the two calls missed its fingerprint - and a run "
-        "that re-implements on every resume is §3.6's failure in the direction that only shows up "
+        "that re-implements on every resume is the failure in the direction that only shows up "
         "in the bill"
     )
     assert len(_filed(home, "implement")) == 2
@@ -1083,11 +1088,12 @@ async def test_the_run_commits_twice_under_its_own_messages_and_wipes_the_review
 ) -> None:
     """The three `commit=` decisions, which are the only difference between the three step calls.
 
-    §3.3's table, read back off the branch: `implement` commits what it left dirty under `implement
-    fix`, `review` commits nothing and has its checkout restored, and `repair` commits on top under
-    `address review findings`. What is asserted is the message the tip carries and every file that
-    differs from the base - a reworded `commit=` moves the first, a `review` that gained one puts
-    the reviewer's scratch file into the second, and a step that lost one shows up in both.
+    The three-row table, read back off the branch: `implement` commits what it left dirty under
+    `implement fix`, `review` commits nothing and has its checkout restored, and `repair` commits
+    on top under `address review findings`. What is asserted is the message the tip carries and
+    every file that differs from the base - a reworded `commit=` moves the first, a `review` that
+    gained one puts the reviewer's scratch file into the second, and a step that lost one shows up
+    in both.
 
     The `implement fix` half is the sibling test below, on a run whose review found nothing high:
     there the implement commit *is* the tip, so its message is readable through the same member.
@@ -1095,10 +1101,11 @@ async def test_the_run_commits_twice_under_its_own_messages_and_wipes_the_review
     consequence of one.
 
     The second assertion is the wipe seen from the other side, and it is the half where "a mistake
-    destroys work rather than merely costing a re-run" (§3.3, one of three). The reviewer
-    really did write into the checkout; what is on disk afterwards is the repaired tree and nothing
-    else, because the ending of a step that passed no `commit=` restores the head *and* removes
-    everything that was not in it.
+    destroys work rather than merely costing a re-run" - one of the three `ARCHITECTURE.md`'s
+    "Invariants where a mistake is silent" opens with. The reviewer really did write into the
+    checkout; what is on disk afterwards is the repaired tree and nothing else, because the ending
+    of a step that passed no `commit=` restores the head *and* removes everything that was not in
+    it.
     """
     seen: list[testing.AgentTask] = []
     harness = testing.harness(tmp_path, agent=_agent(seen, found=(MUST_FIX,)), files=SEED)
@@ -1114,7 +1121,7 @@ async def test_the_run_commits_twice_under_its_own_messages_and_wipes_the_review
     assert changed == frozenset({CHANGED}), (
         f"the run's branch differs from its base in {sorted(changed)}. It should be the one file "
         f"the implementer added and the repairer rewrote, and nothing else: {SCRATCH!r} appearing "
-        f"here is a `review` step that committed, which is the `commit=` §3.3 says it must not have"
+        f"here is a `review` step that committed, which is the `commit=` it must not have"
     )
     assert _files(seen[0].workspace) == AT_REPAIR, (
         f"the checkout holds {sorted(_files(seen[0].workspace))}. The reviewer wrote {SCRATCH!r} "
@@ -1208,9 +1215,9 @@ async def test_one_run_addresses_two_providers_and_both_preflight_checks_pass(
       Claude is the assertion that two adapters served one run. Nothing in this package names a
       harness, an SDK or a binary to get that.
     * **Both preflight checks passing.** They already have by the time anything below runs, at the
-      two moments UF1.3 left them at: `api.run` asks `check_ready` over each distinct model its
-      module names, *before* the record is written, and every `run.step` contains what the role it
-      was handed requires. So a run that has a `run.json` and three entries is a run that passed
+      two moments they happen at: `api.run` asks `check_ready` over each distinct model its module
+      names, *before* the record is written, and every `run.step` contains what the role it was
+      handed requires. So a run that has a `run.json` and three entries is a run that passed
       availability for both providers at second zero and containment for every role it ran. That is
       the invisible half - passing either leaves nothing behind - so the two questions are asked
       again here explicitly, of the same runner the run used, in the test's own words.
@@ -1260,13 +1267,13 @@ class _Watching(Terminal):
 
     **It is not a second headless terminal and makes no claim to be**, exactly as
     `tests/sdk/test_run_terminal.py::_Recording` says of itself: `tests/contracts/terminal.py` is
-    what says how a `Terminal` behaves and this class is under its eye nowhere at all. It is used by
-    one test, it answers nothing, and a `Screen` carrying responses is a failure here rather than a
-    question it might quietly answer with `None`. That refusal is why this class stayed small when
-    18.0 shipped `testing.answering([...])`: a terminal that can answer a question now exists and
-    is a conforming one, so the reason to grow this into a second implementation went away rather
-    than being resisted. What is missing here is only the slot's contents, which is a `Screen` a
-    conforming terminal is free to draw and forget.
+    what says how a `Terminal` behaves and this class is under its eye nowhere at all. It is used
+    by one test, it answers nothing, and a `Screen` carrying responses is a failure here rather
+    than a question it might quietly answer with `None`. That refusal is why this class stayed
+    small when `testing.answering([...])` arrived: a terminal that can answer a question now exists
+    and is a conforming one, so the reason to grow this into a second implementation went away
+    rather than being resisted. What is missing here is only the slot's contents, which is a
+    `Screen` a conforming terminal is free to draw and forget.
     """
 
     def __init__(self) -> None:
@@ -1310,7 +1317,7 @@ class _Watching(Terminal):
 
 @pytest.mark.asyncio
 async def test_the_board_goes_up_once_with_the_run_and_the_request_on_it(tmp_path: Path) -> None:
-    """§3.7's board, put up by the workflow rather than called by a test.
+    """The board, put up by the workflow rather than called by a test.
 
     `show` registers this function and its arguments and the loop invokes it again per frame, so
     what is asserted is exactly that: the view that arrived is this package's `board`, the arguments
@@ -1319,9 +1326,9 @@ async def test_the_board_goes_up_once_with_the_run_and_the_request_on_it(tmp_pat
     than the run would satisfy every board test in the first half of this file and be frozen at the
     moment of the `show`.
 
-    **Once**, which §3.3's own docstring argues is enough: a board re-reads `run.activity` every
-    frame for as long as the run lasts, so a second `show` would only ever mean putting a different
-    view on screen. A workflow that showed it per step would show three here.
+    **Once**, which is enough: a board re-reads `run.activity` every frame for as long as the run
+    lasts, so a second `show` would only ever mean putting a different view on screen. A workflow
+    that showed it per step would show three here.
     """
     watching = _Watching()
     seen: list[testing.AgentTask] = []
@@ -1343,7 +1350,7 @@ async def test_the_board_goes_up_once_with_the_run_and_the_request_on_it(tmp_pat
 
 @pytest.mark.asyncio
 async def test_the_implementers_question_reaches_this_workflows_own_screen(tmp_path: Path) -> None:
-    """§3.7's callback on the Role, driven to the one ending a shipped terminal can produce.
+    """The `on_question` callback on the Role, driven to the one ending a shipped terminal makes.
 
     The agent asks; `fix`'s `answer` closure puts the question on `views.agent_question`; the
     headless terminal refuses it because a screen carrying responses needs somebody to answer it and
@@ -1358,13 +1365,13 @@ async def test_the_implementers_question_reaches_this_workflows_own_screen(tmp_p
     carry on - so the run *completes*, the approval gate silently absent, which is the outcome
     `sdk/roles.py` spends four paragraphs refusing.
 
-    **This is the unattended ending and it is still the real one**, which is why 18.0 kept it after
-    shipping a terminal that can answer: `container.fakes()` builds a `HeadlessTerminal` because a
-    run with nobody at it is what `agl run` in a cron job is, and §3.7 has no timeouts anywhere, so
-    refusing is the only honest thing left. `harness.recorded` being empty is the statement of where
-    that run stopped - a step that raised writes no entry (§3.6), so the implement step is
-    unrecorded, the branch is at its base, and `agl resume` starts it again attended. The test below
-    is the attended half.
+    **This is the unattended ending and it is still the real one**, which is why it was kept after
+    a terminal that can answer arrived: `container.fakes()` builds a `HeadlessTerminal` because a
+    run with nobody at it is what `agl run` in a cron job is, and there are no timeouts anywhere,
+    so refusing is the only honest thing left. `harness.recorded` being empty is the statement of
+    where that run stopped - a step that raised writes no entry, so the implement step is
+    unrecorded, the branch is at its base, and `agl resume` starts it again attended. The test
+    below is the attended half.
     """
 
     def asking(task: testing.AgentTask) -> testing.Reply:
@@ -1422,9 +1429,9 @@ def _asking_agent(
 async def test_a_person_answers_the_implementers_question_and_the_run_carries_on(
     tmp_path: Path,
 ) -> None:
-    """The other ending, and the one this workflow could not reach until 18.0.
+    """The other ending, and the one this workflow could not reach at first.
 
-    17.2 recorded the gap - AGL shipped no input-capable `Terminal` an external author could drive
+    There was a gap - AGL shipped no input-capable `Terminal` an external author could drive
     - and `testing.answering([...])` closed it with a third conforming implementation. So the whole
     path is drivable now: the agent stops to ask, `fix`'s `answer` closure puts the question on
     `views.agent_question`, a person picks something, the `Answer` goes back into the same live
@@ -1444,12 +1451,12 @@ async def test_a_person_answers_the_implementers_question_and_the_run_carries_on
     listening", and the only trace is a script nobody spent. That is the failure `sdk/roles.py`
     spends four paragraphs refusing, and here it is one comparison.
 
-    **And the board is up in the slot while all this happens.** §3.7 puts a passive screen in the
-    slot and keeps writing it under a question, so the agent reads `slot()` on its way past and what
-    it finds is this workflow's own board with nothing running yet. A `fix` that had shown its board
-    as a *question* would be queued rather than slotted and would find `None` there - and would also
-    have blocked before its first step, which is the failure the board's own passivity test guards
-    from the other side.
+    **And the board is up in the slot while all this happens.** The terminal puts a passive screen
+    in the slot and keeps writing it under a question, so the agent reads `slot()` on its way past
+    and what it finds is this workflow's own board with nothing running yet. A `fix` that had shown
+    its board as a *question* would be queued rather than slotted and would find `None` there - and
+    would also have blocked before its first step, which is the failure the board's own passivity
+    test guards from the other side.
     """
     behind: list[Screen[object] | None] = []
     term = testing.answering([testing.Press(2, TYPED)])
@@ -1514,7 +1521,7 @@ SWEEP: Final = tuple(
 async def test_an_interrupted_run_of_fix_ends_where_an_uninterrupted_one_does(
     high: bool, kills: tuple[int, ...], tmp_path: Path
 ) -> None:
-    """§3.6's acceptance criterion, on this workflow: interrupt at every boundary, resume, compare.
+    """The acceptance criterion, on this workflow: interrupt at every boundary, resume, compare.
 
     Two runs of `fix` in two directories. One is never interrupted; the other is interrupted after
     `kills[0]` entries, resumed and interrupted again after `kills[1]`, and so on, and then resumed
@@ -1529,11 +1536,11 @@ async def test_an_interrupted_run_of_fix_ends_where_an_uninterrupted_one_does(
     and stay green. What that cannot survive is a running total: after each invocation the ledger
     must hold exactly the steps that were asked for, which pins where each interruption landed.
 
-    **And the dispatch count is the replay property.** §3.6's replay "returns the stored value
-    without running", writing nothing, so a step that appears in `recorded` twice across two
-    invocations is a step whose fingerprint moved between them and whose agent was paid for twice.
-    Comparing the whole entry list against the uninterrupted run's says that in one comparison, and
-    `dispatches` says it again from the side the operator pays on.
+    **And the dispatch count is the replay property.** A replay returns the stored value without
+    running, writing nothing, so a step that appears in `recorded` twice across two invocations is
+    a step whose fingerprint moved between them and whose agent was paid for twice. Comparing the
+    whole entry list against the uninterrupted run's says that in one comparison, and `dispatches`
+    says it again from the side the operator pays on.
 
     The harness's interruption is not a kill and this file's docstring says so at length; what is
     asserted here is that *this workflow* is resumable, not that the journal survives a process.

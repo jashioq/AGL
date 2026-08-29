@@ -1,7 +1,7 @@
 """The target, the two children that land into it, and the collision every conflict here is made of.
 
 Split out of `integration.py` so that both halves of that suite build their situations the same
-way. There is only one situation: §3.4's merge train, which is a run's own workspace with children
+way. There is only one situation: the merge train, which is a run's own workspace with children
 landing into it one at a time. That is what `open_a_target_and_two_children` makes, and what
 `hold_a_target` drives one step further into the state the conflict protocol is about.
 
@@ -16,8 +16,8 @@ to land.
 
 ## The target is the run's own workspace, addressed by `None`
 
-Not an arbitrary choice of two available ones. §3.9 lands children into the run's own `_base`
-checkout, and `run.integrate()` is the only caller of this port, so the pair below is the pair the
+Not an arbitrary choice of two available ones. Children land into the run's own `_base` checkout,
+and `run.integrate()` is the only caller of this port, so the pair below is the pair the
 framework actually forms. It also keeps the suite honest about a thing that is easy to get wrong
 from a diagram: source and target are two isolated places over one repository, not two repositories
 and not two names for one place.
@@ -28,8 +28,8 @@ The port gives no way to declare a conflict, so a suite has to cause one, and it
 that no honest implementation can combine. Two children each create the same path, with contents
 sharing not one line, and neither of them existed in the state both were cut from. There is no
 combination of those two states that is anybody's answer: an implementation that returns a head
-here has picked a side, which is precisely what §3.4 forbids - "not resolved by guessing" - and
-the assertion in `hold_a_target` says so where it happens.
+here has picked a side, which is precisely what this port forbids - a conflict is never resolved
+by guessing - and the assertion in `hold_a_target` says so where it happens.
 
 `body` derives every line from its marker, so the two versions differ everywhere rather than in one
 place. That is the point: a heuristic combining two files that agree on most lines is doing its job,
@@ -110,9 +110,9 @@ async def hold_a_target(
     """Land one child, collide the next one with it, and hand back the hold that leaves.
 
     The merge train in four lines. Two children create one file with contents that agree nowhere;
-    the first lands, and the second cannot. What comes back is the state §3.4 leaves behind: the
-    target held mid-landing, owing a `retry` or an `abort`, with a `Conflict` for the workflow's
-    own screen.
+    the first lands, and the second cannot. What comes back is the state a conflict leaves
+    behind: the target held mid-landing, owing a `retry` or an `abort`, with a `Conflict` for the
+    workflow's own screen.
 
     The two assertions on the way through are about the implementation and not about the fixture,
     and they are here rather than in each test because every test in the conflict half of the suite
@@ -143,6 +143,6 @@ async def hold_a_target(
         f"two children each created {TRACKED} with contents sharing not one line, and landing the "
         f"second one reported success with head {outcome.head!r}. There is no combination of "
         f"those two states that is anybody's answer, so an implementation that produced one "
-        f"resolved by guessing - which is the one thing §3.4 says a conflict may never be"
+        f"resolved by guessing - which is the one thing a conflict may never be"
     )
     return HeldTarget(target=target, outcome=outcome, head=settled, contents=CHILD_WORK)
