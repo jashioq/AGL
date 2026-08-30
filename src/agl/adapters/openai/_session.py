@@ -9,7 +9,7 @@ from collections.abc import AsyncIterator, Sequence
 from pathlib import Path
 from typing import Final
 
-from agl.adapters.openai._tools import Asking
+from agl.adapters.openai._tools import Caller
 from agl.adapters.openai.translate import activity, failure, launch_failure, unreadable
 from agl.ports.agent import ActivityReporter, AgentOutcome, StopReason
 from agl.ports.run import JsonValue
@@ -54,7 +54,7 @@ async def outcome_of(
     *,
     prompt: str,
     workspace: Path,
-    asking: Asking,
+    caller: Caller,
     on_activity: ActivityReporter | None,
 ) -> AgentOutcome:
     try:
@@ -79,7 +79,7 @@ async def outcome_of(
     try:
         async for line in _lines(child):
             _frame(line, read, workspace, on_activity)
-            if asking.failure is not None:
+            if caller.failure is not None:
                 break
     except BaseException:
         _signal(child, signal.SIGTERM)
@@ -87,9 +87,9 @@ async def outcome_of(
             task.cancel()
         raise
 
-    status = await _closed(child, aside, early=asking.failure is not None)
-    if asking.failure is not None:
-        raise asking.failure
+    status = await _closed(child, aside, early=caller.failure is not None)
+    if caller.failure is not None:
+        raise caller.failure
     if read.reported is not None or status != 0:
         raise failure(reported=read.reported, exit_code=status, stderr=tail.text())
     return AgentOutcome(

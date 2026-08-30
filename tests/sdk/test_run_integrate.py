@@ -138,6 +138,12 @@ _LIVENESS: Final = 30.0
 # as its first `await` would pass against exactly the implementation it is written to catch.
 _SERIALIZED: Final = 1.0
 
+# How many times a conflict screen may go up over one integration before the test calls the loop
+# unterminating. One is the answer the test that spends this expects; the slack is here so that the
+# failure it reports is "this loop does not end" rather than an off-by-one about how many times a
+# person was asked.
+_PATIENCE: Final = 3
+
 
 @dataclass(frozen=True)
 class _Pause:
@@ -1578,6 +1584,114 @@ async def test_a_retry_whose_landing_raises_settles_it_and_gives_the_targets_lea
 
     await outcome.abort()
     await again.abort()
+
+
+@pytest.mark.asyncio
+async def test_a_workflow_that_catches_the_raise_and_loops_again_is_not_refused_its_own_loop(
+    tmp_path: Path,
+) -> None:
+    """`while outcome.conflicted:` has to terminate for every ending, including the raising one.
+
+    **This is the conflict loop, written the way `workflows/split/` writes it**, around the raise
+    the test above provokes. A workflow is entitled to catch what `retry()` raised - the exception
+    is the adapter's own vocabulary reaching a workflow, and `ports/verifier.py` is emphatic that
+    the ordinary refusals are outcomes rather than exceptions, so the ones that do raise are the
+    unusual far-side failures a run may reasonably decide to show and carry on from. Carrying on
+    means going back to the top of the loop it is already inside.
+
+    **The defect was that the loop had no way out.** `retry()` settles on the way out of a raise -
+    which is the fix one test up, and the right one - and `_settle()` deliberately leaves
+    `self._conflict` standing, because the conflict is the record of why nothing landed and
+    `test_abort_after_a_failed_gate_settles_it_and_gives_the_lease_back` requires it to survive.
+    With `conflicted` reading nothing but that field, a settled outcome still answered *yes*: the
+    loop re-entered, `retry()` met its own `if self._settled` guard, and the workflow was handed an
+    `InternalError` - exit 70, *file a bug* - for doing exactly what the object's own public
+    predicate had just invited it to do. The `InternalError` is not caught by the `except` below,
+    because a workflow catching a raise out of `retry()` catches what the *port* raises and has no
+    reason to expect the framework's own refusal, so it escapes this loop and fails this test.
+
+    **So `conflicted` is now the live question and not the record.** It reads "there is a conflict
+    here and this integration has not settled", which makes it the one predicate a loop can be
+    written against: every path out of a hold settles it - `ARCHITECTURE.md` states that as an
+    invariant - so every path out of a hold now ends the loop. The alternative fix, clearing
+    `_conflict` inside `_settle`, was rejected rather than overlooked: two tests require that field
+    to outlive the settling, in this file and in `tests/sdk/test_terminal_priorities.py`, and both
+    argue the same thing - giving up on a landing is not the collision not having happened.
+
+    **`refused_by_the_gate` follows `conflicted` rather than the record**, which is the one
+    judgement call here. It is the discriminator over a shape - `ARCHITECTURE.md` calls
+    `conflicted` "one shape over two causes" and this predicate "what tells the two apart" - so a
+    true answer from it asserts the shape is present. A settled outcome answering "not conflicted"
+    and "refused by the gate" at once is the same class of contradiction this test exists to
+    remove. The record itself is still readable: `conflict` and `verdict` are both still there,
+    and asserted below.
+
+    The three assertions after the loop are what the loop terminating is worth: the outcome is over,
+    the record of why is intact, and the two verbs answer the way `ports/integration.py` says a
+    settled pair answers - `retry()` refuses, `abort()` says nothing.
+    """
+    harness = _harness(tmp_path)
+    harness.verifier.answers(container.FAKE_BUILD, passed=False, status=2, output=RED)
+    run = await _tree(harness)
+    ticket = run.worktree("T-01")
+    await ticket.step(IMPLEMENT_FIRST, commit="implement T-01")
+    outcome = await ticket.integrate()
+
+    assert outcome.refused_by_the_gate is True, (
+        f"this test needs the live conflict a person presses retry at, and the landing came back "
+        f"as {outcome.conflict!r}"
+    )
+
+    # The person's fix, typed into the target's checkout and not committed, exactly as one test up:
+    # `land` refuses over unrecorded work it would itself write, so the retry below raises rather
+    # than conflicting. Left in place, because this loop never gets a second chance to land.
+    hand = _target_dir(tmp_path) / FIRST
+    hand.parent.mkdir(parents=True, exist_ok=True)
+    hand.write_bytes(HAND_EDITED)
+
+    # The loop `workflows/split/` ships, with the one line a workflow is entitled to add. Bounded
+    # twice: the count fails a loop that never terminates, and the deadline fails one that stops
+    # making progress instead of spinning.
+    screens = 0
+    async with asyncio.timeout(_LIVENESS):
+        while outcome.conflicted:
+            screens += 1
+            assert screens <= _PATIENCE, (
+                f"the conflict screen went up {screens} times over one integration that has "
+                f"already settled. `while outcome.conflicted:` is the loop every workflow writes "
+                f"around this object, and a predicate that stays true after the last verb has run "
+                f"is a loop with no exit in it"
+            )
+            try:
+                await outcome.retry()
+            except UpstreamUnexpected:
+                continue
+
+    assert screens == 1, (
+        f"the conflict screen went up {screens} times. There was one conflict and one decision "
+        f"about it; the retry raised, which settled the integration, and a settled integration is "
+        f"not something to show a person a second screen about"
+    )
+    assert outcome.head is None, "nothing landed, so there is no head to report"
+    assert outcome.conflict is not None, (
+        "the settled outcome cleared its conflict. `conflicted` going false is this integration "
+        "being over, not the collision not having happened - the `Conflict` is the record of why "
+        "nothing landed and a workflow is entitled to read it after the loop"
+    )
+    assert outcome.verdict is not None and outcome.verdict.passed is False, (
+        "the settled outcome cleared the build's verdict too, so the record of why nothing landed "
+        "is missing the half that says which of the two causes it was"
+    )
+    assert outcome.refused_by_the_gate is False, (
+        "a settled outcome says the build gate refused it while saying it is not conflicted. The "
+        "predicate tells two causes of one shape apart, so answering it at all asserts the shape "
+        "is there - and a pair that can contradict is the defect this test is about, one property "
+        "over"
+    )
+
+    with pytest.raises(InternalError):
+        await outcome.retry()
+    await outcome.abort()
 
 
 @pytest.mark.asyncio

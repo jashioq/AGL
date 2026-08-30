@@ -92,10 +92,12 @@ preemption loses text a person was part-way through typing, and there are no que
 Nothing below builds either, and the tests are written so that the second one costs a bounded
 failure rather than a hung suite.
 
-**The question round trip is elsewhere** - that the `Question` the agent asked is the object the
-handler was given, that the answer goes back into the round it was asked from, and that a
+**The question round trip is elsewhere** - that the payload the agent sent is what the workflow's
+own asking tool receives, that the answer goes back into the round it was asked from, and that a
 negotiation is one task, one dispatch and one entry. Questions are asked here because two of them
-have to be waiting; what is asserted about them is where they sit in a queue.
+have to be waiting; what is asserted about them is where they sit in a queue. The asking tool below
+is the workflow's own, as every asking tool is: AGL supplies none, so `ASK` and `_Asked` are this
+file's and the framework has never heard of either.
 
 **The five decisions around `integrate()` are elsewhere too** - the advance, the lease, the
 containment check, the root refusal and the merge gate, all in `tests/sdk/test_run_integrate.py`.
@@ -118,13 +120,14 @@ from agl import api
 from agl.adapters.claude_code.fake import Conversation, Script
 from agl.adapters.rich_terminal.terminal import RichTerminal
 from agl.config import container, registry
-from agl.ports.agent import AgentOutcome, Claude, QuestionHandler, StopReason
+from agl.ports.agent import AgentOutcome, Claude, StopReason, Tool, ToolResult
 from agl.ports.ids import Namespace, ProjectName, RunLabel
-from agl.ports.questions import Answer, Question
+from agl.ports.questions import Question
 from agl.ports.tree_layout import TreesRoot
 from agl.sdk._engine.integration import Integration
 from agl.sdk.roles import Role, role
 from agl.sdk.terminal import Choice, Row, Rows, Screen, Text
+from agl.sdk.tools import describe, tool
 from agl.sdk.workflow import Run, workflow
 from instruments.keyboard import DEADLINE, TICK, Typing
 
@@ -232,6 +235,23 @@ class _Scene:
 _STAGED: Final[list[_Scene]] = []
 """Where a test leaves the `_Scene` its workflow will pick up. Module level because the workflows
 have to be: `EntryPoint.load` imports a module and reads an attribute in it, and sees no local."""
+
+@dataclass(frozen=True, slots=True)
+class _Asked:
+    """The payload of the asking tool the workflow below supplies. A question, and what it offers.
+
+    The framework has no asking tool and no `Question` on the wire: a workflow declares its own
+    payload class, `sdk/tools.py` derives the schema from it, and the workflow maps what arrives
+    into whatever its views take. This one maps into a `Question` because `choose` renders one.
+    """
+
+    question: str = describe("What you are asking, in full.")
+
+    options: tuple[str, ...] = describe("The answers you are suggesting.", default=())
+
+
+ASK: Final = "ask_the_operator"
+"""The asking tool's name, which is the workflow's own and which AGL has never heard of."""
 
 asked: Final[list[Question]] = []
 """Every question a handler was given, in the order the handler was called.
@@ -357,16 +377,16 @@ def _role(name: str, instructions: str) -> Role[None]:
 
 
 @role(model=Claude.SONNET)
-def _asking(instructions: str, handler: QuestionHandler) -> Role[None]:
-    """The same role with the callback on it, which is why the handler is a factory parameter.
+def _asking(instructions: str, ask: Tool) -> Role[None]:
+    """The same role with an asking tool on it, which is why the tool is a factory parameter.
 
-    A role's declaration is a factory and the handler cannot be written into it, because it
-    "is a closure over the workflow's `Run`, keeping its signature to one parameter" - so this one
-    cannot exist before a run does, and the parameter list is what lets a call site supply it
-    without being able to supply anything else. Passing it also folds `MID_RUN_QUESTIONS` into
-    `requires`, which `tests/sdk/test_roles.py` pins and nothing here restates.
+    A role's declaration is a factory and the tool cannot be written into it, because its handler
+    is a closure over the workflow's `Run` - so this one cannot exist before a run does, and the
+    parameter list is what lets a call site supply it without being able to supply anything else.
+    Passing it also folds `TOOL_CALLING` into `requires`, which `tests/sdk/test_roles.py` pins and
+    nothing here restates.
     """
-    return Role(name="ask", instructions=instructions, on_question=handler)
+    return Role(name="ask", instructions=instructions, tools=(ask,))
 
 
 PREPARE: Final = _role("prepare", "prepare the parent")
@@ -417,7 +437,7 @@ class _Agent:
         """The instructions of every task, in dispatch order. A role appearing here is a step that
         got past the target namespace's step lock and paid for an agent."""
 
-        self.heard: list[Answer | None] = []
+        self.heard: list[ToolResult] = []
         """Every answer an agent was given. Read only to say that none had arrived yet."""
 
         self.answered_when_the_parent_stepped: int | None = None
@@ -442,7 +462,12 @@ def _agent(record: _Agent) -> Script:
         record.dispatched.append(instructions)
         question = QUESTIONS.get(instructions)
         if question is not None:
-            record.heard.append(await conversation.ask(question))
+            record.heard.append(
+                await conversation.call(
+                    ASK,
+                    {"question": question.prompt, "options": list(question.options)},
+                )
+            )
         for name, content in _WRITES.get(instructions, {}).items():
             where = conversation.task.workspace / name
             where.parent.mkdir(parents=True, exist_ok=True)
@@ -478,10 +503,12 @@ async def deciding(run: Run[NoParams]) -> None:
         outcome is still unsettled. The objection is about a **workflow author's** view carrying
         `sdk/_engine`'s private type in its signature; this view is a test's, in a module that
         already imports `Integration` to annotate `decided`.
-      * **`if` rather than `while`.** Every scene here scripts exactly one keystroke, and a `while`
-        over a view that reads the live outcome would put the same screen back up in the abort
-        case, where `conflicted` deliberately stays true. The `break` is what closes that, and
-        the `break` needs the loop - so this file takes neither rather than half of the pair.
+      * **`if` rather than `while`.** Every scene here scripts exactly one keystroke, and a view
+        that reads the live outcome would be drawn again on any second pass - with no key left to
+        answer it, which is a hung scene rather than a failing assertion. The loop itself ends on
+        both branches, because `abort()` settles and a settled outcome is no longer `conflicted`;
+        what this file cannot afford is a screen going up twice, so it takes the branch and leaves
+        the loop to `workflows/split/`.
 
     What the `if` costs elsewhere is the lease: a person who retries without having fixed anything
     gets a conflicted outcome back, the branch falls through, and the run holds the lease *and* the
@@ -536,12 +563,15 @@ async def contested(run: Run[NoParams]) -> None:
     boards.append(lines)
     await run.terminal.show(board, lines=lines)
 
-    async def answering(question: Question) -> Answer:
+    async def answering(sent: _Asked) -> ToolResult:
         """The handler, spelled the sanctioned way: show it, and answer with what came back."""
+        question = Question(prompt=sent.question, options=sent.options)
         asked.append(question)
         picked = await run.terminal.show(choose, question=question, priority=AGENT)
         answered.append(picked)
-        return Answer(text=picked)
+        return ToolResult(text=picked)
+
+    asking = tool(ASK, "ask the person running this task", _Asked, answering)
 
     first = run.worktree(FIRST_CHILD)
     second = run.worktree(SECOND_CHILD)
@@ -550,8 +580,8 @@ async def contested(run: Run[NoParams]) -> None:
     await landing.step(COLLIDE, commit="implement T-03")
 
     questions = asyncio.gather(
-        first.step(_asking(ASK_FIRST, answering)),
-        second.step(_asking(ASK_SECOND, answering)),
+        first.step(_asking(ASK_FIRST, asking)),
+        second.step(_asking(ASK_SECOND, asking)),
     )
     await scene.proceed.wait()
 
@@ -812,9 +842,15 @@ async def test_a_person_who_gives_up_at_the_conflict_screen_puts_the_target_back
         await running
 
     assert keys.given == [ABORT_KEY]
-    assert outcome.conflicted is True, (
+    assert outcome.conflict is not None, (
         "the aborted outcome cleared its conflict. Giving up on a landing is not the collision not "
         "having happened - it is the record of why nothing landed"
+    )
+    assert outcome.conflicted is False, (
+        "the aborted outcome still calls itself conflicted. That predicate is the live question - "
+        "is there a conflict here still holding its lease - and not the record beside it, because "
+        "`while outcome.conflicted:` is the shape every workflow writes around this object and an "
+        "abort has to end it"
     )
     assert outcome.head is None, "the two-case outcome, and this is the case with no head in it"
     assert (_target_dir(tmp_path) / CONTESTED).read_bytes() == PARENT_BODY, (

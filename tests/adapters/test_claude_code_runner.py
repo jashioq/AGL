@@ -4,9 +4,9 @@ The first class is the port in full: `AgentContract` with its two fixtures overr
 else touched. That suite was written against the port's docstrings and before any adapter
 existed, which is the inversion `tests/contracts/` rests on and why nothing below re-asserts it.
 
-**Eight of its ten tests start a real agent, and none of them runs - anywhere, on any machine.**
-Seven of the eight read a *model's* conduct as their evidence: that it called a tool, that it
-answered a question, that it ignored a repository's instructions. No free instrument can supply
+**Six of its eight tests start a real agent, and none of them runs - anywhere, on any machine.**
+Five of the six read a *model's* conduct as their evidence: that it called a tool, that it
+corrected a refused call, that it ignored a repository's instructions. No free instrument can supply
 that, so running them means a paid turn, and the build's rule is that no test spends tokens, ever -
 "not gated, not opt-in, not 'only when you set the env var'". They are deferred to the manual QA
 pass instead. The gate is delivered by the `runner` fixture handing back a runner whose `run`
@@ -71,11 +71,13 @@ What follows the contract subclass is what the suite lists as beyond it, in roug
     package rather than by running it, so a second session added later (a readiness probe, a
     version check) cannot quietly omit the two options whose SDK defaults are the leaky ones -
     nor name either one and hand it the leaky value, which naming alone does not rule out.
-  * **That a tool call, a refusal, an activity line and a question round-trip work at all** (its
-    gaps 7 and 12: most of that suite is behavioural and reads a model's conduct as evidence).
-    Driven offline through a scripted `Transport`, which is the SDK's own injection point, so the
-    real adapter, the real SDK message parsing and the real in-process MCP servers all run with no
-    CLI and no model anywhere. **This is supplementary evidence and never acceptance**: a subagent's
+  * **That a tool call, a refusal, a handler that raises, an activity line and a question
+    round-trip work at all** (its gaps 7 and 12: most of that suite is behavioural and reads a
+    model's conduct as evidence). Driven offline through a scripted `Transport`, which is the SDK's
+    own injection point, so the real adapter, the real SDK message parsing and the real in-process
+    MCP servers all run with no CLI and no model anywhere. The handler that raises comes with a
+    control that measures what the *vendor* does with one, since that is the reason AGL catches
+    where it does. **This is supplementary evidence and never acceptance**: a subagent's
     own test double is exactly what `tests/contracts/` exists not to rely on, and every
     clause below that it covers is covered *again*, for real, by the gated suite above.
   * **That `stop_reason` is read honestly** (its gap 10: it cannot make a run reach a limit and has
@@ -100,10 +102,10 @@ from typing import Any, Final, NoReturn
 from urllib.parse import urlsplit
 
 import pytest
-from claude_agent_sdk import ClaudeAgentOptions, ProcessError
+from claude_agent_sdk import ClaudeAgentOptions, ProcessError, SdkMcpTool
 from claude_agent_sdk._internal.transport import Transport
 
-from agl.adapters.claude_code import _session
+from agl.adapters.claude_code import _session, _tools
 from agl.adapters.claude_code import runner as runner_module
 from agl.adapters.claude_code.runner import ClaudeCodeRunner
 from agl.adapters.claude_code.translate import Restraint
@@ -121,39 +123,38 @@ from agl.ports.agent import (
     ToolResult,
 )
 from agl.ports.errors import InputError, InternalError, UpstreamUnavailable
-from agl.ports.questions import Answer, Question
 from agl.ports.run import JsonValue
 from contracts._agent_hermeticity import CONFIGURATIONS, markers_in, plant
-from contracts._agent_tasks import Activity, Notes, ReporterFailed, workspace
+from contracts._agent_tasks import Activity, Notes, ReporterFailed, ToolFailed, workspace
 from contracts.agent import AgentContract
 from instruments.loopback import DUMMY_KEY, REPLY, Loopback, wire_text
 
 # The opt-in. It turns on the tests that spawn a real `claude` process against the loopback, and it
-# does not turn on the eight contract tests behind `_NeverRuns` - seven of them read a model's
-# conduct, which nothing free can produce, and the eighth needs a session this suite has no way to
+# does not turn on the six contract tests behind `_NeverRuns` - five of them read a model's
+# conduct, which nothing free can produce, and the sixth needs a session this suite has no way to
 # arrange. Two gates rather than one, because "the operator agreed to have processes started" and
 # "there is a binary to start" are different facts with different fixes.
 LIVE = "AGL_LIVE_AGENT"
 
-# What a person is told when the eight deferred contract tests do not run, which is always. Long on
+# What a person is told when the six deferred contract tests do not run, which is always. Long on
 # purpose: the whole point of this suite is that a green run means something, and a skip that reads
 # like a pass is the failure `tests/contracts/agent.py` is written against.
 _SKIPPED: Final = (
     "UNVERIFIED: this run did not start a real agent, so the ClaudeCodeRunner's entire run-path - "
     "the outcome, the refused tool call, the tool handler that raised, the activity, the activity "
-    "reporter that raised, both question clauses and the poisoned repository - is unverified by "
-    "this run, and by every run. DEFERRED TO THE MANUAL QA PASS, with no switch here that changes "
-    "it: seven of the eight read a model's conduct as their evidence - that it called a tool, that "
-    "it answered a question, that it ignored a poisoned repository - which no free instrument can "
-    "supply, so running one costs a paid turn and no test in this build spends tokens. The eighth, "
+    "reporter that raised and the poisoned repository - is unverified by this run, and by every "
+    "run. DEFERRED TO THE MANUAL QA PASS, with no switch here that changes it: five of the six "
+    "read a model's conduct as their evidence - that it called a tool, that it corrected a refused "
+    "call, that it ignored a poisoned repository - which no free instrument can supply, so running "
+    "one costs a paid turn and no test in this build spends tokens. The sixth, "
     "the activity reporter that raised, needs no conduct at all; it is deferred only because the "
     "contract suite's one knob is the runner and a real ClaudeCodeRunner reports nothing without a "
     "session, and it is asserted for real offline further down this file, against the same "
-    "adapter. Run the other seven by hand against an authenticated CLI, or do not believe them. "
+    "adapter. Run the other five by hand against an authenticated CLI, or do not believe them. "
     "What did run is everything below the contract subclass: a real CLI composing a real session "
     "against a loopback endpoint, so the options, the argv discipline, the registered tools and "
-    "the request that left the machine are all asserted for real - plus the tool, activity and "
-    "question plumbing driven offline through a scripted transport. None of that covers a model "
+    "the request that left the machine are all asserted for real - plus the tool and activity "
+    "plumbing driven offline through a scripted transport. None of that covers a model "
     "deciding anything, and this skip is not a pass."
 )
 
@@ -161,7 +162,7 @@ _SKIPPED: Final = (
 # it is true of one reader's environment and not of the deferral itself.
 _OPTED_IN: Final = (
     f" ({LIVE}=1 is set here and it did turn on the live tests further down, which spawn a real "
-    f"CLI against a loopback endpoint. It does not turn these eight on and no variable can: seven "
+    f"CLI against a loopback endpoint. It does not turn these six on and no variable can: five "
     f"read a model's conduct, and a loopback answers with whatever it was told to say.)"
 )
 
@@ -291,19 +292,19 @@ class _NeverRuns(ClaudeCodeRunner):
     gate on the *port member that starts an agent* instead of on a list of test names - the suite's
     tests can be renamed, split or added to and this keeps deciding correctly.
 
-    Unconditionally, because there is no condition worth writing: seven of the eight tests behind
+    Unconditionally, because there is no condition worth writing: five of the six tests behind
     it assert a model's conduct, the only instrument that can answer is a paid one, and a test that
     spends money on a flag is still a test that spends money. They are deferred to the manual QA
     pass and the skip reason says so.
 
-    The eighth is `test_an_activity_reporter_that_raises_ends_the_run_with_its_own_exception`, and
+    The sixth is `test_an_activity_reporter_that_raises_ends_the_run_with_its_own_exception`, and
     it is the one clause here a free instrument could reach: it asks the agent for nothing. What
     stops it is the shape of the contract suite rather than the price of a turn - its one knob is
     the runner, and a real `ClaudeCodeRunner` handed a scripted transport is not something the
     suite has a way to build. Marking that one test by name would put a list of test names in this
     file after all, for a clause this file already asserts against the same adapter, offline, in
     `test_an_activity_reporter_that_raises_comes_out_of_this_adapters_run`. So it skips with the
-    seven and the skip reason says which of the two reasons applies to it.
+    five and the skip reason says which of the two reasons applies to it.
     """
 
     async def run(self, *args: object, **kwargs: object) -> NoReturn:
@@ -311,7 +312,7 @@ class _NeverRuns(ClaudeCodeRunner):
 
 
 class TestClaudeCodeRunner(AgentContract):
-    """The port in full, against the real adapter: two of its ten tests today, and eight deferred.
+    """The port in full, against the real adapter: two of its eight tests today, and six deferred.
 
     Two overrides and nothing else, which is what the suite asks for. The gate lives inside the
     `runner` fixture because that is one of the two, and because the alternative - marking
@@ -352,20 +353,6 @@ NOTE_SCHEMA: Final[Mapping[str, JsonValue]] = {
     "properties": {"note": {"type": "string"}},
     "required": ["note"],
 }
-
-# How the model addresses AGL's asker: `mcp__<server>__<tool>`, and both halves of it are spelled in
-# `_tools.py`. Written out here rather than imported because it is what a *model* sees, and the
-# three tests using it check it against what the session advertises, what the composed request
-# carries and what the prompt names - rather than against each other.
-#
-# Against a *list of names* this matches exactly; against prompt *text* it would be a substring, and
-# a substring match is satisfied by any longer name beginning with this one - `_ASK` renamed to
-# `ask_person` leaves `mcp__agl_ask__ask in prompt` green while naming a tool no session registers.
-# `_MAY_ASK` renders the name inside backticks, so a prompt assertion matches `ASK_TOOL_NAMED`
-# below: the closing delimiter is what makes it exact, and it needs no regex to be so.
-ASK_TOOL: Final = "mcp__agl_ask__ask"
-ASK_TOOL_NAMED: Final = f"`{ASK_TOOL}`"
-
 
 def poisoned(root: Path) -> Path:
     """The contract suite's poisoned repository, plus the three channels `init` can see.
@@ -531,9 +518,10 @@ async def test_no_configuration_in_the_workspace_reaches_the_session_it_composes
         f"the second lock and not the first - which is the reason to keep setting it, since the "
         f"day setting_sources changes it is the only thing still holding"
     )
-    assert sorted(servers) == ["agl", "agl_ask"], (
-        f"the session's MCP servers are {servers}, and AGL supplies exactly two: the workflow's "
-        f"tools and the one that asks a person"
+    assert sorted(servers) == ["agl"], (
+        f"the session's MCP servers are {servers}, and AGL supplies exactly one: the workflow's "
+        f"own tools. There were two while AGL registered an asking tool of its own; a question is "
+        f"an ordinary tool a workflow declares now, so it arrives on this server with the rest"
     )
 
 
@@ -578,8 +566,13 @@ async def test_the_options_the_run_actually_built_are_the_hermetic_ones(
         "an unapproved tool call in any other mode waits for a person, and there is none"
     )
     assert "AskUserQuestion" in options.disallowed_tools, (
-        "the harness's own asker is left available beside AGL's, so a model may pick the one that "
-        "talks to nobody - which is a question waiting on an answer that cannot arrive"
+        "the vendor's own asking mechanism is left available, and it bypasses AGL's terminal "
+        "entirely: what it puts up is drawn by the CLI, to whoever is at *its* stdout, and no "
+        "workflow sees the question or the answer. That reason does not depend on AGL supplying a "
+        "replacement and did not change when it stopped: a run started by `agl run` in a cron job "
+        "has nobody at that prompt, and a run started at a terminal has a person looking at AGL's "
+        "screens rather than at the CLI's - so the question either waits on an answer that cannot "
+        "arrive, or is answered somewhere the workflow that asked it will never hear about"
     )
 
 
@@ -616,12 +609,11 @@ async def test_the_tools_a_task_carries_are_registered_and_the_denied_ones_are_g
         f"the task's own tool is not in the session's tool list: {registered}. A tool the model "
         f"cannot see is a tool no handler will ever be called for"
     )
-    assert ASK_TOOL in registered, "AGL's asking tool is what MID_RUN_QUESTIONS rests on"
     assert "Read" in registered, "nothing denies Read, so a session missing it registered nothing"
     for gone in ("Bash", "WebFetch", "WebSearch", "AskUserQuestion"):
         assert gone not in registered, (
-            f"{gone} is registered for a task declaring NO_SHELL and NO_NETWORK, and the harness's "
-            f"own asker is denied for every task: {registered}"
+            f"{gone} is registered for a task declaring NO_SHELL and NO_NETWORK, and the vendor's "
+            f"own asking mechanism is denied for every task: {registered}"
         )
 
 
@@ -655,114 +647,6 @@ async def test_check_ready_returns_against_a_harness_that_answers(harness: Loopb
         f"check_ready returned without the readiness probe reaching the far side: the loopback was "
         f"handed {[(seen.method, seen.path) for seen in harness.requests]}. A probe that answers "
         f"'ready' without asking anything is a preflight that admits a run it knows nothing about"
-    )
-
-
-@pytest.mark.asyncio
-@pytest.mark.skipif(not _cli(), reason=_NO_CLI)
-@pytest.mark.skipif(not _live(), reason=_NOT_OPTED_IN)
-async def test_the_composed_request_carries_the_asking_tool_with_a_usable_schema(
-    tmp_path: Path, harness: Loopback
-) -> None:
-    """The asking tool, in the request that actually left the machine.
-
-    **Why this and `test_the_asking_tool_is_advertised_with_a_schema_a_model_could_call`, which
-    looks like the same assertion.** That one drives a scripted transport and reads a `tools/list`
-    answered by AGL's own in-process MCP server: it proves `_tools.py` advertises the right thing to
-    whoever asks. This one reads what the CLI composed and sent, which is a different fact with a
-    whole harness in between - the MCP server has to be started, connected, enumerated, and its
-    tools folded into the request under the API's own `input_schema` spelling rather than MCP's
-    `inputSchema`. Any of that could go wrong with `_tools.py` perfectly correct, and the offline
-    test would still be green. Two tests, because there are two claims.
-
-    The properties are `Question`'s three fields, asserted by shape rather than by comparing the
-    whole schema, so that a reworded description stays a rewording.
-    """
-    await spawn(task_in(workspace(tmp_path)))
-
-    composed = harness.composed()
-    offered = {
-        entry.get("name"): entry
-        for entry in composed.get("tools", [])
-        if isinstance(entry, dict)
-    }
-    assert ASK_TOOL in offered, (
-        f"the request that left the machine offers {sorted(name for name in offered if name)} and "
-        f"{ASK_TOOL} is not among them. `capabilities()` answers MID_RUN_QUESTIONS unconditionally "
-        f"for every task on every machine, and this is the request that has to make that true"
-    )
-
-    schema = offered[ASK_TOOL]["input_schema"]
-    assert schema.get("type") == "object" and "question" in schema.get("required", []), (
-        f"the asking tool reached the model as {schema!r}. `question` has to be required: it is "
-        f"the whole of what a person is shown, and a call that omits it is one `Asking` can only "
-        f"refuse back into the conversation after the turn has been spent"
-    )
-    properties = schema.get("properties", {})
-    assert properties.get("question", {}).get("type") == "string", (
-        f"`question` reached the model as {properties.get('question')!r} and `Question.prompt` is "
-        f"text. A model handed any other type here would send something no view can render"
-    )
-    assert properties.get("options", {}).get("items", {}).get("type") == "string", (
-        f"`options` reached the model as {properties.get('options')!r}. Without an array of "
-        f"strings a model has no way to offer choices, so every question arrives as free text and "
-        f"`Choice` "
-        f"components have nothing to render"
-    )
-    assert properties.get("allow_free_text", {}).get("type") == "boolean", (
-        f"`allow_free_text` reached the model as {properties.get('allow_free_text')!r}. It is the "
-        f"third of `Question`'s three fields and the only way a model can say it is asking for a "
-        f"choice among the options rather than for an opinion"
-    )
-
-
-@pytest.mark.asyncio
-@pytest.mark.skipif(not _cli(), reason=_NO_CLI)
-@pytest.mark.skipif(not _live(), reason=_NOT_OPTED_IN)
-async def test_the_composed_request_names_the_asking_tool_when_somebody_can_answer(
-    tmp_path: Path, harness: Loopback
-) -> None:
-    """Agents are instructed to use the asking tool, asserted against what actually leaves.
-
-    This is the measurement `_MAY_ASK` exists because of. Before it, `agl_ask` occurred **exactly
-    once** in the whole 140 KB request - inside the tool's own definition - and running the same
-    task with `on_question` supplied produced a byte-identical prompt. So the framework supplied the
-    tool and instructed nobody: a workflow's `on_question` would be called only if a model went
-    looking through its tool list for something it had never been told existed.
-
-    Both halves, on one task run twice, because each is the other's control - the same shape as the
-    offline `test_the_prompt_names_the_asking_tool_exactly_when_somebody_can_answer`, and a
-    different claim: that one reads the string the adapter composed, this one reads the request the
-    CLI assembled out of it. A harness that dropped the prompt on the way would fail here alone.
-
-    The count is asserted on the run with no handler, not just the absence of the instruction: one
-    occurrence is the tool definition, and pinning it is what keeps this test honest if `_MAY_ASK`
-    is ever reworded into something that no longer contains the tool's name.
-    """
-    repo = workspace(tmp_path)
-    task = task_in(repo)
-
-    async def answer(question: Question) -> Answer:
-        raise AssertionError("this run never asks; the handler is here to be counted, not called")
-
-    await spawn(task, on_question=answer)
-    told = wire_text(harness.composed())
-
-    harness.clear()
-    await spawn(task)
-    untold = wire_text(harness.composed())
-
-    assert runner_module._MAY_ASK in told, (
-        f"a run carrying a question handler sent {len(told)} bytes to the model and none of them "
-        f"said it could ask. The framework supplies the asking tool *and* instructs the agent "
-        f"to use it, and an agent that never learns the tool is there is a workflow "
-        f"whose on_question is never called"
-    )
-    assert runner_module._MAY_ASK not in untold and untold.count("agl_ask") == 1, (
-        f"a run with no question handler mentioned agl_ask {untold.count('agl_ask')} time(s). "
-        f"Exactly one is right and it is the tool's own definition: the tool is registered either "
-        f"way, and an agent told to ask when nobody is listening spends a turn to be told that no "
-        f"answer is available"
     )
 
 
@@ -1331,6 +1215,130 @@ async def test_a_refused_tool_result_carries_the_mechanisms_own_error_flag(
 
 
 @pytest.mark.asyncio
+async def test_a_tool_handler_that_raises_ends_the_run_with_its_own_exception(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The catch is AGL's own, at AGL's own boundary, and the test below says why it has to be.
+
+    `_tools.Caller.handled` wraps every call to a workflow's handler: it records the exception,
+    answers the in-flight call with a result the model can read rather than leaving a session
+    waiting on a tool that never replied, and `_session.py` then breaks out of the stream at the
+    next message and raises it out of `run`. That is the asking path's mechanism applied to the
+    other piece of caller code a session invokes, and `tests/contracts/agent.py` argues in full why
+    a handler that raises ends a run where a `ToolResult(rejected=True)` does not.
+
+    **The exception never reaches the SDK**, which is the point of catching inside `_wrapped`
+    rather than around the session: the vendor turns an exception out of an `SdkMcpTool` handler
+    into an ordinary error result and carries the session on, so a mechanism that waited for one to
+    surface would wait forever. That claim is measured in the test immediately below, against this
+    same adapter with the catch removed.
+
+    Two calls back to back with no message between them, because that is what a session issuing
+    parallel tool calls looks like and a stream check cannot come between them: the second one is
+    refused where the first was caught, and the handler is not asked again.
+    """
+    repo = workspace(tmp_path)
+    notes = Notes(raise_first=1)
+    told: list[dict[str, Any]] = []
+
+    async def play(cli: Scripted) -> None:
+        await cli.say(init(repo))
+        told.append(await cli.call("agl", notes.tool.name, {"note": "one module"}))
+        told.append(await cli.call("agl", notes.tool.name, {"note": "another"}))
+        await cli.say(says("carrying on"))
+        await cli.say(ends(result="done", terminal_reason="completed"))
+
+    with pytest.raises(ToolFailed) as raised:
+        async with asyncio.timeout(30):
+            await offline(play, task_in(repo, tools=(notes.tool,)), monkeypatch)
+
+    assert raised.value is notes.failure, (
+        f"the run ended with {raised.value!r} rather than with the handler's own exception, so a "
+        f"workflow's Stop or a headless terminal's refusal would be reported as something else"
+    )
+    assert len(notes.received) == 1, (
+        f"the handler was called {len(notes.received)} time(s) against a session that called the "
+        f"tool twice before any message arrived. Once a caller's own code has failed, no more of "
+        f"it runs - the run is already over and the second call is answered without it"
+    )
+    assert [answer["isError"] for answer in told] == [True, True], (
+        f"the session was handed {told}. Both calls are still answered - a session waiting on a "
+        f"tool result that never comes is a hang - and both are errors rather than results"
+    )
+    assert "the notebook this tool writes into is not there" in told[0]["content"][0]["text"]
+    assert "already being stopped" in told[1]["content"][0]["text"], (
+        f"the second call was answered {told[1]!r}. It never reached the handler, so it is not a "
+        f"refusal of what it carried - it is the session being told the task is over"
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_vendor_sdk_absorbs_a_handlers_exception_which_is_why_the_catch_is_agls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The control for the clause above, and it is a measurement of the vendor rather than of AGL.
+
+    `_tools._wrapped` is the one line between a workflow's handler and an `SdkMcpTool`, and this
+    replaces it with a wrapper that does **not** catch - the shape this adapter had before the
+    handler-failure mechanism existed. Everything else is the real thing: the real runner, the real
+    in-process MCP server, the real `_session.py` reading.
+
+    What comes back is an ordinary error result carrying the exception's text, and the run then
+    ends normally with an `AgentOutcome`. So there is nothing for a session-level `try` to catch:
+    an adapter that waited for a handler's exception to surface out of `query()` would wait for
+    something the SDK has already swallowed, the model would be told to try again, and a step whose
+    tool could not do its job would record an answer anyway. That is why the catch is written at
+    AGL's own boundary and why deleting it is not a simplification.
+
+    It measures the installed SDK rather than asserting a documented promise, so a vendor that
+    changes its mind here fails this test and names the assumption that moved.
+    """
+    repo = workspace(tmp_path)
+    notes = Notes(raise_first=1)
+    told: list[dict[str, Any]] = []
+
+    def uncaught(declared: Tool, caller: _tools.Caller) -> Any:
+        async def invoked(payload: dict[str, Any]) -> dict[str, Any]:
+            outcome = await declared.handler(payload)
+            return {
+                "content": [{"type": "text", "text": outcome.text}],
+                "is_error": outcome.rejected,
+            }
+
+        return SdkMcpTool(
+            name=declared.name,
+            description=declared.description,
+            input_schema={**dict(declared.payload_schema), "type": "object"},
+            handler=invoked,
+        )
+
+    monkeypatch.setattr(_tools, "_wrapped", uncaught)
+
+    async def play(cli: Scripted) -> None:
+        await cli.say(init(repo))
+        told.append(await cli.call("agl", notes.tool.name, {"note": "one module"}))
+        await cli.say(ends(result="done", terminal_reason="completed"))
+
+    async with asyncio.timeout(30):
+        outcome = await offline(play, task_in(repo, tools=(notes.tool,)), monkeypatch)
+
+    assert outcome == AgentOutcome(stop_reason=StopReason.COMPLETED, text="done"), (
+        f"the run ended as {outcome!r} with AGL's catch removed. If the exception had come out of "
+        f"the session there would be nothing here to assert, and the mechanism `_tools.Caller` "
+        f"implements could have been a `try` around `query()` instead"
+    )
+    assert told[0]["isError"] is True, (
+        f"the SDK answered {told[0]!r} for a handler that raised. This test is the reason the "
+        f"clause above catches where it does, and it has stopped measuring that"
+    )
+    assert "the notebook this tool writes into is not there" in told[0]["content"][0]["text"], (
+        f"the SDK answered {told[0]!r}, which no longer carries what the handler said - the "
+        f"measurement this control is made of has changed shape"
+    )
+    assert len(notes.received) == 1, "and the handler was reached, so the exception was real"
+
+
+@pytest.mark.asyncio
 async def test_a_malformed_payload_never_reaches_the_handler_and_is_told_so(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1472,7 +1480,7 @@ async def test_an_activity_reporter_that_raises_comes_out_of_this_adapters_run(
     That clause is the one test of a `run` in `AgentContract` that reads no model conduct, which is
     what makes it reachable here: the reporter fails on whatever the session reports, and a scripted
     transport reports two tool uses without an agent deciding anything. Against `_NeverRuns` it
-    skips with the other seven, so this is where the real `ClaudeCodeRunner` is actually held to it
+    skips with the other five, so this is where the real `ClaudeCodeRunner` is actually held to it
     - the same shape as `test_the_options_the_run_actually_built_are_the_hermetic_ones` having a
     structural sibling that needs no binary.
 
@@ -1499,203 +1507,62 @@ async def test_an_activity_reporter_that_raises_comes_out_of_this_adapters_run(
     )
 
 
-@pytest.mark.asyncio
-async def test_the_asking_tool_is_advertised_with_a_schema_a_model_could_call(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The asking tool, read off the wire: one tool, and a schema that describes a question.
-
-    `capabilities()` answers `MID_RUN_QUESTIONS` unconditionally, on every machine and for every
-    task, and this is what that answer rests on - so it is asserted where the model would see it,
-    on the `tools/list` the session's own MCP server answers, rather than on the dict `_tools.py`
-    holds. The run carries **no** handler on purpose: the tool is registered either way, which is
-    the fact that makes the prompt's instruction conditional and the tool's registration not.
-
-    The three properties are `Question`'s three fields and nothing more - prompt text, the options
-    offered, whether free text is allowed - the lowest common denominator across vendors. A
-    property missing here is a field `Asking` can never be handed, however well the mapping below
-    it is written. Asserted by shape rather than by comparing the whole schema, so
-    that a reworded description stays a rewording.
-
-    `test_the_composed_request_carries_the_asking_tool_with_a_usable_schema` asserts what looks like
-    the same thing against a real CLI, and its docstring says why both are here: this one covers
-    what `_tools.py` advertises to whoever asks, and that one covers what survives a whole harness
-    on the way out. Neither subsumes the other, and this one runs on a machine with no CLI at all.
-    """
-    repo = workspace(tmp_path)
-    seen: list[dict[str, Any]] = []
-
-    async def play(cli: Scripted) -> None:
-        await cli.say(init(repo))
-        seen.extend(await cli.listed("agl_ask"))
-        await cli.say(ends(result="done", terminal_reason="completed"))
-
-    await offline(play, task_in(repo), monkeypatch)
-
-    advertised = {entry["name"]: entry for entry in seen}
-    assert list(advertised) == ["ask"], (
-        f"the asking server advertises {sorted(advertised)}. It holds exactly one tool, addressed "
-        f"as {ASK_TOOL}: a second one there is a second way to ask, and the whole reason the "
-        f"harness's own asker is denied by name is that there should be exactly one"
-    )
-    assert advertised["ask"]["description"].strip(), (
-        "the asking tool has no description, which is what a model reads to decide whether this "
-        "is the tool for what it wants"
-    )
-
-    schema = advertised["ask"]["inputSchema"]
-    assert schema.get("type") == "object" and "question" in schema.get("required", []), (
-        f"the asking tool's advertised schema is {schema!r}. `question` has to be required: it is "
-        f"the whole of what a person is shown, and a call that omits it is one `Asking` can only "
-        f"refuse back into the conversation after the turn has been spent"
-    )
-    properties = schema.get("properties", {})
-    assert properties.get("question", {}).get("type") == "string", (
-        f"`question` is advertised as {properties.get('question')!r} and `Question.prompt` is "
-        f"text. A model handed any other type here would send something no view can render"
-    )
-    assert properties.get("options", {}).get("type") == "array", (
-        f"`options` is advertised as {properties.get('options')!r}. Without it a model has no way "
-        f"to offer choices, so every question reaches the workflow as free text and `Choice` "
-        f"components have nothing to render"
-    )
-    assert properties["options"].get("items", {}).get("type") == "string", (
-        f"`options` does not say its items are strings: {properties['options']!r}. An option is "
-        f"the exact text that comes back as the answer, and `_tools.py` drops anything that is not "
-        f"a non-empty string - silently, because by then the turn is already spent"
-    )
-    assert properties.get("allow_free_text", {}).get("type") == "boolean", (
-        f"`allow_free_text` is advertised as {properties.get('allow_free_text')!r}. It is the "
-        f"third of `Question`'s three fields and the only way a model can say it is asking for a "
-        f"choice among the options rather than for an opinion"
-    )
+# There were five tests here and there is one. Four were about the `agl_ask` MCP server AGL used to
+# register on every task on every backend - its advertised schema, a question answered with nobody
+# listening, a blank question refused back into the conversation, and a question handler that raised
+# ending the run - and the fifth was the two-round negotiation below. The server is gone: a question
+# is an ordinary tool a workflow supplies, so its schema is derived from the workflow's own payload
+# class, its blank-question refusal is the workflow's handler's, and a handler that raises is the
+# tool-handler clause pinned above. What could not go with them is the *round-trip* claim, which is
+# about this adapter rather than about questions - so it is kept here, spelled as what it always
+# measured: two `tools/call` exchanges inside one session.
 
 
 @pytest.mark.asyncio
-async def test_two_questions_and_two_answers_inside_one_run(
+async def test_two_tool_calls_and_two_results_inside_one_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The answer is serialised back into the same session, so a negotiation is rounds.
+    """Each result is serialised back into the same session, so a negotiation is rounds.
 
     One `run`, one transport, one session, two `tools/call` round-trips - which is the clause in
-    the smallest form that can hold it. The `Question` handed to the handler is checked field by
-    field, which the contract suite cannot do because it does not know what payload a backend
-    produced.
+    the smallest form that can hold it, and which the contract suite can only see by watching a
+    model choose to call twice. A workflow's asking tool is what this is for: an agent proposes,
+    is answered, revises, and is answered again, all inside the session that holds the reasoning
+    behind the proposal.
+
+    The payloads differ and the answers differ, because an adapter that carried one exchange and
+    replayed its result into the second would satisfy a single token.
     """
     repo = workspace(tmp_path)
-    asked: list[Question] = []
+    asked: list[Mapping[str, JsonValue]] = []
 
-    async def answer(question: Question) -> Answer:
-        asked.append(question)
-        return Answer(text=f"answer-{len(asked)}")
+    async def handler(payload: Mapping[str, JsonValue]) -> ToolResult:
+        asked.append(payload)
+        return ToolResult(text=f"answer-{len(asked)}")
+
+    declared = Tool(
+        name="ask_the_operator",
+        description="Ask the person running this task, and wait for their answer.",
+        payload_schema={
+            "type": "object",
+            "properties": {"question": {"type": "string"}},
+            "required": ["question"],
+        },
+        handler=handler,
+    )
 
     async def play(cli: Scripted) -> None:
         await cli.say(init(repo))
-        first = await cli.call(
-            "agl_ask",
-            "ask",
-            {"question": "Which path?", "options": ["left", "right"], "allow_free_text": False},
-        )
+        first = await cli.call("agl", declared.name, {"question": "Which path?"})
         assert first["content"][0]["text"] == "answer-1"
-        second = await cli.call("agl_ask", "ask", {"question": "And after that?"})
+        second = await cli.call("agl", declared.name, {"question": "And after that?"})
         assert second["content"][0]["text"] == "answer-2"
         await cli.say(ends(result="answer-1 answer-2", terminal_reason="completed"))
 
-    outcome = await offline(play, task_in(repo), monkeypatch, on_question=answer)
+    outcome = await offline(play, task_in(repo, tools=(declared,)), monkeypatch)
 
-    assert [question.prompt for question in asked] == ["Which path?", "And after that?"]
-    assert asked[0].options == ("left", "right") and asked[0].allow_free_text is False
-    assert asked[1].options == () and asked[1].allow_free_text is True, (
-        "a question with no choices in it leaves free text allowed, which is the port's own "
-        "instruction and the difference between an open question and one nobody could answer"
-    )
+    assert [payload["question"] for payload in asked] == ["Which path?", "And after that?"]
     assert outcome.text == "answer-1 answer-2"
-
-
-@pytest.mark.asyncio
-async def test_a_question_with_no_handler_is_answered_at_once_and_never_waits(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The port's second edge case, seen from inside: the tool answers rather than blocking.
-
-    The contract suite asserts this from outside, through a deadline, and a deadline cannot tell a
-    run that answered quickly from one that answered at all. Here the tool result itself is read:
-    it says no answer is available, in words, and it is not an error - nothing went wrong.
-    """
-    repo = workspace(tmp_path)
-
-    async def play(cli: Scripted) -> None:
-        await cli.say(init(repo))
-        answered = await asyncio.wait_for(
-            cli.call("agl_ask", "ask", {"question": "Which path?"}), timeout=10
-        )
-        assert answered["isError"] is False, "nobody listening is not a failure"
-        assert "No answer is available" in answered["content"][0]["text"]
-        await cli.say(ends(result="done", terminal_reason="completed"))
-
-    outcome = await offline(play, task_in(repo), monkeypatch)
-    assert outcome.text == "done"
-
-
-@pytest.mark.asyncio
-async def test_a_question_asking_nothing_is_refused_back_into_the_conversation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """`Question` refuses an empty prompt, so the model is told rather than the run being killed.
-
-    The reject-back-to-the-agent mechanism applied to the adapter's own tool: there is a session
-    in flight holding the reasoning that produced the call, and the cheap fix is for the model to
-    ask again properly.
-    """
-    repo = workspace(tmp_path)
-    asked: list[Question] = []
-
-    async def answer(question: Question) -> Answer:
-        asked.append(question)
-        return Answer(text="never")
-
-    async def play(cli: Scripted) -> None:
-        await cli.say(init(repo))
-        refused = await cli.call("agl_ask", "ask", {"question": "   "})
-        assert refused["isError"] is True
-        assert "asked nothing" in refused["content"][0]["text"]
-        await cli.say(ends(result="done", terminal_reason="completed"))
-
-    await offline(play, task_in(repo), monkeypatch, on_question=answer)
-    assert asked == [], "a question with no prompt reached the handler, and no view could show it"
-
-
-@pytest.mark.asyncio
-async def test_a_question_handler_that_raises_ends_the_run_with_its_own_exception(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A headless terminal raising on a view that needs an answer is a real path, not a hypothesis.
-
-    A terminal that cannot take input raises `UpstreamUnavailable` on any `Screen[T]`, and a
-    workflow's handler may raise `Stop`. The SDK turns an exception out of a tool handler into an
-    error result and carries on, which would spend an hour of agent time on a run whose asker has
-    already failed - so it is kept, the model is told an answer is not available so that it does
-    not block either, and the run ends on the exception as soon as the next message arrives.
-    """
-    repo = workspace(tmp_path)
-    refused = UpstreamUnavailable("this terminal cannot take input")
-
-    async def answer(question: Question) -> Answer:
-        raise refused
-
-    async def play(cli: Scripted) -> None:
-        await cli.say(init(repo))
-        told = await cli.call("agl_ask", "ask", {"question": "Which path?"})
-        assert "No answer is available" in told["content"][0]["text"]
-        await cli.say(says("carrying on"))
-        await cli.say(ends(result="done", terminal_reason="completed"))
-
-    with pytest.raises(UpstreamUnavailable) as raised:
-        await offline(play, task_in(repo), monkeypatch, on_question=answer)
-    assert raised.value is refused, (
-        f"the run ended with {raised.value!r} rather than with the handler's own exception, so a "
-        f"workflow's Stop or a headless terminal's refusal would be reported as something else"
-    )
 
 
 @pytest.mark.asyncio
@@ -1928,83 +1795,6 @@ async def test_a_prompt_with_nothing_standing_around_it_is_the_instructions_verb
 
 
 @pytest.mark.asyncio
-async def test_the_prompt_names_the_asking_tool_exactly_when_somebody_can_answer(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The framework supplies the asking tool, and agents are instructed to use it.
-
-    The instructing is the half that lives in `runner.py`. Supplying it is `_tools.py`'s and is
-    asserted above; a tool's own `description` field is what a model reads once it is already
-    considering that tool, so on its own it cannot be what makes the tool considered.
-
-    Both halves here, on one task run twice, because each is the other's control. A run with a
-    handler is told; a run without one is told nothing at all, since the tool is registered either
-    way and an agent that asks with nobody listening spends a turn to be told no answer is
-    available. That second half is also what keeps
-    `test_a_prompt_with_nothing_standing_around_it_is_the_instructions_verbatim` a statement about
-    ordinary tasks rather than about tasks that happen to have no handler.
-
-    The name is checked against the one the session actually advertises and not only against a
-    string in this file. `mcp__<server>__<tool>` is composed from two names `_tools.py` owns, and
-    nothing in `runner.py` would notice either of them being renamed - a prompt naming a tool the
-    model cannot call is worse than a prompt naming none.
-
-    `test_the_composed_request_names_the_asking_tool_when_somebody_can_answer` makes the same pair
-    of assertions one layer out, against what a real CLI actually sent. This one stops at the string
-    `run` handed the SDK, and is the half that runs on a machine with no CLI.
-    """
-    repo = workspace(tmp_path)
-    seen: list[str] = []
-    advertised: set[str] = set()
-
-    async def play(cli: Scripted) -> None:
-        await cli.say(init(repo))
-        advertised.update(f"mcp__agl_ask__{tool['name']}" for tool in await cli.listed("agl_ask"))
-        await cli.say(ends(result="done", terminal_reason="completed"))
-
-    def capture(*, prompt: str, options: ClaudeAgentOptions) -> AsyncIterator[Any]:
-        from claude_agent_sdk import query
-
-        seen.append(prompt)
-        return query(prompt=prompt, options=options, transport=Scripted(play))
-
-    async def answer(question: Question) -> Answer:
-        raise AssertionError("this script never asks; the handler is here to be counted, not run")
-
-    bare = AgentTask(
-        instructions="Work out what to do about the failing build, and do it.",
-        workspace=repo,
-        model=Claude.HAIKU,
-        restrictions=frozenset(),
-        tools=(),
-    )
-    monkeypatch.setattr(_session, "query", capture)
-    await ClaudeCodeRunner().run(bare, on_question=answer)
-    await ClaudeCodeRunner().run(bare)
-    told, untold = seen
-
-    assert ASK_TOOL_NAMED in told, (
-        f"a run carrying a question handler was told nothing about how to ask: {told!r}. The "
-        f"framework supplies the asking tool *and* instructs the agent to use it, and an "
-        f"agent that never learns the tool is there is a workflow whose on_question is never called"
-    )
-    assert ASK_TOOL in advertised, (
-        f"the prompt names {ASK_TOOL} and the session advertises {sorted(advertised)}: the agent "
-        f"was instructed to call a tool that is not registered, which costs it a turn and AGL the "
-        f"answer it was waiting for"
-    )
-    assert told.endswith(bare.instructions), (
-        f"the instructions are no longer last in the composed prompt: {told!r}. Everything AGL "
-        f"adds stands above what the workflow author wrote"
-    )
-    assert ASK_TOOL not in untold and "agl_ask" not in untold, (
-        f"a run with no question handler was told to ask anyway: {untold!r}. Nobody is listening, "
-        f"so the whole of what that turn buys is being told that no answer is available - and this "
-        f"is also what keeps a bare task's prompt the instructions byte for byte"
-    )
-
-
-@pytest.mark.asyncio
 async def test_no_marker_from_the_contract_suites_own_poison_is_in_what_the_agent_is_told(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2055,10 +1845,14 @@ def test_capabilities_are_the_ports_own_members_and_not_equivalent_strings() -> 
     """The suite asserts this too; what it cannot assert is *which* four, and why they are static.
 
     `Capability` is a `StrEnum`, so this is a statement about the members and not about a set that
-    compares equal to them today. The four are all of them: Claude Code edits files, runs a shell,
-    calls tools, and - because this adapter registers an asker of its own rather than depending on
-    the harness's - asks mid-run on every build, which is why `MID_RUN_QUESTIONS` is not conditional
-    on a feature flag that varies between machines.
+    compares equal to them today. The three are all of them: Claude Code edits files, runs a shell
+    and calls tools, on every build and on every machine, so none of the three is conditional on a
+    feature flag.
+
+    There were four while `MID_RUN_QUESTIONS` existed, and this docstring used to argue that one at
+    length - it was unconditional because AGL registered an asker of its own rather than depending
+    on the harness's. The member went when a question became an ordinary tool: what a role needs of
+    a backend in order to ask is `TOOL_CALLING`, which is already here.
     """
     assert asyncio.run(ClaudeCodeRunner().capabilities(Claude.OPUS)) == frozenset(Capability), (
         "this adapter reports every capability the port has a member for, and a member added to "

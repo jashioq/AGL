@@ -146,10 +146,10 @@ class TerminalRegistrationContract:
         something.
 
         What it costs: one `show` call would return an answer nobody gave it. The workflow that made
-        the second call is an agent's `on_question` handler, and it would carry that answer back
-        into a live session and act on it. The port hands the answer to the caller, so every caller
-        needs one of its own - and the alternative reading buys nothing except not showing a person
-        the same sentence twice.
+        the second call is the handler of an agent's asking tool, and it would carry that answer
+        back into a live session and act on it. The port hands the answer to the caller, so every
+        caller needs one of its own - and the alternative reading buys nothing except not showing a
+        person the same sentence twice.
 
         `pending` is the first witness and the second `show` call is the decisive one. One entry
         waiting behind the displayed screen means two registrations exist; a `two` that resolves off

@@ -1,27 +1,18 @@
 
-from agl.sdk import (
-    Capability,
-    Claude,
-    OpenAI,
-    QuestionHandler,
-    Restriction,
-    Role,
-    prompt_file,
-    role,
-)
+from agl.sdk import Capability, Claude, OpenAI, Restriction, Role, Tool, prompt_file, role
 from agl.workflows.fix.findings import Findings, report_findings
 
 __all__ = ["implementer", "reviewer"]
 
 
 @role(model=Claude.OPUS)
-def implementer(*, on_question: QuestionHandler | None = None) -> Role:
+def implementer(*, ask: Tool | None = None) -> Role:
     return Role(
         name="implement",
         instructions=prompt_file("prompts/implement.md"),
         restrictions={Restriction.NO_VCS_WRITES},
-        requires={Capability.FILE_EDIT, Capability.SHELL, Capability.MID_RUN_QUESTIONS},
-        on_question=on_question,
+        tools=() if ask is None else (ask,),
+        requires={Capability.FILE_EDIT, Capability.SHELL},
     )
 
 

@@ -5,7 +5,7 @@ half is every value this package declares, asserted by importing it; the second 
 whole workflow* down - runs `fix` on an all-fakes bundle, interrupts it at every step boundary,
 resumes it and asserts the final state is the one an uninterrupted run leaves. The three `commit=`
 decisions, the branch over `findings.high()`, the `request=` input, the two `show` calls and the
-`implementer(on_question=…)` that gives the implementer a handler are reachable *only* from the
+`implementer(ask=…)` that gives the implementer somewhere to ask are reachable *only* from the
 second half: they are arguments to calls, and nothing imports an argument.
 
 The three things worth pinning in the first half, in the order this package's own docstrings argue
@@ -86,21 +86,42 @@ alone, `Terminal` being on the front door. `tests/sdk/test_run_terminal.py::_Rec
 object for the same reason one layer down.
 
 **A question can now be answered, and both endings are worth pinning.** There was once a gap - AGL
-shipped no input-capable `Terminal` an external author could drive, so a workflow's `on_question`
-handler could be driven to the *refusal* and not to an answer - and it was closed by
+shipped no input-capable `Terminal` an external author could drive, so this workflow's asking path
+could be driven to the *refusal* and not to an answer - and it was closed by
 `testing.answering([...])`, a third `Terminal` that runs `tests/contracts/terminal.py`'s
 input-capable half. So there are two tests down there and neither replaces the other. The refusal
 is still exactly what an unattended run does and is sharper than it sounds: `UpstreamUnavailable`
 naming `agent_question` says that the implementer's question reached this workflow's own screen
-through this workflow's own handler, and a run that completes instead says the handler was never on
-the role. The answer is the other half, and it is the one this workflow could not have before: a
-scripted gesture comes back through `views.agent_question`'s own `Choice`, into `answer`, into the
-live agent session, and the run goes on to record its steps.
+through this workflow's own tool handler, and a run that completes instead says the tool was never
+on the role. The answer is the other half: a scripted gesture comes back through
+`views.agent_question`'s own `TextInput`, into the handler, into the live agent session, and the run
+goes on to record its steps.
+
+## The asking tool is this package's, and the whole of it is here
+
+`fix` used to hand `run.step` an `implementer(on_question=answer)` and the framework registered an
+asking tool on every task on every backend, mapping its payload into a `Question` in two adapters
+that carried one copy of that vocabulary each. Both copies are gone and neither folded into `sdk/`:
+one workflow wanted it, and `ARCHITECTURE.md`'s rule for `sdk/` is "something belongs here when two
+workflows would otherwise write it themselves". So `workflows/fix/asking.py` writes it once - a
+payload dataclass with `describe()`d fields, from which `tool()` derives the schema, and a handler
+that shows `views.agent_question` on `run.terminal`.
+
+Three things that handler owes, all three of which the deleted framework tool did and all three of
+which are worse to get wrong now: **a blank question**, which `Question.__post_init__` refuses and
+which would therefore kill the step, since an exception out of a tool handler ends the run;
+**`options=[]` with `allow_free_text=False`**, which `Question` refuses too and which is normalised
+rather than rejected because a model that offered no choices has said nothing wrong; and **an empty
+answer**, which `fix` sends back as `SAID_NOTHING` rather than as `""` - a tool result that is the
+empty string is a model told nothing at all, where "the person had no preference, use your own
+judgement" is what actually happened and is something it can act on. All three have a test of their
+own in the first half of this file, driven through the handler rather than through a run, because
+each is a claim about one function.
 """
 
 import json
 import sys
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
@@ -128,9 +149,11 @@ from agl.sdk import (
     Claude,
     InputError,
     InternalError,
+    JsonValue,
     OpenAI,
     Question,
     Restriction,
+    Role,
     RoleFactory,
     Row,
     Rows,
@@ -139,6 +162,8 @@ from agl.sdk import (
     Terminal,
     Text,
     TextInput,
+    Tool,
+    ToolResult,
     UpstreamUnavailable,
 )
 from agl.sdk import params as sdk_params
@@ -147,8 +172,9 @@ from agl.sdk import params as sdk_params
 # test that uses it: `high()`'s docstring claims a tuple of this package's dataclasses survives the
 # fingerprint, and a workflow author has no supported way to check that claim. A *test* may reach
 # here - `tests/sdk/` does throughout - and the workflow itself may not, and does not.
-from agl.sdk._engine.journal import canonical_json
+from agl.sdk._engine.journal import base_of, canonical_json
 from agl.workflows.fix import FixParams, fix, views
+from agl.workflows.fix.asking import ASK, NO_QUESTION, SAID_NOTHING, asking
 from agl.workflows.fix.findings import HIGH, SEVERITIES, Finding, Findings, report_findings
 from agl.workflows.fix.roles import implementer, reviewer
 from agl.workflows.fix.views.question import FREE_TEXT
@@ -289,7 +315,12 @@ def test_the_two_roles_name_two_providers_and_no_vendor_syntax() -> None:
 def test_the_reviewer_reports_through_one_tool_and_the_implementer_through_none() -> None:
     """What makes `review` a reporting step and `implement` an effect step - and therefore what
     makes `run.step(reviewer())` hand back a `Findings` where the other two hand back
-    `None`."""
+    `None`.
+
+    `implementer()` is the *declared* role and carries no tool at all; what `fix` steps with carries
+    one, and it is not a reporting tool - so the implement step's result is `None` either way. The
+    section below is where the difference between the two is measured, digest included.
+    """
     assert reviewer().tools == (report_findings,)
     assert implementer().tools == ()
     assert report_findings.payload is Findings
@@ -300,20 +331,16 @@ def test_each_role_requires_what_its_prompt_actually_asks_of_a_backend() -> None
     the containment left at `run.step` and nowhere earlier, a `requires` being on a `Role` and
     unreachable without calling the factory preflight may not call. So an over-declaration refuses
     a backend that would have worked, and an under-declaration is a run that dies later than it
-    needed to, or - when the member left out is `MID_RUN_QUESTIONS` and `sdk/roles.py` had no
-    `on_question` to fold it in from - does not die at all.
+    needed to.
 
-    `MID_RUN_QUESTIONS` is on the implementer and not on the reviewer, and neither half is
-    incidental: the implementer is the role the workflow hands a handler to, and the reviewer is
-    the one running on the backend with no second asking mechanism, where declaring a handler is
-    the case preflight's third check exists to refuse.
+    **The declared implementer requires two members and the one `fix` steps with requires three.**
+    `TOOL_CALLING` is not typed anywhere in `roles.py`: `Role.__post_init__` folds it in from
+    `tools`, and `tools` is empty until the workflow hands the factory its asking tool. That is the
+    same fold that used to carry `MID_RUN_QUESTIONS` behind `on_question`, at the same line, and the
+    next test is where the two values are compared.
     """
-    assert implementer().requires == frozenset(
-        {Capability.FILE_EDIT, Capability.SHELL, Capability.MID_RUN_QUESTIONS}
-    )
+    assert implementer().requires == frozenset({Capability.FILE_EDIT, Capability.SHELL})
     assert reviewer().requires == frozenset({Capability.SHELL, Capability.TOOL_CALLING})
-    assert reviewer().on_question is None
-    assert implementer().on_question is None
 
 
 def test_both_roles_hold_their_prompt_text_and_not_a_path_to_it() -> None:
@@ -331,6 +358,33 @@ def test_the_review_prompt_names_the_commit_message_the_workflow_writes() -> Non
     stops agreeing with the prompt that tells the reviewer which commit to read. This is what
     notices."""
     assert "implement fix" in reviewer().instructions
+
+
+def test_the_implement_prompt_names_the_asking_tool_this_package_supplies() -> None:
+    """The second coupling of that shape, and it went wrong once already.
+
+    AGL used to append a paragraph naming its own asking tool to every task whose role carried a
+    question handler, and the measurement that paragraph existed because of was taken live: without
+    it the tool's name occurred **exactly once** in a 140 KB request - inside the tool's own
+    definition - and running the same task with a handler supplied produced a byte-identical
+    prompt. The framework registered a tool and instructed nobody, so a workflow's handler would be
+    reached only if a model went looking through its tool list for something it had never been told
+    was there.
+
+    That paragraph went when the mechanism did and nothing followed it into this package: the
+    sibling prompt names `report_findings` and argues for it at length, and `implement.md` said
+    nothing about asking at all - the same silence, now one layer down and against a tool this
+    workflow supplies itself. Against the fakes it makes no difference, because a scripted agent
+    calls whatever it was written to call; a live model reads the prompt.
+
+    Asserted through `ASK` rather than against the literal name, so renaming the tool fails here
+    rather than leaving the prompt naming a tool no session declares. Nothing else couples the two:
+    `roles.py` hands `Role` the prompt file and the tool as separate arguments, and neither reads
+    the other. Read off the declared role, whose `instructions` are this prompt whether or not the
+    tool was passed - that the equipped role really declares a tool under this name is the section
+    further down, and the two together are the whole coupling.
+    """
+    assert ASK in implementer().instructions
 
 
 def test_the_review_prompt_promises_no_inputs_block_because_the_step_passes_none() -> None:
@@ -357,7 +411,17 @@ def test_the_request_is_a_required_named_flag_and_there_are_no_positionals() -> 
 def test_the_workflow_declares_its_params_and_its_version_and_no_roles_at_all() -> None:
     """What `@workflow` hands the framework: nothing about roles, no name at all - `fix` is what
     `pyproject.toml`'s entry point calls this workflow, and the decorator holds no second copy of
-    that - and `version="1.1"` and the function.
+    that - and `version="2"` and the function.
+
+    **The version moved from `1.1` and it is asserted here because that is the only place it can
+    be.** `api.resume` compares the installed version against the one stamped in `run.json` and
+    refuses a mismatch rather than migrating, which is the whole of what the number does. `fix`'s
+    implementer gained a tool, `tools` is a fingerprint term, so the implement step's digest moved
+    and the review step's with it - the head it starts from is a term too. Everything after a
+    resume that missed would have been re-bought silently; the bump turns that into a refusal that
+    names the mismatch. `ARCHITECTURE.md`'s "Bump `@workflow(version=…)` when a workflow's shape
+    changes" is the rule, and `test_the_declared_implementer_requires_less_than_the_asking_one_and
+    _says_so` above is where the digest moving is measured rather than asserted.
 
     `fix.params` is still `FixParams` and the assertion below did not move, but what it asserts did:
     the class is now read off `async def fix(run: Run[FixParams])` rather than off a second copy of
@@ -371,7 +435,7 @@ def test_the_workflow_declares_its_params_and_its_version_and_no_roles_at_all() 
     importing `reviewer` beside its workflow would start passing preflight on a machine with no
     Codex CLI and then die at the review step, which is exactly what preflight exists to
     prevent."""
-    assert fix.version == "1.1"
+    assert fix.version == "2"
     assert fix.params is FixParams
     bound = {
         name: found.model
@@ -607,34 +671,246 @@ def test_the_question_this_screen_could_not_answer_cannot_be_built(tmp_path: Pat
         Question(prompt="Pick one.", options=(), allow_free_text=False)
 
 
+# --- the asking tool this package writes for itself -------------------------------------------
+
+
+class _Refusing(Terminal):
+    """A `Terminal` whose `show` is a tripwire. Not a conforming implementation and claims to be
+    none: `tests/contracts/terminal.py` is what says how a `Terminal` behaves."""
+
+    async def show[T](
+        self,
+        view: Callable[..., Screen[T]],
+        /,
+        *,
+        priority: int = 0,
+        **params: object,
+    ) -> T:
+        raise AssertionError(
+            f"a screen was shown for {params!r}, and this payload never reaches one"
+        )
+
+    @property
+    def pending(self) -> Mapping[int, int]:
+        return {}
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_a_blank_question_comes_back_as_a_rejection_and_not_as_a_dead_step() -> None:
+    """The correction the framework's own asking tool used to make, owed by this one now.
+
+    `Question.__post_init__` raises on an empty prompt, and an exception out of a tool handler
+    **ends the run** - so a model that called this tool with nothing in it would kill the step over
+    a mistake it could have fixed in one more turn. `ToolResult(rejected=True)` is the channel for
+    exactly that, and it is what the deleted `_NO_QUESTION` said.
+
+    Whitespace and not `""`, because `"   ".strip()` is the interesting case: a model that sent a
+    blank line has sent something, and a guard written as `if not asked.question` would let it
+    through to a `Question` that refuses it.
+    """
+    refused = await _handler()({"question": "   "})
+
+    assert refused.rejected is True
+    assert refused.text == NO_QUESTION
+
+
+@pytest.mark.asyncio
+async def test_no_options_and_no_free_text_is_normalised_rather_than_left_to_raise() -> None:
+    """`Question` refuses that pair too, and this handler must not be what discovers it.
+
+    A model that offers no choices and then says free text is unacceptable has asked a question
+    nobody could answer - `ports/questions.py` refuses to construct one - and the deleted
+    `_question()` normalised it rather than rejecting it, on the ground that a payload with no
+    choices in it has said nothing wrong. This one does the same, at the same place, and the
+    tripwire terminal is what says the normalisation happened *before* a screen was reached: a
+    handler that let the pair through would raise `InternalError` out of `Question` instead.
+
+    An empty option string is the same shape one field over - `Question` refuses one of those too,
+    an empty option being unpickable in any view - so it is dropped rather than passed on.
+    """
+    shown: list[Question] = []
+    handler = _handler(shown, answers=["rename", "rename"])
+
+    await handler({"question": "Which?", "options": [], "allow_free_text": False})
+    await handler({"question": "Which?", "options": ["rename", ""], "allow_free_text": False})
+
+    assert [(one.options, one.allow_free_text) for one in shown] == [
+        ((), True),
+        (("rename",), False),
+    ], (
+        f"the handler built {shown!r}. A payload with nothing to choose between leaves free text "
+        f"allowed, which is what makes it answerable; a payload that does offer choices keeps the "
+        f"model's own `allow_free_text`, and an empty option is dropped rather than shown"
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_answer_of_nothing_at_all_is_reported_as_no_preference() -> None:
+    """What `fix` does with an empty answer, and why it is not the empty string.
+
+    A person can dismiss `views.agent_question`'s free-text field having typed nothing, and the
+    `Answer` that comes back carries `""`. Handing that to the model as the tool's result is
+    handing it a call that produced no information and no reason - a model reads an empty result as
+    a tool that did not work. What actually happened is that the person had no preference, so that
+    is what is said, and the sentence tells the agent to use its own judgement and carry on. It is
+    the deleted `_SAID_NOTHING`, kept because the situation it is about did not go anywhere.
+    """
+    assert (await _handler(answers=[""])({"question": "Which?"})).text == SAID_NOTHING
+    assert (await _handler(answers=["rename it"])({"question": "Which?"})).text == "rename it"
+
+
+def _handler(
+    shown: list[Question] | None = None, *, answers: Sequence[str] | None = None
+) -> Callable[[Mapping[str, JsonValue]], Awaitable[ToolResult]]:
+    """`fix`'s asking tool, over a terminal that records what it was shown and answers from a list.
+
+    The tool itself is built by `asking(...)`, which is the shipped function - what varies is only
+    the `Terminal` its handler closes over, which is the seam a workflow's own tool has by
+    construction. With no `answers` the terminal refuses to be reached at all, which is how the two
+    payload tests say that their payload never gets as far as a screen.
+    """
+    terminal: Terminal = _Refusing() if answers is None else _Answering(shown, answers)
+    return asking(terminal).handler
+
+
+class _Answering(Terminal):
+    """A `Terminal` that records the `Question` it was handed and answers from a list.
+
+    One test's instrument and no conforming implementation - `_Watching` further down says the same
+    of itself, and `tests/contracts/terminal.py` is where a `Terminal`'s behaviour is settled.
+    """
+
+    def __init__(self, shown: list[Question] | None, answers: Sequence[str]) -> None:
+        self._shown = shown
+        self._answers = list(answers)
+
+    async def show[T](
+        self,
+        view: Callable[..., Screen[T]],
+        /,
+        *,
+        priority: int = 0,
+        **params: object,
+    ) -> T:
+        question = params["question"]
+        assert isinstance(question, Question)
+        if self._shown is not None:
+            self._shown.append(question)
+        return cast("T", Answer(self._answers.pop(0) if self._answers else ""))
+
+    @property
+    def pending(self) -> Mapping[int, int]:
+        return {}
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        return None
+
+
+def test_the_asking_tools_schema_is_derived_from_its_own_payload_class() -> None:
+    """What the model reads, and it is `describe()`'s output rather than a hand-written dict.
+
+    The two adapters carried a hand-written ask schema each - the same one, twice - and both went.
+    What replaces them is `Asked`, whose fields carry their descriptions in metadata and out of
+    which `sdk/tools.py` derives this. So the vocabulary is written once, in the package that wants
+    it, and the derivation is what puts it on the wire: a field this workflow adds is advertised
+    without anybody editing a schema, and `question` is required because it has no default.
+
+    `title` is asserted because it is how the payload *type* reaches the fingerprint -
+    `ARCHITECTURE.md`'s "A payload class's identity travels only inside its schema's `title`" - and
+    the implement step's digest now moves with this class's module and name.
+    """
+    schema = dict(asking(_Refusing()).payload_schema)
+    properties = schema["properties"]
+
+    assert isinstance(properties, dict)
+    assert schema["required"] == ["question"]
+    assert schema["title"] == "agl.workflows.fix.asking.Asked"
+    assert sorted(properties) == ["allow_free_text", "options", "question"]
+    for name, spec in properties.items():
+        assert isinstance(spec, dict) and str(spec.get("description", "")).strip(), (
+            f"`{name}` reaches the model with no description. A description is what a model reads "
+            f"beside a field name to know what belongs in it, and `describe()` is what puts one "
+            f"there - a field that lost its call is invisible to a reader of the schema"
+        )
+
+
 # --- what preflight sees before anything is written -------------------------------------------
 
 
-def test_the_declared_implementer_requires_what_the_negotiating_one_will(tmp_path: Path) -> None:
-    """The factory is the whole override surface, and this is what says a call site cannot shrink
-    what the role requires.
+def test_the_declared_implementer_requires_less_than_the_asking_one_and_says_so() -> None:
+    """The factory is the whole override surface, and this is what a call site can add to it.
 
-    `fix` hands `run.step` an `implementer(on_question=answer)`, and `sdk/roles.py` folds
-    `MID_RUN_QUESTIONS` into that role's `requires` as it is built - so the role that runs needs a
-    backend able to ask whether or not `roles.py` says so. `roles.py` says so anyway, and since
-    that is no longer about *when* the refusal lands: preflight reads models off factories and
-    never a `requires`, so containment happens at the first `run.step` either way.
+    **This comparison used to run the other way and the change is the deliverable.** `fix` handed
+    `run.step` an `implementer(on_question=answer)`; `on_question` was not a fingerprint term, and
+    `MID_RUN_QUESTIONS` was folded into `requires` behind it, so the two roles' `requires` were
+    *equal* and this test asserted that they were - the point being that a call site could not
+    shrink what a role demands.
 
-    What the declaration buys is that the two values agree. A factory's parameter list is the whole
-    of the override surface, which is only worth reading if what it exposes cannot change what the
-    role demands - and `on_question` is the one knob `implementer` exposes. This comparison is that
-    property measured rather than trusted: `implementer()` is what a reader of `roles.py` sees,
-    `implementer(on_question=…)` is what the workflow runs, and if the declared set were ever the
-    smaller one, the requirement a reader could find would be weaker than the one a run is refused
-    on. The implication runs one way - `sdk/roles.py` folds members in and never out
-    - so this can only break by somebody editing the `requires=` line, which is exactly the edit it
-    is here to catch.
+    A question is an ordinary tool now, so what `fix` hands the factory is a `Tool`, and `tools`
+    **is** a fingerprint term where `on_question` was not. Two things follow and both are asserted:
+    the requirement a reader of `roles.py` can find is the *smaller* set, because `TOOL_CALLING`
+    arrives with the tool and not with the declaration; and the digest of the step moves, so every
+    entry recorded against the toolless implementer misses on a resume. That second one is why
+    `@workflow(version=…)` went from `1.1` to `2` - `ARCHITECTURE.md`'s "Bump when a workflow's
+    shape changes" - and `tests/sdk/test_roles.py` is where the fold and the term are separated
+    from each other.
+
+    The implication still runs one way: `sdk/roles.py` folds members in and never out, so the
+    asking role can only ever require more.
     """
+    equipped = implementer(ask=asking(_Refusing()))
 
-    async def answer(question: Question) -> Answer:
-        return Answer(question.prompt)
+    assert implementer().requires < equipped.requires
+    assert equipped.requires == implementer().requires | {Capability.TOOL_CALLING}
+    assert _digest(equipped) != _digest(implementer()), (
+        "giving the implementer somewhere to ask left the implement step's digest where it was. "
+        "`tools` is a term of `base_of` and `on_question` was not, so this is the difference the "
+        "version bump exists for - without it, an entry recorded under the toolless role would "
+        "replay for a role that can now consult a person"
+    )
 
-    assert implementer(on_question=answer).requires == implementer().requires
+
+def _digest(role: Role[None]) -> str:
+    """What `run.step` would address this role's entry by, over fixed inputs and a fixed head.
+
+    `base_of` is `_engine`'s, and this is the second reach past the front door in this file - see
+    the import at the top for the first. A workflow author has no supported way to compute a digest
+    and should not: the claim being made is about the *framework's* fingerprint, and a test that
+    recomputed one of its own would agree with itself. The inputs and the head are constants because
+    what is being compared is the role term and nothing else.
+    """
+    return base_of(
+        instructions=role.instructions,
+        model=role.model,
+        restrictions=role.restrictions,
+        tools=tuple(declared for declared in role.tools if isinstance(declared, Tool)),
+        inputs={"request": REQUEST},
+        head=_HEAD,
+    )
+
+
+_HEAD: Final = "4a91c07f2b3e8d15c6a0b7f31d92e8054c6a0f13"
+"""A head to fingerprint against. Any constant would do - it is a term of every digest here and the
+same one in both, so it cancels."""
 
 
 # --- driving the whole workflow on fakes ------------------------------------------------------
@@ -743,14 +1019,16 @@ def _agent(seen: list[testing.AgentTask], *, found: Sequence[Finding]) -> testin
     under a fixed heading, where `'"findings":'` is a key. The prompt's prose spells the same word
     in backticks and never with the quotes and colon a JSON key has, so the two cannot collide.
 
-    **It asks nothing.** The harness builds a `HeadlessTerminal`, `fix` routes its implementer's
-    questions to an interactive screen, and that pairing is a refusal - correctly, and it is what
+    **It asks nothing.** The harness builds a `HeadlessTerminal`, `fix`'s asking tool routes what
+    it is sent to an interactive screen, and that pairing is a refusal - correctly, and it is what
     `test_the_implementers_question_reaches_this_workflows_own_screen` drives on purpose with an
-    agent of its own. An agent used to assert anything else has to be explicit and has to not ask.
+    agent of its own. An agent used to assert anything else has to be explicit and has to not ask,
+    which is now also visible in what it does *not* call: `ASK` is on `task.tools` for both
+    implement steps and this agent never names it.
 
     `seen` is the instrument, and the agent fakes say outright that this is where a test's
     knowledge belongs: there is no recorder on either of them, because "what a test wants to know is
-    already held by the tool handlers and question handler it supplied itself"
+    already held by the tool handlers it supplied itself"
     (`adapters/claude_code/fake.py`, and `adapters/openai/fake.py` word for word). Every claim below
     about *what an agent was asked* - the composed prompt, the model, the provider, how many times
     it was paid for - is read out of this list.
@@ -1350,34 +1628,39 @@ async def test_the_board_goes_up_once_with_the_run_and_the_request_on_it(tmp_pat
 
 @pytest.mark.asyncio
 async def test_the_implementers_question_reaches_this_workflows_own_screen(tmp_path: Path) -> None:
-    """The `on_question` callback on the Role, driven to the one ending a shipped terminal makes.
+    """This package's asking tool, driven to the one ending a shipped terminal makes.
 
-    The agent asks; `fix`'s `answer` closure puts the question on `views.agent_question`; the
-    headless terminal refuses it because a screen carrying responses needs somebody to answer it and
-    there is nobody. The refusal names the view, and that is what makes this a test of *this
-    workflow* rather than of the terminal: the string `agent_question` is in the message because the
-    handler in `fix`'s own body chose that view for that question.
+    The agent calls `ask_the_operator`; `asking(run.terminal)`'s handler puts what it sent on
+    `views.agent_question`; the headless terminal refuses it because a screen carrying responses
+    needs somebody to answer it and there is nobody. The refusal names the view, and that is what
+    makes this a test of *this workflow* rather than of the terminal: the string `agent_question` is
+    in the message because the handler in `fix`'s own package chose that view for that payload.
 
-    **Three of the workflow's decisions are in this one refusal**, and each fails differently:
-    a handler routing to the board raises from the view's own signature instead; a workflow handing
-    `run.step` a plain `implementer()` rather than `implementer(on_question=answer)` passes no
-    handler at all, and both fakes then answer the agent "nobody is listening" and let it
-    carry on - so the run *completes*, the approval gate silently absent, which is the outcome
-    `sdk/roles.py` spends four paragraphs refusing.
+    **Two of the workflow's decisions are in this one refusal**, and each fails differently: a
+    handler routing to the board raises from the view's own signature instead; and a workflow
+    handing `run.step` a plain `implementer()` rather than `implementer(ask=…)` declares no such
+    tool at all, so both fakes refuse the call by name and this test fails on an `InputError`
+    naming the tool rather than on the view.
 
-    **This is the unattended ending and it is still the real one**, which is why it was kept after
-    a terminal that can answer arrived: `container.fakes()` builds a `HeadlessTerminal` because a
-    run with nobody at it is what `agl run` in a cron job is, and there are no timeouts anywhere,
-    so refusing is the only honest thing left. `harness.recorded` being empty is the statement of
-    where that run stopped - a step that raised writes no entry, so the implement step is
-    unrecorded, the branch is at its base, and `agl resume` starts it again attended. The test
-    below is the attended half.
+    **The refusal reaches out of the run rather than being absorbed**, and that is the mechanism
+    this deliverable rests on: an exception out of a tool handler ends the run with its own
+    exception, so an approval gate that cannot be answered stops the step instead of leaving the
+    agent to approve itself. `tests/contracts/agent.py` holds every backend to it.
+
+    **This is the unattended ending and it is still the real one**: `container.fakes()` builds a
+    `HeadlessTerminal` because a run with nobody at it is what `agl run` in a cron job is, and there
+    are no timeouts anywhere, so refusing is the only honest thing left. `harness.recorded` being
+    empty is the statement of where that run stopped - a step that raised writes no entry, so the
+    implement step is unrecorded, the branch is at its base, and `agl resume` starts it again
+    attended. The test below is the attended half.
     """
 
-    def asking(task: testing.AgentTask) -> testing.Reply:
-        return testing.Reply(asks=[Question(prompt="Rename the helper, or leave it?")])
+    def stops_to_ask(task: testing.AgentTask) -> testing.Reply:
+        return testing.Reply(
+            calls=[testing.Call(ASK, {"question": "Rename the helper, or leave it?"})]
+        )
 
-    harness = testing.harness(tmp_path, agent=asking, files=SEED)
+    harness = testing.harness(tmp_path, agent=stops_to_ask, files=SEED)
 
     with pytest.raises(UpstreamUnavailable, match="agent_question"):
         await harness.run(fix, "-r", REQUEST)
@@ -1385,11 +1668,17 @@ async def test_the_implementers_question_reaches_this_workflows_own_screen(tmp_p
     assert harness.recorded == (), "a step that died on an unanswerable question left an entry"
 
 
-ASKED: Final = Question(
-    prompt="Rename the helper, or leave it?", options=("rename", "leave")
-)
-"""What the implementer stops to ask. Two options and free text allowed, which is the ordinary
-shape and the one `views.agent_question` renders as two `Choice`s and a field after them."""
+ASKED: Final[Mapping[str, JsonValue]] = {
+    "question": "Rename the helper, or leave it?",
+    "options": ["rename", "leave"],
+}
+"""What the implementer stops to ask, as the JSON a model sends to this package's asking tool.
+
+Two options and free text allowed - `allow_free_text` is left out, and `Asked` defaults it to true -
+which is the ordinary shape and the one `views.agent_question` renders as two `Choice`s and a field
+after them. Written as a mapping rather than as an `Asked`, for `_payload`'s reason one section up:
+what a session carries is JSON, and a call carrying an already-built payload would be testing a
+conversion no session performs."""
 
 TYPED: Final = "three, and log the last error"
 """What the person types into that field rather than picking either option - which is why the
@@ -1420,7 +1709,7 @@ def _asking_agent(
             return testing.Reply(calls=[_payload(())], says="reviewed it")
         behind.append(term.slot())
         _wrote(task, CHANGED, IMPLEMENTED)
-        return testing.Reply(asks=[ASKED], says="implemented it")
+        return testing.Reply(calls=[testing.Call(ASK, ASKED)], says="implemented it")
 
     return agent
 
@@ -1433,10 +1722,10 @@ async def test_a_person_answers_the_implementers_question_and_the_run_carries_on
 
     There was a gap - AGL shipped no input-capable `Terminal` an external author could drive
     - and `testing.answering([...])` closed it with a third conforming implementation. So the whole
-    path is drivable now: the agent stops to ask, `fix`'s `answer` closure puts the question on
-    `views.agent_question`, a person picks something, the `Answer` goes back into the same live
-    session, and the run goes on to record its steps. Every one of those is a decision this package
-    made, and the one previously asserted only as far as the refusal.
+    path is drivable now: the agent calls this package's asking tool, its handler puts the question
+    on `views.agent_question`, a person picks something, the answer goes back into the same live
+    session as that tool's result, and the run goes on to record its steps. Every one of those is a
+    decision this package made, and the one previously asserted only as far as the refusal.
 
     **The gesture's index is the sharpest assertion here.** `Press(2, ...)` names the third response
     of whatever screen was in front of the terminal, and `views.agent_question` puts the free-text
@@ -1446,10 +1735,9 @@ async def test_a_person_answers_the_implementers_question_and_the_run_carries_on
     this package's `Answer` constructor, so the string a person typed reaches the agent unedited.
 
     **`remaining` is the other direction and it is not decoration.** A workflow that never showed a
-    question - `run.step` handed a plain `implementer()` rather than one built with
-    `on_question=answer` - completes perfectly well, both fakes answering the agent "nobody is
-    listening", and the only trace is a script nobody spent. That is the failure `sdk/roles.py`
-    spends four paragraphs refusing, and here it is one comparison.
+    question - `run.step` handed a plain `implementer()` rather than one built with `ask=…` - leaves
+    the script unspent, and the run this file drives would then either complete having consulted
+    nobody or die on a tool the task never declared. Either way it is one comparison here.
 
     **And the board is up in the slot while all this happens.** The terminal puts a passive screen
     in the slot and keeps writing it under a question, so the agent reads `slot()` on its way past

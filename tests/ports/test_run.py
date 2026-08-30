@@ -277,7 +277,15 @@ def test_the_ref_a_run_starts_from_is_checked_the_way_a_param_is() -> None:
     refnames permit any byte at or above `0x80` - so a repository can genuinely hold the ref, git
     resolves it, and the surrogate rides into the record. A surrogate outside that range cannot
     come off a command line at all: `os.fsencode` refuses it, and the subprocess never starts.
-    `resolve` runs *before* `RunSpec` is built, so nothing upstream of this line refuses it either.
+
+    **What "never starts" used to mean was a traceback**, which is why `api.run` now checks the ref
+    it was handed before it resolves one. `base_sha=await services.history.resolve(ref)` is written
+    as an argument to `RunSpec(...)`, and a constructor's arguments are evaluated before its body -
+    so this check sat *behind* the git call rather than in front of it, and an out-of-range
+    surrogate reached `create_subprocess_exec` first and came back as a bare `UnicodeEncodeError`.
+    Not from a command line, but `api.run` takes `base_ref=` from Python and `src/agl/testing.py`
+    passes one through. That ordering is `tests/test_api.py`'s claim, `adapters/git/_runner.py` is
+    where the encode failure is now translated, and this line is what both of them call.
 
     **`workflow` and `workflow_version` are deliberately not checked, and this is where that is
     written down** so it is not re-proposed as an oversight. `workflow` is whatever
@@ -426,9 +434,16 @@ def test_there_is_no_run_status() -> None:
     """`ARCHITECTURE.md`'s "Deliberately not built" refuses one by name, and the module docstring
     argues the absence out. Pinned as a test rather than left to prose because an empty enum is the
     easy thing to add here, and adding it is one field away from storing it in `run.json` - a
-    second source of truth that nothing updates."""
+    second source of truth that nothing updates.
+
+    **`checked_text` is on that list and is not a type.** It is the surrogate rule this module
+    already applies to `base_ref`, made callable so that `api.run` can apply it to the *same value*
+    before handing it to `History.resolve` - a constructor's arguments are all evaluated before its
+    body, so the check in `__post_init__` sat behind the git call it was written to precede. One
+    implementation with two call sites rather than a second spelling of the rule in `api.py`, which
+    is the copy that would be free to be wrong. `tests/test_api.py` holds the ordering claim."""
     assert not hasattr(run, "RunStatus")
-    assert run.__all__ == ["JsonValue", "RunSpec"]
+    assert run.__all__ == ["JsonValue", "RunSpec", "checked_text"]
     assert "status" not in run._WIRE_KEYS
 
 

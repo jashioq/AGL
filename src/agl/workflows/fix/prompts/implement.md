@@ -42,6 +42,36 @@ you are working in is what you run between edits.
    message, because a green gate that was made green by editing the gate is worse than a red one.
 5. **Stop when the gates are green.** Leave your edits in the working tree exactly as they are.
 
+## How to ask instead of guessing
+
+There is a person running this task and you can put a question to them: call the tool
+`ask_the_operator`. Their answer comes back as that tool's result, in this same session, and you
+carry on from where you stopped.
+
+Use it when a decision is genuinely theirs to make rather than yours - which of two approaches this
+project should take, which of two readings of an ambiguous request is the one they meant, whether a
+change that reaches further than the work describes is acceptable. It is not for anything you can
+settle by reading the code, and it is not for permission to do what the work already asks for. A
+change built on the wrong guess about something only they could have answered is a change that has
+to be made twice, and the second time is after a reviewer has already read the first.
+
+Call it as many times as you need; each call is one question and returns one answer.
+
+- **`question`** - what you are asking, in full, in your own words. It is the whole of what the
+  person sees: they have not read this prompt and are not watching your session, so a question that
+  makes sense only next to what you were just doing reads as nothing at all. **A blank question is
+  refused** - the call comes straight back telling you it asked nothing, and nobody is shown
+  anything - so write the question out in the field rather than sending an empty one first.
+- **`options`** - the answers you are suggesting, if any. Each one is the exact text that may come
+  back as the answer, so write them as answers and not as labels.
+- **`allow_free_text`** - whether an answer other than the ones you offered is acceptable. It
+  defaults to true; set it to false only when you are asking for a choice among them.
+
+**Waiting is expected.** The call does not return until they answer and nothing times it out, so a
+long pause is this working rather than this stuck - do not abandon a question and guess anyway. If
+they answer with nothing at all you will be told so: take that as no preference either way, use
+your own judgement, and carry on.
+
 ## What not to do
 
 - **Do not run `git commit`, `git add`, `git stash`, `git checkout` or `git reset`.** The framework

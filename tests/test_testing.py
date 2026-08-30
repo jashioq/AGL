@@ -35,8 +35,8 @@ what the count is counted from.
     invocations. A replay has no observable difference from a re-run that happens to produce the
     same answer other than that the worker was not called - so `seen` below is the instrument, and
     it lives in the author's own `Agent` function, which is exactly where the agent fakes say a
-    test's knowledge belongs ("what a test wants to know is already held by the tool handlers and
-    question handler it supplied itself" - `adapters/claude_code/fake.py` and its OpenAI twin).
+    test's knowledge belongs ("what a test wants to know is already held by the tool handlers it
+    supplied itself" - `adapters/claude_code/fake.py` and its OpenAI twin).
   * **The payload assertion reads the ledger** through `harness.recorded`, and the value it compares
     is one nothing in the framework could have invented: it is the mapping this file's own agent
     handed to the reporting tool.
@@ -92,7 +92,6 @@ from agl.sdk import (
     Claude,
     OpenAI,
     Question,
-    QuestionHandler,
     Restriction,
     Role,
     Row,
@@ -100,9 +99,13 @@ from agl.sdk import (
     Run,
     Screen,
     Text,
+    Tool,
+    ToolResult,
     arg,
+    describe,
     reporting_tool,
     role,
+    tool,
     workflow,
 )
 from agl.testing import Agent, AgentTask, Call, Press, Recorded, Reply
@@ -159,19 +162,40 @@ def review() -> Role[Findings]:
 
 
 @role(model=Claude.SONNET)
-def decide(*, on_question: QuestionHandler | None = None) -> Role[Findings]:
+def decide(*, ask: Tool | None = None) -> Role[Findings]:
     """The role the two question tests use, and the one factory here with a parameter.
 
-    A handler is a closure over the workflow's own `Run`, so it cannot be written at this level -
-    which is exactly what a factory parameter is for: `decide()` is what a workflow declares and
-    `decide(on_question=...)` is what it steps with, and nothing else about this role is reachable
-    from either call."""
-    return Role(
+    An asking tool's handler is a closure over the workflow's own `Run`, so the tool cannot be
+    written at this level - which is exactly what a factory parameter is for: `decide()` is what a
+    workflow declares and `decide(ask=...)` is what it steps with, and nothing else about this role
+    is reachable from either call.
+
+    `Role[Findings]` is written out because the display is mixed - a list holding a `ReportingTool`
+    and a plain `Tool` does not solve for `P`, and `tests/sdk/test_roles.py` calls the explicit
+    parameter the sanctioned fallback."""
+    return Role[Findings](
         name="decide",
         instructions="propose something, ask whether to go ahead, then report what was decided",
-        tools=[REPORT],
-        on_question=on_question,
+        tools=[REPORT] if ask is None else [REPORT, ask],
     )
+
+
+@dataclass(frozen=True, slots=True)
+class Asked:
+    """The payload of the asking tool `asking` supplies. AGL declares none, so a workflow does.
+
+    Two fields, both described, because `describe()` is what puts a sentence beside a field name in
+    the derived schema - which is the whole of what the model reads to know what belongs there.
+    """
+
+    question: str = describe("What you are asking, in full.")
+
+    options: tuple[str, ...] = describe("The answers you are suggesting.", default=())
+
+
+ASK: Final = "ask_the_operator"
+"""What this file's workflow calls its asking tool. A workflow's own name for its own tool: the
+framework supplies none and so knows none."""
 
 
 def approve(question: Question) -> Screen[Answer]:
@@ -203,15 +227,21 @@ async def demo(run: Run[DemoParams]) -> None:
 
 @workflow(version="1")
 async def asking(run: Run[DemoParams]) -> None:
-    """One step whose agent stops to ask, answered by a person at a screen this workflow owns."""
+    """One step whose agent stops to ask, answered by a person at a screen this workflow owns.
 
-    async def answered(question: Question) -> Answer:
+    The asking tool is built here rather than at module level for the reason its handler is a
+    closure: `run.terminal` is this run's, and a tool declared beside the role would have no run to
+    show anything on.
+    """
+
+    async def answered(sent: Asked) -> ToolResult:
+        question = Question(prompt=sent.question, options=sent.options, allow_free_text=False)
         asked.append(question)
         picked = await run.terminal.show(approve, question=question, priority=5)
         answers.append(picked)
-        return picked
+        return ToolResult(text=picked.text)
 
-    await run.step(decide(on_question=answered))
+    await run.step(decide(ask=tool(ASK, "ask whether to go ahead", Asked, answered)))
 
 
 @workflow(version="1")
@@ -309,13 +339,21 @@ def _building() -> Agent:
 
 def _asking_agent(seen: list[str]) -> Agent:
     """An agent that stops to ask before it reports. The question is this file's, the answer is
-    the workflow's, and what a `Reply` cannot do is read one - see `agl.sdk.testing`."""
+    the workflow's, and what a `Reply` cannot do is read one - see `agl.sdk.testing`.
+
+    **A question is a `Call` and no longer a field of its own.** `Reply.asks` existed while AGL
+    supplied an asking tool to every task; a workflow supplies its own now, so asking is calling it
+    by the name that workflow gave it, with the payload its schema asks for. The two calls are in
+    the order the agent makes them, which is what puts the report after the answer.
+    """
 
     def agent(task: AgentTask) -> Reply:
         seen.append("asking")
         return Reply(
-            asks=[Question(prompt=PROPOSAL, options=(GO_AHEAD, NOT_YET), allow_free_text=False)],
-            calls=[Call(REPORT.name, {"summary": SUMMARY, "high": 0})],
+            calls=[
+                Call(ASK, {"question": PROPOSAL, "options": [GO_AHEAD, NOT_YET]}),
+                Call(REPORT.name, {"summary": SUMMARY, "high": 0}),
+            ],
             says="asked and reported",
         )
 
@@ -583,14 +621,16 @@ def _negotiating() -> Script:
 
     `Conversation` is `adapters/claude_code/fake.py`'s and is reached here, in a test, on purpose:
     it is what `container.fakes(claude=...)` takes and the thing `agl.sdk.testing` says a `Reply`
-    cannot do. The whole of what it adds over a `Reply` is the line that branches on `answer`.
+    cannot do. The whole of what it adds over a `Reply` is the line that branches on what the call
+    came back with - and that is still the limitation, a `Reply` being computed before the run
+    whether its calls ask a person something or not.
     """
 
     async def script(conversation: Conversation) -> AgentOutcome:
-        answer = await conversation.ask(
-            Question(prompt=PROPOSAL, options=(GO_AHEAD, NOT_YET), allow_free_text=False)
+        answered = await conversation.call(
+            ASK, {"question": PROPOSAL, "options": [GO_AHEAD, NOT_YET]}
         )
-        said = NOT_YET if answer is None else answer.text
+        said = answered.text or NOT_YET
         await conversation.call(REPORT.name, {"summary": said, "high": 0})
         return AgentOutcome(stop_reason=StopReason.COMPLETED, text=f"decided: {said}")
 
@@ -834,7 +874,8 @@ def _writing(seen: list[str]) -> Agent:
     """`_agent`'s replies, plus the file an implementer would have left in the checkout.
 
     Keyed on whether the task declares any tool, which is `sdk/testing.py`'s own sharpest handle
-    and here picks out the effect step: the reviewer runs under `NO_VCS_WRITES` and its step passes
+    and here picks out the effect step - `implement()` declares none and `review()` reports through
+    one: the reviewer runs under `NO_VCS_WRITES` and its step passes
     no `commit=`, so anything written there is wiped on the way out by design.
 
     **The return type is the alias's own and not `Reply`**, which is what composing two agents

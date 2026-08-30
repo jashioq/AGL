@@ -1,50 +1,53 @@
 """The mid-run question path, end to end: an agent asks, a person answers, the run goes on.
 
-The framework's half of "agent questions are a callback on the Role". Both adapter halves already
-exist - AGL's own MCP asking tool for Claude Code and the equivalent for Codex, and each is held to
-the port by `tests/contracts/_agent_questions.py` - so what is left for this file is the part no
-adapter can see: a `Role`'s handler reaching the workflow that declared it,
-the answer coming back into the call the agent asked from, and the whole negotiation staying inside
-**one** step and one session.
+The framework's half of "a question is an ordinary tool the workflow supplies". There is no other
+half any more, which is the change this file is written across: AGL used to put an asking tool on
+every task on every backend and route what came back through a `QuestionHandler` on the `Role`, and
+each adapter's copy of that was held to the port by `tests/contracts/_agent_questions.py`. All of it
+is gone - the port member, the capability, the two vendor tools, the contract module. What is left
+is what a workflow declares for itself, and this file is what says the framework does not interpose
+between it and the agent.
 
-Every test below goes through `api.run`, which is not ceremony. The handler is a closure over the
-workflow's own `Run`, so it does not exist until a workflow is running; and the terminal it shows on
-is only legal inside the context `api.run` opens (`ports/terminal.py` makes a `show` outside it an
-`InternalError`). A test that built a `Run` by hand could still exercise the callback, but it could
-not exercise the thing this deliverable is about, which is that all of it composes.
+Every test below goes through `api.run`, which is not ceremony. The tool's handler is a closure over
+the workflow's own `Run`, so it does not exist until a workflow is running; and the terminal it
+shows on is only legal inside the context `api.run` opens (`ports/terminal.py` makes a `show`
+outside it an `InternalError`). A test that built a `Run` by hand could still call the handler, but
+it could not exercise the thing this file is about, which is that all of it composes.
 
 ## What is asserted here, and what is deliberately not
 
-  * **The framework interposes nothing.** The question the agent produced is the object the handler
-    receives, and the answer the handler produced is the object the agent receives - asserted by
-    identity, in both directions, because that is the only spelling with teeth. A framework that
-    normalised a `Question`, dropped an option it had no view for, or re-wrapped an `Answer` would
-    satisfy every value comparison and would be an opinion about presentation in the one layer
-    that is meant to have none.
+  * **The framework interposes nothing.** The payload the agent produced is what the handler is
+    given, and the `ToolResult` the handler produced is the object the agent receives - the second
+    asserted by identity, because that is the only spelling with teeth. A framework that rebuilt a
+    result to carry which tool answered it, or that normalised the text, would satisfy every value
+    comparison and would be an opinion in the one layer meant to have none. The first direction is a
+    value comparison rather than an identity one, and the reason is the mechanism: `sdk/tools.py`'s
+    `tool()` *builds* the payload dataclass out of the JSON a model sent, so there is no object on
+    the agent's side for a handler to receive twice. What is asserted instead is that every field
+    arrived - including the two a schema most easily defaults away.
   * **One session, N rounds.** The load-bearing one, and the reason it counts rather than checking
     the outcome: an approval loop that re-invokes a step is forbidden, because a fresh session per
-    round "discards the reasoning that produced the proposal". A workflow loop written that way
+    round discards the reasoning that produced the proposal. A workflow loop written that way
     reaches the same final answer - it is not a wrong answer, it is a wrong bill and a lost
     argument - so the assertion is one `AgentTask`, one dispatch, one journal entry.
   * **The handler really is a closure over the `Run`.** `approving` below shows the question on
     `run.terminal` and returns what a person picked, so the answer that reaches the agent is a
     string that exists nowhere in this file except in the keystrokes a test typed. Nothing a
     handler answering from a constant, a policy or a lookup could produce.
-  * **Nobody listening does not block.** `ports/agent.py` settles that edge case for the adapters;
-    what is this layer's is that the framework supplies no answerer of its own when a role declares
-    none - the agent is told nobody is listening, and the step records a result as though the run
-    were fine. That is `sdk/roles.py`'s "the workflow's approval gate is then simply absent",
-    observed rather than argued.
+  * **The framework supplies no asking tool of its own.** The third workflow declares no asking
+    tool and its agent has nothing to call: `task.tools` holds what the role declared and nothing
+    else, and the fake refuses a call to anything else by name. Under the old mechanism this was a
+    thing to *observe* - the framework put `agl_ask` on the task whatever the role said, and a role
+    that declared no handler got an agent told nobody was listening. Now the absence is structural,
+    and that is what this test reads.
 
-Not here, and each for its own reason. **`Role.requires` gaining `MID_RUN_QUESTIONS` at
-declaration** is pinned by `tests/sdk/test_roles.py` in four tests and is not restated.
-**A handler reaching the runner at all, with the answer's text arriving** is `tests/sdk/
-test_run_step.py::test_a_roles_question_handler_reaches_the_runner_and_its_answer_returns`, one
-round and prompt-only; what is added here is the two fields that test's question does not carry and
-the identity that its value comparison cannot make. **Priority, preemption and the conflict screen**
-are elsewhere. `priority=5` is written below because the standing example writes it and a handler
-that omitted it would be modelling something no workflow does, but nothing here asserts a thing
-about what it means.
+Not here, and each for its own reason. **`Role.requires` gaining `TOOL_CALLING` from `tools`** is
+pinned by `tests/sdk/test_roles.py` and is not restated. **A tool handler reaching the runner at
+all, with its result arriving** is `tests/sdk/test_run_step.py`; what is added here is a whole
+negotiation rather than one call, and a person at the end of it. **Priority, preemption and the
+conflict screen** are elsewhere. `priority=5` is written below because the standing example writes
+it and a handler that omitted it would be modelling something no workflow does, but nothing here
+asserts a thing about what it means.
 
 ## The arrangement, and why each half of it is real
 
@@ -65,8 +68,8 @@ nowhere at all, and the input port exists precisely so the real adapter can be d
 A third implementation did arrive - `adapters/rich_terminal/scripted.py`, which
 `agl.testing.answering([...])` builds - and it is a third *adapter* that runs the contract suite
 rather than a mock, which is the whole difference this paragraph was about. **This file stays on
-the real one deliberately**: what it grades is the engine's question path against the terminal a
-person actually sits in front of, so substituting a class written for tests would take the one
+the real one deliberately**: what it grades is the engine's tool path against the terminal a person
+actually sits in front of, so substituting a class written for tests would take the one
 implementation under test out of the test. `tests/test_testing.py` is where a scripted terminal
 belongs, that file being what a workflow author can write. The keyboard is `instruments.keyboard`,
 promoted out of `tests/adapters/test_rich_terminal.py` for this file and unchanged by the move.
@@ -77,8 +80,8 @@ takes `_display.py`'s appending path, with no `rich.Live` and so no process-glob
 `tests/adapters/test_rich_terminal.py`'s - so the animating path would buy a takeover and nothing
 else.
 
-**Every await is bounded.** There are no timeouts anywhere: "an unanswered question blocks its step
-indefinitely, so 'stuck' and 'waiting for you' look alike from outside". That is the design, and it
+**Every await is bounded.** There are no timeouts anywhere: an unanswered question blocks its step
+indefinitely, so "stuck" and "waiting for you" look alike from outside. That is the design, and it
 makes an honest mistake in any of these tests a hang rather than a failure, so each one runs under
 `asyncio.timeout` and the expiry is the failure.
 """
@@ -102,15 +105,17 @@ from agl.adapters.git.history import GitHistory
 from agl.adapters.git.workspace import GitWorkspaceProvider
 from agl.adapters.rich_terminal.terminal import RichTerminal
 from agl.config import container, registry
-from agl.ports.agent import AgentOutcome, AgentTask, Claude, QuestionHandler, StopReason
+from agl.ports.agent import AgentOutcome, AgentTask, Claude, StopReason, Tool, ToolResult
+from agl.ports.errors import InputError
 from agl.ports.home_layout import AglHome, RunScope, step_dir
 from agl.ports.ids import ProjectName, RunLabel, StepName
-from agl.ports.questions import Answer, Question
+from agl.ports.questions import Question
+from agl.ports.run import JsonValue
 from agl.ports.terminal import Choice, Response, Screen, Text, TextInput
 from agl.ports.tree_layout import TreesRoot
 from agl.sdk._engine.services import Services
 from agl.sdk.roles import Role, role
-from agl.sdk.tools import reporting_tool
+from agl.sdk.tools import describe, reporting_tool, tool
 from agl.sdk.workflow import Run, workflow
 from instruments.keyboard import DEADLINE, Typing
 
@@ -148,35 +153,42 @@ PROMPT: Final = "propose, ask for approval, revise until approved, then report"
 not read `task.instructions`, on purpose - and it is here because a role's prompt is what makes a
 negotiating agent a negotiating agent rather than a detail this file invented."""
 
-# --- what the agents ask --------------------------------------------------------------------------
 
-ASKED: Final = Question(
-    prompt="I can split this two ways. Which do you want?",
-    options=("split by layer", "split by feature"),
-    allow_free_text=False,
-)
-"""One question, carrying all three of what a `Question` can carry.
+# --- the asking tool, which is the workflow's and not the framework's -----------------------------
 
-`allow_free_text=False` is the interesting field and it is why the options are two rather than none:
-the port defaults it to `True`, so a framework that dropped it, defaulted it, or rebuilt the
-question without it would produce something that still answers `Question(prompt=...)` correctly.
-`approve` below reads it, which is what makes it visible as more than a value in a record."""
 
-ROUNDS: Final = (
-    Question(prompt="Here is a first cut of the backlog. Approve it?"),
-    Question(prompt="I have folded your note in. Approve it now?"),
-    Question(prompt="Last one: shall I report this?"),
-)
-"""Three rounds of one negotiation - propose, revise, revise - all inside one step and one session.
+@dataclass(frozen=True, slots=True)
+class Asked:
+    """The payload the agent fills in to ask something, and the whole of what a schema carries.
 
-Three rather than two because two is the smallest number that can be a coincidence: a step invoked
-twice by a workflow loop asks once per invocation, so a two-round transcript and a two-invocation
-loop are the same list of questions. Three is not, and neither is one entry."""
+    Three fields because a `Question` has three, and the two with defaults are the interesting
+    ones: they are what a derived schema most easily loses, and `approve` below reads both. A
+    payload dataclass is how a workflow says what it will accept - `sdk/tools.py` derives the schema
+    from it, refuses a payload that does not fit before the handler runs, and hands the handler the
+    built instance - so this class is this workflow's half of the vocabulary the two vendor asking
+    tools used to carry twice.
+    """
 
-NOBODY: Final = "<nobody was listening>"
-"""What the script writes down when `ask` answers `None`. It is the fake's way of saying the port's
-second edge case happened - see `adapters/claude_code/fake.py::Conversation.ask`, where `None` is
-the return type rather than a sentence because a script is not a model and cannot read one."""
+    question: str = describe("What you are asking, in full, in your own words.")
+
+    options: tuple[str, ...] = describe(
+        "The answers you are suggesting, if any, written as answers rather than as labels.",
+        default=(),
+    )
+
+    allow_free_text: bool = describe(
+        "Whether an answer other than the ones you offered is acceptable.", default=True
+    )
+
+
+ASK: Final = "ask_the_operator"
+"""The tool's name, which is the workflow's own. Nothing in AGL knows it, which is the point: the
+old `mcp__agl_ask__ask` was a constant in two adapters and reached every task ever dispatched."""
+
+NO_QUESTION: Final = "That call asked nothing: write out what you are asking and call again."
+"""What a blank question comes back as. A *rejection* and not a raise, because
+`Question.__post_init__` refuses an empty prompt and an exception out of a tool handler ends the
+run - so a model that sent a blank question would kill the step over a correctable mistake."""
 
 
 # --- the views a workflow shows, and the answer type they produce ---------------------------------
@@ -186,9 +198,10 @@ the return type rather than a sentence because a script is not a model and canno
 class Verdict:
     """What answering one of these screens produces: the workflow's own type, in shape.
 
-    The rule: "the workflow's own answer type carries more than this and goes on carrying it: a
-    `Screen[T]` returns its `T`, and the workflow's handler maps that down to a string on the way
-    out". One field here, because the mapping is what matters and not how rich the type is.
+    The rule: the workflow's own answer type carries more than a string and goes on carrying it -
+    a `Screen[T]` returns its `T`, and the workflow's handler maps that down to the text a tool
+    result carries on the way out. One field here, because the mapping is what matters and not how
+    rich the type is.
     """
 
     said: str
@@ -220,87 +233,94 @@ def approve(question: Question) -> Screen[Verdict]:
 # imports a module and reads an attribute in it, and sees no local. Emptied by `_nothing_carried
 # _over` before each test and never by a workflow, so a workflow that ran when nothing asked it to
 # shows up here as a list that is too long rather than as one somebody tidied away.
-asked: Final[list[Question]] = []
-given: Final[list[Answer]] = []
+asked: Final[list[Asked]] = []
+given: Final[list[ToolResult]] = []
 reported: Final[list[Summary]] = []
 
 
 # The three workflows below share one role, and the difference this file is about is the one
-# argument its factory takes. They were once three `Role(...)` literals, on the argument that "a
-# factory taking `on_question=` as an argument would put that difference behind a default value in
-# a signature nobody reads" - which was since decided the other way: a role *is* a
-# `@role(model=…)` factory, and its parameter list is the whole of what a call site may vary. What
-# survives of the objection is why the call is written out at each `run.step` below rather than
-# parametrised once: the difference between these three is meant to be visible at the line that
-# takes the step, which is the only line on which they differ.
+# argument its factory takes. A role *is* a `@role(model=…)` factory, and its parameter list is the
+# whole of what a call site may vary - so the asking tool arrives the way every other override
+# does, and the call is written out at each `run.step` below rather than parametrised once, because
+# the difference between these three is meant to be visible at the line that takes the step.
 
 
 @role(model=Claude.SONNET)
-def deciding(*, on_question: QuestionHandler | None = None) -> Role[Summary]:
+def deciding(*, ask: Tool | None = None) -> Role[Summary]:
     """The one role this file drives, in its three states.
 
-    `deciding(on_question=…)` is what a negotiating workflow steps with - the handler is a
-    closure over the `Run`, so it can only arrive here as an argument - and `deciding()` is the
-    same role with nothing to answer it, which is the third workflow below and the case
-    `sdk/roles.py` says costs a workflow its approval gate silently.
+    `deciding(ask=…)` is what a negotiating workflow steps with - the tool's handler is a closure
+    over the `Run`, so it can only arrive here as an argument - and `deciding()` is the same role
+    with nothing to ask through, which is the third workflow below.
+
+    `Role[Summary]` is written out because the display is mixed: a list holding a `ReportingTool`
+    and a plain `Tool` does not solve for `P`, which `tests/sdk/test_roles.py` pins in both
+    directions. The explicit parameter is that file's own sanctioned fallback, and it is checked
+    there rather than believed.
     """
-    return Role(name=STEP, instructions=PROMPT, tools=(REPORT,), on_question=on_question)
+    return Role[Summary](
+        name=STEP, instructions=PROMPT, tools=[REPORT] if ask is None else [REPORT, ask]
+    )
+
+
+def _asking(run: Run[NoParams], *, on_screen: bool) -> Tool:
+    """This workflow's asking tool: a payload dataclass, a handler, and one `tool()` call.
+
+    Two shapes behind one signature, because two of the three workflows below want a handler that
+    answers from the workflow itself - allowed, and the right shape for the tests that are about
+    routing and counting rather than about a person, where a terminal would be a second thing able
+    to fail - and one wants the standing example spelled out:
+
+        return await run.terminal.show(views.approve_backlog, question=q, priority=5)
+
+    The `Verdict` a person's response produced is mapped down to the tool result's text here, at
+    the workflow's layer and in the workflow's own language, because a `ToolResult` carries one
+    string and that mapping belongs on this side of the port on purpose.
+
+    The blank-question guard is the third thing every asking tool owes and the one that is easy to
+    miss: `Question.__post_init__` raises on an empty prompt, a raise out of a handler ends the run,
+    and "the model sent a blank question" is a correctable mistake rather than a reason to throw a
+    session away. So it comes back as a rejection, which is what the deleted framework tool did.
+    """
+
+    async def answered(sent: Asked) -> ToolResult:
+        asked.append(sent)
+        if not sent.question.strip():
+            return ToolResult(text=NO_QUESTION, rejected=True)
+        question = Question(
+            prompt=sent.question,
+            options=sent.options,
+            allow_free_text=sent.allow_free_text or not sent.options,
+        )
+        if on_screen:
+            verdict = await run.terminal.show(approve, question=question, priority=5)
+            given.append(ToolResult(text=verdict.said))
+        else:
+            given.append(ToolResult(text=f"answer {len(asked)}"))
+        return given[-1]
+
+    return tool(ASK, "ask the person running this task, and wait for their answer", Asked, answered)
 
 
 @workflow(version="1")
 async def negotiating(run: Run[NoParams]) -> None:
-    """A role whose handler answers from the workflow, without showing anybody anything.
+    """A role whose asking tool answers from the workflow, without showing anybody anything.
 
-    This is allowed - "the handler routes it to a view, or to a log, or answers it from a
-    policy without showing anybody anything - all three are a workflow's business" - and it is the
-    right shape for the two tests that are about routing and counting rather than about a person.
-    A terminal in those would be a second thing able to fail.
-
-    The `Answer` it returns is kept in `given` so that a test can ask whether the object the agent
-    received is the object this produced, which value equality could not tell it.
+    This is allowed - the handler routes the question to a view, or to a log, or answers it from a
+    policy without showing anybody anything, and all three are a workflow's business.
     """
-
-    async def on_question(question: Question) -> Answer:
-        asked.append(question)
-        answer = Answer(text=f"answer {len(asked)}")
-        given.append(answer)
-        return answer
-
-    reported.append(await run.step(deciding(on_question=on_question)))
+    reported.append(await run.step(deciding(ask=_asking(run, on_screen=False))))
 
 
 @workflow(version="1")
 async def approving(run: Run[NoParams]) -> None:
-    """The standing example, spelled out: the handler shows the question and returns what came back.
-
-        async def approve(q: Question) -> Answer:
-            return await run.terminal.show(views.approve_backlog, question=q, priority=5)
-
-    A closure over this `Run` and nothing else, which is why `Role` can be built here and not at
-    module level, and why `QuestionHandler` takes one parameter. The `Verdict` a person's response
-    produced is mapped down to `Answer.text` here - at the workflow's layer, in the workflow's own
-    language - because `Answer` carries one string and that mapping belongs on this side of the
-    port on purpose.
-    """
-
-    async def on_question(question: Question) -> Answer:
-        asked.append(question)
-        verdict = await run.terminal.show(approve, question=question, priority=5)
-        given.append(Answer(text=verdict.said))
-        return given[-1]
-
-    reported.append(await run.step(deciding(on_question=on_question)))
+    """The standing example: the handler shows the question and returns what came back."""
+    reported.append(await run.step(deciding(ask=_asking(run, on_screen=True))))
 
 
 @workflow(version="1")
 async def unattended(run: Run[NoParams]) -> None:
-    """The same role with the handler left off, and nothing else changed.
-
-    `sdk/roles.py` names what this costs and this is what it looks like from outside: "preflight
-    passes, the run starts, and the agent asks into an adapter that must not block... The workflow's
-    approval gate is then simply absent, and 'propose, ask for approval, revise until
-    approved' becomes an agent approving itself."
-    """
+    """The same role with the asking tool left off, and nothing else changed."""
     reported.append(await run.step(deciding()))
 
 
@@ -328,27 +348,53 @@ class _Agent:
         this is the number of times the framework paid for an agent, and the entries are the
         `AgentTask`s it composed - which is what "one task, one dispatch" is asked of."""
 
-        self.heard: list[Answer | None] = []
-        """Every answer the agent was given, in order, `None` included."""
+        self.heard: list[ToolResult] = []
+        """Every result the agent was given, in order."""
+
+        self.refused: list[InputError] = []
+        """Every call the fake refused outright, which is what a tool nobody declared looks like."""
+
+
+def _payload(question: Question) -> dict[str, JsonValue]:
+    """One question as the JSON a model would send, which is what crosses the port.
+
+    Written out by hand rather than built from `Asked`, for `sdk/testing.py`'s reason: a session
+    carries JSON, the schema is derived from the payload type precisely so the model is shown the
+    shape, and a call carrying an already-built payload would be testing a conversion no session
+    performs.
+    """
+    return {
+        "question": question.prompt,
+        "options": list(question.options),
+        "allow_free_text": question.allow_free_text,
+    }
 
 
 def _asks(record: _Agent, *rounds: Question) -> Script:
     """An agent that asks each of `rounds` in turn and then reports what it was told.
 
-    A negotiating agent in the only vocabulary the port has: it asks, it uses the answer, it
-    asks again, and it reports once - so the step returns exactly once, at the end, and everything
-    before that happened inside one session. Each answer is written into the report *in the order
-    it arrived*, which is what makes "the answer came back into the round it was asked from" a
-    thing the step's own return value can be read for.
+    A negotiating agent in the only vocabulary the port has: it calls a tool, it uses the answer, it
+    calls again, and it reports once - so the step returns exactly once, at the end, and everything
+    before that happened inside one session. Each answer is written into the report *in the order it
+    arrived*, which is what makes "the answer came back into the round it was asked from" a thing
+    the step's own return value can be read for.
+
+    A call to a tool the task does not declare is an `InputError` out of the fake, and it is caught
+    here rather than left to end the run: the third workflow below declares no asking tool, and what
+    that refusal says by name is the assertion that test makes.
     """
 
     async def _script(conversation: Conversation) -> AgentOutcome:
         record.tasks.append(conversation.task)
         said: list[str] = []
         for question in rounds:
-            answer = await conversation.ask(question)
-            record.heard.append(answer)
-            said.append(NOBODY if answer is None else answer.text)
+            try:
+                result = await conversation.call(ASK, _payload(question))
+            except InputError as refused:
+                record.refused.append(refused)
+                break
+            record.heard.append(result)
+            said.append(result.text)
         await conversation.call(REPORT.name, {"text": " then ".join(said)})
         return AgentOutcome(stop_reason=StopReason.COMPLETED, text="reported")
 
@@ -454,45 +500,70 @@ def _nothing_carried_over() -> None:
         record.clear()
 
 
+# --- what the agent asked ------------------------------------------------------------------------
+
+ASKED: Final = Question(
+    prompt="I can split this two ways. Which do you want?",
+    options=("split by layer", "split by feature"),
+    allow_free_text=False,
+)
+"""One question, carrying all three of what a `Question` can carry.
+
+`allow_free_text=False` is the interesting field and it is why the options are two rather than none:
+the derived schema defaults it to `True`, so a framework - or a payload walker - that dropped it
+would produce something that still answers `Asked(question=...)` correctly. `approve` reads it,
+which is what makes it visible as more than a value in a record."""
+
+ROUNDS: Final = (
+    Question(prompt="Here is a first cut of the backlog. Approve it?"),
+    Question(prompt="I have folded your note in. Approve it now?"),
+    Question(prompt="Last one: shall I report this?"),
+)
+"""Three rounds of one negotiation - propose, revise, revise - all inside one step and one session.
+
+Three rather than two because two is the smallest number that can be a coincidence: a step invoked
+twice by a workflow loop asks once per invocation, so a two-round transcript and a two-invocation
+loop are the same list of questions. Three is not, and neither is one entry."""
+
+
 # --- the framework interposes nothing, in either direction ----------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_the_question_the_agent_asked_is_the_one_the_handler_is_given(
+async def test_the_payload_the_agent_sent_is_the_one_the_handler_is_given(
     repository: Path, tmp_path: Path, terminal: RichTerminal
 ) -> None:
-    """The framework "maps whatever payload the vendor produced into a `Question`, and calls
-    the workflow's handler. The framework has no opinion on presentation."
+    """The JSON a model produced arrives at the workflow's handler as its own payload type, whole.
 
-    Both halves of that are asserted here as identity, which is the only spelling that can tell an
-    opinion from a pass-through. `tests/sdk/test_run_step.py` already pins that a handler is
-    reached and that its answer's *text* arrives; what a value comparison there cannot see is a
-    framework that rebuilt either object on the way past - and rebuilding is exactly what a layer
-    with an opinion does. A `Question` normalised into something a view could render, or an
-    `Answer` re-wrapped to carry which option it matched, would compare equal to nothing this test
-    could have written down in advance and would be a policy nobody chose.
+    Both directions are asserted, and they are asserted differently because the mechanism is not
+    symmetric. Outbound there is nothing to compare by identity: `tool()` builds the payload out of
+    the mapping the adapter handed it, so what the handler receives is a fresh `Asked` either way.
+    What a test can see is whether every field survived - and `ASKED` carries the two that are most
+    easily lost, `options` and an `allow_free_text` the schema defaults to `True`, so a payload that
+    arrived stripped would still be a perfectly well-formed one.
 
-    `ASKED` carries options and forbids free text, so the two fields most easily lost are in flight
-    rather than defaulted: the port's own defaults are `()` and `True`, so a question that arrived
-    stripped would still be a perfectly well-formed one.
+    Inbound the identity is available and is the only spelling with teeth. `tests/sdk/
+    test_run_step.py` already pins that a handler is reached and that its result's *text* arrives;
+    what a value comparison there cannot see is a framework that rebuilt the `ToolResult` on the way
+    past - which is exactly what a layer with an opinion does.
     """
     record = _Agent()
     services = _services(repository, tmp_path, terminal, _asks(record, ASKED))
 
     await _ran(services, "negotiating")
 
-    assert asked and asked[0] is ASKED, (
-        f"the handler was given {asked!r}. A `Question` crosses the port as the value the "
-        f"adapter built out of what the model produced, and this layer's whole job with it is to "
-        f"hand it to the role's own handler - so anything but the same object is a framework that "
-        f"read it, decided something about it, and passed on its own reading"
+    assert asked == [
+        Asked(question=ASKED.prompt, options=ASKED.options, allow_free_text=False)
+    ], (
+        f"the handler was given {asked!r}. A payload crosses the port as the mapping the adapter "
+        f"read off its backend, `tool()` builds the workflow's own class out of it, and this "
+        f"layer's whole job with it is to hand that to the handler the role declared - so a "
+        f"missing field is either a schema that never asked for it or a walker that dropped it"
     )
-    assert asked[0].options == ("split by layer", "split by feature")
-    assert asked[0].allow_free_text is False
     assert record.heard and record.heard[0] is given[0], (
-        f"the agent was handed {record.heard!r} and the handler returned {given!r}. The answer is "
-        f"serialised back into the same live session by the adapter; a different object arriving "
-        f"there is something between the two having produced an answer of its own"
+        f"the agent was handed {record.heard!r} and the handler returned {given!r}. A tool result "
+        f"is serialised back into the same live session by the adapter; a different object "
+        f"arriving there is something between the two having produced an answer of its own"
     )
 
 
@@ -505,9 +576,9 @@ async def test_three_rounds_of_one_negotiation_are_one_task_one_dispatch_and_one
 ) -> None:
     """Negotiation stays inside one step and one session, asserted as a count.
 
-    "An approval loop is **not** a workflow loop re-invoking a step. That would start a fresh agent
+    An approval loop is **not** a workflow loop re-invoking a step. That would start a fresh agent
     session per round, discarding the reasoning that produced the proposal and re-deriving from the
-    spec each time." The failure this exists to catch therefore produces the **right answer**: a
+    spec each time. The failure this exists to catch therefore produces the **right answer**: a
     workflow that looped over `run.step` would ask three times, be answered three times, and report
     the same approved backlog at the end. What it would cost is three sessions instead of one,
     three entries in the ledger instead of one, and the reasoning behind each proposal thrown away
@@ -541,10 +612,10 @@ async def test_three_rounds_of_one_negotiation_are_one_task_one_dispatch_and_one
         f"final outcome only, and that a crash mid-negotiation re-runs the step and re-asks"
     )
     assert len(asked) == len(ROUNDS) and len(given) == len(ROUNDS), (
-        f"the handler was asked {len(asked)} times and answered {len(given)}, for a negotiation of "
-        f"{len(ROUNDS)} rounds. Every round is one call to the handler and one return from it"
+        f"the handler was called {len(asked)} times and answered {len(given)}, for a negotiation "
+        f"of {len(ROUNDS)} rounds. Every round is one call to the handler and one return from it"
     )
-    assert all(seen is sent for seen, sent in zip(asked, ROUNDS, strict=True))
+    assert [sent.question for sent in asked] == [round.prompt for round in ROUNDS]
     assert all(back is made for back, made in zip(record.heard, given, strict=True))
     assert reported == [Summary(text="answer 1 then answer 2 then answer 3")], (
         f"the step returned {reported!r}. Each answer goes into the agent's report in the order it "
@@ -560,13 +631,13 @@ async def test_three_rounds_of_one_negotiation_are_one_task_one_dispatch_and_one
 async def test_the_handler_shows_the_question_and_the_answer_is_what_a_person_picked(
     repository: Path, tmp_path: Path, terminal: RichTerminal, keys: Typing
 ) -> None:
-    """The whole path in one run: agent asks, workflow shows, person answers, agent carries on.
+    """The whole path in one run: agent calls, workflow shows, person answers, agent carries on.
 
-    This is the path the deliverable exists for, and every layer of it is the real one - `api.run`
-    opening the terminal, a `Role` built inside a workflow with a handler closed over its `Run`,
-    `run.terminal.show` registering a workflow-defined view, `RichTerminal`'s redraw loop drawing
-    it, its reader taking a line off a `Keys` on a worker thread, and the `Answer` going back into
-    the session the agent asked from.
+    Every layer of it is the real one - `api.run` opening the terminal, a `Role` built inside a
+    workflow carrying a tool whose handler is closed over its `Run`, `run.terminal.show`
+    registering a workflow-defined view, `RichTerminal`'s redraw loop drawing it, its reader taking
+    a line off a `Keys` on a worker thread, and the result going back into the session the agent
+    called from.
 
     **Two rounds, and the questions differ in shape on purpose.** The first offers two options and
     forbids free text, so `approve` builds two responses and `2` picks the second of them. The
@@ -574,7 +645,7 @@ async def test_the_handler_shows_the_question_and_the_answer_is_what_a_person_pi
     and `2` now opens the field - after which what the agent is told is a sentence this test typed.
     That sentence is what makes the claim unfakeable: it exists nowhere in the framework, nowhere
     in the view and nowhere in the role, so a handler answering from a constant, a policy or the
-    question's own first option cannot produce it. It is also the assertion that the `Question`'s
+    question's own first option cannot produce it. It is also the assertion that the payload's
     fields reached the *view* and not merely the handler - the digit means two different things in
     the two rounds, and only the question can have decided which.
 
@@ -619,31 +690,31 @@ async def test_the_handler_shows_the_question_and_the_answer_is_what_a_person_pi
     )
 
 
-# --- a role with no handler, whose agent asks anyway ----------------------------------------------
+# --- a role that declares no asking tool, whose agent tries anyway -------------------------------
 
 
 @pytest.mark.asyncio
-async def test_an_agent_that_asks_with_no_handler_is_told_so_and_the_step_records_anyway(
+async def test_a_role_with_no_asking_tool_leaves_the_agent_nothing_to_call(
     repository: Path, tmp_path: Path, terminal: RichTerminal, keys: Typing
 ) -> None:
-    """`ports/agent.py`'s second edge case, seen from the layer that decides there is no handler.
+    """**The framework supplies no asking tool of its own**, read off the task it composed.
 
-    "If the agent asks while `on_question` is `None`, the adapter must **not** block. It tells the
-    agent that no answer is available and lets it carry on with its own judgement. A run hanging on
-    a question nobody is listening for is the worst outcome available, because it looks exactly like
-    work." The adapters are held to that by `tests/contracts/_agent_questions.py` and it is not
-    re-proved here.
+    This used to be a thing to observe rather than a structural fact. AGL put `agl_ask` on every
+    task on every backend, so a role that declared no `on_question` still got an agent that could
+    call it - and what came back was a sentence telling the agent nobody was listening, after which
+    the run *finished*, the approval gate silently absent, "propose, ask for approval, revise until
+    approved" having become an agent approving itself.
 
-    What is this layer's is the line before it: **the framework supplies no answerer of its own.**
-    A `Steps.step` that defaulted `on_question` to something - a logger, a policy, a screen the
-    framework composed - would satisfy the port perfectly and would be the framework answering for
-    a workflow that declared no handler. The agent is told nobody is listening, so nothing did.
+    Now the tool is the workflow's. `task.tools` holds `REPORT` and nothing else, and the fake
+    refuses a call to `ask_the_operator` by name because the task declares no such tool - which is
+    the fake saying what a real backend would have said differently and meant the same by: there is
+    no tool there. A framework that supplied one of its own would show up here as a second entry in
+    `task.tools`, and the refusal would never happen.
 
-    And the consequence is the one `sdk/roles.py` names as the reason the capability is folded in at
-    declaration: the run *finishes*. One entry, a result recorded, an exit code of zero, and the
-    approval gate simply absent - "an agent approving itself. Nothing raises, nothing is logged as
-    wrong, and the step reports a result." That is what a forgotten handler looks like from outside,
-    and it is why forgetting one is not left to discipline.
+    The rest of the run is the part that did not change. Nothing raises, the step records, the exit
+    code is zero, and a workflow that forgot its asking tool gets a step that ran without ever
+    consulting anybody. What is different is where a reader looks for the omission: at the `Role`
+    the workflow built, in the workflow's own file, rather than at a keyword nobody typed.
 
     `keys.given` being empty is the other half: the terminal was there, entered and reading, and
     nothing was ever put in front of a person. With the run bounded, that distinguishes "no screen
@@ -654,16 +725,20 @@ async def test_an_agent_that_asks_with_no_handler_is_told_so_and_the_step_record
 
     await _ran(services, "unattended")
 
-    assert record.heard == [None, None, None], (
-        f"the agent was handed {record.heard!r} by a run whose role declares no handler. `None` is "
-        f"the fake's spelling of the port's second edge case; anything else is the framework "
-        f"having answered on a workflow's behalf"
+    assert [declared.name for declared in record.tasks[0].tools] == [REPORT.name], (
+        f"the task carried {[declared.name for declared in record.tasks[0].tools]}. A role's tools "
+        f"are the whole of what an agent may call, and a framework that added one of its own would "
+        f"be answering for a workflow that declared nothing"
+    )
+    assert len(record.refused) == 1 and ASK in str(record.refused[0]), (
+        f"the fake refused {record.refused!r} for a script that called {ASK!r} against a task "
+        f"declaring no such tool. One refusal, naming it, is what 'there is no asking tool here' "
+        f"looks like from inside a session"
     )
     assert asked == [] and given == []
-    assert keys.given == [], f"somebody was asked to type {keys.given!r} with no handler declared"
-    assert reported == [Summary(text=f"{NOBODY} then {NOBODY} then {NOBODY}")]
+    assert keys.given == [], f"somebody was asked to type {keys.given!r} with no asking tool"
+    assert reported == [Summary(text="")]
     assert len(_entries(tmp_path)) == 1, (
         "the step recorded nothing. A run whose approval gate is absent does not fail - it "
-        "succeeds, quietly, which is the whole reason `on_question` folds `MID_RUN_QUESTIONS` "
-        "into `Role.requires` at declaration rather than leaving it to be remembered"
+        "succeeds, quietly, and what a reader has to notice is a `tools=` that is missing a tool"
     )

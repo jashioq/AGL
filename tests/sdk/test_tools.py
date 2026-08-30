@@ -23,6 +23,46 @@ field worth having: `test_journal.py`'s rule 6 has one open hole, a `__post_init
 to a derived schema, and a rule interpolated into a field's description is not, because it is schema
 and schema is fingerprint. Everything else about `describe()` is convenience; that one is the hole
 being closed, so it is measured against `base_of` and against two payloads built under one name.
+
+## Two classes, and the check that exists only because they are two
+
+`ReportingTool[P]` reads as "a `Tool` with a payload and no handler", so folding the two into one
+parametrised class gets proposed about once per reader - `tool()` below, which derives the same
+schema and hands its handler a typed instance, makes the resemblance closer rather than weaker.
+It does not survive contact with `Role[P]`. That parameter binds from the one member of
+`Sequence[Tool | ReportingTool[P]]` that carries a payload type, and it binds **because the two
+classes are disjoint**: make `ReportingTool` a subclass of one `Tool` and every mismatched
+declaration type-checks, because a `ReportingTool[Other]` satisfies the bare `Tool` arm and `P` is
+never bound at all. Four things pay for the merge, and each has a home here:
+
+  1. *The layering.* `test_two_payload_types_of_one_shape_are_two_schemas_and_two_fingerprints`
+     already writes it down in as many words - "`Tool` is a port type that must not learn what a
+     payload class is" - and one class is exactly that sentence reversed. The derivation is ~205
+     lines and either follows `payload` into `ports/` or stays here while `payload: type[P]` goes
+     without it, which is the split that lets a bare `Tool(payload=…)` be written with no schema.
+  2. *The check is recoverable, at a price.* The one spelling that keeps it is
+     `tools: Sequence[Tool[P] | Tool[None]]` - more machinery rather than less, `Tool[Any]` in
+     `AgentTask` and in `base_of`, and a hand-written overloaded constructor on a `ports/`
+     dataclass, since a generated `__init__` is public and reopens what the overloads closed.
+  3. *It deletes a refusal that exists.* Under that spelling a mixed *list* display quietly infers
+     `Role[Findings | None]` where today it is refused at the declaration -
+     `tests/sdk/test_roles.py::test_a_mixed_list_display_does_not_infer_p_and_says_so_at_the_declaration`,
+     whose docstring says "the `type: ignore` is the assertion".
+  4. *It opens a new hole on the shape `tool()` exists for.* A tool carrying both a payload and a
+     handler would bind `P`, so `Role(tools=(that_one,))` infers `Role[Findings]` while `run.step`
+     returns `None`. Two classes cannot have that hole: a handled tool is a `Tool` and carries no
+     `P`, which is what `test_a_handled_tool_is_an_ordinary_tool_and_binds_no_role_parameter`
+     measures.
+
+And the distinction is not conventional. A reporting tool's payload is **the only value a tool call
+can put on the journal** - `sdk/_engine/steps.py`'s `return None if capture is None else
+capture.reported(outcome)` is the whole of it, and that value becomes `Entry.value`. Every other
+tool, `tool()`'s included, answers with a `ToolResult` that every adapter turns into content for the
+model and that reaches no store. One class buries that in `handler is None`.
+
+`ARCHITECTURE.md`'s "No single `Tool` class" carries the argument; what is here is the measurement.
+`test_a_role_promising_one_payload_refuses_a_tool_that_reports_another` spends the check, so a merge
+that lost it fails a line instead of passing a review.
 """
 
 import json
@@ -39,7 +79,8 @@ from agl.ports.agent import Claude, Tool, ToolResult
 from agl.ports.errors import InputError, InternalError
 from agl.ports.run import JsonValue
 from agl.sdk._engine.journal import base_of, canonical_json
-from agl.sdk.tools import ReportingTool, describe, reporting_tool
+from agl.sdk.roles import Role
+from agl.sdk.tools import ReportingTool, describe, reporting_tool, tool
 
 _HEAD: Final = "4a91c07f2b3e8d15c6a0b7f31d92e8054c6a0f13"
 
@@ -787,6 +828,188 @@ async def test_the_payload_type_carries_through_to_what_the_workflow_calls() -> 
     findings = await _step(REPORT, _ONE_HIGH)
     assert_type(findings, Findings)
     assert [found.file for found in findings.high()] == ["a.py"]
+
+
+# --- `tool()`: the same derivation, behind a handler the workflow wrote ---------------------------
+#
+# A reporting tool is a declaration the engine binds a handler to; `tool()` is the other half of the
+# same machinery - an ordinary `agl.ports.agent.Tool` whose schema is derived from a payload
+# dataclass and whose handler is the workflow's own, called with the payload already built. Nothing
+# below is a second derivation: the assertions are written as equalities against `REPORT`, which is
+# what makes "100% reuse" a measurement rather than a claim about the source.
+
+
+def _applier(seen: list[Findings]) -> Callable[[Findings], Awaitable[ToolResult]]:
+    """A workflow's own handler: it takes the payload *class* rather than a mapping, which is the
+    whole of what `tool()` buys over a hand-built `Tool`. `seen` is how a test sees what arrived."""
+
+    async def _apply(payload: Findings) -> ToolResult:
+        seen.append(payload)
+        return ToolResult(text=f"{len(payload.findings)} findings")
+
+    return _apply
+
+
+def test_a_handled_tool_derives_what_a_declaration_over_the_same_payload_derives() -> None:
+    """One derivation serving both, asserted as equality rather than as a claim about the source.
+
+    The schema is the stored format and `base_of` hashes it, so a `tool()` that had grown its own
+    deriver would be a second format free to drift - and the drift would surface as two steps where
+    an author wrote one. The base is asserted too, over a tool holding the same name and description
+    as `REPORT`: equal digests are the sentence that the handler is not a term and the payload type
+    reached the digest the one way it can, through the schema's `title`.
+    """
+    seen: list[Findings] = []
+    handled = tool(REPORT.name, REPORT.description, Findings, _applier(seen))
+    assert dict(handled.payload_schema) == dict(REPORT.payload_schema)
+    assert _base(handled) == _base(_tool(REPORT))
+
+
+@pytest.mark.asyncio
+async def test_the_handler_is_handed_the_payload_dataclass_and_not_the_mapping() -> None:
+    """`Tool.handler` takes a `Mapping[str, JsonValue]` because that is what a vendor delivers, and
+    a workflow author should never write the walk from one to a dataclass. So the conversion is the
+    factory's, and what the author's function is called with is the instance - methods, defaults,
+    `tuple` fields and all, exactly what `ReportingTool.read` returns off the ledger."""
+    seen: list[Findings] = []
+    handled = tool("apply_findings", "act on what the review found", Findings, _applier(seen))
+
+    answered = await handled.handler(_ONE_HIGH)
+
+    assert seen == [REPORT.read(_ONE_HIGH)]
+    assert isinstance(seen[0].tags, tuple), "the handler was given something JSON-shaped instead"
+    assert [found.file for found in seen[0].high()] == ["a.py"]
+    assert answered == ToolResult(text="2 findings")
+
+
+@pytest.mark.asyncio
+async def test_a_payload_the_handler_cannot_take_is_refused_in_the_declarations_own_words() -> None:
+    """A model that sent the wrong shape gets one correctable message whichever kind of tool it
+    called, which is why `_refusal` is shared rather than reimplemented here: asserted as equality
+    against `ReportingTool.rejection`, so a second wording would fail this line.
+
+    And the handler is not called at all. Half-built payloads never reach a workflow's code, so an
+    author's function may read `payload.summary` without asking whether a summary arrived.
+    """
+    seen: list[Findings] = []
+    handled = tool(REPORT.name, REPORT.description, Findings, _applier(seen))
+
+    refused = await handled.handler({"summary": 3, "findings": [], "notes": "extra"})
+
+    assert refused.rejected
+    assert refused.text == REPORT.rejection({"summary": 3, "findings": [], "notes": "extra"})
+    assert "report_findings.summary" in refused.text
+    assert seen == [], "the handler ran on a payload that did not convert"
+
+
+@pytest.mark.asyncio
+async def test_a_handler_that_answers_is_content_for_the_model_and_never_an_entry() -> None:
+    """The one runtime difference between the two kinds, from the tool's own side: an ordinary
+    tool's answer is a `ToolResult`, which every adapter turns into content sent back into the
+    session. Only a reporting tool's payload becomes `Entry.value`, and it does so in
+    `sdk/_engine/steps.py` rather than here - `tests/sdk/test_run_step.py` is where that half is
+    driven. What this pins is that `tool()` produces the ordinary shape and nothing more."""
+    seen: list[Findings] = []
+    handled = tool("apply_findings", "act on what the review found", Findings, _applier(seen))
+    answered = await handled.handler(_ONE_HIGH)
+    assert isinstance(answered, ToolResult)
+    assert not answered.rejected
+
+
+def test_a_handled_tools_payload_is_refused_by_the_same_rules_a_declarations_is() -> None:
+    """`_check_payload` and the schema walk, reached through the other factory: refused where the
+    tool is written, for `reporting_tool()`'s reason - a package that cannot be invoked correctly
+    should not import.
+
+    **Asserted as equality against the declaration's refusal, and that equality is the point.**
+    Both factories reach one `_check_payload` and one schema walk, so the two messages are the same
+    string over the same name - a `tool()` that grew a wording of its own would be a second
+    vocabulary for one rule, and the two would be free to drift the way the schema derivation is
+    not allowed to. Written this way rather than as a substring match so that the whole message is
+    compared and not the half somebody remembered.
+
+    **And neither of them may say "reporting tool"**, which is the clause that would silently drift
+    back. Both messages named one until the shared helpers were reached by a second factory: an
+    author who wrote `tool(...)` and handed it a class read a refusal about a concept their tool is
+    not, and went looking for the reporting tool they had not declared. `_refusal` is deliberately
+    not covered by this - a payload the model got wrong is refused in wording that is correct for
+    both kinds and is asserted as shared, one section up.
+    """
+
+    async def _never(payload: object) -> ToolResult:
+        raise AssertionError("a handler was called on a tool that should not have been built")
+
+    with pytest.raises(InputError) as not_a_dataclass:
+        tool("apply", "apply it", str, _never)
+    with pytest.raises(InputError) as declared_not_a_dataclass:
+        reporting_tool("apply", "apply it", str)
+    assert "builtins.str" in str(not_a_dataclass.value)
+    assert str(not_a_dataclass.value) == str(declared_not_a_dataclass.value)
+
+    with pytest.raises(InputError) as unsupported:
+        tool("apply", "apply it", HasMapping, _never)
+    with pytest.raises(InputError) as declared_unsupported:
+        reporting_tool("apply", "apply it", HasMapping)
+    assert "counts" in str(unsupported.value)
+    assert str(unsupported.value) == str(declared_unsupported.value)
+
+    for refused in (not_a_dataclass, unsupported):
+        assert "reporting tool" not in str(refused.value), (
+            f"a payload refusal reached through `tool()` calls the thing a reporting tool: "
+            f"{str(refused.value)!r}. These two messages are shared with `reporting_tool()` and "
+            f"have to be true of both - an author of an ordinary handled tool who is told what a "
+            f"reporting tool cannot do has been sent to look for a declaration they never wrote."
+        )
+
+
+# --- one tool class or two, and the check that rests on there being two ---------------------------
+#
+# The module docstring holds the argument and `ARCHITECTURE.md`'s "No single `Tool` class" holds it
+# at length. These two are the mechanical half: the check the disjointness buys, and the hole it
+# cannot have.
+
+
+def test_a_role_promising_one_payload_refuses_a_tool_that_reports_another() -> None:
+    """`Role[Findings]` declared with a `ReportingTool[Described]`, refused at the declaration.
+
+    **The `type: ignore` is the assertion**, `tests/sdk/test_roles.py`'s idiom: `--strict` turns on
+    `warn_unused_ignores`, so a mypy - or a `Tool`/`ReportingTool` merge - that stopped refusing
+    this fails on this line rather than passing quietly and handing a workflow a `Described` under
+    an `assert_type(…, Findings)`.
+
+    The runtime half is asserted beside it for the same reason `test_roles.py` asserts it: nothing
+    is wrong with the *value*, and a reader who met only the ignore would go looking for a refusal
+    that does not exist. `Role.__post_init__` has no opinion here and could not have one - one
+    reporting tool is one reporting tool, and which payload type a role was annotated with is not
+    a thing a `Role` instance can see.
+    """
+    mismatched: Role[Findings] = Role(
+        name="review",
+        instructions="review the worktree",
+        tools=(DESCRIBED,),  # type: ignore[arg-type]
+    )
+    assert [declared.name for declared in mismatched.tools] == [DESCRIBED.name]
+
+
+def test_a_handled_tool_is_an_ordinary_tool_and_binds_no_role_parameter() -> None:
+    """The hole one class would open, measured as absent.
+
+    A tool with a payload *and* a handler is the shape the next deliverable wants, and under a
+    single parametrised `Tool` it would bind `P` - so `Role(tools=(handled,))` would infer
+    `Role[Findings]` while `run.step` returned `None`, and `.summary` on the result would be an
+    `AttributeError` with mypy clean. Here it cannot: `tool()` returns an
+    `agl.ports.agent.Tool`, which carries no payload type, so the role is `Role[None]` and a
+    workflow that wanted a payload has to declare a reporting tool and say so.
+    """
+    seen: list[Findings] = []
+    handled = tool("apply_findings", "act on what the review found", Findings, _applier(seen))
+    assert_type(handled, Tool)
+    assert isinstance(handled, Tool)
+    assert not isinstance(handled, ReportingTool)
+
+    offered = Role(name="apply", instructions="apply what the review found", tools=(handled,))
+    assert_type(offered, Role[None])
+    assert [declared.name for declared in offered.tools] == ["apply_findings"]
 
 
 # --- the re-export half --------------------------------------------------------------------------

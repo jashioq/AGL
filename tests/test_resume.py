@@ -49,7 +49,6 @@ from agl.ports.agent import (
     Capability,
     Claude,
     ModelId,
-    QuestionHandler,
     Restriction,
     StopReason,
 )
@@ -781,7 +780,6 @@ class _NotReady(AgentRunner):
         self,
         task: AgentTask,
         *,
-        on_question: QuestionHandler | None = None,
         on_activity: ActivityReporter | None = None,
     ) -> AgentOutcome:
         raise AssertionError("preflight refused this run and an agent was dispatched anyway")

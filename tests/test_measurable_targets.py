@@ -67,12 +67,12 @@ wrong reason and looks identical from the summary line. `__pycache__` is exclude
 the same reason: a stale `.pyc` is not a module anybody imports and counting one would inflate the
 number the assertion rests on.
 
-## One module, and it is the largest in the repository
+## One module, and it is one of the longest in the repository
 
-709 code lines against `scripts/check`'s 300-line convention, which is more than half again the
-next largest module here (`tests/test_contract_listings.py`, at 448) and is the single biggest
-margin over the ceiling in the tree. The module size ceiling warns rather than fails, and this is
-the warning answered rather than ignored.
+773 code lines against `scripts/check`'s 300-line convention, which is among the largest of the 35
+modules over it and more than half again `tests/test_contract_listings.py`, the file whose rule
+this one applies a floor up. The module size ceiling warns rather than fails, and this is the
+warning answered rather than ignored.
 
 **The seam a split would follow is the target numbers, and they are not a seam.** Twelve targets is
 twelve instances of one job - read the target's sentence, find the mechanical form of it, assert
@@ -89,7 +89,7 @@ anything. #8 is the same shape from the other side, its enumeration static and i
 
 What the length actually is: twelve sections, each with the target quoted, the mechanical form
 argued for somebody meeting it for the first time, and a failure message that names the target
-rather than the expression that failed. 139 of those 709 lines are assertion messages, which is this
+rather than the expression that failed. 148 of those 773 lines are assertion messages, which is this
 repository's convention rather than this file's indulgence.
 
 ## The one instrument this file could not build
@@ -155,7 +155,7 @@ ENTRY_POINT_TABLE: Final = 'entry-points."agl.workflows"'
 
 # Where each of the twelve is settled, spelled `path::name` so that a reader can go straight to the
 # assertion and so that `test_every_settlement_names_a_test_that_exists` can resolve every one of
-# them against the real file. Four targets cite a test written elsewhere rather than a copy of it
+# them against the real file. Five targets cite a test written elsewhere rather than a copy of it
 # made here, and each of those citations says in its own section why re-writing it would have been
 # worse. Nothing is listed twice: a target settled here is settled here.
 HERE: Final = "tests/test_measurable_targets.py"
@@ -167,7 +167,10 @@ SETTLED: Final[Mapping[int, tuple[str, ...]]] = {
         f"{HERE}::test_the_registry_dispatches_through_no_name_it_was_handed",
         f"{HERE}::test_every_workflow_package_is_one_entry_point_line_and_no_more",
     ),
-    2: (f"{HERE}::test_both_workflows_are_the_size_the_target_records",),
+    2: (
+        f"{HERE}::test_both_workflows_are_the_size_the_target_records",
+        f"{HERE}::test_the_counting_method_reproduces_the_decomposition_the_target_recorded",
+    ),
     3: (
         f"{HERE}::test_only_the_composition_root_names_an_adapter",
         f"{HERE}::test_there_is_one_config_section_per_agent_backend",
@@ -296,19 +299,29 @@ def _is_docstring(statement: ast.stmt) -> bool:
     )
 
 
-def _header(statement: ast.stmt, lines: Sequence[str]) -> str:
-    """A statement's own source, without the body it encloses.
+def _spanned(statement: ast.stmt) -> range:
+    """The lines a statement's own header occupies - decorators in, the body it encloses out.
 
     A compound statement's `ast.unparse` renders everything inside it, so a function whose body
     happens to call `terminal.show` would match a test for `terminal.show` on the *function*. What
-    is wanted is the line the author wrote to open the statement - decorators included, since a
-    decorator is part of the declaration - and this is that.
+    is wanted is the lines the author wrote to open the statement - decorators included, since a
+    decorator is part of the declaration - and this is them.
+
+    A range rather than a string, because #2's counter needs both: `_header` renders these lines to
+    match text in, and the wiring rule below also asks whether a *name* is referenced in them,
+    which is a question about the parsed statement and not about its text.
     """
     decorators = [node.lineno for node in getattr(statement, "decorator_list", [])]
     start = min([statement.lineno, *decorators])
     body = getattr(statement, "body", None)
     end = body[0].lineno - 1 if body else (statement.end_lineno or statement.lineno)
-    return "\n".join(lines[start - 1 : end])
+    return range(start, end + 1)
+
+
+def _header(statement: ast.stmt, lines: Sequence[str]) -> str:
+    """A statement's own source, without the body it encloses - the lines `_spanned` names."""
+    span = _spanned(statement)
+    return "\n".join(lines[span.start - 1 : span.stop - 1])
 
 
 def _entry_points() -> Mapping[str, str]:
@@ -518,13 +531,42 @@ def test_every_workflow_package_is_one_entry_point_line_and_no_more() -> None:
 # `show`)", and under this method `fix` is 12 statements of which exactly those 4 are the screen
 # wiring. Any method that cannot reproduce that decomposition is measuring something else.
 #
-# **The third of those four is no longer spelled `replace`, and the count did not move.** The
-# target is quoted above as it was written; what `fix` holds today is `asking =
-# implementer(on_question=answer)` - the `dataclasses.replace` was replaced by a factory call whose
-# parameter list is the whole override surface. It is the same statement doing the same job at the
-# same line, so the wording is left as it was recorded and the decomposition is unchanged: a
-# handler, its body, the statement that puts the handler on a role, and the board's `show`. A
-# wiring count that moved when the spelling did would have been counting spellings.
+# **The decomposition has changed and the floor has not.** The target is quoted above as it was
+# written - "8 ... plus 4 more to wire one interactive screen (a handler, its body, a `replace` for
+# the asking role, and the board's `show`)" - and two of those four are no longer in this package.
+# A question used to be a callback the framework asked through: `fix` wrote an `async def answer`
+# and its one-line body, put it on a role with `on_question=`, and AGL supplied the tool the agent
+# called. A question is now an ordinary tool the *workflow* supplies, and `fix` writes it in
+# `workflows/fix/asking.py` - a payload class, a handler, and a `tool()` call - so what is left in
+# `__init__.py` is the statement that hands the role its tool and the board's `show`.
+#
+# So: **wiring went from 4 to 2, and the floor stayed at 8.** The floor is the number target #2 is
+# about, it is the target's own, and it did not move - the two statements that left were both
+# wiring, and neither was the workflow. The recorded decomposition below is updated to what is
+# true rather than kept at what was recorded, because a count that no longer describes the file is
+# a count nobody can check. What the two numbers now say is: `fix` is 10 logical statements, 2 of
+# them putting a screen in front of a person, 8 of them the workflow the target specified.
+#
+# **That sentence is only worth anything under one rule, and the first rewrite was not one.** A
+# widening is exactly where a count improves because the counter moved, so the rule below is run
+# against `PREVIOUS_FIX` - the `__init__.py` as it stood when the decomposition was recorded - and
+# has to answer 12 and 4 there. The first attempt at the rewrite did not: it matched a statement
+# whose header names `.terminal` and nothing else, which scores the *old* file 2 as well, putting
+# its floor at 10 and **failing this target on the tree the target was written against**. Under
+# that rule the workflow contributed nothing at all to 4 -> 2; the whole of the delta was the
+# rewrite, and the floor read 8 only because the total had dropped by 2 at the same time. So the
+# clause it had dropped is kept: the old rule caught a handler by *name* and caught the statement
+# that handed it over, and both survive with `on_question` generalised to "a nested function that
+# reaches the terminal". What actually moved is then visible in one line - the handler and its body
+# left this file for `asking.py`, and `implementer(ask=asking(run.terminal))` arrived.
+#
+# The statements that left did not vanish - they moved to `workflows/fix/asking.py`, which this
+# method does not count, and which is bigger than the two lines it replaced because it carries the
+# vocabulary two adapters used to carry twice: a schema, a blank-question refusal, an options
+# normalisation, and a sentence for an answer that was empty. That is not hidden by the number and
+# is not meant to be: #2 counts a workflow's `__init__.py`, which is the file an author writes the
+# workflow *in*, and a package growing a module beside it is visible to anybody reading the package.
+# `tests/workflows/test_fix.py` is where that module is measured.
 #
 # The method that was refused, and its numbers, because a reader deserves both: counting only the
 # **decorated function's body** gives `fix` = 8 and `split` = 6. Those are smaller and they are the
@@ -541,31 +583,89 @@ def test_every_workflow_package_is_one_entry_point_line_and_no_more() -> None:
 FIX_PACKAGE: Final = WORKFLOWS_DIR / "fix" / "__init__.py"
 SPLIT_PACKAGE: Final = WORKFLOWS_DIR / "split" / "__init__.py"
 
-# The target's recorded decomposition of `fix`: the workflow, plus the interactive screen.
+# The recorded decomposition of `fix`: the workflow, plus the interactive screen. `FIX_CORE` is the
+# target's own number and has not moved. `FIX_SCREEN_WIRING` was 4 and is 2 - see the section header
+# above for what left and where it went.
 FIX_CORE: Final = 8
-FIX_SCREEN_WIRING: Final = 4
+FIX_SCREEN_WIRING: Final = 2
 
 # The target's word for `split`, which is a bound rather than a number: "`split` is ~30".
 SPLIT_CEILING: Final = 30
+
+# `src/agl/workflows/fix/__init__.py` as it stood when target #2's decomposition was recorded. The
+# method's stated criterion is that it reproduces that decomposition, and a criterion nothing runs
+# is how the wiring rule got narrower once already - so the criterion is run, below, against this.
+# Frozen history rather than a copy of anything live: no edit under `src/` can move it, and the day
+# `fix` changes again this still says 12 and 4.
+PREVIOUS_FIX: Final = '''
+from dataclasses import dataclass
+
+from agl.sdk import Answer, Question, Run, arg, workflow
+from agl.workflows.fix import views
+from agl.workflows.fix.roles import implementer, reviewer
+
+__all__ = ["FixParams", "fix"]
+
+
+@dataclass(frozen=True)
+class FixParams:
+
+    request: str = arg("-r", "--request", help="what to fix, in your own words")
+
+
+@workflow(version="1.1")
+async def fix(run: Run[FixParams]) -> None:
+
+    async def answer(question: Question) -> Answer:
+        return await run.terminal.show(views.agent_question, question=question)
+
+    asking = implementer(on_question=answer)
+    await run.terminal.show(views.board, run=run, request=run.params.request)
+    await run.step(asking, request=run.params.request, commit="implement fix")
+    findings = await run.step(reviewer())
+    if findings.high():
+        await run.step(asking, findings=findings.high(), commit="address review findings")
+'''
 
 
 def _counted(module: Path) -> tuple[int, int]:
     """A workflow package's statement count, and how many of those are interactive-screen wiring.
 
-    The wiring is identified structurally and not by line number: a statement counts as wiring if
-    its own header names `terminal.show` or `on_question`, or if it *is* the handler function some
-    `on_question=` keyword points at. That rule picks out exactly the four named in `fix` - the
-    handler, its body, the statement that puts the handler on a role, and the board's `show` -
-    without this file holding a list of line numbers that would rot on the next edit.
+    The wiring is identified structurally and not by line number, in three clauses:
 
-    **Structural is what makes the rule survive a respelling.** The third of those four was
-    `replace(implementer, on_question=answer)` when the target recorded it and is
-    `implementer(on_question=answer)` now; the `on_question` keyword is what both have in common and
-    is what this matches on, so the spelling changed under the rule without the count moving.
+      1. a statement whose own **header** names `.terminal` - that is `Run.terminal`, the one member
+         a workflow reaches a person through, so `await run.terminal.show(views.board, ...)`,
+         `if await w.terminal.show(views.conflict, ...)` and `implementer(ask=asking(run.terminal))`
+         all count, the last of them handing a role a tool whose handler shows a screen;
+      2. a **nested** function whose body reaches the terminal - a screen handler written inside the
+         workflow, whose own header names nothing and which clause 1 therefore cannot see;
+      3. a statement whose header **references** such a function - the line that hands the handler
+         over to whatever is going to call it.
+
+    **Clauses 2 and 3 are the old rule generalised, not new machinery, and dropping them is how a
+    counter flatters.** The rule read "names `terminal.show` or `on_question`, or *is* the handler
+    function some `on_question=` keyword points at" - three clauses, the same three - and
+    `on_question` no longer exists, so the middle term had to be rewritten. Rewriting it to
+    `.terminal` and stopping there was tried and refused: `.terminal` alone scores the *previous*
+    `fix` 2 rather than 4, which puts that file's floor at 10 and fails target #2 on the very tree
+    the target was written against - so the whole of the recorded 4 -> 2 would have been the
+    counter moving rather than the workflow. `test_the_counting_method_reproduces_the_
+    decomposition_the_target_recorded` is that check, kept as a test rather than as this paragraph.
+
+    Clause 3 asks the *parsed* statement whether a handler's name is loaded inside `_spanned`'s
+    lines, rather than searching the header's text for it, so a name that occurs as part of a longer
+    word is not a hand-over. Clause 2 is restricted to a nested function because the module-level
+    ones are the workflow itself and `split`'s `_implement`, and a rule that counted a def because
+    something inside it reaches a screen would report the whole workflow as wiring.
+
+    **What it deliberately does not do is follow the wiring out of the package.** `fix`'s asking
+    tool lives in `workflows/fix/asking.py` and nothing here counts it; the section header above
+    says so and says why. A rule that chased imports would be measuring a different thing from the
+    one target #2 recorded, which is the size of the file the workflow is written in.
 
     `_header` and not `ast.unparse`, because unparsing a compound statement renders its whole body:
-    the `@workflow` declaration would match `terminal.show` on account of a call four lines inside
-    it, and the count would then say the workflow function is a screen.
+    the `@workflow` declaration would match `.terminal` on account of a call four lines inside it,
+    and the count would then say the workflow function is a screen.
     """
     source = module.read_text()
     lines = source.splitlines()
@@ -576,19 +676,23 @@ def _counted(module: Path) -> tuple[int, int]:
         if not isinstance(node, ast.Import | ast.ImportFrom)
     ]
     handlers = {
-        keyword.value.id
+        statement.name
         for statement in statements
-        for node in ast.walk(statement)
-        if isinstance(node, ast.Call)
-        for keyword in node.keywords
-        if keyword.arg == "on_question" and isinstance(keyword.value, ast.Name)
+        if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef)
+        and statement not in tree.body
+        and any(".terminal" in _header(inner, lines) for inner in _statements(statement))
     }
 
     def wiring(statement: ast.stmt) -> bool:
         if getattr(statement, "name", None) in handlers:
             return True
-        header = _header(statement, lines)
-        return "terminal.show" in header or "on_question" in header
+        if ".terminal" in _header(statement, lines):
+            return True
+        span = _spanned(statement)
+        return any(
+            isinstance(node, ast.Name) and node.id in handlers and node.lineno in span
+            for node in ast.walk(statement)
+        )
 
     return len(statements), sum(1 for statement in statements if wiring(statement))
 
@@ -598,12 +702,15 @@ def test_both_workflows_are_the_size_the_target_records() -> None:
 
     Three assertions and each is a different claim:
 
-      * **`fix`'s floor is 8.** Take away the four statements that wire one interactive screen and
-        what is left is the workflow as specified - the two steps, the branch, and the repair -
-        plus the params and the declaration an author cannot avoid writing. That is the number the
-        target means by "~8 lines", and it is the target's own.
-      * **The screen costs exactly 4**, which is the target's "plus 4" reproduced rather than
-        restated. The question wiring sits on top of the floor; it does not move it.
+      * **`fix`'s floor is 8.** Take away the statements that wire one interactive screen and what
+        is left is the workflow as specified - the two steps, the branch, and the repair - plus the
+        params and the declaration an author cannot avoid writing. That is the number the target
+        means by "~8 lines", it is the target's own, and it has not moved.
+      * **The screen costs exactly 2**, where the target recorded 4. Two of those four were an
+        `async def` question handler and its body, and they left this package when a question became
+        an ordinary tool a workflow supplies - see the section header for where they went. The
+        screen wiring sits on top of the floor; it does not move it, which is why the floor is
+        unchanged by a change that halved the wiring.
       * **`split` is under 30.** The target's word for `split` is "~30", so what is asserted is the
         bound rather than a number, and the measured value is carried into the failure message so
         that a workflow which grew is reported as a size and not only as a breach.
@@ -620,10 +727,9 @@ def test_both_workflows_are_the_size_the_target_records() -> None:
 
     assert fix_wiring == FIX_SCREEN_WIRING, (
         f"{FIX_PACKAGE.parent.name} spends {fix_wiring} statements on interactive-screen wiring "
-        f"and the target records {FIX_SCREEN_WIRING} - a handler, its body, the statement that "
-        f"puts the handler on the asking role, and the board's `show`. The decomposition is what "
-        f"makes floor a floor: if the wiring count moved, the number left under it is not the "
-        f"specified workflow any more."
+        f"and this file records {FIX_SCREEN_WIRING} - the statement that hands the asking role its "
+        f"tool, and the board's `show`. The decomposition is what makes floor a floor: if the "
+        f"wiring count moved, the number left under it is not the specified workflow any more."
     )
     assert fix_total - fix_wiring == FIX_CORE, (
         f"`fix` is {fix_total} logical statements of which {fix_wiring} are screen wiring, leaving "
@@ -637,6 +743,49 @@ def test_both_workflows_are_the_size_the_target_records() -> None:
         f"that it adds them with no framework change between it and `fix` - a `split` that has "
         f"outgrown the number is either doing framework work or doing more than one thing. "
         f"({split_wiring} of those statements are screens.)"
+    )
+
+
+def test_the_counting_method_reproduces_the_decomposition_the_target_recorded(
+    tmp_path: Path,
+) -> None:
+    """The criterion the counting method was chosen by, run instead of asserted in prose.
+
+    The section header says it in as many words - "it is chosen because it is the one that
+    reproduces the target's own recorded number ... any method that cannot reproduce that
+    decomposition is measuring something else" - and until this test existed that was a sentence
+    nothing checked. It went wrong exactly as an unchecked criterion does. When `on_question` was
+    deleted the wiring rule had to be rewritten, the rewrite dropped two of the old rule's three
+    clauses, and the recorded wiring went from 4 to 2 with the section header attributing the drop
+    to two statements leaving the package. Under the rule that produced the 2, the *previous* file
+    scores 2 as well: the workflow contributed nothing to the delta, and this assertion is what
+    would have said so.
+
+    So the method is run against `PREVIOUS_FIX` and has to answer with the decomposition the target
+    recorded - `FIX_CORE` statements plus the four the target names, of which the four are the
+    wiring. **`FIX_CORE` is on both sides on purpose.** The floor is the number target #2 is about,
+    and what is being asserted is that it is the same floor here and in `fix` today - a rule that
+    moved it under the old file would be a rule reporting a workflow that has not been edited in
+    years as having changed size.
+
+    The historical source is frozen in this module rather than read out of git, because a test that
+    resolves a commit is a test a rebase can delete and this claim is about a file's *content*, not
+    about a repository's history. Nothing under `src/` can drift from it either, which is what makes
+    it safe to keep: it is the past, and the past does not need maintaining.
+    """
+    previous = tmp_path / "__init__.py"
+    previous.write_text(PREVIOUS_FIX)
+
+    total, wiring = _counted(previous)
+
+    assert (total, wiring) == (FIX_CORE + 4, 4), (
+        f"the counting method scores the `fix` that target #2's decomposition was recorded against "
+        f"at {total} statements of which {wiring} are screen wiring, where the target records "
+        f"{FIX_CORE + 4} and 4 - a handler, its body, the statement that puts it on the asking "
+        f"role, and the board's `show`. The method is chosen *because* it reproduces that "
+        f"decomposition, so a rule that cannot is measuring something else, and any number it "
+        f"reports for the workflow as it stands today is a number about the rule rather than about "
+        f"the workflow. Its floor here would be {total - wiring} against the target's {FIX_CORE}."
     )
 
 

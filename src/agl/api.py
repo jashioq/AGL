@@ -10,7 +10,7 @@ from agl.ports.errors import ConflictError, InputError, NotFoundError
 from agl.ports.history import History
 from agl.ports.home_layout import RunScope
 from agl.ports.ids import Namespace, ProjectName, RunLabel
-from agl.ports.run import RunSpec
+from agl.ports.run import RunSpec, checked_text
 from agl.ports.store import Store
 from agl.ports.tree_layout import TreesRoot, run_branch
 from agl.sdk import params
@@ -66,7 +66,11 @@ async def run(
 
     await preflight.check(services.agents, wf.fn)
 
-    ref = await services.history.default_ref() if base_ref is None else base_ref
+    ref = (
+        await services.history.default_ref()
+        if base_ref is None
+        else checked_text(base_ref, "base_ref")
+    )
     spec = RunSpec(
         workflow=name,
         workflow_version=wf.version,

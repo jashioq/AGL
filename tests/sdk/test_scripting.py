@@ -23,7 +23,6 @@ import pytest
 
 from agl.ports.agent import StopReason
 from agl.ports.errors import InputError
-from agl.ports.questions import Question
 from agl.ports.run import JsonValue
 from agl.sdk.testing import Call, Reply
 
@@ -73,20 +72,19 @@ def test_a_call_is_frozen_once_it_is_built() -> None:
 def test_a_reply_normalises_every_sequence_to_a_tuple() -> None:
     """A list the author goes on appending to must not change what an agent already did.
 
-    All three, because each is a separate `object.__setattr__` and two of them being right is what a
-    partial normalisation looks like.
+    Both, because each is a separate `object.__setattr__` and one of them being right is what a
+    partial normalisation looks like. There were three while `Reply.asks` existed: a question is an
+    ordinary tool call now, so what an agent asks is a `Call` in `calls` and there is no third
+    sequence for a `Reply` to normalise.
     """
     calls = [Call("report")]
-    asks = [Question(prompt="anything to add?")]
     activity = ["Edit: src/a.py"]
 
-    reply = Reply(calls=calls, asks=asks, activity=activity)
+    reply = Reply(calls=calls, activity=activity)
     calls.append(Call("report_again"))
-    asks.append(Question(prompt="and now?"))
     activity.append("Read: src/b.py")
 
     assert reply.calls == (Call("report"),)
-    assert reply.asks == (Question(prompt="anything to add?"),)
     assert reply.activity == ("Edit: src/a.py",)
 
 
@@ -99,5 +97,5 @@ def test_an_empty_reply_is_an_agent_that_reported_nothing_and_completed() -> Non
     """
     reply = Reply()
 
-    assert (reply.calls, reply.asks, reply.activity) == ((), (), ())
+    assert (reply.calls, reply.activity) == ((), ())
     assert (reply.says, reply.stop_reason) == ("", StopReason.COMPLETED)

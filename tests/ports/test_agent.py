@@ -122,7 +122,6 @@ def test_the_enum_values_are_the_strings_a_fingerprint_holds() -> None:
     assert {member.name: member.value for member in Capability} == {
         "FILE_EDIT": "file_edit",
         "SHELL": "shell",
-        "MID_RUN_QUESTIONS": "mid_run_questions",
         "TOOL_CALLING": "tool_calling",
     }
     assert {member.name: member.value for member in StopReason} == {

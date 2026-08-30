@@ -26,21 +26,30 @@ factory imported and never used, a factory written below the workflow function, 
 reached only as `roles.implementer()` through a bound module.
 
 **The two halves are tested against each other, not separately.** The interesting case is a role
-that *passes* preflight and must still be refused: `implementer(on_question=handler)` is the
-spelling for a question handler, which is a closure over the `Run`, so the role a module declares
-the role a workflow steps with are different values. A suite that only checked what preflight saw
-would go green against an engine in which a handler-carrying role reaches a backend that cannot ask
-- which raises nothing, logs nothing, and reports a result (`sdk/roles.py`).
+that *passes* preflight and must still be refused: `implementer(ask=tool)` is the spelling for a
+role a workflow hands its own tool to, and that tool's handler is a closure over the `Run`, so the
+role a module declares and the role a workflow steps with are different values. A suite that only
+checked what preflight saw would go green against an engine in which a tool-carrying role reaches a
+backend that cannot call one - where the reporting tool never reaches the model, the agent cannot
+fire it, and the step ends with `RoleIncompleteError` rather than with the refusal it was owed.
+
+**This half used to be measured on `MID_RUN_QUESTIONS` and it is measured on `TOOL_CALLING` now.**
+`fix` handed its implementer an `on_question=` handler, `Role.__post_init__` folded the capability
+in behind it, and that was the value no namespace scan could have seen. Both went: a question is an
+ordinary tool the workflow supplies, so the same workflow hands the same role a `Tool` at the same
+line, and `Role.__post_init__` folds `TOOL_CALLING` in from `tools` where it used to fold
+`MID_RUN_QUESTIONS` in from `on_question`. The check did not vanish with the member - it moved one
+fold over, and this suite is where that is measured rather than asserted.
 
 **The refusals are pinned on the part of the message the reader acts on**, which for a capability
 miss is the member that is missing and, when a declaration put it there rather than the author, the
-word that declaration is spelled with - `on_question` for `MID_RUN_QUESTIONS`, and `tools` for
-`TOOL_CALLING`. Those clauses are what `roles.py` asks for by name: "otherwise the reader goes
-looking for a line that is not in their file." Each is conditioned on the trigger and not on the
-member, and there is a test for the negative of both: a role that typed its own requirement is told
-nothing about where it came from. For an unavailable provider it is now also *which factory in which
-module* asked for that model, because the namespace over-approximates and a person refused for a
-provider they never meant to use has otherwise no thread to pull.
+word that declaration is spelled with - `tools` for `TOOL_CALLING`. That clause is what `roles.py`
+asks for by name: "otherwise the reader goes looking for a line that is not in their file." It is
+conditioned on the trigger and not on the member, and there is a test for its negative: a role that
+typed its own requirement is told nothing about where it came from. For an unavailable provider it
+is now also *which factory in which module* asked for that model, because the namespace
+over-approximates and a person refused for a provider they never meant to use has otherwise no
+thread to pull.
 
 ## What moved when the registry replaced `roles=`, and why it is here rather than deleted
 
@@ -50,16 +59,18 @@ factory - it has no arguments for a parameter list the author chose. So four sui
 containment through `api.run` now measure it through `run.step`:
 
   * a role requiring what its backend lacks, refused with the member named;
-  * a missing `MID_RUN_QUESTIONS` saying that `on_question` put it there;
-  * a missing `TOOL_CALLING` saying that `tools` did;
+  * a missing `TOOL_CALLING` saying that `tools` put it there;
   * a role that typed its own requirement being told nothing about where it came from.
 
-Every one of those claims is unchanged - the class, the exit code and the sentence are the same. All
-that moved is the moment, and the moment is what they no longer assert: three of them used to assert
-that no record and no workspace existed afterwards, and that is exactly what the move gave up. The
-cost is not merely recorded in prose here - `test_a_negotiating_role_is_checked_at_the_step_it_is
-_handed_to` asserts the record is **present** when containment refuses, which is the same fact read
-from the other side.
+There were four, and the fourth was a missing `MID_RUN_QUESTIONS` saying that `on_question` put it
+there. It went with the member: `_unmet` has one such clause now, not two.
+
+Every one of the remaining claims is unchanged - the class, the exit code and the sentence are the
+same. All that moved is the moment, and the moment is what they no longer assert: they used to
+assert that no record and no workspace existed afterwards, and that is exactly what the move gave
+up. The cost is not merely recorded in prose here - `test_a_role_built_inside_a_workflow_is_checked
+_at_the_step_it_is_handed_to` asserts the record is **present** when containment refuses, which is
+the same fact read from the other side.
 
 What did not move is the provider half. A logged-out harness is still refused before anything
 durable exists, and the acceptance criterion is still met in as many words.
@@ -85,18 +96,18 @@ from agl.ports.agent import (
     Claude,
     ModelId,
     OpenAI,
-    QuestionHandler,
     StopReason,
+    Tool,
+    ToolResult,
 )
 from agl.ports.errors import DeniedError, UpstreamUnavailable, exit_code_for
 from agl.ports.home_layout import RunScope
 from agl.ports.ids import Namespace, ProjectName, RunLabel
-from agl.ports.questions import Answer, Question
 from agl.ports.tree_layout import TreesRoot
 from agl.ports.workspace import Workspace, WorkspaceProvider
 from agl.sdk._engine import preflight
 from agl.sdk.roles import Role, role
-from agl.sdk.tools import reporting_tool
+from agl.sdk.tools import reporting_tool, tool
 from agl.sdk.workflow import Run, workflow
 from instruments.preflight import NoParams, entered
 
@@ -112,15 +123,14 @@ SCOPE: Final = RunScope(PROJECT, LABEL)
 # a hand-copied list quietly narrower than the thing it stands in for.
 EVERYTHING: Final = frozenset(Capability)
 
-# Everything except the one member the third check is about. The interesting backend in this file,
-# and the one that is a live possibility rather than a fiction: `MID_RUN_QUESTIONS` on that harness
-# rests on an asking tool AGL registers itself.
-CANNOT_ASK: Final = EVERYTHING - {Capability.MID_RUN_QUESTIONS}
-
-
-# Everything except the member the second folded implication is about. A backend that cannot call a
-# tool at all is the sharper of the two cases: the role's reporting tool never reaches the model,
-# so the agent cannot fire it, and `Run.step` ends the step with `RoleIncompleteError`.
+# Everything except the member the folded implication is about, and the interesting backend in this
+# file. A backend that cannot call a tool is where a role built inside a workflow gets caught: the
+# tool never reaches the model, so the agent cannot fire it, and `Run.step` would otherwise end the
+# step with `RoleIncompleteError` - a failure that names a prompt where the fact is a backend.
+#
+# There was a second one, `CANNOT_ASK`, for a backend that reported no `MID_RUN_QUESTIONS`. Both the
+# member and the constant went when a question became an ordinary tool: the backend that cannot
+# serve `fix`'s implementer is the one that cannot call a tool, which is this one.
 CANNOT_CALL: Final = EVERYTHING - {Capability.TOOL_CALLING}
 
 
@@ -131,14 +141,25 @@ class _Found:
     summary: str
 
 
-async def _answer(question: Question) -> Answer:
-    """A question handler, reduced to the one thing this file needs of it: that it exists.
+@dataclass(frozen=True)
+class _Asked:
+    """The payload an asking tool would carry. One field, because nothing here is ever asked."""
 
-    A role carrying one has `Capability.MID_RUN_QUESTIONS` folded into `requires` at declaration
-    time (`sdk/roles.py`), and that is the whole of its part here - nothing below ever asks a
-    question, because every refusal this file is about happens before an agent is dispatched.
+    question: str
+
+
+def _asking() -> Tool:
+    """An asking tool, reduced to the one thing this file needs of it: that it exists.
+
+    A role carrying any tool has `Capability.TOOL_CALLING` folded into `requires` at declaration
+    time (`sdk/roles.py`), and that is the whole of its part here - nothing below ever calls this,
+    because every refusal this file is about happens before an agent is dispatched.
     """
-    return Answer(text="yes")
+
+    async def answered(asked: _Asked) -> ToolResult:
+        return ToolResult(text="yes")
+
+    return tool("ask_the_operator", "ask the person running this task", _Asked, answered)
 
 
 # --- the roles, as the `@role(model=…)` factories a role is declared by --------------------------
@@ -151,16 +172,18 @@ async def _answer(question: Question) -> Answer:
 
 
 @role(model=Claude.OPUS)
-def implementer(*, on_question: QuestionHandler | None = None) -> Role:
+def implementer(*, ask: Tool | None = None) -> Role:
     """Requires nothing, and is the role every workflow below that means to *pass* preflight is
     written on.
 
-    **The `on_question` parameter is the whole of the step-time check's case**, and it is
-    `fix/roles.py`'s shape: `implementer()` requires nothing and is what a reader of a declaration
-    sees; `implementer(on_question=…)` requires `MID_RUN_QUESTIONS`, because `Role.__post_init__`
-    folds it in, and is what reaches `run.step`. Nothing before the workflow's body has run can see
-    the second, which is why containment is a step-time check and always was."""
-    return Role(name="implement", instructions="implement it", on_question=on_question)
+    **The `ask` parameter is the whole of the step-time check's case**, and it is `fix/roles.py`'s
+    shape: `implementer()` requires nothing and is what a reader of a declaration sees;
+    `implementer(ask=…)` requires `TOOL_CALLING`, because `Role.__post_init__` folds it in from
+    `tools`, and is what reaches `run.step`. Nothing before the workflow's body has run can see the
+    second, which is why containment is a step-time check and always was."""
+    return Role(
+        name="implement", instructions="implement it", tools=() if ask is None else (ask,)
+    )
 
 
 @role(model=OpenAI.SOL)
@@ -189,17 +212,10 @@ def builder() -> Role:
 
 
 @role(model=Claude.OPUS)
-def proposer() -> Role:
-    """Declares no `requires` at all, and requires `MID_RUN_QUESTIONS` all the same. That folding
-    is `Role.__post_init__`'s, and it is why the refusal has to say where the member came from."""
-    return Role(name="propose", instructions="propose, then ask", on_question=_answer)
-
-
-@role(model=Claude.OPUS)
 def reporter() -> Role[_Found]:
-    """The same shape one implication over: declares no `requires` and needs `TOOL_CALLING` all the
-    same, because it is folded in behind `tools=`. A reporting step, in the smallest form that
-    has a payload at all."""
+    """Declares no `requires` at all and needs `TOOL_CALLING` all the same, because it is folded in
+    behind `tools=`. That folding is `Role.__post_init__`'s, and it is why the refusal has to say
+    where the member came from. A reporting step, in the smallest form that has a payload at all."""
     return Role(
         name="report",
         instructions="read the change, then report what you found",
@@ -226,21 +242,25 @@ async def two_providers(run: Run[NoParams]) -> None:
 
 @workflow(version="1.1")
 async def replacing(run: Run[NoParams]) -> None:
-    """Steps with a role that requires asking, in a module whose factories require nothing.
+    """Steps with a role that requires tool calling, in a module whose factories require nothing.
 
-    **This is the workflow containment exists for**, and it is written the way a
-    negotiating workflow is written: the handler is a closure over this `Run`, so the role carrying
-    it is built here, by calling the factory with the one argument it exposes. Preflight saw a
-    model; what runs is `implementer(on_question=…)`, which needs `MID_RUN_QUESTIONS`, and no scan
-    of a namespace could have known that - the value did not exist until this line ran.
+    **This is the workflow containment exists for**, and it is written the way a negotiating
+    workflow is written: the tool's handler is a closure over this `Run`, so the role carrying it is
+    built here, by calling the factory with the one argument it exposes. Preflight saw a model; what
+    runs is `implementer(ask=…)`, which needs `TOOL_CALLING`, and no scan of a namespace could have
+    known that - the value did not exist until this line ran.
     """
     entered.append("replacing")
 
-    async def approve(question: Question) -> Answer:
+    async def answered(asked: _Asked) -> ToolResult:
         """A closure over `run` in the only way that matters here: it is defined inside it."""
-        return Answer(text=f"{run.scope.label}: yes")
+        return ToolResult(text=f"{run.scope.label}: yes")
 
-    await run.step(implementer(on_question=approve))
+    await run.step(
+        implementer(
+            ask=tool("ask_the_operator", "ask the person running this", _Asked, answered)
+        )
+    )
 
 
 def _point(name: str, target: str) -> EntryPoint:
@@ -303,7 +323,6 @@ class _Stub(AgentRunner):
         self,
         task: AgentTask,
         *,
-        on_question: QuestionHandler | None = None,
         on_activity: ActivityReporter | None = None,
     ) -> AgentOutcome:
         self.ran.append(task)
@@ -598,7 +617,7 @@ async def test_preflight_asks_whether_a_backend_is_ready_and_never_what_it_can_d
 
     Containment used to run here too, over the roles `@workflow(roles=…)` declared, and it cannot:
     it needs `role.requires`, which lives on the `Role` a factory returns, and preflight may not
-    call a factory - `implementer(on_question=…)` takes a handler that does not exist until a `Run`
+    call a factory - `implementer(ask=…)` takes a tool whose handler does not exist until a `Run`
     does. So `capabilities()` is asked by nothing at second zero.
 
     Both ends, because one of them alone would pass against a preflight that had merely reordered
@@ -667,36 +686,18 @@ async def test_a_role_requiring_what_its_backend_lacks_is_refused_with_the_membe
 
 
 @pytest.mark.asyncio
-async def test_a_missing_mid_run_questions_says_that_on_question_put_it_there(
-    tmp_path: Path,
-) -> None:
-    """The third check, which is the second check plus one clause in the message.
-
-    `proposer()` declares `on_question` and no `requires` at all, so `mid_run_questions` is in its
-    requirement because `Role.__post_init__` folded it in - and a reader told only that the role
-    "requires mid_run_questions" goes looking for a line that is not in their file. `sdk/roles.py`
-    asks for this sentence by name, and this is the test that keeps it there.
-    """
-    harness = _fakes(tmp_path)
-    stub = _Stub(offers=CANNOT_ASK)
-    run = await _direct(harness, stub)
-
-    with pytest.raises(DeniedError) as caught:
-        await run.step(proposer())
-
-    said = str(caught.value)
-    assert "mid_run_questions" in said
-    assert "on_question" in said
-
-
-@pytest.mark.asyncio
 async def test_a_missing_tool_calling_says_that_tools_put_it_there(tmp_path: Path) -> None:
-    """The same clause one implication over, owed for the same reason.
+    """The third check, which is the second check plus one clause in the message.
 
     `reporter()` declares `tools=` and no `requires` at all, so `tool_calling` is in its requirement
     because `Role.__post_init__` folded it in - and "either the role names a model whose backend
     has it, or it stops requiring it" is unactionable advice about a line nobody wrote. What the
     reader needs is which declaration implied it, because that is the line they would edit.
+    `sdk/roles.py` asks for this sentence by name, and this is the test that keeps it there.
+
+    There was a second clause of this shape, for a `MID_RUN_QUESTIONS` that `on_question` had
+    folded in, and it was deleted with the member rather than rewritten: `_unmet` has one such
+    clause now, and this is it.
     """
     harness = _fakes(tmp_path)
     stub = _Stub(offers=CANNOT_CALL)
@@ -708,20 +709,18 @@ async def test_a_missing_tool_calling_says_that_tools_put_it_there(tmp_path: Pat
     said = str(caught.value)
     assert "tool_calling" in said
     assert "tools" in said
-    assert "on_question" not in said, "a role with no handler was told about one"
 
 
 @pytest.mark.asyncio
 async def test_a_role_that_typed_the_member_itself_gets_no_extra_clause(tmp_path: Path) -> None:
-    """The clause above is about a *handler*, not about the member, which is what keeps it honest.
+    """The clause above is about a *declaration*, not about the member, which keeps it honest.
 
     `builder()` requires `SHELL` because its author typed `requires={Capability.SHELL}`, and there
     is nothing to explain: a message telling them the framework put it there would be false, and a
-    message mentioning `on_question` at all would send them looking for a handler they never wrote.
+    message mentioning `tools` at all would send them looking for a declaration they never wrote.
 
-    Both clauses are asserted absent, because both are conditioned on the *trigger* rather than on
-    the member - and a clause conditioned on the member would fire here for a role that declares
-    neither a handler nor a tool.
+    The clause is conditioned on the *trigger* rather than on the member - and one conditioned on
+    the member would fire here for a role that declares no tool at all.
     """
     harness = _fakes(tmp_path)
     stub = _Stub(offers=EVERYTHING - {Capability.SHELL})
@@ -730,23 +729,31 @@ async def test_a_role_that_typed_the_member_itself_gets_no_extra_clause(tmp_path
     with pytest.raises(DeniedError) as caught:
         await run.step(builder())
 
-    assert "on_question" not in str(caught.value)
+    assert "declares `tools`" not in str(caught.value)
     assert "folds it in" not in str(caught.value)
 
 
 @pytest.mark.asyncio
-async def test_a_negotiating_role_is_checked_at_the_step_it_is_handed_to(tmp_path: Path) -> None:
+async def test_a_role_built_inside_a_workflow_is_checked_at_the_step_it_is_handed_to(
+    tmp_path: Path,
+) -> None:
     """**What makes the third check real, and what the registry costs, in one run.**
 
-    A question handler is a closure over the `Run`, so a workflow that negotiates calls its role's
-    factory - `declared(on_question=handler)` - inside its own function, and that value has a
+    An asking tool's handler is a closure over the `Run`, so a workflow that negotiates calls its
+    role's factory - `declared(ask=tool)` - inside its own function, and that value has a
     requirement no scan of a namespace could have seen: the value did not exist until the body ran.
     Preflight admitted a model, and the step is where the difference becomes visible.
 
-    Without this line, the run does not fail. `AgentRunner.run` forbids an adapter that cannot ask
-    from blocking, so it tells the agent no answer is available; the workflow's approval gate is
-    simply absent, the step reports a result, and nothing anywhere raises. That is the outcome
-    `sdk/roles.py` spends four paragraphs refusing to accept.
+    **This clause used to be measured on `MID_RUN_QUESTIONS` and the check moved rather than
+    vanishing.** `Role.__post_init__` folded that member in from `on_question` at the very line it
+    folds `TOOL_CALLING` in from `tools`, and the workflow that hands its implementer a handler now
+    hands it a `Tool` - so the same statement, in the same place, still produces a role a namespace
+    scan cannot have seen, and `Steps.step` still calls `require` before `_namespace()` opens
+    anything. Losing the member cost this check nothing; it changed which fold carries it.
+
+    Without this line, the run does not fail *here*. The tool never reaches the model, the agent
+    cannot fire it, and the step ends with `RoleIncompleteError` at exit 6 - a failure that names
+    a prompt where the fact is a backend that cannot call a tool at all.
 
     **The record is asserted present, and that assertion carries two meanings.** It is still the
     contrast that makes this the other half rather than a copy of the first - preflight passed, so
@@ -757,15 +764,15 @@ async def test_a_negotiating_role_is_checked_at_the_step_it_is_handed_to(tmp_pat
     """
     entered.clear()
     harness = _fakes(tmp_path)
-    stub = _Stub(offers=CANNOT_ASK)
+    stub = _Stub(offers=CANNOT_CALL)
 
     with pytest.raises(DeniedError) as caught:
         await _start(harness, "replacing", agents=stub)
 
     said = str(caught.value)
     assert "'implement'" in said, "the refusal does not name the step the role was handed to"
-    assert "mid_run_questions" in said
-    assert "on_question" in said
+    assert "tool_calling" in said
+    assert "tools" in said
     # The same class and the same code as a declared role's would have been, pinned here because
     # this is now the only place containment refuses: a step that answered a workflow author
     # differently from what `sdk/roles.py` promises would be one rule described in two ways.
@@ -858,11 +865,11 @@ async def test_a_step_is_refused_before_its_checkout_is_provisioned(tmp_path: Pa
     then, and this namespace's checkout still does not.
     """
     harness = _fakes(tmp_path)
-    stub = _Stub(offers=CANNOT_ASK)
+    stub = _Stub(offers=CANNOT_CALL)
     run = await _direct(harness, stub)
 
     with pytest.raises(DeniedError):
-        await run.step(implementer(on_question=_answer))
+        await run.step(implementer(ask=_asking()))
 
     assert not (tmp_path / "trees" / str(LABEL)).exists()
     assert stub.ran == []

@@ -63,7 +63,6 @@ from agl.ports.history import History
 from agl.ports.home_layout import AglHome
 from agl.ports.ids import Namespace, ProjectName, RunLabel
 from agl.ports.integration import Integrator
-from agl.ports.questions import Answer, Question
 from agl.ports.run import JsonValue
 from agl.ports.store import Store
 from agl.ports.terminal import Screen, Terminal
@@ -646,18 +645,21 @@ async def test_a_raw_script_replaces_the_compiled_agent_for_its_own_provider(
 
 
 @pytest.mark.asyncio
-async def test_a_reply_is_performed_as_activity_then_questions_then_calls(tmp_path: Path) -> None:
+async def test_a_reply_is_performed_as_activity_then_calls(tmp_path: Path) -> None:
     """The whole of what a `Reply` means, in the order `sdk/testing.py` documents.
 
-    One recorder across all three channels, because the claim is about their order relative to each
-    other and three separate lists could not state it. The `stop_reason` and the closing text come
+    One recorder across both channels, because the claim is about their order relative to each
+    other and two separate lists could not state it. The `stop_reason` and the closing text come
     back on the outcome, which is the other half of what a `Reply` carries.
+
+    **There were three channels and there are two.** `Reply.asks` sat between them and was performed
+    through `Conversation.ask`, which reached a `QuestionHandler` on the `Role`. That whole path is
+    gone: a question is an ordinary tool a workflow supplies, so a scripted agent asks one the way
+    it calls anything else - a `Call` naming the workflow's own asking tool, in the `calls` list,
+    with the payload that tool's schema asks for. Nothing was lost with the field, because there is
+    no longer any question a *framework* could have performed.
     """
     seen: list[str] = []
-
-    async def handler(question: Question) -> Answer:
-        seen.append(f"asked: {question.prompt}")
-        return Answer("go on")
 
     async def tool(payload: Mapping[str, JsonValue]) -> ToolResult:
         seen.append(f"called: {payload['note']}")
@@ -666,7 +668,6 @@ async def test_a_reply_is_performed_as_activity_then_questions_then_calls(tmp_pa
     def agent(task: AgentTask) -> Reply:
         return Reply(
             activity=["first", "second"],
-            asks=[Question(prompt="anything to add?")],
             calls=[Call("report", {"note": "the payload"})],
             says="done",
             stop_reason=StopReason.LIMIT,
@@ -681,11 +682,9 @@ async def test_a_reply_is_performed_as_activity_then_questions_then_calls(tmp_pa
     )
     task = replace(_task(tmp_path, Claude.OPUS), tools=(declared,))
 
-    outcome = await harness.services.agents.run(
-        task, on_question=handler, on_activity=seen.append
-    )
+    outcome = await harness.services.agents.run(task, on_activity=seen.append)
 
-    assert seen == ["first", "second", "asked: anything to add?", "called: the payload"]
+    assert seen == ["first", "second", "called: the payload"]
     assert (outcome.text, outcome.stop_reason) == ("done", StopReason.LIMIT)
 
 

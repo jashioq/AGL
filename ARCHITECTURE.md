@@ -24,10 +24,11 @@ terminals across two suites — `RichTerminal` for `real()`, `ScriptedTerminal` 
 the *port*, never the vendor: `openai/fake.py` starts no process at all.
 
 **`sdk/`** — What a workflow author builds from: `@workflow`, the `Run` a workflow is handed,
-`@role`, `Tool`, `arg()`, the terminal components, `Stop`. `sdk/__init__.py` is the front door and
-re-exports the authoring surface with `__all__` typed out rather than computed; `_engine/` is the
-private machinery behind `Run` and is not on it. Something belongs here when two workflows would
-otherwise write it themselves.
+`@role`, `Tool` and the `tool()` and `reporting_tool()` that derive one from a payload dataclass,
+`arg()`, the terminal components, `Stop`. `sdk/__init__.py` is the front door and re-exports the
+authoring surface with `__all__` typed out rather than computed; `_engine/` is the private
+machinery behind `Run` and is not on it. Something belongs here when two workflows would otherwise
+write it themselves.
 
 **`workflows/`** — One package per workflow, found through the `agl.workflows` entry points in
 `pyproject.toml`; no central table to edit. `fix` is one worktree run sequentially, Claude
@@ -116,6 +117,10 @@ already holding. The target's lease and its namespace's step lock then stay take
 the process, and the next landing into that parent blocks inside `Leases.claim` — a hang rather than
 a failure, with nothing raised and no predicate to ask. So both verbs settle on the way out, and the
 tests in `tests/sdk/test_run_integrate.py` bound the claim that follows rather than awaiting it.
+Settling is also what ends the workflow's own loop: `Integration.conflicted` is *is there a conflict
+here that has not settled*, so `while outcome.conflicted:` terminates for every path out of a hold
+and never sends a workflow back to a `retry()` that would refuse it. The `Conflict` itself outlives
+the settling — it is the record of why nothing landed, and a workflow reads it after the loop.
 
 **A workflow branches only on step results.** Resume is not a continuation — `api.resume`
 re-invokes the workflow from its first line in a fresh process, so every line runs again and only
@@ -138,6 +143,21 @@ resumes it — and a miss is not an error, so nothing complains: the run wipes t
 every step it had already recorded, finishes, and returns the right answer, the symptoms being the
 bill and the wall clock. Hence tests that spawn interpreters under several `PYTHONHASHSEED`
 values; an in-process one passes just as happily against the bug.
+
+**A payload class's identity travels only inside its schema's `title`.** `_object_schema` in
+`sdk/tools.py` writes `"title": f"{kind.__module__}.{kind.__qualname__}"` at every depth, and
+`base_of` takes a tool's name, its description and its derived schema — so the payload *type* is a
+fingerprint term reached through that one string and through nothing else. Both failure directions
+are silent and they run opposite ways. Rename the payload class, move its module, or re-nest it,
+and the digest moves although nothing about what the agent is asked has changed: every recorded step
+that reported through it misses, and the run re-buys work it already had. Add a method to it — or a
+`__post_init__` that *rejects values the old one accepted* — and the digest is byte-identical: a
+vocabulary enforced in code and named nowhere else is invisible to the schema, so an entry recorded
+under the old rules replays under the new ones, or stops converting with its fingerprint still
+matching and surfaces as an `InternalError` out of `ReportingTool.read` on a resume.
+`workflows/fix/findings.py` holds exactly such a `__post_init__` over `SEVERITIES` and takes the
+price; `describe()` is the way out of it, a vocabulary interpolated into a field's description being
+schema and therefore fingerprint. Four tests in `tests/sdk/test_tools.py` pin the pieces.
 
 **Everything a step does must land inside its workspace.** A replayed step returns a recorded
 value and never calls the worker, so an effect that is not a file in the checkout — an HTTP POST,
@@ -173,17 +193,52 @@ The reasoning is the point — without it these get re-proposed.
   `git/_runner.py`, `openai/runner.py`, `openai/_session.py` — and disagree on six axes of how one
   is *started and read*: shell or exec, buffered or streamed, stdin, stderr, deadline, failure
   signal. A helper would take a flag per axis to say which caller it was being. Stopping is not a
-  seventh axis, because it is where two of them agree on purpose: `verifier.py`'s `_signalled` and
-  `_session.py`'s `_signal` escalate SIGTERM, grace, SIGKILL behind the same `returncode` guard and
-  the same `send_signal` fallback, and differ on the one line that names the group. They agree
-  because `verifier.py` was brought into line — a difference there was a defect, not a caller's
-  business — and the other two follow from how they start: `git/_runner.py` gave its child no
-  session of its own and so signals the process, and `openai/runner.py`'s readiness probe was given
-  one so that it could spend `_session.py`'s `_halted` and `_signal` unchanged rather than grow a
-  third copy of them — a sibling module inside one adapter, which is the one place a stopping
-  sequence can be shared for free. It stopped nothing at all until it was given both that session
-  and a deadline. The helper would also have nowhere to live: the adapter-independence contract in
-  `.importlinter` forbids one adapter importing another.
+  seventh axis, because it is where all three of the modules that stop a child agree on purpose:
+  `verifier.py`'s `_signalled`, `_session.py`'s `_signal` and `git/_runner.py`'s `_signalled`
+  escalate SIGTERM, grace, SIGKILL; none of them signals a child whose `returncode` is already set,
+  because a reaped pid is the kernel's to hand out again and what dies is then whatever holds that
+  number now; and none of them lets a denied signal out of a stopping path, where a raw `OSError`
+  would replace whatever was being reported — a deadline, or an unwinding `CancelledError`. They
+  differ on the one line that names *what* is signalled, and that follows from how they start:
+  `verifier.py` and `_session.py` gave their child a session, so they signal the group and fall
+  back to the child itself when the group is denied; `git/_runner.py` gave its child none, so it
+  signals the process and has no group to fall back from. All three were brought into line rather
+  than born that way — a difference there was a defect, not a caller's business — and
+  `openai/runner.py`'s readiness probe was given a session so that it could spend `_session.py`'s
+  `_halted` and `_signal` unchanged rather than grow a fourth copy of them — a sibling module
+  inside one adapter, which is the one place a stopping sequence can be shared for free. It stopped
+  nothing at all until it was given both that session and a deadline. The helper would also have
+  nowhere to live: the adapter-independence contract in `.importlinter` forbids one adapter
+  importing another.
+- **No single `Tool` class.** `ReportingTool[P]` in `sdk/tools.py` reads as "a `ports/` `Tool` with
+  a payload and no handler", and `tool()` beside it — an ordinary `Tool` whose schema is derived
+  from a payload dataclass and whose handler is called with the built instance — makes the
+  resemblance closer rather than weaker. What one class would buy is that resemblance written down.
+  What it costs is the only static check `Role[P]` has: that parameter binds from the one member of
+  `Sequence[Tool | ReportingTool[P]]` which carries a payload type, and it binds **because the two
+  classes are disjoint** — make `ReportingTool` a subclass of one `Tool` and every mismatched
+  declaration type-checks clean, a `ReportingTool[Other]` satisfying the bare `Tool` arm so that `P`
+  is never bound at all. Four things pay for the merge. *The layering*:
+  `tests/sdk/test_tools.py` already writes that half down — "`Tool` is a port type that must not
+  learn what a payload class is" — and one class is that sentence reversed, with either ~205 lines
+  of schema derivation following `payload` into `ports/`, or `payload: type[P]` going without them,
+  which is the split that lets a bare `Tool(payload=…)` be written carrying no schema at all. *The
+  price of recovering the check*: the one spelling that keeps it is
+  `tools: Sequence[Tool[P] | Tool[None]]` — more machinery rather than less, `Tool[Any]` in
+  `AgentTask.tools` and in `base_of`, and a hand-written overloaded `__init__` on a `ports/`
+  dataclass, a generated one being public and reopening what the overloads closed. *A refusal
+  deleted*: under that spelling a mixed **list** display quietly infers `Role[Findings | None]`
+  where today it is refused at the declaration
+  (`tests/sdk/test_roles.py::test_a_mixed_list_display_does_not_infer_p_and_says_so_at_the_declaration`,
+  whose docstring says "the `type: ignore` is the assertion"). *A new hole on the shape `tool()`
+  exists for*: a tool carrying both a payload and a handler binds `P`, so `Role(tools=(that_one,))`
+  infers `Role[Findings]` while `run.step` returns `None` and the `.summary` after it is an
+  `AttributeError` with mypy clean. And the distinction the merge would erase is not conventional.
+  A reporting tool's payload is the only value a tool call can put on the journal —
+  `sdk/_engine/steps.py`'s `return None if capture is None else capture.reported(outcome)` is the
+  whole of it, and that value becomes `Entry.value`; every other tool answers with a `ToolResult`
+  that each adapter turns into content for the model and that reaches no store. One class buries
+  that in `handler is None`.
 - **No `Integrator.revert()`.** Undoing a landing that succeeded is `Workspace.restore(head)`,
   which already exists; a second spelling would be owed by every integrator.
 - **No second `IntegrationOutcome` case for a build gate's refusal.** `Integration.conflicted` in
@@ -193,7 +248,10 @@ The reasoning is the point — without it these get re-proposed.
   third case on the port would be a value no adapter can produce: the refusal is fabricated in the
   engine, after `land` has already answered. `Integration.refused_by_the_gate` is what tells the two
   apart, and it reads the verdict `_gated` sets and `_concluded` clears — never `paths == ()`, which
-  `adapters/git/_conflicts.py` also emits when git names no unmerged file.
+  `adapters/git/_conflicts.py` also emits when git names no unmerged file. It answers about the
+  shape rather than about the record, so it is false wherever `conflicted` is: a settled outcome
+  still carries the verdict that refused it, and there is no longer a conflict for it to be the
+  cause of.
 - **`Store` has six members and no more.** No `exists`, because a read returning `None` is that
   question already answered; no listing of entries, because replay computes the digest it wants; no
   transaction, because a batch needs a boundary and a flush would admit to a buffer.

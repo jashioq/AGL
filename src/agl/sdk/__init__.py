@@ -17,7 +17,6 @@ from agl.sdk.roles import (
     Claude,
     ModelId,
     OpenAI,
-    QuestionHandler,
     Restriction,
     Role,
     RoleFactory,
@@ -36,7 +35,15 @@ from agl.sdk.terminal import (
     Text,
     TextInput,
 )
-from agl.sdk.tools import ReportingTool, Tool, ToolResult, describe, reporting_tool
+from agl.sdk.tools import (
+    JsonValue,
+    ReportingTool,
+    Tool,
+    ToolResult,
+    describe,
+    reporting_tool,
+    tool,
+)
 from agl.sdk.workflow import (
     Conflict,
     Namespace,
@@ -59,12 +66,12 @@ __all__ = [
     "DeniedError",
     "InputError",
     "InternalError",
+    "JsonValue",
     "ModelId",
     "Namespace",
     "NotFoundError",
     "OpenAI",
     "Question",
-    "QuestionHandler",
     "ReportingTool",
     "Response",
     "Restriction",
@@ -91,5 +98,6 @@ __all__ = [
     "prompt_file",
     "reporting_tool",
     "role",
+    "tool",
     "workflow",
 ]

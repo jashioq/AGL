@@ -13,12 +13,7 @@ from claude_agent_sdk import (
 from claude_agent_sdk.types import SystemPromptPreset
 
 from agl.adapters.claude_code._session import Stderr, outcome_of
-from agl.adapters.claude_code._tools import (
-    ASKING_MECHANISMS_DENIED,
-    ASKING_TOOL,
-    Asking,
-    servers,
-)
+from agl.adapters.claude_code._tools import ASKING_MECHANISMS_DENIED, Caller, servers
 from agl.adapters.claude_code.translate import Restraint, model_name, restraint, unready
 from agl.ports.agent import (
     ActivityReporter,
@@ -27,7 +22,6 @@ from agl.ports.agent import (
     AgentTask,
     Capability,
     ModelId,
-    QuestionHandler,
 )
 from agl.ports.errors import InputError, InternalError, UpstreamUnavailable
 
@@ -37,7 +31,6 @@ _CAPABILITIES: Final = frozenset(
     {
         Capability.FILE_EDIT,
         Capability.SHELL,
-        Capability.MID_RUN_QUESTIONS,
         Capability.TOOL_CALLING,
     }
 )
@@ -50,12 +43,6 @@ _PLAN_ONLY: Final = (
     "AGL is asking you to examine and propose, and to change nothing: work out what should be "
     "done and report it, rather than doing it. This is what is being asked of you, not a "
     "restriction placed on you - anything you are actually forbidden to do is listed separately."
-)
-
-_MAY_ASK: Final = (
-    "There is a person running this task and you can put a question to them and wait for their "
-    f"answer: call the tool `{ASKING_TOOL}`. Use it when a decision is genuinely theirs to make "
-    "rather than guessing at what they would want."
 )
 
 _CONTEXT_HEADING: Final = "AGL is running this task with the following standing context:"
@@ -102,17 +89,16 @@ class ClaudeCodeRunner(AgentRunner):
         self,
         task: AgentTask,
         *,
-        on_question: QuestionHandler | None = None,
         on_activity: ActivityReporter | None = None,
     ) -> AgentOutcome:
         limits = restraint(task.restrictions)
-        asking = Asking(on_question)
+        caller = Caller()
         stderr = Stderr()
         return await outcome_of(
             task,
-            _prompt(task, limits, may_ask=on_question is not None),
-            _options(task, limits, servers(task.tools, asking), self._cli_path, stderr),
-            asking=asking,
+            _prompt(task, limits),
+            _options(task, limits, servers(task.tools, caller), self._cli_path, stderr),
+            caller=caller,
             on_activity=on_activity,
             stderr=stderr,
         )
@@ -142,11 +128,10 @@ def _options(
     )
 
 
-def _prompt(task: AgentTask, limits: Restraint, *, may_ask: bool) -> str:
+def _prompt(task: AgentTask, limits: Restraint) -> str:
     standing = [
         f"{_CONTEXT_HEADING}\n\n{task.context}" if task.context else "",
         limits.in_words,
-        _MAY_ASK if may_ask else "",
         _PLAN_ONLY if task.plan_only else "",
     ]
     return "\n\n".join([*(part for part in standing if part), task.instructions])

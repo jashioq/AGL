@@ -11,13 +11,11 @@ from agl.ports.agent import (
     Capability,
     Claude,
     ModelId,
-    QuestionHandler,
     StopReason,
     Tool,
     ToolResult,
 )
 from agl.ports.errors import InputError
-from agl.ports.questions import Answer, Question
 from agl.ports.run import JsonValue
 
 __all__ = ["Conversation", "FakeAgentRunner", "Script", "unscripted"]
@@ -26,23 +24,29 @@ _CAPABILITIES: Final = frozenset(
     {
         Capability.FILE_EDIT,
         Capability.SHELL,
-        Capability.MID_RUN_QUESTIONS,
         Capability.TOOL_CALLING,
     }
 )
 
 _ROUNDS: Final = 8
 
-_QUESTION: Final = (
-    "AGL is running this task on its Claude Code fake, with a script where the model would be. "
-    "Is there anything this run should be told before it goes on?"
-)
+_OPENING: Final = "Read: the task AGL's Claude Code fake was given"
 
 _PLACEHOLDER: Final = "AGL's Claude Code fake produced this: no model was involved."
 
 _CLOSING: Final = (
     "AGL's Claude Code fake ran this task with a script where the model would be. It read nothing "
     "in the workspace and changed nothing there."
+)
+
+_FAILED: Final = (
+    "{name} could not do what it was asked: {raised}. This task is being stopped because of it. "
+    "Nothing you do from here is kept, so do not call it again and do not work around it."
+)
+
+_STOPPING: Final = (
+    "{name} was not called. This task is already being stopped because a tool could not do what "
+    "it was asked: {raised}. Nothing you do from here is kept."
 )
 
 
@@ -52,25 +56,14 @@ class Conversation:
         self,
         task: AgentTask,
         *,
-        on_question: QuestionHandler | None = None,
         on_activity: ActivityReporter | None = None,
     ) -> None:
         self.task = task
 
         self.failure: Exception | None = None
 
-        self._on_question = on_question
         self._on_activity = on_activity
         self._tools: dict[str, Tool] = {declared.name: declared for declared in task.tools}
-
-    async def ask(self, question: Question) -> Answer | None:
-        if self._on_question is None or self.failure is not None:
-            return None
-        try:
-            return await self._on_question(question)
-        except Exception as raised:
-            self.failure = raised
-            return None
 
     async def call(self, tool: str, payload: Mapping[str, JsonValue]) -> ToolResult:
         declared = self._tools.get(tool)
@@ -83,10 +76,17 @@ class Conversation:
                 f"proves a workflow works with a tool the workflow never declared"
             )
         arguments = _as_json(payload, tool)
+        if self.failure is not None:
+            return ToolResult(
+                text=_STOPPING.format(name=declared.name, raised=self.failure), rejected=True
+            )
         try:
             return await declared.handler(arguments)
         except Exception as raised:
-            return ToolResult(text=f"{declared.name} failed: {raised}", rejected=True)
+            self.failure = raised
+            return ToolResult(
+                text=_FAILED.format(name=declared.name, raised=raised), rejected=True
+            )
 
     def report(self, line: str) -> None:
         if self._on_activity is not None:
@@ -97,13 +97,7 @@ type Script = Callable[[Conversation], Awaitable[AgentOutcome]]
 
 
 async def unscripted(conversation: Conversation) -> AgentOutcome:
-    heard: list[str] = []
-    while len(heard) < _ROUNDS:
-        conversation.report("Ask: whether there is anything this run should be told")
-        answer = await conversation.ask(Question(prompt=_QUESTION))
-        if answer is None or answer.text in heard:
-            break
-        heard.append(answer.text)
+    conversation.report(_OPENING)
 
     called: list[str] = []
     for declared in conversation.task.tools:
@@ -114,11 +108,11 @@ async def unscripted(conversation: Conversation) -> AgentOutcome:
             conversation.report(f"{declared.name}: {said}")
             result = await conversation.call(declared.name, _payload(declared.payload_schema, said))
             called.append(declared.name)
-            if not result.rejected:
+            if not result.rejected or conversation.failure is not None:
                 break
             said = result.text
 
-    return AgentOutcome(stop_reason=StopReason.COMPLETED, text=_said(heard, called))
+    return AgentOutcome(stop_reason=StopReason.COMPLETED, text=_said(called))
 
 
 class FakeAgentRunner(AgentRunner):
@@ -137,11 +131,10 @@ class FakeAgentRunner(AgentRunner):
         self,
         task: AgentTask,
         *,
-        on_question: QuestionHandler | None = None,
         on_activity: ActivityReporter | None = None,
     ) -> AgentOutcome:
         _served(task.model)
-        conversation = Conversation(task, on_question=on_question, on_activity=on_activity)
+        conversation = Conversation(task, on_activity=on_activity)
         outcome = await self._script(conversation)
         if conversation.failure is not None:
             raise conversation.failure
@@ -204,10 +197,8 @@ def _value(described: JsonValue, said: str) -> JsonValue:
     return said
 
 
-def _said(heard: list[str], called: list[str]) -> str:
+def _said(called: list[str]) -> str:
     parts = [_CLOSING]
-    if heard:
-        parts.append(f"The last answer it was given was: {heard[-1]}")
     if called:
         parts.append(f"It called: {', '.join(called)}.")
     return " ".join(parts)

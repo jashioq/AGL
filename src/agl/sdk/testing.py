@@ -6,7 +6,6 @@ from typing import Final
 
 from agl.ports.agent import AgentTask, StopReason
 from agl.ports.errors import InputError
-from agl.ports.questions import Question
 from agl.ports.run import JsonValue
 
 __all__ = ["Agent", "Call", "Reply"]
@@ -37,8 +36,6 @@ class Reply:
 
     calls: Sequence[Call] = ()
 
-    asks: Sequence[Question] = ()
-
     activity: Sequence[str] = ()
 
     says: str = ""
@@ -47,7 +44,6 @@ class Reply:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "calls", tuple(self.calls))
-        object.__setattr__(self, "asks", tuple(self.asks))
         object.__setattr__(self, "activity", tuple(self.activity))
 
 

@@ -90,7 +90,6 @@ from contracts._agent_tasks import (
     NOTE_WHAT_THIS_IS,
     SAY_WHAT_THIS_IS,
     Activity,
-    Answers,
     Notes,
     task,
     workspace,
@@ -453,35 +452,34 @@ class Transcript:
     """Everything one run of a fake can be seen doing, from outside the port.
 
     Four channels, because a router can drop a thing on each of them independently: what the agent
-    said, why it stopped, every activity line it reported, every question it asked, and every
-    payload it handed a tool. `repr` for the last two rather than the objects themselves - the
-    contract suite's own instruments keep them as `object` on purpose, so that an adapter handing
-    over the raw text its backend produced is catchable, and comparing reprs asserts that whatever
-    arrived arrived identically without claiming a type it might not have.
+    said, why it stopped, every activity line it reported, and every payload it handed a tool.
+    `repr` for the last rather than the objects themselves - the contract suite's own instruments
+    keep them as `object` on purpose, so that an adapter handing over the raw text its backend
+    produced is catchable, and comparing reprs asserts that whatever arrived arrived identically
+    without claiming a type it might not have.
+
+    There were five channels while `on_question` was a member of this port, and the questions a run
+    asked were one of them. A question is an ordinary tool now, so what used to be its own channel
+    is the tool payloads below.
     """
 
     text: str
     stop_reason: StopReason | None
     activity: tuple[str, ...]
-    questions: tuple[str, ...]
     payloads: tuple[str, ...]
 
 
 async def transcript(runner: AgentRunner, model: ModelId, where: Path) -> Transcript:
-    """One unscripted run with all three of the port's per-call channels wired up, recorded."""
+    """One unscripted run with both of the port's per-call channels wired up, recorded."""
     notes = Notes(reject_first=1)
     activity = Activity()
-    answers = Answers()
     outcome = await runner.run(
-        task(where, model, NOTE_WHAT_THIS_IS, tools=(notes.tool,)),
-        on_question=answers,
-        on_activity=activity,
+        task(where, model, NOTE_WHAT_THIS_IS, tools=(notes.tool,)), on_activity=activity
     )
     return Transcript(
         text=outcome.text,
         stop_reason=outcome.stop_reason,
         activity=tuple(repr(line) for line in activity.lines),
-        questions=tuple(repr(asked) for asked in answers.asked),
         payloads=tuple(repr(payload) for payload in notes.received),
     )
 
@@ -490,18 +488,18 @@ async def transcript(runner: AgentRunner, model: ModelId, where: Path) -> Transc
 async def test_a_routed_run_is_indistinguishable_from_the_same_run_made_directly(
     provider: Provider, tmp_path: Path
 ) -> None:
-    """One fake, two callers, one transcript: `on_question` and `on_activity` pass straight through.
+    """One fake, two callers, one transcript: the task and `on_activity` pass straight through.
 
     The control is the same *instance*, addressed directly and then through a router holding it, so
     any difference between the two transcripts is this class's and nothing else's. That is what
     makes the assertion worth making at all: an adapter's own behaviour cancels out of both sides.
 
     **This is the test that exists because a contract suite cannot catch one half of it.** A dropped
-    `on_question` the suite would see, since both fakes report `MID_RUN_QUESTIONS` and it asserts
-    two rounds inside one run against a backend that claims to ask. A dropped `on_activity` it would
-    not: the suite asserts only that whatever arrives is a `str`, and an adapter with nothing to
-    report calls it never, so a router that swallowed every line would pass the whole suite and show
-    up as a dashboard that has gone quiet.
+    tool the suite would see, since it asserts a refused call put back to the agent inside one run
+    against a backend that claims `TOOL_CALLING`. A dropped `on_activity` it would not: the suite
+    asserts only that whatever arrives is a `str`, and an adapter with nothing to report calls it
+    never, so a router that swallowed every line would pass the whole suite and show up as a
+    dashboard that has gone quiet.
     """
     adapter = FAKES[provider]()
     router = RoutingAgentRunner({provider: adapter})
@@ -516,22 +514,23 @@ async def test_a_routed_run_is_indistinguishable_from_the_same_run_made_directly
         f"parameter, and a router that filters, wraps or forgets one of them is a capability "
         f"regression that no workflow could see and no adapter is to blame for"
     )
-    assert direct.activity and direct.questions and direct.payloads, (
-        "the control run reported no activity, asked nothing and called no tool, so the comparison "
-        "above would hold against a router that dropped all three"
+    assert direct.activity and direct.payloads, (
+        "the control run reported no activity and called no tool, so the comparison above would "
+        "hold against a router that dropped both"
     )
 
 
 @pytest.mark.parametrize("provider", sorted(SERVED))
-async def test_a_run_with_neither_callback_reaches_the_adapter_unchanged(
+async def test_a_run_with_no_activity_reporter_reaches_the_adapter_unchanged(
     provider: Provider, tmp_path: Path
 ) -> None:
-    """`None` is a value both callbacks have, and it means "nobody is listening", not "unset".
+    """`None` is a value `on_activity` has, and it means "nobody is watching", not "unset".
 
-    A router that defaulted either one - to a handler of its own, to a reporter that swallows lines
-    - would turn the port's second settled edge case into something no adapter ever sees: the agent
-    would be answered by the framework instead of being told that no answer is available. The fakes
-    make that observable, since `unscripted` asks once, is answered `None`, and carries on.
+    A router that defaulted it - to a reporter of its own, to one that swallows lines - would put a
+    caller between an adapter and a callback the port says may simply be absent, and every line the
+    adapter reports would then go somewhere the caller chose. The fakes make the pass-through
+    observable, since `unscripted` reports a line per tool it is offered and this run has none to
+    report to.
     """
     adapter = FAKES[provider]()
     router = RoutingAgentRunner({provider: adapter})

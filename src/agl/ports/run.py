@@ -10,7 +10,7 @@ from typing import Final
 from agl.ports.errors import InputError, InternalError
 from agl.ports.ids import RunLabel
 
-__all__ = ["JsonValue", "RunSpec"]
+__all__ = ["JsonValue", "RunSpec", "checked_text"]
 
 
 type JsonValue = None | bool | int | float | str | list[JsonValue] | dict[str, JsonValue]
@@ -55,7 +55,7 @@ class RunSpec:
             if not value:
                 raise InternalError(f"a run record's {name!r} is empty, and that names nothing")
         _check_sha(self.base_sha)
-        _checked_text(self.base_ref, "base_ref")
+        checked_text(self.base_ref, "base_ref")
         object.__setattr__(self, "params", MappingProxyType(_checked_params(self.params)))
         object.__setattr__(self, "created_at", _normalised(self.created_at))
 
@@ -146,10 +146,10 @@ def _checked_key(key: object) -> str:
             f"the param key {key!r} is a {type(key).__name__}, and a JSON object is keyed by "
             f"strings - writing this record would silently rename it"
         )
-    return _checked_text(key, f"the param key {key!r}")
+    return checked_text(key, f"the param key {key!r}")
 
 
-def _checked_text(value: str, where: str) -> str:
+def checked_text(value: str, where: str) -> str:
     for index, character in enumerate(value):
         if unicodedata.category(character) == _SURROGATE:
             raise InputError(
@@ -164,7 +164,7 @@ def _checked_json(value: object, where: str) -> JsonValue:
     if value is None or isinstance(value, bool | int):
         return value
     if isinstance(value, str):
-        return _checked_text(value, where)
+        return checked_text(value, where)
     if isinstance(value, float):
         if not isfinite(value):
             raise InternalError(

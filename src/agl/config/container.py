@@ -29,7 +29,6 @@ from agl.adapters.system_clock import ManualClock, SystemClock
 from agl.config.schema import AgentSettings, Project, Settings
 from agl.ports.agent import AgentOutcome, AgentRunner, Provider, ToolResult
 from agl.ports.errors import UpstreamUnavailable
-from agl.ports.questions import Answer, Question
 from agl.ports.run import JsonValue
 from agl.ports.store import Store
 from agl.ports.terminal import Terminal
@@ -143,10 +142,7 @@ def _claude_script(agent: Agent | None) -> claude_fake.Script | None:
 
     async def script(conversation: claude_fake.Conversation) -> AgentOutcome:
         return await _performs(
-            agent(conversation.task),
-            ask=conversation.ask,
-            call=conversation.call,
-            report=conversation.report,
+            agent(conversation.task), call=conversation.call, report=conversation.report
         )
 
     return script
@@ -158,10 +154,7 @@ def _openai_script(agent: Agent | None) -> openai_fake.Script | None:
 
     async def script(conversation: openai_fake.Conversation) -> AgentOutcome:
         return await _performs(
-            agent(conversation.task),
-            ask=conversation.ask,
-            call=conversation.call,
-            report=conversation.report,
+            agent(conversation.task), call=conversation.call, report=conversation.report
         )
 
     return script
@@ -170,15 +163,12 @@ def _openai_script(agent: Agent | None) -> openai_fake.Script | None:
 async def _performs(
     produced: Reply | Awaitable[Reply],
     *,
-    ask: Callable[[Question], Awaitable[Answer | None]],
     call: Callable[[str, Mapping[str, JsonValue]], Awaitable[ToolResult]],
     report: Callable[[str], None],
 ) -> AgentOutcome:
     reply = await produced if isawaitable(produced) else produced
     for line in reply.activity:
         report(line)
-    for question in reply.asks:
-        await ask(question)
     for made in reply.calls:
         await call(made.tool, made.payload)
     return AgentOutcome(stop_reason=reply.stop_reason, text=reply.says)

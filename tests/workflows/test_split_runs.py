@@ -772,10 +772,11 @@ class _Watched(Terminal):
     `ScriptedTerminal` all do - keeps it **with the priority it was shown at**, calls `watching()`
     if it is a question, and delegates.
 
-    **The priority is kept because nothing else in this run can see it.** `split` declares no
-    `on_question` on either role, so no agent question is ever queued, so nothing else is ever in
-    the queues for a conflict screen to preempt and the number does not discriminate: `priority=10`
-    and `priority=0` produce identical runs. The reason for the number is not about `split`'s
+    **The priority is kept because nothing else in this run can see it.** Neither of `split`'s
+    roles carries an asking tool - it declares none, and needs none: nothing in it stops to consult
+    a person - so no agent question is ever queued, nothing else is ever in the queues for a
+    conflict screen to preempt, and the number does not discriminate: `priority=10` and
+    `priority=0` produce identical runs. The reason for the number is not about `split`'s
     current roles, though - a conflict screen queued behind two agent questions stalls the merge
     queue on something unrelated, which is the entire justification for having one level of
     preemption at all - so what a test can hold is the number the workflow asked for, which is what
@@ -960,13 +961,13 @@ async def test_the_target_is_held_across_the_decision_and_a_sibling_waits_behind
     assert [priority for priority, _screen in watched.questions] == [10, 10], (
         f"the conflict screen was shown at {[p for p, _ in watched.questions]} where the workflow "
         f"shows it at 10, above the board's own {watched.boards[0][0]}. Nothing in *this* run "
-        f"discriminates on it - `split` declares no `on_question`, so no agent question is ever "
-        f"queued for a "
+        f"discriminates on it - neither of `split`'s roles carries an asking tool, so no agent "
+        f"question is ever queued for a "
         f"conflict to preempt - and the number is what one level of preemption exists for: "
         f"`integrate()` holds the target's lease and step lock until this screen is answered, so a "
         f"conflict queued behind an agent question stalls every other chunk's landing on something "
         f"unrelated. A workflow that shipped the default here would look identical until the day a "
-        f"role grew a handler, and then stall the merge queue"
+        f"role grew an asking tool, and then stall the merge queue"
     )
     record = await _record(harness)
     tip = harness.fakes.repository.tip(_text(record, "branch"))

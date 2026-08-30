@@ -42,8 +42,9 @@ top of the port. In the order they matter:
     interpreter that imports the module and runs a whole task, reporting everything that arrived in
     `sys.modules`; and a barricade over `asyncio.create_subprocess_exec` and `asyncio.start_server`
     with the real runner in the same test as the control that proves it was armed.
-  * **The port's two settled edge cases and the exceptions around them** - a question with nobody
-    listening, a handler that raises - which the suite can see the timing of and not the shape.
+  * **What a script may not do, and what a payload may not be** - a call to a tool the task never
+    declared, and a payload no model could have produced - neither of which the contract suite can
+    reach, because both are moves only a caller writing Python can make.
 
 **No test in this file starts a process, binds a socket or spends a token**, and that is structural
 rather than promised: the module under test cannot do any of the three, and the one `subprocess.run`
@@ -77,8 +78,7 @@ from agl.ports.agent import (
     Tool,
     ToolResult,
 )
-from agl.ports.errors import InputError, Stop
-from agl.ports.questions import Answer, Question
+from agl.ports.errors import InputError
 from agl.ports.run import JsonValue
 from contracts._agent_tasks import task, workspace
 from contracts.agent import AgentContract
@@ -128,6 +128,17 @@ _NOTE_SCHEMA: Final[Mapping[str, JsonValue]] = {
     "additionalProperties": False,
 }
 
+ASK: Final = "ask_the_operator"
+"""What a workflow calls its asking tool. AGL supplies none and so knows no name for one; this is
+this file's, and a real workflow's is its own."""
+
+_ASK_SCHEMA: Final[Mapping[str, JsonValue]] = {
+    "type": "object",
+    "properties": {"question": {"type": "string", "description": "What you are asking, in full."}},
+    "required": ["question"],
+    "additionalProperties": False,
+}
+
 # Every JSON Schema shape the payload composer has a reading for, in one tool, plus one optional
 # property that must not appear in what it composes.
 RICH_SCHEMA: Final[Mapping[str, JsonValue]] = {
@@ -158,8 +169,9 @@ class Recorded:
     turns down that many calls before accepting one - and `received` is `object` for that suite's
     reason: an adapter that handed over the raw text its backend produced is the bug worth
     catching, and a list already claiming to hold mappings could not report it. `raises` is the
-    other half, and it is this backend's own: `_tools.py` turns a handler that raised into a
-    refusal carrying what it said, so there has to be a handler here that raises.
+    other half and it runs the other way: `Conversation.call` records a handler's exception and the
+    run then ends on it. The exception is handed in already built and raised as itself, which is
+    what lets a caller assert that the object it raised is the object that came out of `run`.
     """
 
     def __init__(
@@ -193,29 +205,27 @@ class Recorded:
         return ToolResult(text=f"{self.tool.name} accepted that.")
 
 
-class Heard:
-    """A question handler answering from a fixed list, repeating the last one once it runs out."""
+class Answering:
+    """An asking tool answering from a fixed list, repeating the last one once it runs out.
+
+    A workflow's own tool, because AGL supplies none: what an agent asks and what comes back are a
+    payload and a `ToolResult` like any other tool's, and this is the shape a negotiating workflow
+    writes. `asked` is what the handler was handed, so a script that asked twice leaves two entries.
+    """
 
     def __init__(self, *answers: str) -> None:
-        self.asked: list[Question] = []
+        self.asked: list[object] = []
         self._answers = answers
+        self.tool = Tool(
+            name=ASK,
+            description="Ask the person running this task, and wait for their answer.",
+            payload_schema=_ASK_SCHEMA,
+            handler=self._called,
+        )
 
-    async def __call__(self, question: Question) -> Answer:
-        self.asked.append(question)
-        return Answer(text=self._answers[min(len(self.asked), len(self._answers)) - 1])
-
-
-class Raises:
-    """A question handler that raises, which a headless terminal makes ordinary rather than
-    hypothetical."""
-
-    def __init__(self, failure: Exception) -> None:
-        self.asked = 0
-        self._failure = failure
-
-    async def __call__(self, question: Question) -> Answer:
-        self.asked += 1
-        raise self._failure
+    async def _called(self, payload: Mapping[str, JsonValue]) -> ToolResult:
+        self.asked.append(payload)
+        return ToolResult(text=self._answers[min(len(self.asked), len(self._answers)) - 1])
 
 
 def anything(where: Path, *, tools: tuple[Tool, ...] = ()) -> AgentTask:
@@ -230,42 +240,39 @@ def anything(where: Path, *, tools: tuple[Tool, ...] = ()) -> AgentTask:
 async def test_an_answer_visibly_changes_what_happens_next_inside_the_same_run(
     tmp_path: Path,
 ) -> None:
-    """The answer returns into the same session, so a negotiation is rounds and not runs.
+    """A tool's result returns into the same session, so a negotiation is rounds and not runs.
 
-    The contract suite can see that two questions were asked and that the last answer came back in
-    the closing text. What it cannot see - because it reads a model's conduct rather than an
-    adapter's - is that the answer *decided* what happened next. Here one script is run twice
-    against two handlers that differ in one word, and the two runs differ in how many questions
-    were asked, whether a tool was called at all, and what the run stopped for.
+    The asking tool below is a workflow's own, because AGL supplies none: what an agent asks and
+    what comes back are a payload and a `ToolResult` like any other tool's. The contract suite can
+    see that a refused call was tried again. What it cannot see - because it reads a model's
+    conduct rather than an adapter's - is that a result *decided* what happened next. Here one
+    script is run twice against two asking tools that differ in one word, and the two runs differ
+    in how many questions were asked, whether the other tool was called at all, and what the run
+    stopped for.
 
     One `run` each way, which is the clause: an adapter that carried one exchange per run would
     have to start a second to ask the second question, and there is no second here to start.
     """
     landing = Recorded(REPORT)
-    landed = Heard("land it")
-    kept = Heard("keep going", "about a day")
+    landed = Answering("land it")
+    kept = Answering("keep going", "about a day")
 
     async def negotiate(conversation: Conversation) -> AgentOutcome:
-        first = await conversation.ask(
-            Question(prompt="Land it, or keep going?", options=("land it", "keep going"))
-        )
-        if first is None:
-            return AgentOutcome(stop_reason=None, text="nobody was listening")
+        first = await conversation.call(ASK, {"question": "Land it, or keep going?"})
         if first.text == "land it":
             await conversation.call(REPORT, {"note": "landed"})
             return AgentOutcome(stop_reason=StopReason.COMPLETED, text=f"landed: {first.text}")
-        second = await conversation.ask(Question(prompt="How much further?"))
-        said = "" if second is None else second.text
-        return AgentOutcome(stop_reason=StopReason.LIMIT, text=f"kept going: {said}")
+        second = await conversation.call(ASK, {"question": "How much further?"})
+        return AgentOutcome(stop_reason=StopReason.LIMIT, text=f"kept going: {second.text}")
 
     runner = FakeAgentRunner(negotiate)
-    work = anything(workspace(tmp_path), tools=(landing.tool,))
-    one = await runner.run(work, on_question=landed)
-    other = await runner.run(work, on_question=kept)
+    where = workspace(tmp_path)
+    one = await runner.run(anything(where, tools=(landing.tool, landed.tool)))
+    other = await runner.run(anything(where, tools=(landing.tool, kept.tool)))
 
     assert (len(landed.asked), len(kept.asked)) == (1, 2), (
         "the same script asked a different number of questions depending on what it was told, "
-        "which is the whole of what 'the answer goes back into the same session' buys"
+        "which is the whole of what 'a tool's result goes back into the same session' buys"
     )
     assert one.text == "landed: land it" and one.stop_reason is StopReason.COMPLETED
     assert other.text == "kept going: about a day" and other.stop_reason is StopReason.LIMIT
@@ -388,7 +395,7 @@ async def test_the_default_behaves_the_same_way_whatever_it_is_asked(tmp_path: P
     do nothing recognisable for a workflow author's own prompt, and every other test in this file
     would still pass. So two tasks, as unlike each other and as unlike the suite's as they can be
     made - one asking for a translation, one for something destructive - and the transcripts are
-    compared: the same questions, the same payloads, the same closing text.
+    compared: the same payloads to both tools, and the same closing text.
 
     The other two fields the real adapter reads are varied in the same breath, because they are the
     other two things `runner.py` composes into a prompt this fake does not have: `context` and
@@ -401,7 +408,7 @@ async def test_the_default_behaves_the_same_way_whatever_it_is_asked(tmp_path: P
     """
     where = workspace(tmp_path)
     before = sorted(path.relative_to(where) for path in where.rglob("*"))
-    transcripts: list[tuple[list[str], list[object], str]] = []
+    transcripts: list[tuple[list[object], list[object], str]] = []
 
     for instructions, context, planning in (
         ("Translate into French: the cat sat on the mat.", None, False),
@@ -412,20 +419,19 @@ async def test_the_default_behaves_the_same_way_whatever_it_is_asked(tmp_path: P
         ),
     ):
         notes = Recorded(NOTE)
-        heard = Heard("first", "second")
+        heard = Answering("first", "second")
         outcome = await FakeAgentRunner().run(
             AgentTask(
                 instructions=instructions,
                 workspace=where,
                 model=OpenAI.TERRA,
                 restrictions=frozenset(),
-                tools=(notes.tool,),
+                tools=(notes.tool, heard.tool),
                 context=context,
                 plan_only=planning,
-            ),
-            on_question=heard,
+            )
         )
-        transcripts.append(([asked.prompt for asked in heard.asked], notes.received, outcome.text))
+        transcripts.append((heard.asked, notes.received, outcome.text))
 
     assert transcripts[0] == transcripts[1], (
         f"the default answered two different tasks differently:\n  {transcripts[0]}\n  "
@@ -440,47 +446,6 @@ async def test_the_default_behaves_the_same_way_whatever_it_is_asked(tmp_path: P
         "green rather than meaningfully green - `_agent_hermeticity.py` says so about itself"
     )
     assert "cat sat on the mat" not in transcripts[0][2]
-
-
-@pytest.mark.asyncio
-async def test_the_default_asks_while_the_answers_are_new_and_stops_when_one_repeats(
-    tmp_path: Path,
-) -> None:
-    """The default's own rule, which is about what it is *told* and never about what it is asked.
-
-    An unscripted run has no task of its own to pursue, so the only thing it can do with an answer
-    is find out whether there is more to hear; a repeated answer is the handler saying the same
-    thing twice. Two handlers make that visible - one with something new to say twice, one with
-    one thing to say - and the counts differ for a reason that is a property of the handler and
-    of nothing else.
-
-    Both counts are one higher than the number of *distinct* answers, and that is the rule rather
-    than an off-by-one: a repeat cannot be discovered without asking again, so the last question of
-    any negotiation is the one that ends it. Which also means the count the contract suite's own
-    handler provokes is three, not the two it asserts - a default fitted to that assertion would
-    have asked exactly twice, and this one overshoots it because the rule came from somewhere else.
-    """
-    varied, constant = Heard("alpha", "bravo"), Heard("the same thing")
-    where = workspace(tmp_path)
-
-    varied_outcome = await FakeAgentRunner().run(anything(where), on_question=varied)
-    await FakeAgentRunner().run(anything(where), on_question=constant)
-
-    assert len(varied.asked) == 3, (
-        f"a handler with two things to say was asked {len(varied.asked)} time(s): the default asks "
-        f"again while an answer is one it has not heard, and stops on the first repeat - which is "
-        f"the third question here, not the second"
-    )
-    assert len(constant.asked) == 2, (
-        f"a handler with one thing to say was asked {len(constant.asked)} time(s). Two is the "
-        f"floor for any rule of this shape: the second question is what establishes that there was "
-        f"nothing further to learn, and it is the one that ends the negotiation"
-    )
-    assert all(isinstance(asked, Question) and asked.prompt for asked in varied.asked)
-    assert "bravo" in varied_outcome.text, (
-        "the last answer is not in the closing text: an answer that reached the session and "
-        "changed nothing about what came back is worth less than not asking"
-    )
 
 
 @pytest.mark.asyncio
@@ -556,9 +521,7 @@ async def test_the_default_never_reports_a_limit_it_did_not_reach(tmp_path: Path
     """
     both: tuple[tuple[Tool, ...], ...] = ((), (Recorded(NOTE).tool,))
     for tools in both:
-        outcome = await FakeAgentRunner().run(
-            anything(workspace(tmp_path), tools=tools), on_question=Heard("something")
-        )
+        outcome = await FakeAgentRunner().run(anything(workspace(tmp_path), tools=tools))
         assert outcome.stop_reason is StopReason.COMPLETED, (
             f"a default run stopped for {outcome.stop_reason!r}. It ended its own turn, which is "
             f"the one thing `_session.py` reports as COMPLETED and the only honest answer a "
@@ -682,55 +645,64 @@ async def test_a_task_carrying_every_restriction_runs_and_is_prevented_from_noth
 
 
 @pytest.mark.asyncio
-async def test_a_tool_handler_that_raises_comes_back_as_a_refusal_and_not_as_an_exception(
+async def test_a_tool_handler_that_raises_ends_the_run_with_its_own_exception(
     tmp_path: Path,
 ) -> None:
-    """`_tools._Route._called`'s own line, which this fake matches and the other fake now does too.
+    """`Caller.handled`'s rule, which this fake matches and `adapters/claude_code/fake.py` too.
 
-    That module catches a handler's exception and answers `f"{tool} failed: {raised}"` with
-    `rejected=True`, "so the model is told, and the run carries on". A fake of this adapter that
-    killed a run its runner would have carried through is a `--dry-run` reporting a failure anger
-    would not.
+    A tool handler is a workflow's own Python and it can hit a bug or refuse to go on: the tool
+    behind an approval gate raises when nobody approved. `Conversation.call` records the exception
+    and `run` raises it in place of an outcome - so a fake that carried the run on would report a
+    `--dry-run` passing with the gate silently absent.
 
-    This used to be a divergence from `adapters/claude_code/fake.py`, argued from where the catch
-    is written - one line of this adapter's own here, the vendor SDK's over there. That fake now
-    catches too, for the reason both modules' docstrings give: a workflow author cannot see whose
-    `except` did it, only that both runners carry on. `tests/contracts/agent.py` pins the clause
-    for every implementation of the port; what stays here is the shape only a script can see, which
-    is the refusal itself and the sentence it carries.
+    **This fake used to absorb it**, answering `f"{tool} failed: {raised}"` with `rejected=True`
+    and letting the script go on, and that was argued from where the catch is written - one line of
+    this adapter's own `_tools.py`, the vendor SDK's in the other. Both catch and both then stop;
+    `tests/contracts/agent.py` argues the inversion in full and pins the clause for every
+    implementation of the port. What stays here is the shape only a script can see - the result the
+    model is handed before the run ends, and that it is not an invitation to correct anything -
+    plus the default, which the contract suite reaches only through a model's conduct.
 
-    Both callers are driven, because they fail differently: a script gets a `ToolResult` it can
-    read, and the default treats it as any other refusal - which is what makes a handler that
-    raises forever a bounded run rather than a hung one.
+    The default is the half that matters most: `unscripted` retries a refusal up to `_ROUNDS`
+    times, so a failure that did not break out of that inner loop would call a handler that has
+    already failed seven more times before the run it is about to kill even ends.
     """
-    broken = Recorded(NOTE, raises=RuntimeError("the store is not writable"))
+    stopping = RuntimeError("the store is not writable")
+    broken = Recorded(NOTE, raises=stopping)
     seen: list[ToolResult] = []
 
     async def calls(conversation: Conversation) -> AgentOutcome:
         seen.append(await conversation.call(NOTE, {"note": "one sentence"}))
-        return AgentOutcome(stop_reason=StopReason.COMPLETED, text="carried on")
+        return AgentOutcome(stop_reason=StopReason.COMPLETED, text="never reached")
 
-    outcome = await FakeAgentRunner(calls).run(anything(workspace(tmp_path), tools=(broken.tool,)))
+    with pytest.raises(RuntimeError) as raised:
+        await FakeAgentRunner(calls).run(anything(workspace(tmp_path), tools=(broken.tool,)))
 
-    assert outcome.text == "carried on", "the run carried on, which is the whole of the clause"
+    assert raised.value is stopping, (
+        "the run raised something other than what the handler raised: a workflow's own Stop has to "
+        "arrive as itself, or the exit code it carries is decided by an adapter"
+    )
     assert [(result.rejected, result.text) for result in seen] == [
-        (True, "record_note failed: the store is not writable")
+        (
+            True,
+            f"record_note could not do what it was asked: {stopping}. This task is being stopped "
+            f"because of it. Nothing you do from here is kept, so do not call it again and do not "
+            f"work around it.",
+        )
     ], (
-        f"the script was handed {seen}. A handler that raised is a refusal carrying what it said - "
-        f"the same sentence `_tools.py` builds - so a workflow's tool behaves the same way on this "
-        f"fake as it does on the runner it stands in for"
+        f"the script was handed {seen}. The in-flight call is still answered - a model left with "
+        f"no result for a tool it called is a model waiting - and what it is told is that the task "
+        f"is being stopped, not that it should correct itself and call again"
     )
 
-    looping = Recorded(NOTE, raises=RuntimeError("the store is not writable"))
-    default = await FakeAgentRunner().run(anything(workspace(tmp_path), tools=(looping.tool,)))
-    assert isinstance(default.stop_reason, StopReason), (
-        "the default did not survive a handler that raises. A fake that raised here would kill a "
-        "--dry-run on a bug the real backend would have reported into the conversation"
-    )
-    assert 1 < len(looping.received) < 100, (
-        f"the default called a handler that raises {len(looping.received)} time(s): more than "
-        f"once, because a refusal is retried with what it was told, and bounded, because a fake "
-        f"must never be the thing that loops"
+    looping = Recorded(NOTE, raises=stopping)
+    with pytest.raises(RuntimeError):
+        await FakeAgentRunner().run(anything(workspace(tmp_path), tools=(looping.tool,)))
+    assert len(looping.received) == 1, (
+        f"the default called a handler that raises {len(looping.received)} time(s). Once is the "
+        f"whole of it: `unscripted`'s inner retry loop reads a refusal and goes round again, and a "
+        f"failure that did not break out of it spends seven more calls on caller code that has "
+        f"already failed, in a run that is about to raise"
     )
 
 
@@ -830,9 +802,7 @@ async def test_a_whole_run_on_this_fake_starts_no_process_and_binds_no_socket(
     monkeypatch.setattr(asyncio, "start_server", barricade)
 
     notes = Recorded(NOTE)
-    outcome = await FakeAgentRunner().run(
-        anything(workspace(tmp_path), tools=(notes.tool,)), on_question=Heard("nothing to add")
-    )
+    outcome = await FakeAgentRunner().run(anything(workspace(tmp_path), tools=(notes.tool,)))
     assert outcome.stop_reason is StopReason.COMPLETED and len(notes.received) == 1
 
     real = OpenAiRunner()
@@ -842,85 +812,14 @@ async def test_a_whole_run_on_this_fake_starts_no_process_and_binds_no_socket(
         await real.run(task(workspace(tmp_path), OpenAI.LUNA, "Say anything at all."))
 
 
-# --- The port's two settled edge cases, and the exceptions around them ---------------------------
-
-
-@pytest.mark.asyncio
-async def test_a_question_with_nobody_listening_is_answered_none_and_never_waited_for(
-    tmp_path: Path,
-) -> None:
-    """The port's second edge case, in the return type so that a script cannot forget it.
-
-    "If the agent asks while `on_question` is `None`, the adapter must **not** block. It tells the
-    agent that no answer is available and lets it carry on with its own judgement." `_tools.py`
-    says that in a sentence because a tool result has no other channel; a script is not a model and
-    would have to recognise a sentence, so it is said as `None` and `mypy --strict` makes carrying
-    on regardless impossible to write by accident.
-
-    The contract suite asserts the timing of this under a deadline. What it cannot see is the
-    shape, or that nothing was recorded as having gone wrong: nobody listening is not a failure.
-    """
-    seen: list[Answer | None] = []
-
-    async def asks(conversation: Conversation) -> AgentOutcome:
-        seen.append(await conversation.ask(Question(prompt="Which of two paths?")))
-        assert conversation.failure is None, "nobody listening is not something going wrong"
-        return AgentOutcome(stop_reason=StopReason.COMPLETED, text="carried on")
-
-    outcome = await FakeAgentRunner(asks).run(anything(workspace(tmp_path)))
-
-    assert seen == [None], f"asking with no handler answered {seen}, and nobody answered"
-    assert outcome.text == "carried on"
-
-
-@pytest.mark.asyncio
-async def test_a_question_handler_that_raises_ends_the_run_with_its_own_exception(
-    tmp_path: Path,
-) -> None:
-    """`_tools.Asking`'s behaviour, and it is not an implementation detail of the real adapter.
-
-    A headless terminal raises `UpstreamUnavailable` on any view that needs an answer and a
-    workflow's handler may raise `Stop`, so a fake that swallowed either would turn a run that dies
-    in anger into a run that passes on fakes - which is fake drift exactly. The exception comes
-    back out of `run` itself, and the handler is not asked again on the way there: spending the
-    rest of a run on an asker that has already failed is what `_session.py` refuses to do when it
-    checks `asking.failure` after every frame.
-    """
-    stopping = Stop("the workflow decided there is nothing more to do")
-    handler = Raises(stopping)
-
-    async def keeps_asking(conversation: Conversation) -> AgentOutcome:
-        for _ in range(3):
-            assert await conversation.ask(Question(prompt="Anything?")) is None
-        return AgentOutcome(stop_reason=StopReason.COMPLETED, text="never reached")
-
-    with pytest.raises(Stop) as raised:
-        await FakeAgentRunner(keeps_asking).run(anything(workspace(tmp_path)), on_question=handler)
-
-    assert raised.value is stopping, (
-        "the run raised something other than what the handler raised: a workflow's own Stop has to "
-        "arrive as itself, or the exit code it carries is decided by an adapter"
-    )
-    assert handler.asked == 1, (
-        f"the handler that raised was called {handler.asked} times. The first exception is the one "
-        f"that explains why the rest went the way they did, and later questions are answered "
-        f"without calling it again"
-    )
-
-    # And the default stops working, which is the other half of `_session.py`'s behaviour: it
-    # breaks out of the stream at the very next frame rather than spending an hour of a run on a
-    # session whose asker has already failed. A script decides that for itself; the default cannot
-    # be left to, because it is what `--dry-run` runs and nobody wrote it for the occasion.
-    notes = Recorded(NOTE)
-    with pytest.raises(Stop):
-        await FakeAgentRunner().run(
-            anything(workspace(tmp_path), tools=(notes.tool,)), on_question=Raises(stopping)
-        )
-    assert notes.received == [], (
-        "the default carried on calling tools after the asker had already failed, which is an "
-        "hour of a real run spent on a session that was over, and here is a step's own handlers "
-        "being invoked for a run that is about to raise"
-    )
+# --- What a script may not do, and what a payload may not be --------------------------------------
+#
+# Two tests stood at the head of this section and both are gone. They were about `Conversation.ask`
+# - a question with nobody listening answered `None`, and a question handler that raised ending the
+# run - and they were deleted with the member: `on_question` and the framework-supplied asking tool
+# are gone, so a question is an ordinary tool call and there is no second kind of caller code for
+# this fake to invoke. What they asserted between them is asserted of a *tool* handler above, and
+# `tests/contracts/agent.py` holds every implementation of the port to it.
 
 
 @pytest.mark.asyncio
@@ -1007,9 +906,7 @@ async def test_a_scripts_activity_line_arrives_untouched_and_a_reporter_that_rai
     said: list[str] = []
     notes = Recorded(NOTE)
     await FakeAgentRunner().run(
-        anything(workspace(tmp_path), tools=(notes.tool,)),
-        on_question=Heard("nothing to add"),
-        on_activity=said.append,
+        anything(workspace(tmp_path), tools=(notes.tool,)), on_activity=said.append
     )
     assert said and all(_shaped(line) for line in said), (
         f"the default said {said}. Every line this backend shows is one word, a colon and a "

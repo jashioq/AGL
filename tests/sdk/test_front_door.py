@@ -12,7 +12,7 @@ which is the thing the facades exist to prevent.
 
 **Nothing below carries a copy of what is on the door.** `_DOOR` maps each submodule to *how much*
 of it the door takes - all of it, or a named few - and every comparison is between `agl.sdk.__all__`
-and the submodules' own `__all__`. A test holding its own list of the door's forty-two names would
+and the submodules' own `__all__`. A test holding its own list of the door's forty-five names would
 be a second hand-maintained list, free to drift from the first, and its agreement would mean only
 that one person updated both at once.
 

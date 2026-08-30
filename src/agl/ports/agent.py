@@ -7,7 +7,6 @@ from pathlib import Path
 from types import MappingProxyType
 
 from agl.ports.errors import InputError, InternalError
-from agl.ports.questions import Answer, Question
 from agl.ports.run import JsonValue
 
 __all__ = [
@@ -20,7 +19,6 @@ __all__ = [
     "ModelId",
     "OpenAI",
     "Provider",
-    "QuestionHandler",
     "Restriction",
     "StopReason",
     "Tool",
@@ -76,7 +74,6 @@ class Capability(StrEnum):
 
     FILE_EDIT = "file_edit"
     SHELL = "shell"
-    MID_RUN_QUESTIONS = "mid_run_questions"
     TOOL_CALLING = "tool_calling"
 
 
@@ -160,8 +157,6 @@ class AgentOutcome:
     text: str
 
 
-type QuestionHandler = Callable[[Question], Awaitable[Answer]]
-
 type ActivityReporter = Callable[[str], None]
 
 
@@ -180,7 +175,6 @@ class AgentRunner(ABC):
         self,
         task: AgentTask,
         *,
-        on_question: QuestionHandler | None = None,
         on_activity: ActivityReporter | None = None,
     ) -> AgentOutcome:
         ...

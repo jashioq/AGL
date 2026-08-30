@@ -12,7 +12,6 @@ from agl.ports.agent import (
     Claude,
     ModelId,
     OpenAI,
-    QuestionHandler,
     Restriction,
     Tool,
 )
@@ -25,7 +24,6 @@ __all__ = [
     "Claude",
     "ModelId",
     "OpenAI",
-    "QuestionHandler",
     "Restriction",
     "Role",
     "RoleFactory",
@@ -49,8 +47,6 @@ class Role[P = None]:
     tools: Sequence[Tool | ReportingTool[P]] = ()
 
     requires: AbstractSet[Capability] = frozenset()
-
-    on_question: QuestionHandler | None = None
 
     def __post_init__(self) -> None:
         StepName(self.name)
@@ -78,8 +74,6 @@ class Role[P = None]:
                 f"handler - `AgentTask` refuses it too, one layer down and one run later"
             )
         requires = frozenset(self.requires)
-        if self.on_question is not None:
-            requires |= {Capability.MID_RUN_QUESTIONS}
         if tools:
             requires |= {Capability.TOOL_CALLING}
         object.__setattr__(self, "restrictions", frozenset(self.restrictions))

@@ -1,5 +1,5 @@
-"""What a `Role` declaration promises: a name, four terms, a handler, a model from its factory,
-and one typed result per step.
+"""What a `Role` declaration promises: a name, four terms, a model from its factory, and one typed
+result per step.
 
 Five properties carry this suite.
 
@@ -243,12 +243,7 @@ def _unservable() -> Role:
     `@role` validates nothing, `Role.__post_init__` asks no port, and the two deaths arranged for
     this both need a runner - `check_ready` on its model at second zero, and containment of what it
     requires at the first step it is handed to."""
-    return Role(
-        name="review",
-        instructions=_REVIEW,
-        requires=frozenset(Capability),
-        on_question=_answer,
-    )
+    return Role(name="review", instructions=_REVIEW, requires=frozenset(Capability))
 
 
 @role(model=Claude.HAIKU)
@@ -413,11 +408,11 @@ def test_the_name_is_the_address_and_reaches_no_fingerprint() -> None:
 
 
 def test_a_role_holds_the_declared_terms_and_nothing_else() -> None:
-    """"Instructions + restrictions + tools + required capabilities", plus the question handler,
-    the name its steps are recorded under, and the model its factory bound. Slotted, so an
-    attribute nobody declared cannot be attached to one."""
+    """"Instructions + restrictions + tools + required capabilities", plus the name its steps are
+    recorded under and the model its factory bound. Slotted, so an attribute nobody declared cannot
+    be attached to one - and a `Role` carried a sixth field, `on_question`, until a question became
+    an ordinary tool; the `__dict__` refusal is what says a deleted field cannot be set back on."""
     assert (REVIEWER.name, REVIEWER.instructions, REVIEWER.model) == ("review", _REVIEW, OpenAI.SOL)
-    assert REVIEWER.on_question is None
     with pytest.raises(AttributeError):
         object.__getattribute__(REVIEWER, "__dict__")
 
@@ -802,78 +797,20 @@ def test_a_plain_tool_colliding_with_the_reporting_tool_is_refused_too() -> None
     assert REPORT.name in str(refusal.value)
 
 
-# --- rule two: on_question implies MID_RUN_QUESTIONS ----------------------------------------------
+# --- rule two: what `requires` is, and what it is not ---------------------------------------------
+#
+# There was a second folded implication here and it is gone: `on_question` implied
+# `MID_RUN_QUESTIONS`, and both the field and the member were deleted when a question became an
+# ordinary tool a workflow supplies. What survives is the half that was never about questions -
+# `requires` is not a fingerprint term - and it is measured on the fold that is left.
 
 
-def test_declaring_on_question_requires_mid_run_questions() -> None:
-    """"This makes `MID_RUN_QUESTIONS` load-bearing." Folded in here so that preflight is one
-    containment with no special case, and so that the check cannot be lost by not being typed."""
-    decompose = Role(
-        name="decompose",
-        instructions="Propose tickets, ask for approval, revise until approved, then report.",
-        tools=[REPORT_TICKETS],
-        on_question=_answer,
-    )
-    assert Capability.MID_RUN_QUESTIONS in decompose.requires
-
-
-def test_the_capability_is_added_beside_the_ones_the_author_declared() -> None:
-    """Folded in, not substituted for: an author who also needs `FILE_EDIT` keeps it."""
-    role = Role(
-        name="implement",
-        instructions=_IMPLEMENT,
-        requires={Capability.FILE_EDIT, Capability.SHELL},
-        on_question=_answer,
-    )
-    assert role.requires == frozenset(
-        {Capability.FILE_EDIT, Capability.SHELL, Capability.MID_RUN_QUESTIONS}
-    )
-
-
-def test_declaring_it_as_well_as_the_handler_changes_nothing() -> None:
-    """A set, so saying it twice says it once. An author who prefers to write it stays right."""
-    stated = Role(
-        name="review",
-        instructions=_REVIEW,
-        requires={Capability.MID_RUN_QUESTIONS},
-        on_question=_answer,
-    )
-    implied = Role(name="review", instructions=_REVIEW, on_question=_answer)
-    assert stated.requires == implied.requires
-
-
-def test_the_implication_runs_one_way_only() -> None:
-    """`requires={MID_RUN_QUESTIONS}` with no handler says the prompt may invite the agent to ask
-    and the author wants a backend that can. Over-declaring is the author's business; refusing it
-    would be this module inventing a policy about what a requirement means."""
-    role = Role(
-        name="review",
-        instructions=_REVIEW,
-        requires={Capability.MID_RUN_QUESTIONS},
-    )
-    assert role.on_question is None
-    assert role.requires == frozenset({Capability.MID_RUN_QUESTIONS})
-
-
-def test_a_role_with_no_handler_requires_nothing_it_was_not_given() -> None:
-    assert Capability.MID_RUN_QUESTIONS not in REVIEWER.requires
-
-
-@pytest.mark.asyncio
-async def test_the_handler_is_the_ports_own_shape_and_is_called_as_one() -> None:
-    """`QuestionHandler` rather than a respelled `Callable`, so that what a role declares and what
-    `AgentRunner.run` accepts are one type and cannot drift apart."""
-    role = Role(name="review", instructions=_REVIEW, on_question=_answer)
-    assert role.on_question is not None
-    answer = await role.on_question(Question(prompt="Ship it?", options=("yes", "no")))
-    assert answer == Answer(text="yes")
-
-
-def test_neither_the_handler_nor_the_requirements_reach_the_fingerprint() -> None:
-    """`base_of` takes instructions, model, restrictions and tools. So a closure is safe on a role
-    where `AgentTask` refuses one, and the capability folded in above cannot move a digest."""
-    asking = replace(REVIEWER, on_question=_answer, requires={Capability.FILE_EDIT})
-    assert _base(asking) == _base(REVIEWER)
+def test_the_requirements_do_not_reach_the_fingerprint() -> None:
+    """`base_of` takes instructions, model, restrictions and tools, and `requires` is not among
+    them - so a capability an author typed, and one `__post_init__` folded in, are alike invisible
+    to a digest."""
+    demanding = replace(REVIEWER, requires={Capability.FILE_EDIT})
+    assert _base(demanding) == _base(REVIEWER)
 
 
 def test_nothing_here_is_checked_against_a_provider() -> None:
@@ -887,10 +824,19 @@ def test_nothing_here_is_checked_against_a_provider() -> None:
 
 # --- rule three: tools implies TOOL_CALLING -------------------------------------------------------
 #
-# A finding closed late, on the three arguments the section above is written on: a
-# second declaration carries no information and can only be forgotten, the implication runs one way
-# only, and a derived member cannot move a digest. The third is re-measured here rather than
-# inherited, because this implication's trigger *is* a fingerprint term where `on_question` is not.
+# A finding closed late, on three arguments: a second declaration carries no information and can
+# only be forgotten, the implication runs one way only, and a derived member cannot move a digest.
+#
+# **The trigger is a fingerprint term, and that is now a consequence an author meets.** This
+# section used to note that `tools` is a term "where `on_question` is not", and the contrast was
+# doing work: a workflow could hand a role a question handler without moving one digest. It cannot
+# any more - a question is an ordinary tool, so *giving a role somewhere to ask changes that step's
+# fingerprint*, and every entry recorded before it was added misses. `test_folding_tool_calling_in
+# _moves_no_digest_although_its_trigger_is_a_term` below is where the two halves are separated: the
+# fold rides for free, the tool it rides behind does not. What follows from it is
+# `ARCHITECTURE.md`'s "Bump `@workflow(version=…)` when a workflow's shape changes" - `fix` went
+# from 1.1 to 2 for exactly this, and `tests/workflows/test_fix.py` is where that is written down
+# beside the workflow it happened to.
 
 
 def test_declaring_a_reporting_tool_requires_tool_calling() -> None:
@@ -945,14 +891,19 @@ def test_a_role_with_no_tools_requires_nothing_it_was_not_given() -> None:
 
 
 def test_folding_tool_calling_in_moves_no_digest_although_its_trigger_is_a_term() -> None:
-    """The one argument that had to be checked again rather than inherited from `on_question`.
+    """The fold rides for free; the tool it rides behind does not. Two halves, measured apart.
 
-    `base_of` fingerprints instructions, model, restrictions and tools, so `tools` **is** a term
-    where `on_question` is not - and a fold behind a term looks, at a glance, like it could move a
-    digest. It cannot, because what the fold writes is a member of `requires`, and `requires` is
-    not a term. Both halves are measured: declaring the capability by hand and letting the fold do
-    it are one digest, and the tool itself is what moved the digest all along. So no role's digest
-    is different today from what it was before this implication existed.
+    `base_of` fingerprints instructions, model, restrictions and tools, so `tools` **is** a term -
+    and a fold behind a term looks, at a glance, like it could move a digest. It cannot, because
+    what the fold writes is a member of `requires`, and `requires` is not a term. So no role's
+    digest is different today from what it was before this implication existed.
+
+    **The second assertion is the one an author meets**, and it is the reason this test is quoted
+    from `tests/workflows/test_fix.py` and from `ARCHITECTURE.md`'s version rule. Declaring a tool
+    *does* move the digest, and a question is now an ordinary tool - so a workflow that gives a role
+    somewhere to ask has changed that step's fingerprint, every entry recorded under the toolless
+    role misses, and a resume re-buys the step. That is a shape change, and a shape change is a
+    `@workflow(version=…)` bump.
     """
     typed = replace(REVIEWER, requires={Capability.TOOL_CALLING})
     folded = replace(REVIEWER, requires=frozenset())

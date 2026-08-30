@@ -1,5 +1,5 @@
 
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import MISSING, Field, dataclass, field, fields, is_dataclass
 from math import isfinite
 from types import MappingProxyType, UnionType
@@ -9,7 +9,15 @@ from agl.ports.agent import Tool, ToolResult
 from agl.ports.errors import InputError, InternalError
 from agl.ports.run import JsonValue
 
-__all__ = ["ReportingTool", "Tool", "ToolResult", "describe", "reporting_tool"]
+__all__ = [
+    "JsonValue",
+    "ReportingTool",
+    "Tool",
+    "ToolResult",
+    "describe",
+    "reporting_tool",
+    "tool",
+]
 
 _SCALARS: Final[Mapping[object, tuple[str, str]]] = MappingProxyType(
     {
@@ -83,6 +91,25 @@ def reporting_tool[P](name: str, description: str, payload: type[P]) -> Reportin
     return ReportingTool(name=name, description=description, payload=payload)
 
 
+def tool[P](
+    name: str,
+    description: str,
+    payload: type[P],
+    handler: Callable[[P], Awaitable[ToolResult]],
+) -> Tool:
+    _check_payload(payload, name)
+    schema = _object_schema(payload, name, ())
+
+    async def _called(sent: Mapping[str, JsonValue]) -> ToolResult:
+        problems: list[str] = []
+        built = _instance(payload, sent, name, problems)
+        if not isinstance(built, payload):
+            return ToolResult(text=_refusal(name, tuple(problems)), rejected=True)
+        return await handler(built)
+
+    return Tool(name=name, description=description, payload_schema=schema, handler=_called)
+
+
 @overload
 def describe[T](text: str, *, default: T) -> T: ...
 @overload
@@ -144,9 +171,10 @@ def _schema_for(hint: object, where: str, inside: tuple[type[Any], ...]) -> dict
     if isinstance(hint, type) and is_dataclass(hint):
         return _object_schema(hint, where, inside)
     raise InputError(
-        f"{where} is a {_describe(hint)}, which a reporting tool cannot carry: {_SUPPORTED}. A "
-        f"payload is stored as the step's result and read back as this dataclass, so a field type "
-        f"that does not survive JSON unchanged is one the ledger could not return"
+        f"{where} is a {_describe(hint)}, which a tool payload cannot carry: {_SUPPORTED}. A "
+        f"payload is filled in as JSON by the model and converted back into this dataclass, and "
+        f"where it is also a step's result it is stored and read back the same way, so a field "
+        f"type that does not survive JSON unchanged is one nothing could return"
     )
 
 
@@ -266,7 +294,7 @@ def _check_payload(payload: object, name: str) -> None:
     if isinstance(payload, type) and is_dataclass(payload):
         return
     raise InputError(
-        f"the reporting tool {name!r} was declared with {_describe(payload)}, and a payload is a "
+        f"the tool {name!r} was declared with {_describe(payload)}, and a payload is a "
         f"dataclass - the class itself, never an instance of it. Its fields are what the "
         f"schema is derived from and what the agent is asked to fill in"
     )

@@ -1,13 +1,20 @@
 
 import asyncio
 import os
+import signal
 from collections.abc import Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-from agl.ports.errors import AglError, UpstreamError, UpstreamUnavailable, UpstreamUnexpected
+from agl.ports.errors import (
+    AglError,
+    InputError,
+    UpstreamError,
+    UpstreamUnavailable,
+    UpstreamUnexpected,
+)
 
 __all__ = ["GitRunner", "unreadable"]
 
@@ -82,8 +89,7 @@ class GitRunner:
                 f"it is asked to stop, so the same call may well succeed later"
             ) from None
         except BaseException:
-            with suppress(ProcessLookupError):
-                process.terminate()
+            _signalled(process, signal.SIGTERM)
             raise
         code = process.returncode if process.returncode is not None else 0
         return _Completed(code, _text(out), _text(err))
@@ -139,6 +145,14 @@ async def _spawned(argv: Sequence[str], where: Path) -> asyncio.subprocess.Proce
             stderr=asyncio.subprocess.PIPE,
             env=os.environ | {"GIT_TERMINAL_PROMPT": "0"},
         )
+    except ValueError as error:
+        raise InputError(
+            f"{_asked(argv, where)} could not be started: {error}. A child process is handed its "
+            f"arguments, its working directory and its environment as bytes, and something here "
+            f"has no encoding at all - a lone surrogate, or a NUL inside a string. Nothing ran, "
+            f"and unlike every other way a start fails this one will never succeed: the same text "
+            f"encodes the same way every time, so it is the value that has to change"
+        ) from error
     except OSError as error:
         raise UpstreamUnavailable(
             f"{_asked(argv, where)} could not be started: {error}. Nothing ran, so the same call "
@@ -147,15 +161,20 @@ async def _spawned(argv: Sequence[str], where: Path) -> asyncio.subprocess.Proce
 
 
 async def _stopped(process: asyncio.subprocess.Process) -> None:
-    with suppress(ProcessLookupError):
-        process.terminate()
+    _signalled(process, signal.SIGTERM)
     try:
         async with asyncio.timeout(_GRACE):
             await process.wait()
     except TimeoutError:
-        with suppress(ProcessLookupError):
-            process.kill()
+        _signalled(process, signal.SIGKILL)
         await process.wait()
+
+
+def _signalled(process: asyncio.subprocess.Process, sign: signal.Signals) -> None:
+    if process.returncode is not None:
+        return
+    with suppress(ProcessLookupError, PermissionError):
+        process.send_signal(sign)
 
 
 def _text(raw: bytes) -> str:

@@ -434,7 +434,8 @@ async def test_two_identical_registrations_are_two_entries_answered_separately()
     screens with the same text really are equal, since `Screen` compares by value and
     `TextInput.maps` is excluded from that comparison. So a module keyed on the value cannot tell
     these two calls apart, and this is where that costs something - one `show` returning an answer
-    nobody gave it, to an agent's `on_question` handler, which carries it back into a live session.
+    nobody gave it, to the handler of an agent's asking tool, which carries it back into a live
+    session as that call's result.
     """
     assert question(EARLY) == question(EARLY), (
         "two independently built frames of this view do not compare equal, so `Screens` could tell "

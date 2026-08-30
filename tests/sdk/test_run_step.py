@@ -66,20 +66,19 @@ from agl.config import container
 from agl.ports.agent import (
     AgentOutcome,
     Claude,
-    QuestionHandler,
     Restriction,
     StopReason,
+    Tool,
     ToolResult,
 )
 from agl.ports.errors import InputError
 from agl.ports.home_layout import AglHome, RunScope, step_dir
 from agl.ports.ids import ProjectName, RunLabel, StepName
-from agl.ports.questions import Answer, Question
 from agl.ports.run import JsonValue
 from agl.ports.tree_layout import TreesRoot
 from agl.ports.workspace import Workspace
 from agl.sdk.roles import Role, RoleIncompleteError, prompt_file, role
-from agl.sdk.tools import reporting_tool
+from agl.sdk.tools import reporting_tool, tool
 from agl.sdk.workflow import Run
 
 # Every test below is async and marked one by one rather than through a module-level `pytestmark`,
@@ -129,6 +128,18 @@ class Restatement:
 
 
 RESTATE: Final = reporting_tool(REPORT.name, "report what you did", Restatement)
+
+
+@dataclass(frozen=True)
+class _Asking:
+    """The payload of a role's own asking tool. One field, which is the whole of a question here."""
+
+    question: str
+
+
+_ASK: Final = "ask_the_operator"
+"""What a workflow calls its asking tool. Nothing in AGL knows the name, which is the point: the
+framework supplies no asking tool of its own, so this is a string this file chose."""
 
 
 class _Crash(Exception):
@@ -248,10 +259,28 @@ def _effect(name: str, instructions: str) -> Role[None]:
 
 
 @role(model=Claude.SONNET)
-def _deciding(*, on_question: QuestionHandler | None = None) -> Role[Summary]:
-    """A reporting role that negotiates: the handler is a closure over a `Run`, so it can only
-    reach a role as the one argument this factory takes."""
-    return Role(name="decide", instructions="decide", tools=(REPORT,), on_question=on_question)
+def _promising() -> Role[Summary]:
+    """A role annotated `Role[Summary]` that declares no reporting tool - and therefore lies.
+
+    `Role[P]` solves `P` from `tools=`, and an omitted `tools=` solves it from the return
+    annotation instead, so this declaration is clean under `mypy --strict` and there is nothing at
+    the declaration to object to. What it promises is a `Summary`; what `run.step` can hand back is
+    `null`. The section near the bottom of this file is where that is measured and argued.
+    """
+    return Role(name="audit", instructions="audit the worktree")
+
+
+@role(model=Claude.SONNET)
+def _deciding(*, ask: Tool | None = None) -> Role[Summary]:
+    """A reporting role that negotiates: the asking tool's handler is a closure over a `Run`, so it
+    can only reach a role as the one argument this factory takes.
+
+    `Role[Summary]` is written out because the display is mixed - a list holding a `ReportingTool`
+    and a plain `Tool` does not solve for `P`, which `tests/sdk/test_roles.py` pins in both
+    directions and calls the explicit parameter the sanctioned fallback for."""
+    return Role[Summary](
+        name="decide", instructions="decide", tools=[REPORT] if ask is None else [REPORT, ask]
+    )
 
 
 @role(model=Claude.SONNET)
@@ -282,8 +311,8 @@ class _Agent:
         """Every answer the reporting tool gave, refusals included - the rejection path is a
         `ToolResult` going back to the model, so this is where it is visible from."""
 
-        self.asked: list[Question] = []
-        """Every question the script put to `on_question`, or nothing if it never asked."""
+        self.asked: list[str] = []
+        """Every question the script put to the role's own asking tool, in the order it asked."""
 
 
 def _agent(
@@ -307,8 +336,7 @@ def _agent(
     async def _script(conversation: Conversation) -> AgentOutcome:
         record.runs.append(conversation.task.instructions)
         if asks is not None:
-            answer = await conversation.ask(Question(prompt=asks))
-            record.results.append(ToolResult(text="" if answer is None else answer.text))
+            record.results.append(await conversation.call(_ASK, {"question": asks}))
         for name, content in writes.items():
             target = conversation.task.workspace / name
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -843,32 +871,84 @@ async def test_an_effect_step_records_a_null_value_and_the_commits_are_the_resul
     assert len(record.runs) == 1
 
 
-# --- the role's own question handler -------------------------------------------------------------
+# --- a known hole: a role may promise a payload and declare nothing that can produce one ----------
+#
+# **This is open, and the test below exists so that the next person meets the argument rather than
+# the surprise.** It is not a bug in the step: `steps.py` does the only thing it can, and the
+# declaration it is serving is the thing that was wrong.
+#
+# `Role[P]` carries its reporting tool as one member of `tools: Sequence[Tool | ReportingTool[P]]`,
+# so `P` is solved from whatever `tools=` holds - and when it holds nothing, from the annotation on
+# the factory instead. `Role[Summary]` with no tools is therefore a legal, `mypy --strict`-clean
+# declaration of a role that cannot report. `Steps.step` finds no `ReportingTool` in it, builds no
+# capture cell, and ends at `return cast(R, None)`: the workflow is handed `None` with mypy still
+# holding that it is a `Summary`, and the ledger records `null`, which is the truth.
+#
+# Closing it means `Role` carrying its reporting tool as its own member rather than as a union
+# element - `reports: ReportingTool[P]`, required, so that `Missing named argument "reports"` is
+# what an author gets - which was measured to work and to close the second-reporting-tool hole with
+# it. It is a different deliverable: it moves a public field on `Role`, rewrites every role
+# declaration in `src/`, `tests/` and any workflow anyone has written, and touches nothing this
+# file's subject does. Until then the hole is here, in one test, with its name on it.
 
 
 @pytest.mark.asyncio
-async def test_a_roles_question_handler_reaches_the_runner_and_its_answer_returns(
+async def test_a_role_promising_a_payload_with_no_reporting_tool_is_handed_none(
+    repository: Path, tmp_path: Path, base: str
+) -> None:
+    """The hole, driven end to end rather than argued: real role, real step, real ledger.
+
+    Both halves are here because either alone would read as something else. `assert_type` is the
+    static half and it *passes* - that is the defect, not a check that this test is doing its job -
+    and `mypy --strict` runs over `tests/`, so this line is a gate saying the hole is still open. A
+    day when `Role` learns to refuse this declaration is a day this file fails to type-check, which
+    is the notification being arranged.
+    """
+    record = _Agent()
+    run = _run(repository, tmp_path, base, _agent(record, reports=False))
+
+    summary = await run.step(_promising(), commit="audit the worktree")
+
+    assert_type(summary, Summary)
+    assert _one(tmp_path, "audit")["value"] is None, "the ledger recorded something other than null"
+    assert len(record.runs) == 1
+    assert summary is None, (
+        "the step handed back something other than `None`, so `steps.py` no longer ends a "
+        "capture-less step at `return cast(R, None)` and this hole has moved rather than closed"
+    )
+
+
+# --- the role's own asking tool -------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_roles_asking_tool_reaches_the_runner_and_its_answer_returns(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
     """The answer returns into the same live session, so a negotiation is N rounds inside one
     step rather than N steps.
 
-    `Role.on_question` folds `Capability.MID_RUN_QUESTIONS` into `requires` at declaration time, on
-    the argument that there is no role which declares a handler and does not need a backend able to
-    ask. A `step` that did not pass the handler on would leave preflight insisting on a capability
-    nothing used, and the workflow's approval gate simply absent - the agent approving itself, with
-    nothing raised and nothing logged as wrong.
+    A question is an ordinary tool the workflow supplies: `Role.tools` folds
+    `Capability.TOOL_CALLING` into `requires` at declaration time, the engine hands `AgentTask` the
+    whole tuple, and what comes back out of the handler is what the agent reads. A `step` that
+    dropped a role's non-reporting tools would leave preflight insisting on a capability nothing
+    used, and the workflow's approval gate simply absent - the agent approving itself, with nothing
+    raised and nothing logged as wrong.
+
+    This is the one round; `tests/sdk/test_agent_questions.py` is the whole negotiation, with a
+    person at the end of it.
     """
     record = _Agent()
 
-    async def _answers(question: Question) -> Answer:
-        record.asked.append(question)
-        return Answer(text="land it")
+    async def _answers(asked: _Asking) -> ToolResult:
+        record.asked.append(asked.question)
+        return ToolResult(text="land it")
 
     run = _run(repository, tmp_path, base, _agent(record, asks="Land it, or keep going?"))
+    asking = tool(_ASK, "ask the person running this task", _Asking, _answers)
 
-    assert await run.step(_deciding(on_question=_answers)) == Summary("decide #0")
-    assert [question.prompt for question in record.asked] == ["Land it, or keep going?"]
+    assert await run.step(_deciding(ask=asking)) == Summary("decide #0")
+    assert record.asked == ["Land it, or keep going?"]
     assert record.results[0].text == "land it", "the answer did not reach the agent that asked"
 
 
@@ -1442,7 +1522,6 @@ async def test_the_step_refuses_the_same_name_again_before_it_provisions_anythin
         "restrictions": frozenset({Restriction.NO_VCS_WRITES}),
         "tools": (REPORT,),
         "requires": frozenset(),
-        "on_question": None,
     }.items():
         object.__setattr__(undeclared, field, value)
 

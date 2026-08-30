@@ -12,14 +12,6 @@ __all__ = ["Capabilities", "check"]
 
 type _Declaration = Callable[..., object]
 
-_FROM_ON_QUESTION: Final = (
-    f". {str(Capability.MID_RUN_QUESTIONS)!r} is in this role's `requires` because it declares "
-    f"`on_question`: `sdk/roles.py` folds it in at declaration time, so there is no line in the "
-    f"workflow to go looking for. A backend that cannot ask would not block on the question - it "
-    f"would tell the agent no answer is available, leaving the approval gate silently absent and "
-    f"the step reporting a result anyway"
-)
-
 _FROM_TOOLS: Final = (
     f". {str(Capability.TOOL_CALLING)!r} is in this role's `requires` because it declares `tools`: "
     f"`sdk/roles.py` folds it in at declaration time, so there is no line in the workflow to go "
@@ -111,8 +103,6 @@ def _unmet(
         f"A capability is what a backend can be asked for at all, so this does not clear up on "
         f"its own: either the role names a model whose backend has it, or it stops requiring it"
     )
-    if Capability.MID_RUN_QUESTIONS in missing and role.on_question is not None:
-        message += _FROM_ON_QUESTION
     if Capability.TOOL_CALLING in missing and role.tools:
         message += _FROM_TOOLS
     return message

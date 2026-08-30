@@ -10,7 +10,6 @@ from agl.ports.agent import (
     Capability,
     ModelId,
     Provider,
-    QuestionHandler,
 )
 from agl.ports.errors import InputError
 
@@ -40,12 +39,9 @@ class RoutingAgentRunner(AgentRunner):
         self,
         task: AgentTask,
         *,
-        on_question: QuestionHandler | None = None,
         on_activity: ActivityReporter | None = None,
     ) -> AgentOutcome:
-        return await self._serving(task.model).run(
-            task, on_question=on_question, on_activity=on_activity
-        )
+        return await self._serving(task.model).run(task, on_activity=on_activity)
 
     def _serving(self, model: ModelId) -> AgentRunner:
         provider = model.provider

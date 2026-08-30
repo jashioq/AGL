@@ -79,7 +79,6 @@ class Steps:
                         restrictions=frozenset(role.restrictions),
                         tools=offered,
                     ),
-                    on_question=role.on_question,
                     on_activity=self._reported,
                 )
             finally:

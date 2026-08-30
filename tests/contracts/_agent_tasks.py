@@ -26,10 +26,19 @@ that simply did not write a file look identical from out here. Asking for nothin
 position, and `contracts/agent.py` lists it among what this suite does not prove.
 
 **The prompts are instructions to a model, so they are written like instructions to a model** -
-numbered, literal, and saying what to reply with. Three tests read what the agent did as evidence
-about the adapter (a rejected call retried, two questions asked, an answer echoed back), and there
-is no other way to see those clauses from outside. Vague prompts would make those tests flaky
-against correct adapters, which is a way of teaching a reader to ignore them.
+numbered, literal, and saying what to reply with. Two tests read what the agent did as evidence
+about the adapter (a rejected call retried, a failed call not retried), and there is no other way to
+see those clauses from outside. Vague prompts would make those tests flaky against correct adapters,
+which is a way of teaching a reader to ignore them.
+
+**There is no asking prompt here any more, and its absence is the deliberate half.** Two used to
+sit at the bottom of this file - one ordering the agent to ask twice, one ordering it to ask with
+nobody listening - and they drove a tool AGL supplied to every task on every backend. That tool is
+gone: a question is an ordinary tool a *workflow* declares, so what an agent may ask is now a fact
+about the role that ran it and not about the port, and a contract suite that shipped its own asking
+prompt would be asserting a mechanism no implementation is obliged to have. What survives of that
+clause is `Notes` and the two tool prompts, which is where it always was: a question reaching a
+person is a tool call whose handler happens to block on one.
 """
 
 import asyncio
@@ -43,18 +52,23 @@ from agl.ports.agent import (
     AgentRunner,
     AgentTask,
     ModelId,
-    QuestionHandler,
     Tool,
     ToolResult,
 )
-from agl.ports.questions import Answer, Question
 from agl.ports.run import JsonValue
 
-# A deadline around every run, and not a performance assertion. The port makes exactly one promise
-# about time - that an adapter must not block on a question nobody is listening for - and a suite
-# cannot assert that without being willing to stop waiting. It is generous because an agent
-# verifying its own work is unbounded by design (`AgentTask` refuses to carry a timeout for that
-# reason), so anything under this is not slowness, it is a run that is never coming back.
+# A deadline around every run, and not a performance assertion. The port makes no promise about
+# time at all - `AgentTask` refuses to carry a timeout, because an agent verifying its own work is
+# unbounded by design - so this bound is the suite's own and exists for one reason: an await with no
+# end looks exactly like an agent that is still thinking, and a suite unwilling to stop waiting
+# reports a hung adapter as a slow one and then as nothing at all, because somebody kills it by
+# hand. It is generous, so anything over it is not slowness, it is a run that is never coming back.
+#
+# The port used to make one promise here - that an adapter must not block on a question nobody was
+# listening for - and this comment was written for it. That clause went with `on_question`: a
+# question is an ordinary tool the workflow supplies now, so there is no framework-supplied
+# mechanism an agent can call into with nothing behind it. The deadline outlived the clause because
+# any handler an adapter awaits can fail to come back, and a tool handler is the caller's code.
 RUN_DEADLINE: Final = 300.0
 
 README: Final = "README.md"
@@ -104,29 +118,27 @@ async def outcome_of(
     runner: AgentRunner,
     work: AgentTask,
     *,
-    on_question: QuestionHandler | None = None,
     on_activity: ActivityReporter | None = None,
 ) -> AgentOutcome:
-    """`run`, under a deadline, with the two things every test would otherwise assert itself.
+    """`run`, under a deadline, with the one thing every test would otherwise assert itself.
 
-    The deadline is what makes "the adapter must not block" testable at all: an await with no
-    end looks exactly like an agent that is still thinking, and a suite that could not tell them
-    apart would hang instead of failing - which is the same outcome the port forbids, one layer
-    up. A timeout is reported as a failed assertion rather than as a `TimeoutError`, because a
-    reader needs to be told which clause was broken and not which primitive noticed.
+    The deadline is what keeps a hang a *failure*: an await with no end looks exactly like an
+    agent that is still thinking, and a suite that could not tell them apart would hang instead of
+    reporting. A timeout is reported as a failed assertion rather than as a `TimeoutError`, because
+    a reader needs to be told what did not come back and not which primitive noticed.
 
     Every test that does not name `on_activity` leaves it at its default, so the port's "may be
-    omitted" is exercised by six of the nine runs this suite starts without a test for it.
+    omitted" is exercised by four of the seven runs this suite starts without a test for it.
     """
     try:
         async with asyncio.timeout(RUN_DEADLINE):
-            outcome = await runner.run(work, on_question=on_question, on_activity=on_activity)
+            outcome = await runner.run(work, on_activity=on_activity)
     except TimeoutError as expired:
         raise AssertionError(
             f"the run did not come back within {RUN_DEADLINE:.0f}s and was cancelled. A run that "
-            f"never returns is the worst outcome the port names, because it looks exactly like "
-            f"work: if this task asked a question, an adapter with no handler to call must tell "
-            f"the agent that no answer is available and let it carry on, never wait for one"
+            f"never returns is the worst outcome available, because it looks exactly like work. "
+            f"Every await an adapter makes on the caller's behalf is a candidate - a tool handler "
+            f"that never returns is the one this suite hands one of"
         ) from expired
     assert isinstance(outcome, AgentOutcome), (
         f"run answered with {type(outcome).__name__}, and the port's answer is an AgentOutcome - "
@@ -164,8 +176,11 @@ class ToolFailed(Exception):
 
     Its own class, and deliberately not one of `errors.py`'s: a handler is the *caller's* code, an
     adapter is entitled to have no reading of what comes out of one, and an exception this suite
-    borrowed from the framework's own hierarchy would let an implementation recognise it. It is not
-    a `BaseException` either - both fakes decline to catch those on purpose, and a suite raising one
+    borrowed from the framework's own hierarchy would let an implementation recognise it. That is
+    now load-bearing rather than tidy - the clause this class provokes asserts that the object the
+    handler raised is the object that comes out of `run`, and an implementation that recognised the
+    class could translate it into something from `errors.py` and still look correct. It is not a
+    `BaseException` either - both fakes decline to catch those on purpose, and a suite raising one
     would be asking every implementation to swallow a cancellation.
     """
 
@@ -179,11 +194,18 @@ class Notes:
     *how* the refusal was carried - `ToolResult.rejected` is a channel a backend may not have, and
     the port explicitly lets an adapter render the refusal into the text the agent reads instead.
 
-    `raise_first` is the same provocation through the other door, and the two compose in the order
-    they are written: the handler raises that many times, then refuses `reject_first` times, then
-    accepts. A handler that raises is not a handler that refused politely - it is somebody's tool
-    hitting a bug - and every implementation of this port turns it into a refusal the agent reads,
-    so the clause it provokes is the same clause and the trace it leaves is the same trace.
+    `raise_first` is the *opposite* provocation through the other door, and the two compose in the
+    order they are written: the handler raises that many times, then refuses `reject_first` times,
+    then accepts. A handler that raises is not a handler that refused politely - it is somebody's
+    tool hitting a bug - and every implementation of this port ends the run with that exception
+    rather than putting it back to the agent, so the trace it leaves is the opposite trace: one
+    call, no second one, and nothing returned from `run` at all.
+
+    **`failure` is built once and raised as itself every time**, which is what makes the identity
+    assertable. The clause says the object the handler raised is the object that comes out of
+    `run` - not a translation, not a wrapper, not a `raise ... from` - and a fresh instance per
+    call would leave `is` unusable and `==` no better, since `Exception` compares by identity too.
+    A `Notes(raise_first=1)` raises it exactly once, so the traceback it accumulates is one.
 
     What arrives is kept as `object` rather than as a mapping. The port says a payload is a
     `Mapping[str, JsonValue]`, and an adapter that hands over the raw JSON string its backend
@@ -193,6 +215,7 @@ class Notes:
 
     def __init__(self, *, reject_first: int = 0, raise_first: int = 0) -> None:
         self.received: list[object] = []
+        self.failure = ToolFailed(_FAILURE)
         self._reject_first = reject_first
         self._raise_first = raise_first
         self.tool = Tool(
@@ -208,29 +231,10 @@ class Notes:
     async def _record(self, payload: Mapping[str, JsonValue]) -> ToolResult:
         self.received.append(payload)
         if len(self.received) <= self._raise_first:
-            raise ToolFailed(_FAILURE)
+            raise self.failure
         if len(self.received) <= self._raise_first + self._reject_first:
             return ToolResult(text=_REJECTION, rejected=True)
         return ToolResult(text=_ACCEPTANCE)
-
-
-ANSWER_TOKENS: Final = ("alpha-K41", "bravo-Q73")
-
-
-class Answers:
-    """A question handler that answers with a different token each round, and remembers the asking.
-
-    A token per round rather than one for both, because "N rounds inside one run" is the clause,
-    and an adapter that asked twice while replaying the first answer into both is a thing one
-    string could not tell apart from a working one.
-    """
-
-    def __init__(self) -> None:
-        self.asked: list[object] = []
-
-    async def __call__(self, question: Question) -> Answer:
-        self.asked.append(question)
-        return Answer(text=ANSWER_TOKENS[min(len(self.asked), len(ANSWER_TOKENS)) - 1])
 
 
 class ReporterFailed(Exception):
@@ -304,26 +308,4 @@ KEEP_CALLING_A_FAILING_NOTE: Final = (
     "3. If the call comes back as an error, a failure or a refusal of any kind, read what you "
     f"were told and call {NOTE} again. Keep going until a call is accepted.\n"
     "4. Once a call has been accepted, stop and reply with the single word: done"
-)
-
-ASK_TWICE: Final = (
-    "Before doing anything else you must ask the person running you two questions, one after "
-    "the other, using whatever mechanism you have for asking something in the middle of a task. "
-    "Do not guess either answer and do not ask them both at once.\n"
-    "\n"
-    "1. Ask which of two paths to take, and wait for the answer.\n"
-    "2. Then, separately, ask which path to take after that, and wait for that answer too.\n"
-    "3. Reply with the two answers you were given, copied exactly, separated by a space, and "
-    "nothing else.\n"
-    "\n"
-    "If you have no way of asking, or you are told that no answer is available, reply with the "
-    "single word: unanswered"
-)
-
-ASK_WITH_NOBODY_LISTENING: Final = (
-    "Ask the person running you which of two paths to take, using whatever mechanism you have "
-    "for asking something in the middle of a task.\n"
-    "\n"
-    "If no answer is available to you, do not wait for one: pick a path yourself and carry on. "
-    "Either way, reply with the single word: done"
 )

@@ -608,6 +608,122 @@ async def test_a_step_reopens_that_checkout_rather_than_cutting_a_second(
     assert _git(place, "rev-parse", "--abbrev-ref", "HEAD").strip() == run_branch(LABEL)
 
 
+# --- `--from` reaches git before the record that checks it ----------------------------------------
+
+# The one value that cannot be handed to a child process, written the long way round: a
+# module-level `Final` holding a surrogate *literal* crashes `mypy --strict` inside its own cache,
+# which `tests/test_no_literal_surrogates.py` is the fence around and this is one of the shapes
+# that fence permits.
+LONE_SURROGATE: Final = chr(0xD800)
+
+
+class _RecordingHistory(GitHistory):
+    """`GitHistory`, plus a note of every ref it was asked to resolve.
+
+    `_MovingHistory`'s subclassing argument, for the opposite purpose: that one changes what
+    `resolve` does, this one changes nothing and only records that it happened. What it makes
+    assertable is a **negative** - that a value refused upstream never reached git at all - and a
+    negative is not readable from the answer, because the refusal has the same class either way.
+    """
+
+    def __init__(self, repository: Path) -> None:
+        super().__init__(repository)
+        self.asked: list[str] = []
+
+    async def resolve(self, ref: str) -> str:
+        """What `GitHistory` answers, with the question kept."""
+        self.asked.append(ref)
+        return await super().resolve(ref)
+
+
+@pytest.mark.asyncio
+async def test_a_base_ref_that_cannot_be_encoded_is_refused_before_git_is_asked_about_it(
+    repository: Path, tmp_path: Path
+) -> None:
+    """`--from` is checked where the caller still knows what it handed over, not three layers down.
+
+    **The ordering was the defect.** `RunSpec.__post_init__` checks `base_ref` for surrogates -
+    `tests/ports/test_run.py` argues the whole of why - but `api.run` writes `base_sha=await
+    services.history.resolve(ref)` as an *argument* to that constructor, and a constructor's
+    arguments are all evaluated before its body runs. So the check sat behind the git call it was
+    written to stand in front of, and the value reached `git rev-parse` first.
+
+    **What arrived there was not one of AGL's errors.** `asyncio.create_subprocess_exec` runs
+    `os.fsencode` over argv; a surrogate outside `\\udc80`-`\\udcff` has no encoding under
+    `surrogateescape` either, so it raises `UnicodeEncodeError` - a `ValueError`, which
+    `adapters/git/_runner.py::_spawned` did not catch, because it caught `OSError`. It escaped the
+    adapter untranslated: a raw traceback, `cli/main.py`'s *this is our bug*, and exit 70 for a
+    string somebody typed.
+
+    That range is exactly what `tests/ports/test_run.py` reasoned about and stopped at. Its
+    paragraph is right that `agl run --from` cannot produce one of these - `sys.argv` is decoded
+    with `surrogateescape`, which mints only `\\udc80`-`\\udcff` - and right that "the subprocess
+    never starts". What it does not say is what happens instead, and the reason the case is not
+    hypothetical: `api.run` is a Python entry point with a `base_ref=` keyword, and `src/agl/
+    testing.py` passes one straight through from a workflow author's own harness.
+
+    **The negative is the assertion.** Both the fix and the defect answer `InputError` now - the
+    adapter translates the encode failure, which is the guarantee half and
+    `tests/adapters/test_git_runner.py` is where it is pinned - so the class alone distinguishes
+    nothing. What distinguishes them is that git was never asked, and that the message names the
+    field the caller supplied rather than the argv it became.
+    """
+    history = _RecordingHistory(repository)
+    harness = _over(repository, tmp_path)
+    harness = replace(harness, services=replace(harness.services, history=history))
+
+    with pytest.raises(InputError) as refused:
+        await _run(harness, base_ref=LONE_SURROGATE)
+
+    assert history.asked == [], (
+        f"the ref was handed to `History.resolve` before anything checked it: {history.asked!r}. "
+        f"That call is `git rev-parse`, and this value has no encoding a process can be started "
+        f"with - so the refusal came back from three layers down, about an argv, instead of from "
+        f"the line that took it"
+    )
+    assert exit_code_for(refused.value) == 2, (
+        "a `--from` that cannot be written down came back with an exit code other than 2. It is "
+        "malformed input; 70 tells whoever hit it that AGL is broken when what is broken is the "
+        "value they passed"
+    )
+    said = str(refused.value)
+    assert "base_ref" in said and "U+D800" in said, (
+        f"the refusal does not name the field or the character: {said!r}. This is the only place "
+        f"in the path where both are still known - by the time it reaches the adapter the value is "
+        f"one element of an argv, and the adapter cannot name it any more precisely than that"
+    )
+    assert await harness.services.store.read_record(SCOPE) is None, (
+        "a run record was written for a run that was refused before it started"
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_same_ref_reaching_git_anyway_is_still_one_of_agls_own_errors(
+    repository: Path, tmp_path: Path
+) -> None:
+    """The backstop under the check above, asserted through the port rather than around it.
+
+    The caller-side check is about the *message*; this is about the guarantee. `History.resolve` is
+    a port anything may call - `api.resume` reads its ref back off a record, `api.clear` asks
+    `contains` about one - and the check in `api.run` guards exactly one of those call sites. So the
+    adapter translates the encode failure itself, and the value that used to escape as a
+    `UnicodeEncodeError` comes back as an `InputError` like every other unusable input.
+
+    Asserted here as well as in `tests/adapters/test_git_runner.py` because the two files are about
+    different things: that one is about `_runner.py`'s mapping, and this is about the seam - the
+    same string, through the same port `api.run` uses, arriving as an AGL error rather than a
+    traceback.
+    """
+    with pytest.raises(InputError) as refused:
+        await GitHistory(repository).resolve(LONE_SURROGATE)
+
+    assert exit_code_for(refused.value) == 2
+    assert "could not be started" in str(refused.value), (
+        "the refusal does not say that nothing ran. A value git never received is not git refusing "
+        "anything, and a message that reads as a refusal sends a person to the repository"
+    )
+
+
 # --- the rest of the surface ---------------------------------------------------------------------
 
 

@@ -16,16 +16,22 @@ drifting into fiction. It is written against the port alone, before any of them 
 subagent that writes its own tests writes tests that pass - and every adapter ships only once "the
 contract suite passes", a sentence worth something only when the suite had no stake in the outcome.
 
-`AgentContract` is one class assembled from four modules, and only this name is public. Its own
+`AgentContract` is one class assembled from three modules, and only this name is public. Its own
 tests are the five things a `run` answers for that need no machinery: the outcome, a refused tool
 call, a tool call whose handler *failed*, the activity it may or may not report, and what becomes
-of a run whose activity reporter raises. The three it inherits follow seams the port draws itself.
+of a run whose activity reporter raises. The two it inherits follow seams the port draws itself.
 `_agent_preflight` holds the two members that are asked *about* an agent rather than running one;
-`_agent_questions` holds the mid-run negotiation and the two edge cases the port settles by hand;
 `_agent_hermeticity` holds the poisoned repository and the table it is built from, and is the
-centrepiece. `_agent_tasks` under all of them holds the workspace, the tasks, the tool and the two
-callbacks every test is made of, and argues there why this suite touches a filesystem when the store
+centrepiece. `_agent_tasks` under all of them holds the workspace, the tasks, the tool and the one
+callback every test is made of, and argues there why this suite touches a filesystem when the store
 suite refuses to.
+
+**There was a fourth module and it was deleted rather than emptied.** `_agent_questions` held the
+mid-run negotiation - a handler on the port, two rounds inside one run, and an adapter that must not
+block on a question nobody was listening for. Its subject was `on_question`, a port member that no
+longer exists: a question is an ordinary tool a workflow supplies, so what is left of that clause is
+the two tool clauses below, which every implementation already owed. Nothing about a *question* is
+asserted here now, and nothing should be - the port has never heard of one.
 
 ## Written against the port, never against a harness
 
@@ -35,10 +41,10 @@ The tests speak `AgentTask`, `AgentOutcome`, `Capability`, `Question` and `ToolR
 those are the whole of what the port accepts and answers with.
 
 Where a backend genuinely differs, the suite branches on **what the port says it can do** and never
-on which implementation it is: `Capability.MID_RUN_QUESTIONS` decides whether a handler must be
-called, `Capability.TOOL_CALLING` whether a tool call can be rejected. Those are the port's own
-escape hatches, stated in `capabilities()` by the adapter itself. A test that asked "is this the X
-adapter" would be a test somebody has to edit when the second X arrives.
+on which implementation it is: `Capability.TOOL_CALLING` decides whether a tool call can be rejected
+or failed. That is the port's own escape hatch, stated in `capabilities()` by the adapter itself. A
+test that asked "is this the X adapter" would be a test somebody has to edit when the second X
+arrives.
 
 ## What this suite does NOT prove
 
@@ -74,19 +80,24 @@ not entitle anybody to believe.
    context honours the distinction and one that does not joins two strings; both are correct, and
    an `AgentOutcome` cannot tell them apart.
 
-7. **That `run` raises only from `errors.py`.** Nothing here can make a backend fail on demand -
-   there is no member for it and inventing one would be inventing a port - so no test provokes a
-   translation. `check_ready` is the one error path this suite sees, and only in an environment
-   where the backend is genuinely not ready.
+7. **That a backend failure is translated into `errors.py`.** Nothing here can make a backend fail
+   on demand - there is no member for it and inventing one would be inventing a port - so no test
+   provokes a translation. `check_ready` is the one error path this suite sees, and only in an
+   environment where the backend is genuinely not ready. Two clauses below do put an exception
+   through `run` on purpose - a tool handler that raises, an activity reporter that raises - and
+   neither is evidence about translation: both assert that the *caller's own* exception arrives
+   untranslated, which is the opposite promise and says nothing about what an adapter does with a
+   failure of its backend's.
 
 8. **That `on_activity` does not block, or that a line is passed through untouched.** The first
    needs a clock and a threshold that would fail an honest adapter on a loaded machine; the second
    needs knowing what the adapter meant to say. What is left, and asserted, is that whatever
    arrives is a `str`.
 
-9. **That an adapter reporting `MID_RUN_QUESTIONS` asks every time it should.** A backend that asks
-   once and then stops asking passes. "At least the number of rounds the prompt asked for, inside
-   one run" is the shape of the clause this suite can see.
+9. **That an agent can be made to call a tool more than once, except by refusing it.** The
+   rejection clause gets a second call because the handler refused the first and the prompt orders
+   a retry; nothing here can ask for N *accepted* calls and check the count, and a backend that
+   calls a tool once and then stops calling passes everything below.
 
 10. **That a `stop_reason` is true.** A backend that always answers `COMPLETED`, including when it
     hit its own limit, passes: this suite cannot make a run reach a limit and has no second source
@@ -96,11 +107,11 @@ not entitle anybody to believe.
     a workflow's two reviewers run against one instance - and nothing here starts two.
 
 12. **Most of this is behavioural, and reads a model's conduct as evidence about an adapter.** That
-    a refused tool call was tried again, that two questions were asked, that an answer came back in
-    the closing text: each is what the port promises, and each is visible only because an agent
-    followed an instruction. A model that ignores a numbered, literal prompt fails these tests and
-    the failure names the adapter. There is no version of this port whose promises are observable
-    without running an agent, so the cost is the price of asserting them at all.
+    a refused tool call was tried again, that a failed one was not, that a poisoned repository was
+    ignored: each is what the port promises, and each is visible only because an agent followed an
+    instruction. A model that ignores a numbered, literal prompt fails these tests and the failure
+    names the adapter. There is no version of this port whose promises are observable without
+    running an agent, so the cost is the price of asserting them at all.
 
 ## Where the port is silent, and what this suite assumed
 
@@ -125,7 +136,6 @@ from agl.ports.agent import AgentRunner, Capability, ModelId, StopReason
 
 from ._agent_hermeticity import AgentHermeticityContract
 from ._agent_preflight import AgentPreflightContract
-from ._agent_questions import AgentQuestionContract
 from ._agent_tasks import (
     CORRECT_A_REFUSED_NOTE,
     KEEP_CALLING_A_FAILING_NOTE,
@@ -133,30 +143,31 @@ from ._agent_tasks import (
     Activity,
     Notes,
     ReporterFailed,
+    ToolFailed,
     outcome_of,
     task,
     workspace,
 )
 
 
-class AgentContract(AgentPreflightContract, AgentQuestionContract, AgentHermeticityContract):
+class AgentContract(AgentPreflightContract, AgentHermeticityContract):
     """The suite. Everything an `AgentRunner` promises, and nothing an implementation gets to pick.
 
     Its own five tests are what a `run` answers for with no machinery around it: an outcome whose
     stop reason may be `None`, a refused tool call that goes back to the agent inside the same run,
-    a tool call whose handler raised, which goes back the same way, activity that may never arrive
-    at all, and an activity reporter that raised, which - unlike the tool handler - is not carried
-    on from. The three halves it inherits are named in this module's docstring, and
-    `_agent_hermeticity` among them is the centrepiece - the one test here whose failure mode is to
-    silently prove nothing.
+    a tool call whose handler *raised*, which - unlike the refusal - ends the run with the
+    handler's own exception, activity that may never arrive at all, and an activity reporter that
+    raised, which ends it the same way. The two halves it inherits are named in this module's
+    docstring, and `_agent_hermeticity` among them is the centrepiece - the one test here whose
+    failure mode is to silently prove nothing.
 
-    Ten clauses: two ask *about* an agent and eight run one. Of the eight, seven are evidence about
-    an adapter obtained by watching an agent follow an instruction (gap 12) - a tool called, a
-    question answered, a poisoned repository ignored - and that is what keeps them behind the real
-    adapters' live gate, where they are deferred to the manual QA pass. The activity-reporter
-    clause is the exception and is written to be one: it asks the agent for nothing, so any free
-    instrument that produces a single line of activity reaches it, and the real adapters' own
-    suites run exactly that assertion offline beside their other activity tests.
+    Eight clauses: two ask *about* an agent and six run one. Of the six, five are evidence about an
+    adapter obtained by watching an agent follow an instruction (gap 12) - a tool called, a tool
+    refused, a poisoned repository ignored - and that is what keeps them behind the real adapters'
+    live gate, where they are deferred to the manual QA pass. The activity-reporter clause is the
+    exception and is written to be one: it asks the agent for nothing, so any free instrument that
+    produces a single line of activity reaches it, and the real adapters' own suites run exactly
+    that assertion offline beside their other activity tests.
 
     `pytestmark` is on the class rather than on each method because subclasses inherit it, and
     because `asyncio_mode = "strict"` makes the marker the difference between a test that runs and
@@ -284,32 +295,48 @@ class AgentContract(AgentPreflightContract, AgentQuestionContract, AgentHermetic
         )
         assert isinstance(outcome.text, str), "and the run itself ended normally"
 
-    async def test_a_tool_handler_that_raises_is_a_refusal_and_not_the_end_of_the_run(
+    async def test_a_tool_handler_that_raises_ends_the_run_with_its_own_exception(
         self, runner: AgentRunner, model: ModelId, tmp_path: Path
     ) -> None:
-        """The other half of that mechanism: a handler that *failed*, not one that refused.
+        """The other half of that mechanism, and it runs the other way: a handler that *failed*.
 
         A tool handler is the caller's own code and it can hit a bug - an unwritable file, a
-        service that is down, a `KeyError` in somebody's payload reading. The agent is told and
-        gets another go, exactly as it does for a payload the handler turned down: by the time a
-        call has failed there is a session in flight holding all the reasoning that produced it,
-        and the argument for not throwing that away is the same argument.
+        service that is down, a `KeyError` in somebody's payload reading. The port settles what an
+        adapter does about it: the exception comes out of `run` in place of an `AgentOutcome`, as
+        the object the handler raised, and the session stops rather than running on to its natural
+        end.
 
-        **This clause exists because its silence was doing damage.** The suite pinned the refusal
-        path and said nothing here, and two fakes of this port answered it differently for a long
-        time - one carrying the run on, one killing it - with every suite green. A clause can only
-        be written where every implementation agrees, so writing it is what closes that: an
-        implementation that lets a handler's exception out of `run` reports a failure in
-        `--dry-run` that the backend it stands in for would have carried through, and one that
-        swallowed it silently would leave the agent with nothing to correct.
+        **This clause used to say the opposite, and answering that is the point.** It read
+        `test_a_tool_handler_that_raises_is_a_refusal_and_not_the_end_of_the_run`, and its argument
+        was the one the clause above still makes: by the time a call has failed there is a session
+        in flight holding all the reasoning that produced it, and throwing that away is the
+        expensive move. What answers it is that a handler which wants the agent to try again
+        already has a way to say so, and it is `ToolResult(rejected=True)` - pinned immediately
+        above, unchanged, and the reason nothing is lost by reading a *raise* as something else.
+        The split is: refusal returns, failure raises. Absorbing the failure instead is what makes
+        an unanswerable approval gate silently absent while the step records an answer anyway - the
+        agent shrugs off a refusal it cannot act on, the run finishes normally, and `run.step`
+        writes down a result nobody stood behind. And the expense is smaller than it looks: a step
+        that dies is a step the journal never recorded, so a resume replays everything before it
+        and the session is bought again rather than lost.
 
-        What is asserted is the outcome and never the mechanism, exactly as above: the handler
-        invoked more than once inside **one** `run`, and that run returning normally. The words the
-        agent was told are not asserted, because every implementation has its own - one prefixes
-        the tool's name, another hands over the vendor's rendering of the exception - and a suite
-        that read them would be refusing a correct adapter for its phrasing.
+        **This clause exists because its silence was doing damage**, which was true when it was
+        written the other way round and is still the reason it is written at all. The suite pinned
+        the refusal path and said nothing here, and two fakes of this port answered it differently
+        for a long time - one carrying the run on, one killing it - with every suite green. A
+        clause can only be written where every implementation agrees; what changed is which way
+        they were made to agree.
 
-        A run that raised never reaches the assertion, which is the point of provoking it this way.
+        What is asserted is the exception and the trace, never the mechanism. The words the agent
+        was told before the run ended are not asserted, because every implementation has its own
+        and a suite that read them would be refusing a correct adapter for its phrasing - what
+        matters is that the handler was not asked a second time, which is what "the session stops"
+        looks like from out here.
+
+        **The prompt is the control.** `KEEP_CALLING_A_FAILING_NOTE` orders the agent to call again
+        on any error, failure or refusal until a call is accepted, so an implementation that put
+        the failure back into the conversation gets a model actively trying to make a second call -
+        and `received` of more than one is what that leaves behind.
         """
         reported = await runner.capabilities(model)
         if Capability.TOOL_CALLING not in reported:
@@ -320,24 +347,32 @@ class AgentContract(AgentPreflightContract, AgentQuestionContract, AgentHermetic
             )
 
         notes = Notes(raise_first=1)
-        outcome = await outcome_of(
-            runner,
-            task(workspace(tmp_path), model, KEEP_CALLING_A_FAILING_NOTE, tools=(notes.tool,)),
-        )
+        with pytest.raises(ToolFailed) as raised:
+            await outcome_of(
+                runner,
+                task(workspace(tmp_path), model, KEEP_CALLING_A_FAILING_NOTE, tools=(notes.tool,)),
+            )
 
-        assert len(notes.received) >= 2, (
+        assert raised.value is notes.failure, (
+            f"the run ended with {raised.value!r} and the handler raised {notes.failure!r}. It is "
+            f"the caller's own exception that comes out, as itself: a `raise ... from` or an "
+            f"AglError built around it destroys what the caller wrote its `except` against, and a "
+            f"workflow's own Stop then has its exit code decided by whichever adapter served the "
+            f"step"
+        )
+        assert len(notes.received) == 1, (
             f"the tool handler was called {len(notes.received)} time(s) in one run, and the first "
-            f"call raised. A handler that failed reaches the agent as a refusal it can read and "
-            f"act on, inside the same conversation - an adapter that ended the run on it, retried "
-            f"the whole task itself, or let the exception out of `run`, leaves exactly this trace"
+            f"call raised. A handler that failed ends the run, and the prompt this task carries "
+            f"orders the agent to keep calling on any error - so a second call is an adapter that "
+            f"put the failure back into the conversation and spent more of the run on a session "
+            f"that was already over"
         )
         odd = [payload for payload in notes.received if not isinstance(payload, Mapping)]
         assert not odd, (
-            f"a tool handler was handed {odd} on a call after one that raised. A retry after a "
-            f"failure is an ordinary call and carries the mapping the port declares, not the raw "
-            f"text a backend produced"
+            f"a tool handler was handed {odd}. A call that goes on to fail is an ordinary call on "
+            f"the way in and carries the mapping the port declares, not the raw text a backend "
+            f"produced"
         )
-        assert isinstance(outcome.text, str), "and the run itself ended normally"
 
     async def test_activity_lines_are_plain_strings_and_may_never_arrive_at_all(
         self, runner: AgentRunner, model: ModelId, tmp_path: Path
@@ -382,10 +417,20 @@ class AgentContract(AgentPreflightContract, AgentQuestionContract, AgentHermetic
         cosmetic reason. Against which: the framework's own reporter is a single assignment, so a
         reporter that raises is a *broken* one and the trade is not "a step or a progress line" but
         "a bug that says so or a bug that does not, on every step, for the length of a run"; the
-        port's other caller-supplied callback, `on_question`, already ends the run when it raises;
-        terminal views are decoration by the same definition and what a view raises comes
-        straight out; and a step that dies is a step the journal never recorded, so a resume
-        replays everything before it. `ports/agent.py` carries the argument in full.
+        clause above says the same of a **tool handler**, which is the closest neighbour there is -
+        the other piece of caller code an adapter invokes during a run, ending it with its own
+        exception for its own reasons; terminal views are decoration by the same definition and
+        what a view raises comes straight out; and a step that dies is a step the journal never
+        recorded, so a resume replays everything before it. `ports/agent.py` carries the argument
+        in full.
+
+        The tool handler is cited here and `on_question` is not, although `on_question` raising
+        ended a run too and used to be the evidence this paragraph gave. It was a callback on its
+        way *out* of the port, and it has since gone - along with the framework-supplied asking tool
+        and `Capability.MID_RUN_QUESTIONS` - which is precisely why the citation was moved off it
+        while it still existed. A rule resting on a member that could be deleted was a rule with no
+        support; the tool handler is the member every implementation of this port is built around,
+        and it is what a question travels on now.
 
         **This clause exists because its silence was doing damage**, exactly as the tool-handler
         one above does. Both fakes and both real adapters let the exception out, and none of them

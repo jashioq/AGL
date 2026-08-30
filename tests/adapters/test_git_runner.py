@@ -15,6 +15,12 @@ death is git genuinely being signalled. The one thing arranged rather than provo
 environment: the repositories below carry no global or system git configuration, so a developer's
 own `~/.gitconfig` cannot decide whether this suite passes.
 
+**One failure below is not git's at all**, and it is the only one: a value that cannot be encoded
+for a child process. `os.fsencode` runs inside `asyncio.create_subprocess_exec`, before any binary
+is looked for, so no git is involved and none is blamed - and it is provoked rather than fabricated
+here too, because Python genuinely refuses these values. It is why `InputError` is in this module's
+mapping.
+
 **What is not covered here, and why.** The classification of an unreadable *parse* is
 `unreadable`'s, and that is a function returning an error rather than a thing git does, so it is
 asserted directly. `DeniedError` is nowhere in this module's mapping - an unreadable repository is
@@ -27,20 +33,27 @@ files of one name under different directories would collide at import.
 """
 
 import asyncio
+import os
+import signal
 import subprocess
 import time
 from collections.abc import Iterator
+from contextlib import suppress
 from pathlib import Path
 from typing import Final
 
 import pytest
 
+from agl.adapters.git import _runner as git_runner
 from agl.adapters.git._runner import GitRunner, unreadable
 from agl.ports.errors import (
     ConflictError,
+    InputError,
     NotFoundError,
+    UpstreamError,
     UpstreamUnavailable,
     UpstreamUnexpected,
+    exit_code_for,
 )
 
 # On the module rather than on each test, and every test here is `async` so that it applies to all
@@ -74,6 +87,13 @@ MARKS: Final = ("subshell", "backtick", "chained")
 # nothing about how the runner invokes git.
 SLOW: Final = ("-c", "alias.slow=!sleep 3", "slow")
 SELF_SIGNALLING: Final = ("-c", "alias.boom=!kill -TERM $PPID", "boom")
+
+# The two values no child process can be handed. `chr` rather than the escape, and a scalar rather
+# than a tuple of them: a module-level `Final` holding a surrogate *literal* crashes `mypy --strict`
+# inside its own cache with no file named, which `tests/test_no_literal_surrogates.py` is the fence
+# around and this is one of the spellings that fence permits.
+LONE_SURROGATE: Final = chr(0xD800)
+EMBEDDED_NUL: Final = "a\x00b"
 
 
 def _git(repository: Path, *argv: str) -> str:
@@ -277,6 +297,61 @@ async def test_a_working_directory_that_is_not_there_is_unavailable(tmp_path: Pa
         await GitRunner(tmp_path / "never-created").run("status", refusal=ConflictError)
 
 
+async def test_a_value_that_cannot_be_encoded_at_all_is_input_and_not_an_upstream_failure(
+    runner: GitRunner,
+) -> None:
+    """The third way a start fails, and the only one where trying again is pointless.
+
+    **It is not git's failure and it is not the repository's.** A child process is handed its
+    arguments, its working directory and its environment as *bytes*: `os.fsencode` runs inside
+    `asyncio.create_subprocess_exec`, before any binary is looked for. A lone surrogate outside
+    `\\udc80`-`\\udcff` has no encoding even under `surrogateescape`, and a `str` holding a NUL
+    cannot be a C string at all - so Python raises before the fork. Provoked and not fabricated,
+    like everything else here: Python really does refuse these, and nothing below patches anything.
+
+    **The class it used to be was no class.** `_spawned` caught `OSError`, and both of these are
+    `ValueError` - `UnicodeEncodeError` is a subclass of it - so they left this adapter as
+    themselves. `cli/main.py`'s last handler prints a traceback and *this is our bug* over anything
+    that is not an `AglError`, and `exit_code_for` answers 70 for it. Exit 70 for a string somebody
+    passed is the mistake `ports/run.py` and `sdk/_engine/journal.py` were both corrected for: a
+    surrogate arrives from outside, so the answer is `InputError` and the number is 2. This is the
+    fourth seam that value reaches and it now answers the same as the other three.
+
+    **`InputError` and not `UpstreamUnavailable`, which is the interesting half.** Nothing ran here
+    either, so the two look alike from the call site - and `UpstreamUnavailable` means *the same
+    call may well succeed later*, which is a claim about a missing binary or an unmounted directory.
+    This call encodes the same way every time. Sending a person to check whether git is installed,
+    forever, is worse than telling them the value is unusable.
+
+    **Two values and one clause.** `_spawned` passes `create_subprocess_exec` four literals besides
+    argv, `cwd` and the environment, so the only `ValueError` reachable from that call is one of
+    these three being unencodable - which is why the handler is written about `ValueError` rather
+    than about `UnicodeEncodeError` alone, and why the NUL is asserted beside the surrogate rather
+    than left to be discovered as a second traceback.
+    """
+    for value in (LONE_SURROGATE, EMBEDDED_NUL):
+        with pytest.raises(InputError) as refused:
+            await runner.run(*VERIFY, value, refusal=NotFoundError)
+
+        said = str(refused.value)
+        assert exit_code_for(refused.value) == 2, (
+            f"a value no process can be handed came back as exit "
+            f"{exit_code_for(refused.value)}. It is malformed input and 2 is what says so; the "
+            f"three other places AGL meets a surrogate all answer 2, and this one used to answer "
+            f"70 by not answering at all"
+        )
+        assert not isinstance(refused.value, UpstreamError), (
+            f"the refusal is an `UpstreamError`, whose whole promise is that the same call may "
+            f"succeed later: {said!r}. This one cannot. Nothing about the repository, the binary "
+            f"or the machine will change how this text encodes"
+        )
+        assert "could not be started" in said, (
+            f"the message does not say that nothing ran: {said!r}. git received no such argument "
+            f"and refused nothing, so a message reading as a refusal sends a person into the "
+            f"repository looking for something that was never asked about"
+        )
+
+
 # --- git does not finish, or does not answer at all ----------------------------------------------
 
 
@@ -341,6 +416,189 @@ async def test_a_cancelled_call_raises_cancellation_and_not_an_agl_error(
         await task
 
     assert _git(repository, "status", "--porcelain") == ""
+
+
+# --- The two clauses inside `_signalled` that no answer can witness ------------------------------
+
+# `_signalled` is what `_stopped` spends twice for its terminate-then-kill escalation, and what
+# `_completed`'s `except BaseException` spends once on the way out. It is the third copy of a
+# sequence `src/agl/adapters/shell/verifier.py` and `src/agl/adapters/openai/_session.py` already
+# share, and it differs from them in exactly one line: those two escalate against the child's
+# process *group* and this one against the process, because `_spawned` gives its child no session
+# of its own. `ARCHITECTURE.md`'s "No general subprocess helper" says why that one line may differ
+# and why nothing else may - and the two properties below are what "nothing else" meant. This
+# module had neither of them. `tests/adapters/test_shell_verifier.py` argues both at length for the
+# pair; what is repeated here is only what is different about git.
+#
+# They are deliberately not folded into a shared helper: `ARCHITECTURE.md`'s "Deliberately not
+# built" refuses one, and `.importlinter`'s adapter-independence contract forbids one adapter
+# importing another. Three implementations that have to agree is what these tests are for.
+
+# A git alias that exits at once and leaves something of its own behind holding the pipe. That is
+# what puts the child in the state the guard is about - reaped, with the transport still open -
+# and it is not contrived: `_completed` reads `communicate()` under a deadline, so any git whose
+# grandchild outlives it arrives here.
+ORPHAN_SLEEP: Final = 30.0
+ORPHANED: Final = "orphan.pid"
+ORPHANING: Final = (
+    "-c",
+    f"alias.orphan=!sleep {ORPHAN_SLEEP:g} & echo $! > {ORPHANED}",
+    "orphan",
+)
+
+# A git that takes a moment, for the two tests below that deny the signal and then wait the child
+# out. Short, because with signalling denied that wait is real: `SLOW`'s three seconds are spent
+# proving a timeout is prompt, and these two are spent only on the child dying by itself.
+BRIEF: Final = ("-c", "alias.brief=!sleep 1", "brief")
+
+# How long the reaped-child arrangement is given to become the state it is about.
+REAPED_WITHIN: Final = 10.0
+
+
+async def _reaped_with_the_pipe_still_open(repository: Path) -> asyncio.subprocess.Process:
+    """A git that has exited and been reaped, whose transport is still open. Fails if it cannot.
+
+    The two halves are what make the guard reachable. `returncode` is set the moment the child
+    exits, and asyncio only tears the transport down once every pipe has disconnected as well - so
+    a grandchild holding stdout keeps `_proc` alive on a pid the kernel has already handed back.
+    Signalling then reaches whatever now holds that number.
+    """
+    process = await git_runner._spawned(ORPHANING, repository)
+    deadline = time.monotonic() + REAPED_WITHIN
+    while process.returncode is None and time.monotonic() < deadline:
+        await asyncio.sleep(0.02)
+    assert process.returncode is not None, (
+        f"git did not exit within {REAPED_WITHIN:g}s, so this test is not exercising the guard it "
+        f"is about"
+    )
+    return process
+
+
+def _orphan(repository: Path) -> int | None:
+    """The pid of the grandchild this file started, so the test can take it away again."""
+    pidfile = repository / ORPHANED
+    if not pidfile.is_file():
+        return None
+    said = pidfile.read_text(encoding="utf-8").strip()
+    return int(said) if said else None
+
+
+async def test_a_git_that_has_already_been_reaped_is_never_signalled(
+    repository: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A reaped pid is the kernel's to hand out again, so signalling one signals whoever holds it.
+
+    **The window is real here and it is not the pair's.** `verifier.py` reaches `os.killpg` with the
+    pid itself and gets no help from anything; this module calls `process.send_signal`, and asyncio
+    does raise `ProcessLookupError` once it has torn the transport down - which is why the ordinary
+    reap looks safe from outside. It is only safe until a pipe outlives the child. asyncio finishes
+    a transport when the process has exited *and* every pipe has disconnected, so a git whose
+    grandchild inherited stdout leaves `returncode` set with `_proc` still open, and
+    `BaseSubprocessTransport.send_signal` on POSIX is `os.kill(self._proc.pid, signal)` with no
+    check of its own. That is exactly the shape `_completed` produces: it reads `communicate()`
+    under a deadline, and the deadline expires because something is still holding the pipe.
+
+    So the arrangement is a git that exits immediately and backgrounds a `sleep` that does not, and
+    the guard being the module's own rather than borrowed from asyncio is the point of writing it.
+
+    **The instrument is a spy, and it has to be.** `test_shell_verifier.py` argues this for its own
+    copy: "a process group that was *not* signalled" has no witness, arranging a real pid reuse
+    would mean starting processes until the kernel handed back a number this test had released, and
+    a green result would still not tell "nothing was signalled" from "something was, and it was not
+    looking". `os.kill` is the call the transport makes, so that is what is replaced, and the
+    assertion is that it was never reached. Nothing is awaited between the substitution and the two
+    calls, which is also why `returncode is not None` is exact rather than best-effort: the loop's
+    reaping callback is what sets it, and it cannot run inside a function with no `await` in it.
+    """
+    process = await _reaped_with_the_pipe_still_open(repository)
+    signalled: list[tuple[int, int]] = []
+
+    def recorded(pid: int, number: int) -> None:
+        signalled.append((pid, number))
+
+    monkeypatch.setattr(os, "kill", recorded)
+    try:
+        git_runner._signalled(process, signal.SIGTERM)
+        git_runner._signalled(process, signal.SIGKILL)
+    finally:
+        monkeypatch.undo()
+        orphan = _orphan(repository)
+        if orphan is not None:
+            with suppress(ProcessLookupError):
+                os.kill(orphan, signal.SIGKILL)
+
+    assert signalled == [], (
+        f"a git that had already exited and been reaped was signalled anyway: {signalled}. Its pid "
+        f"went back to the kernel when it was reaped, so this is a signal aimed at whatever now "
+        f"holds the number - which on a machine running a build is whatever started next. Nothing "
+        f"in this adapter's answer would ever show it"
+    )
+
+
+async def test_a_signal_the_os_refuses_leaves_the_timeout_saying_what_it_always_says(
+    repository: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`PermissionError` may not leave this adapter, and the deadline is where it would.
+
+    `_stopped` is called from inside `except TimeoutError:`, one line before the
+    `UpstreamUnavailable` that says the command was stopped. A signal the kernel refuses used to
+    raise straight out of there - `suppress(ProcessLookupError)` does not cover it - so the whole
+    call came back as a bare `PermissionError`. That is an `OSError`, not an `AglError`, so
+    `cli/main.py`'s last handler prints a traceback and *this is our bug*, and `exit_code_for`
+    answers 70: a timeout reported as a crash in AGL.
+
+    The two siblings answer a denied signal by falling back from the group to the child itself.
+    This module has no group to be denied - it signals the process, which is the one line
+    `ARCHITECTURE.md` allows to differ - so there is nothing left to fall back *to*, and what it
+    owes is the other half of what they promise: the escalation carries on and the caller gets this
+    adapter's own answer. `_stopped` still waits the child out, which is why the alias here sleeps
+    for a second rather than three.
+
+    Asserted by effect through `run`, not by a spy: what is being claimed is what a caller sees.
+    """
+
+    def denied(pid: int, number: int) -> None:
+        raise PermissionError(f"signalling {pid} is not permitted")
+
+    monkeypatch.setattr(os, "kill", denied)
+
+    with pytest.raises(UpstreamUnavailable) as stopped:
+        await GitRunner(repository, timeout=0.2).run(*BRIEF, refusal=ConflictError)
+
+    assert "did not finish" in str(stopped.value), (
+        f"the deadline came back saying something else: {str(stopped.value)!r}. A signal the "
+        f"kernel would not deliver does not change what happened - git was asked to stop and did "
+        f"not answer in time"
+    )
+
+
+async def test_a_cancelled_call_still_raises_cancellation_when_the_signal_is_refused(
+    repository: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same clause in the other place that spends it, where getting it wrong is worse.
+
+    `_completed`'s `except BaseException:` signals and re-raises. A `PermissionError` out of that
+    line does not merely mislabel a failure - it **replaces the exception being unwound with a
+    different one**, so a `CancelledError` never arrives, the `TaskGroup` above it does not treat
+    the group as cancelled, and what a workflow author reads is a permission problem they do not
+    have. The test above this section pins that cancellation passes through untouched; this pins
+    that it still does when the stop cannot be delivered.
+
+    It is the same defect as the deadline's and it is treated the same way, which is the whole
+    reason both places now go through one guarded helper rather than each calling `terminate()`
+    under a `suppress` of its own.
+    """
+
+    def denied(pid: int, number: int) -> None:
+        raise PermissionError(f"signalling {pid} is not permitted")
+
+    task = asyncio.create_task(GitRunner(repository).run(*BRIEF, refusal=ConflictError))
+    await asyncio.sleep(0.2)
+    monkeypatch.setattr(os, "kill", denied)
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
 
 
 async def test_a_command_runs_where_the_caller_said_and_not_where_the_runner_lives(

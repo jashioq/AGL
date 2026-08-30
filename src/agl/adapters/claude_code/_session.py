@@ -12,7 +12,7 @@ from claude_agent_sdk import (
     query,
 )
 
-from agl.adapters.claude_code._tools import Asking
+from agl.adapters.claude_code._tools import Caller
 from agl.adapters.claude_code.translate import activity, translated
 from agl.ports.agent import ActivityReporter, AgentOutcome, AgentTask, StopReason
 from agl.ports.errors import UpstreamUnavailable, UpstreamUnexpected
@@ -57,7 +57,7 @@ async def outcome_of(
     prompt: str,
     options: ClaudeAgentOptions,
     *,
-    asking: Asking,
+    caller: Caller,
     on_activity: ActivityReporter | None,
     stderr: Stderr,
 ) -> AgentOutcome:
@@ -69,15 +69,15 @@ async def outcome_of(
                 said = _read(message, task, said, on_activity)
             elif isinstance(message, ResultMessage):
                 reported = message
-            if asking.failure is not None:
+            if caller.failure is not None:
                 break
     except ClaudeSDKError as error:
         limited = _limited(reported, said)
         if limited is not None:
             return limited
         raise translated(error) from error
-    if asking.failure is not None:
-        raise asking.failure
+    if caller.failure is not None:
+        raise caller.failure
     if reported is None:
         raise UpstreamUnexpected(
             f"the Claude Code CLI ran and never said how the run ended, so AGL has no outcome to "

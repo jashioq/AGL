@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Final
 
 from agl.adapters.openai._session import _halted, _signal, outcome_of
-from agl.adapters.openai._tools import ASKING_TOOL, Asking, Supply
+from agl.adapters.openai._tools import Caller, Supply
 from agl.adapters.openai.translate import (
     APPROVAL,
     Sandbox,
@@ -24,7 +24,6 @@ from agl.ports.agent import (
     AgentTask,
     Capability,
     ModelId,
-    QuestionHandler,
 )
 from agl.ports.errors import InputError
 
@@ -36,7 +35,6 @@ _CAPABILITIES: Final = frozenset(
     {
         Capability.FILE_EDIT,
         Capability.SHELL,
-        Capability.MID_RUN_QUESTIONS,
         Capability.TOOL_CALLING,
     }
 )
@@ -68,12 +66,6 @@ _PLAN_ONLY: Final = (
     "AGL is asking you to examine and propose, and to change nothing: work out what should be "
     "done and report it, rather than doing it. This is what is being asked of you, not a "
     "restriction placed on you - anything you are actually forbidden to do is listed separately."
-)
-
-_MAY_ASK: Final = (
-    "There is a person running this task and you can put a question to them and wait for their "
-    f"answer: call the tool `{ASKING_TOOL}`. It will wait as long as they take. Use it when a "
-    "decision is genuinely theirs to make rather than guessing at what they would want."
 )
 
 _CONTEXT_HEADING: Final = "AGL is running this task with the following standing context:"
@@ -121,18 +113,17 @@ class OpenAiRunner(AgentRunner):
         self,
         task: AgentTask,
         *,
-        on_question: QuestionHandler | None = None,
         on_activity: ActivityReporter | None = None,
     ) -> AgentOutcome:
         slug = _not_a_flag(model_slug(task.model), "model")
         limits = sandbox(task.restrictions)
-        asking = Asking(on_question)
-        async with Supply(task.tools, asking) as supply:
+        caller = Caller()
+        async with Supply(task.tools, caller) as supply:
             return await outcome_of(
                 _argv(self._cli, slug, limits, supply.urls),
-                prompt=_prompt(task, limits, may_ask=on_question is not None),
+                prompt=_prompt(task, limits),
                 workspace=task.workspace,
-                asking=asking,
+                caller=caller,
                 on_activity=on_activity,
             )
 
@@ -168,11 +159,10 @@ def _supplied(urls: Mapping[str, str]) -> list[str]:
     ]
 
 
-def _prompt(task: AgentTask, limits: Sandbox, *, may_ask: bool) -> str:
+def _prompt(task: AgentTask, limits: Sandbox) -> str:
     standing = [
         f"{_CONTEXT_HEADING}\n\n{task.context}" if task.context else "",
         limits.in_words,
-        _MAY_ASK if may_ask else "",
         _PLAN_ONLY if task.plan_only else "",
     ]
     return "\n\n".join([*(part for part in standing if part), task.instructions])

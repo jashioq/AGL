@@ -108,7 +108,7 @@ class Integration:
 
     @property
     def conflicted(self) -> bool:
-        return self._conflict is not None
+        return self._conflict is not None and not self._settled
 
     @property
     def verdict(self) -> VerifierOutcome | None:
@@ -116,7 +116,7 @@ class Integration:
 
     @property
     def refused_by_the_gate(self) -> bool:
-        return self._conflict is not None and self._verdict is not None
+        return self.conflicted and self._verdict is not None
 
     async def retry(self) -> None:
         if self._settled:

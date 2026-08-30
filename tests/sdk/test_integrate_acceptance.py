@@ -1237,8 +1237,8 @@ that reads it clears it first.
 async def raises_mid_conflict(run: Run[NoParams]) -> None:
     """A workflow that hits a conflict and then gives up by raising, mid-decision.
 
-    Not contrived: a workflow whose conflict screen raised, a role's `on_question` handler that
-    raised `Stop`, and a person pressing Ctrl-C all arrive at `api.run`'s `finally` in exactly this
+    Not contrived: a workflow whose conflict screen raised, an asking tool's handler that raised
+    `Stop`, and a person pressing Ctrl-C all arrive at `api.run`'s `finally` in exactly this
     state - a live `Integration` holding a lease *and* the parent namespace's step lock, reachable
     only from an object that is going away with the workflow.
     """
@@ -1723,7 +1723,8 @@ def test_a_second_process_can_abort_the_hold_the_first_one_died_holding(world: _
     stopped, the parent's own version of the contested file back in the checkout with no markers in
     it, and the child's work not in the run's line of work - because giving up on a landing means it
     did not happen. The outcome keeps its `Conflict`, which is the record of why nothing landed
-    rather than a claim that the hold is still there.
+    rather than a claim that the hold is still there, and it stops calling itself `conflicted`,
+    which is the live question a workflow's loop is written against.
     """
     before = _died_holding(world)
     built = _tip(world, worktree_branch(LABEL, Namespace(CHILD)))
@@ -1737,9 +1738,17 @@ def test_a_second_process_can_abort_the_hold_the_first_one_died_holding(world: _
     )
     assert _said(records, "resumed", "landed")["conflicted"] is True
     settled = _said(records, "resumed", "settled")
-    assert settled["conflicted"] is True, (
+    assert settled["summary"], (
         "the aborted outcome cleared its conflict. Giving up on a landing does not make the "
-        "collision not have happened - the `Conflict` is the record of why nothing landed"
+        "collision not have happened - the `Conflict` is the record of why nothing landed, and it "
+        "is read off `Integration.conflict` rather than off the predicate beside it"
+    )
+    assert settled["conflicted"] is False, (
+        "the aborted outcome still reports itself as conflicted. `conflicted` is the live "
+        "question - is there a conflict here that has not been settled - because it is what a "
+        "workflow writes `while outcome.conflicted:` against, and every path out of a hold settles "
+        "it. An abort that leaves it true is a conflict screen that goes back up over an "
+        "integration nobody can act on any more"
     )
     assert settled["head"] is None, "an aborted outcome reports a head, so something landed"
     assert not _holding(world.target), (
