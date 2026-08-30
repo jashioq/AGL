@@ -6,11 +6,19 @@ import shutil
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
 from agl.ports.errors import AglError, ConflictError, DeniedError, UpstreamUnavailable
-from agl.ports.tree_layout import TreesRoot
+from agl.ports.ids import Namespace, RunLabel
+from agl.ports.tree_layout import (
+    TreesRoot,
+    base_worktree,
+    run_branch,
+    worktree_branch,
+    worktree_dir,
+)
 
 __all__ = ["deleted", "made", "registry_lock", "run_lock", "tidied"]
 
@@ -73,6 +81,19 @@ def tidied(directory: Path) -> None:
         directory.rmdir()
     except OSError:
         return
+
+
+@dataclass(frozen=True, slots=True)
+class _Place:
+
+    path: Path
+    branch: str
+
+
+def _place(trees: TreesRoot, label: RunLabel, namespace: Namespace | None) -> _Place:
+    if namespace is None:
+        return _Place(base_worktree(trees, label), run_branch(label))
+    return _Place(worktree_dir(trees, label, namespace), worktree_branch(label, namespace))
 
 
 def _opened(lock: Path) -> int:

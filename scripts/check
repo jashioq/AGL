@@ -244,9 +244,12 @@ fi
 # `pyproject.toml`'s select list, so nothing here would stop an author deleting those lines to get
 # under a ceiling that counted them. Which is the argument a second time, from the other end.)
 #
-# **A module that is all prose counts zero, and that is a legal answer.** `src/agl/ports/__init__.py`
-# is one docstring and nothing else. Nothing here divides by the count, so zero is a number like any
-# other; the file simply never appears.
+# **A module that counts zero is a legal answer, and two kinds of file reach it.** Every
+# `__init__.py` under `src/` is empty - thirteen of them, `src/agl/__init__.py` and the twelve
+# package roots below it - and an empty file counts nothing. `tests/contracts/__init__.py` and
+# `tests/instruments/__init__.py` are the other kind, a docstring and nothing else, and prose counts
+# zero by the rule above. Nothing here divides by the count, so zero is a number like any other;
+# those files simply never appear.
 #
 # **A file that will not parse is counted at its full physical size and named.** Not skipped: a
 # counter that silently drops what it cannot read is a fail-open, and this gate's whole job is to
@@ -377,8 +380,9 @@ fi
 # The one hole in contract 5. import-linter skips any (source, forbidden) pair where one module
 # is a descendant of the other, and agl.adapters is a descendant of agl - so an adapter imported
 # in src/agl/__init__.py leaves all six contracts kept. Nothing in .importlinter can express it.
-# Hence the blunt rule: that file holds no import statements at all. It is meant to stay a
-# docstring; a later stage that genuinely needs a re-export there comes here and changes this.
+# Hence the blunt rule: that file holds no import statements at all. It is meant to stay empty; a
+# later stage that genuinely needs a re-export there comes here and changes this. Deleting it is a
+# different proposal and a refused one - tests/test_tree.py's docstring carries the measurement.
 # ---------------------------------------------------------------------------------------------
 
 gate_header 7 "package root holds no imports" \

@@ -143,7 +143,6 @@ from agl.config import container
 from agl.ports.home_layout import AglHome
 from agl.ports.tree_layout import TreesRoot
 from agl.sdk import (
-    Answer,
     Capability,
     Choice,
     Claude,
@@ -151,7 +150,6 @@ from agl.sdk import (
     InternalError,
     JsonValue,
     OpenAI,
-    Question,
     Restriction,
     Role,
     RoleFactory,
@@ -176,6 +174,7 @@ from agl.sdk._engine.journal import base_of, canonical_json
 from agl.workflows.fix import FixParams, fix, views
 from agl.workflows.fix.asking import ASK, NO_QUESTION, SAID_NOTHING, asking
 from agl.workflows.fix.findings import HIGH, SEVERITIES, Finding, Findings, report_findings
+from agl.workflows.fix.questions import Answer, Question
 from agl.workflows.fix.roles import implementer, reviewer
 from agl.workflows.fix.views.question import FREE_TEXT
 
@@ -661,11 +660,11 @@ def test_the_question_this_screen_could_not_answer_cannot_be_built(tmp_path: Pat
     """The edge this view deliberately does not handle, and the reason it does not have to.
 
     A question with no options and no free text has no answer anybody could give it, and
-    `ports/questions.py` refuses to construct one before any of this is reached. That refusal is
-    what stands between `agent_question` and a screen with an empty `responses` tuple - shown,
-    un-dismissable, blocking its step until somebody kills the run. It is pinned here rather than
-    re-checked in the view because it is an assumption this package rests on and would fail silently
-    if the port ever relaxed it.
+    `workflows/fix/questions.py` refuses to construct one before any of this is reached. That
+    refusal is what stands between `agent_question` and a screen with an empty `responses` tuple -
+    shown, un-dismissable, blocking its step until somebody kills the run. It is pinned here rather
+    than re-checked in the view because it is an assumption this package rests on and would fail
+    silently if that module ever relaxed it.
     """
     with pytest.raises(InternalError):
         Question(prompt="Pick one.", options=(), allow_free_text=False)
@@ -730,7 +729,7 @@ async def test_no_options_and_no_free_text_is_normalised_rather_than_left_to_rai
     """`Question` refuses that pair too, and this handler must not be what discovers it.
 
     A model that offers no choices and then says free text is unacceptable has asked a question
-    nobody could answer - `ports/questions.py` refuses to construct one - and the deleted
+    nobody could answer - `workflows/fix/questions.py` refuses to construct one - and the deleted
     `_question()` normalised it rather than rejecting it, on the ground that a payload with no
     choices in it has said nothing wrong. This one does the same, at the same place, and the
     tripwire terminal is what says the normalisation happened *before* a screen was reached: a

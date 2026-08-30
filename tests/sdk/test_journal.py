@@ -474,15 +474,17 @@ _RECORD: Final[dict[str, JsonValue]] = {
 
 
 def test_both_surrogate_checks_in_agl_answer_one_string_with_one_exit_code() -> None:
-    """`_checked_text` is written twice, and the two copies must not disagree about the verdict.
+    """One scan now answers both, and the two refusals still name what they each cost.
 
-    This module holds one and `agl.ports.run` holds the other, with a character-for-character
-    identical `unicodedata.category(character) == "Cs"` loop in each. The duplication is not an
-    accident to be folded away: `ports` may not import `sdk`, and the two refusals name different
-    consequences that are both true - here the canonical text escapes a lone surrogate to the same
-    characters as the astral code point it stands for, so two different inputs would share a
-    fingerprint and one would replay the other's result; there the store cannot encode it, so the
-    record refuses it at the call that still knows what it handed over.
+    This module and `agl.ports.run` used to hold a character-for-character identical
+    `unicodedata.category(character) == "Cs"` loop each. The direction out was the only one
+    contract 1 allows - `ports` may not import `sdk`, but `sdk` may import `ports` - so the loop
+    is `ports/run.py::checked_text` and this module calls it, passing the `cost=` clause its own
+    refusal ends with. What was never the duplication's justification, and is kept anyway, is the
+    two *consequences*, both of which are true: here the canonical text escapes a lone surrogate
+    to the same characters as the astral code point it stands for, so two different inputs would
+    share a fingerprint and one would replay the other's result; there the store cannot encode it,
+    so the record refuses it at the call that still knows what it handed over.
 
     What they may not differ on is the **verdict**, and they did. This one raised `InputError` and
     that one `InternalError`, which is exit 2 against exit 70 for one string - decided by nothing
@@ -498,9 +500,11 @@ def test_both_surrogate_checks_in_agl_answer_one_string_with_one_exit_code() -> 
 
     This is the *first* seam, which is a step's inputs and a run record's params. The second is one
     field over - a step's **result**, which is stored rather than fingerprinted and so is refused by
-    a narrower check of its own, in `Journal.step`. It is pinned by
-    `test_journal_walk.py::test_a_steps_result_answers_a_lone_surrogate_the_way_its_inputs_do`,
-    which is where the walk that hands a worker's value to the store can be driven.
+    a check of its own, `_check_result` in `Journal.step`. That one is `_canonical`'s mirror for the
+    output side: the same three classes - surrogate text, a non-string key, a non-finite float -
+    and none of the fingerprint's own concerns, because a result is handed back rather than hashed.
+    It is pinned by the three tests at the bottom of `test_journal_walk.py`, which is where the
+    walk that hands a worker's value to the store can be driven.
     """
     with pytest.raises(InputError, match="surrogate") as canonicalised:
         canonical_json({"summary": _LONE_SURROGATE})

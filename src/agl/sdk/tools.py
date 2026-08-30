@@ -3,11 +3,12 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import MISSING, Field, dataclass, field, fields, is_dataclass
 from math import isfinite
 from types import MappingProxyType, UnionType
-from typing import Any, Final, get_args, get_origin, get_type_hints, overload
+from typing import Any, Final, get_args, get_origin, overload
 
-from agl.ports.agent import Tool, ToolResult
+from agl.ports.agent import Tool, ToolResult, checked_tool_declaration
 from agl.ports.errors import InputError, InternalError
 from agl.ports.run import JsonValue
+from agl.sdk._declarations import _describe, _hints
 
 __all__ = [
     "JsonValue",
@@ -50,13 +51,7 @@ class ReportingTool[P]:
     payload_schema: Mapping[str, JsonValue] = field(init=False)
 
     def __post_init__(self) -> None:
-        if not self.name:
-            raise InputError("a tool with an empty name cannot be named by anything calling it")
-        if not self.description:
-            raise InputError(
-                f"tool {self.name!r} has an empty description, and the description is the whole of "
-                f"what the model reads to decide whether this tool is the one it wants"
-            )
+        checked_tool_declaration(self.name, self.description)
         _check_payload(self.payload, self.name)
         object.__setattr__(
             self, "payload_schema", MappingProxyType(_object_schema(self.payload, self.name, ()))
@@ -300,16 +295,6 @@ def _check_payload(payload: object, name: str) -> None:
     )
 
 
-def _hints(kind: type[Any]) -> Mapping[str, object]:
-    try:
-        return get_type_hints(kind)
-    except (NameError, TypeError) as error:
-        raise InputError(
-            f"{_describe(kind)} has an annotation that cannot be resolved: {error}. Its fields are "
-            f"read for their types, so each has to name something importable where it is"
-        ) from error
-
-
 def _refusal(name: str, problems: tuple[str, ...]) -> str:
     listed = "\n".join(f"  - {problem}" for problem in problems)
     return (
@@ -334,9 +319,3 @@ def _at(where: str, name: object) -> str:
 def _shown(value: object) -> str:
     text = repr(value)
     return text if len(text) <= _SHOWN else f"{text[:_SHOWN]}..."
-
-
-def _describe(thing: object) -> str:
-    if not isinstance(thing, type):
-        return repr(thing)
-    return f"{thing.__module__}.{thing.__qualname__}"

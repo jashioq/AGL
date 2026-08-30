@@ -1338,6 +1338,160 @@ async def test_the_vendor_sdk_absorbs_a_handlers_exception_which_is_why_the_catc
     assert len(notes.received) == 1, "and the handler was reached, so the exception was real"
 
 
+# --- and which of two failures is the one the run is stopped by -----------------------------------
+
+_LATCH_BOUND: Final = 5.0
+"""Seconds either half of the arrangement below is allowed to take.
+
+Nothing here starts a process, opens a socket or touches a repository: two coroutines hand an
+`asyncio.Event` back and forth, which takes microseconds. So the bound is not a performance
+assertion and cannot fire on a slow machine - it fires when a handler is waiting for something that
+is never going to arrive, which is the way a mistake in an arrangement like this one shows itself.
+The suite's global 60s timeout is the floor under awaits nobody bounded and reports only that
+something hung; this reports which half of the interleaving did not happen."""
+
+_EMPTY_SCHEMA: Final[Mapping[str, JsonValue]] = {"type": "object", "properties": {}}
+"""What both tools below advertise. Nothing validates it here - `Caller` is handed a payload that
+has already crossed the wire - so it is the smallest object a `Tool` can carry."""
+
+
+async def _answered(call: Awaitable[ToolResult], what: str) -> ToolResult:
+    """Take what one `Caller.handled` call was answered with, under a bound that says what stalled.
+
+    `asyncio.wait_for` and not a bare `await`: a `Caller` that answered one of these calls and left
+    the other waiting forever is one of the ways the clause below can fail, and a bare `await` on it
+    would hang until the suite's global timeout killed the test with a traceback into the selector.
+    """
+    try:
+        return await asyncio.wait_for(call, _LATCH_BOUND)
+    except TimeoutError:
+        raise AssertionError(
+            f"waited {_LATCH_BOUND:g}s for {what}, and it never happened. Both handlers below are "
+            f"released by an event the other half sets, so a wait that does not end is one half of "
+            f"the interleaving never reaching the line that releases the other"
+        ) from None
+
+
+@pytest.mark.asyncio
+async def test_the_first_of_two_concurrent_failures_is_the_one_the_caller_latches() -> None:
+    """`Caller.failed` keeps the *first* exception, and two calls in flight is the only way to see.
+
+    **The clause.** `failed` is written `if self.failure is None: self.failure = raised`, and the
+    guard is the whole of it. Every other test in this repository drives one failing handler, and
+    against one failure that guard and a bare `self.failure = raised` are the same three lines - so
+    the line is untested by everything around it, and a mutation of it survived a session. It is not
+    dead code either: `handled` is `async`, and the guard it reads at the top and the assignment it
+    makes at the bottom are separated by `await tool.handler(payload)`.
+
+    **Why this interleaving is the only way in, and why it is real.** `failed` is called from one
+    place in `_tools.py` - inside `handled`'s own `except` - so `self.failure` can only be set when
+    a call has passed the guard, and it can only be *already* set when a second call passed that
+    guard before the first one raised. That is two tool calls in flight at once, which this backend
+    produces on its own: the model talks to an in-process MCP server and may emit parallel tool
+    calls into it, which is the same arrangement
+    `test_a_tool_handler_that_raises_ends_the_run_with_its_own_exception` drives through a session
+    two calls deep with no message between them.
+
+    **What a last-wins latch would cost.** `_session.py` ends with `raise caller.failure`, so the
+    step would be stopped by the *later* exception and would report it as the cause - and
+    `_STOPPING`'s `{raised}` would name it to the model too. The run would blame the tool that
+    failed because the first one already had, and the failure that actually stopped it would appear
+    nowhere: not in the traceback a person reads, not in what the agent was told, and not on the
+    journal, since a step that raises records nothing.
+
+    **The arrangement is deterministic and is not a race.** Two `asyncio.Event`s hold both handlers
+    inside their own bodies before either raises - the first waits for the second to arrive, the
+    second waits until the test has read what was latched - so the guard is reached with
+    `self.failure` already set on every run rather than on the runs where the scheduler obliged. A
+    test that only sometimes exercised the guard would be no clause at all.
+
+    Written twice, once per adapter, for the reason
+    `test_a_tool_handler_that_raises_ends_the_run_with_its_own_exception` is: the two `Caller`
+    classes are byte-identical copies, `tests/adapters/test_openai_runner.py` holds this same
+    clause under this same name, and a workflow's tool cannot behave two ways depending on which
+    adapter happened to serve the step.
+    """
+    caller = _tools.Caller()
+    first = RuntimeError("the notebook this tool writes into is not there")
+    second = RuntimeError("and the other tool could not reach the index either")
+    entered: list[str] = []
+    second_arrived = asyncio.Event()
+    first_latched = asyncio.Event()
+
+    async def fails_first(payload: Mapping[str, JsonValue]) -> ToolResult:
+        entered.append("record_note")
+        await second_arrived.wait()
+        raise first
+
+    async def fails_second(payload: Mapping[str, JsonValue]) -> ToolResult:
+        entered.append("read_note")
+        second_arrived.set()
+        await first_latched.wait()
+        raise second
+
+    writing = Tool(
+        name="record_note",
+        description="Write down one note.",
+        payload_schema=_EMPTY_SCHEMA,
+        handler=fails_first,
+    )
+    reading = Tool(
+        name="read_note",
+        description="Read one note back.",
+        payload_schema=_EMPTY_SCHEMA,
+        handler=fails_second,
+    )
+
+    calls = (
+        asyncio.create_task(caller.handled(writing, {})),
+        asyncio.create_task(caller.handled(reading, {})),
+    )
+    try:
+        early = await _answered(calls[0], "the call whose handler raises first to be answered")
+        assert caller.failure is first, (
+            f"the first handler raised and `caller.failure` is {caller.failure!r}. Nothing "
+            f"concurrent has happened yet - this is the ordinary single-failure path, and the rest "
+            f"of this test rests on it"
+        )
+        first_latched.set()
+        late = await _answered(calls[1], "the call whose handler raises second to be answered")
+    finally:
+        for call in calls:
+            call.cancel()
+
+    assert caller.failure is first, (
+        f"`caller.failure` is {caller.failure!r} after a second handler failed inside a call that "
+        f"had already passed the guard. `failed` is a first-wins latch, and `_session.py` ends "
+        f"with `raise caller.failure` - so last-wins means the step is stopped by the later "
+        f"exception and reports it as the cause, with the failure that actually stopped the run "
+        f"named nowhere at all"
+    )
+
+    assert early.rejected is True and str(first) in early.text, (
+        f"the call that failed first was answered {early!r}. Both calls are still answered - a "
+        f"session waiting on a tool result that never comes is a hang - and each is told what its "
+        f"own handler did"
+    )
+    assert late.rejected is True and str(second) in late.text, (
+        f"the call that failed second was answered {late!r}. It reached its handler, so what it is "
+        f"told is its own failure and not the first one's"
+    )
+
+    stopped = await caller.handled(writing, {})
+
+    assert stopped.rejected is True, f"a call made after the stop was answered {stopped!r}"
+    assert str(first) in stopped.text and str(second) not in stopped.text, (
+        f"a later call was told {stopped.text!r}. `_STOPPING` interpolates `self.failure`, so this "
+        f"is the same latch read from the model's side: the reason the task is being stopped is "
+        f"the failure that stopped it, not whichever one happened last"
+    )
+    assert entered == ["record_note", "read_note"], (
+        f"the handlers reached were {entered}. Both had to be inside their own bodies before "
+        f"either raised - that is the whole arrangement - and the call above them must have been "
+        f"refused at the guard without reaching a handler at all"
+    )
+
+
 @pytest.mark.asyncio
 async def test_a_malformed_payload_never_reaches_the_handler_and_is_told_so(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

@@ -170,6 +170,28 @@ async def _refused[T](
     return refusal
 
 
+async def _refusals(
+    stores: Mapping[str, Store], ask: Callable[[Store], Awaitable[object]]
+) -> dict[str, str]:
+    """Assert both stores refuse the same call, and hand back what each of them *said*.
+
+    `_refused` above compares the class and stops there, which is the right depth for every test
+    that asks what a store does with a document. This one exists for the one test that asks what a
+    store's refusal is *about*, and that is in the sentence rather than in the class.
+    """
+    said: dict[str, str] = {}
+    for name, store in stores.items():
+        try:
+            await ask(store)
+        except AglError as error:
+            said[name] = str(error)
+        else:
+            raise AssertionError(
+                f"the {name} store accepted a value this test expected it to refuse"
+            )
+    return said
+
+
 def _writing(value: Mapping[str, JsonValue]) -> Callable[[Store], Awaitable[None]]:
     """`write_entry` of one document at one address, as a callable over a store.
 
@@ -287,6 +309,62 @@ async def test_a_value_json_cannot_write_at_all_is_refused_by_both_with_the_same
         "nowhere else, because `JsonValue` spells its nested objects `dict` and json refuses the "
         "rest - so the two stores agree about where the tolerance stops as well as that it exists"
     )
+
+
+async def test_a_refusal_from_either_store_names_the_run_the_step_and_the_digest(
+    stores: Mapping[str, Store],
+) -> None:
+    """Where a refusal happened, asserted of both stores at once - which is new as of one fold.
+
+    `_scope_address`, `_record_address` and `_entry_address` used to be written out twice, byte for
+    byte, in `store.py` and `memory_store.py`. They are one implementation now, in
+    `filesystem/_documents.py`, and this is the test that keeps the sharing honest: one assertion,
+    both stores, which is exactly the thing that was not available while there were two copies -
+    a test then would have covered one of them and left its twin unasserted next door.
+
+    **Why the address is worth a test at all.** These three functions produce no state and change
+    no behaviour; all they do is say which run, which step and which digest a refusal was about.
+    That is the part a person needs at the moment they can least go and look - `agl` has exited,
+    the document is gone, and the sentence is all that is left. A store that refused "a value AGL
+    cannot write down" without saying whose value sends them to grep a ledger.
+
+    **What is asserted is the naming and not the sentence.** Each name is looked for as a
+    substring, so an address that stops carrying the label, the project, the namespaces, the step
+    or the digest fails here, and a reword that still names all five does not - the wording is this
+    repository's to improve and the naming is the contract with whoever reads it.
+
+    The refusal provoked is `_encoded`'s, over a NaN: it is the one both stores reach identically
+    for `write_record` and for `write_entry` alike, which is what lets one test ask about all three
+    address builders. Nested twice over, so that `_scope_address`'s "inside" clause is asserted
+    rather than only its run half - a namespaced entry that named no namespace would be an address
+    that fits several places in one run.
+    """
+    unwritable: Final[dict[str, JsonValue]] = {"value": float("nan")}
+    nested = RUN.inside(CHILD).inside(GRANDCHILD)
+
+    for name, said in (
+        await _refusals(stores, lambda store: store.write_record(RUN, unwritable))
+    ).items():
+        assert str(RUN.project) in said and str(RUN.label) in said, (
+            f"the {name} store refused a run record without naming the run it was for: {said!r}"
+        )
+
+    for name, said in (
+        await _refusals(stores, lambda store: store.write_entry(nested, STEP, DIGEST, unwritable))
+    ).items():
+        for what, named in (
+            ("project", str(RUN.project)),
+            ("label", str(RUN.label)),
+            ("child namespace", str(CHILD)),
+            ("grandchild namespace", str(GRANDCHILD)),
+            ("step", str(STEP)),
+            ("digest", DIGEST),
+        ):
+            assert named in said, (
+                f"the {name} store refused an entry without naming the {what} it was for: "
+                f"{said!r}. The address is the whole of what tells a reader which of a run's steps "
+                f"this was, and there is nothing else left by the time they read it"
+            )
 
 
 # --- What both stores accept, and what it turns into ---------------------------------------------

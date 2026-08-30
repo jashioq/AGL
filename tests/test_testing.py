@@ -87,11 +87,9 @@ from agl.ports.agent import AgentOutcome, StopReason
 from agl.ports.errors import InputError
 from agl.ports.tree_layout import TreesRoot, run_branch
 from agl.sdk import (
-    Answer,
     Choice,
     Claude,
     OpenAI,
-    Question,
     Restriction,
     Role,
     Row,
@@ -196,6 +194,44 @@ class Asked:
 ASK: Final = "ask_the_operator"
 """What this file's workflow calls its asking tool. A workflow's own name for its own tool: the
 framework supplies none and so knows none."""
+
+
+@dataclass(frozen=True, slots=True)
+class Question:
+    """What `asking`'s handler maps a payload into, and what `approve` renders. Also its own.
+
+    The framework has no question type either, and it is worth being explicit about why this one is
+    declared here rather than imported. There was a `ports/questions.py` and an `agl.sdk.Question`
+    re-exporting it, and both are gone: no port ABC spoke those types and no adapter named them, so
+    they went where the tool that asks went, into `workflows/fix/questions.py`. This file is what a
+    *workflow author* can write, so what it writes is what an author writes - a payload class, a
+    view, a value type between them - and reaching into a shipped workflow for the middle one would
+    be the one step of that an author cannot copy.
+
+    Three fields: the two `Asked` carries, plus the one this workflow pins for itself. It refuses
+    nothing, and that is deliberate rather than an omission - every screen here is built out of
+    options an agent supplied, so there is no unanswerable question for a `__post_init__` to catch.
+    What a refusal is worth, and what a view rests on it for, is
+    `tests/workflows/test_fix_questions.py`'s to say about the workflow that needs one.
+    """
+
+    prompt: str
+
+    options: tuple[str, ...] = ()
+
+    allow_free_text: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class Answer:
+    """What answering one of these screens produces. One string, and the workflow's own type.
+
+    Frozen, so two built from the same option compare equal and `answers` below can say *which*
+    answer came back rather than only that something did - which is what makes a keystroke
+    traceable to the `Choice` it picked.
+    """
+
+    text: str
 
 
 def approve(question: Question) -> Screen[Answer]:

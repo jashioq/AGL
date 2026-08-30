@@ -81,7 +81,7 @@ docstring and nothing else today. `tests/test_contract_listings.py` states the s
 other side.
 
 The file is a little over three hundred lines to scroll through and well inside the ceiling, which
-counts code lines: 148 of them. The rest is this argument, one complaint written to be read by
+counts code lines: 150 of them. The rest is this argument, one complaint written to be read by
 somebody who has never opened the file, and eleven fabricated cases. There is no seam in that worth
 cutting.
 """

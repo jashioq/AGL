@@ -1,4 +1,20 @@
-"""`adapters/openai/translate.py` - the four translations, tested one at a time.
+"""`adapters/openai/translate.py` - the vendor boundary, both halves of it, one at a time.
+
+The module does two jobs and this suite covers both. The **restriction half** turns a set of
+`Restriction`s into a sandbox mode, a list of `-c` overrides and a paragraph the agent reads, and
+turns a `ModelId` into a slug; the constant approval setting sits with it. The **reading half**
+turns what the Codex CLI says into an `AglError` - a binary that would not start, a readiness probe
+that refused, a probe that never answered, a failed turn, a line off the event stream that will not
+parse - and turns an event-stream frame into one activity line.
+
+They were two modules until the second one was folded in. `_reading.py` had exactly one importer in
+the tree, this module, which re-declared all six of its public names in its own `__all__` and
+passed them straight through; the three real consumers - `_session.py`, `runner.py`, `fake.py` -
+imported them from here and were unaffected by the fold. The sibling
+`adapters/claude_code/translate.py` had held both jobs in one module the whole time. **The suite
+did not move either**: every name below was already imported from `agl.adapters.openai.translate`
+before the merge, which is the other half of the argument for it - a split whose test suite cannot
+tell you where the split was is not paying for itself.
 
 There is no contract suite here and there should not be: `AgentContract` is written against
 `AgentRunner`, and this module implements no port. It is the vendor boundary underneath one - pure
@@ -11,20 +27,27 @@ and nothing here needs it.
 **What these tests can and cannot be.** The restriction half of the module is a claim about another
 program's behaviour, and no test in this repository can settle it: asserting that `read-only`
 appears in a field proves the string was produced, not that a sandbox refuses a write when the
-harness is handed it. That verification is a set of free probes against the installed binary,
-recorded in the module docstring with what each covered and what it could not - `codex sandbox` for
-the filesystem and network rows, `codex debug prompt-input` for the policy handed to the model,
-`codex features list` for the feature registry, and the argument parser itself for the exit status
-that means "this command line was refused".
+harness is handed it. That verification was a set of free probes against the installed binary -
+`codex sandbox` for the filesystem and network rows, `codex debug prompt-input` for the policy
+handed to the model, `codex features list` for the feature registry, and the argument parser itself
+for the exit status that means "this command line was refused". What each covered and what it could
+not was recorded in `translate.py`'s own module docstring, and that record went when `src/` was
+stripped of prose in one pass; this list of the four instruments is what is left of it, and it is
+here rather than there because `tests/` is where the reasoning now lives.
 
 So the tests below assert what a test *can* settle, and one thing more that is worth naming
-because it is the reason the file is worth having. Three of the four translations are decisions
-rather than computations, and the way each of them fails is silently: a mode that is one value too
-permissive, a restriction that renders nothing, a slug that would be read as a flag. Each of those
+because it is the reason the file is worth having. **Both halves fail silently when they fail.**
+Three of the restriction half's four translations are decisions rather than computations: a mode
+that is one value too permissive, a restriction that renders nothing, a slug that would be read as
+a flag. The reading half has the same shape one layer over - an error class is a claim about
+whether a retry can help, so a failure mapped to the wrong one either tells a reader to retry what
+cannot succeed or tells them to file a bug about their own logged-out session, and a frame kind
+read as unrecognised is an activity line nobody ever sees rather than a crash. Each of those
 compiles, passes a type checker and produces a plausible-looking string. The assertions are
 therefore about *properties* - totality over every subset, both halves present for every member,
-no slug that begins with a dash - rather than golden copies of the tables, because a test holding
-a second copy of a table agrees with the first only because one person edited both.
+no slug that begins with a dash, no exit status ever presented as a meaning - rather than golden
+copies of the tables, because a test holding a second copy of a table agrees with the first only
+because one person edited both.
 
 Named `test_openai_translate.py`: `tests/` carries no `__init__.py` (see `tests/conftest.py` for
 why it must not), so pytest's module names are the bare filenames and two files of one name under

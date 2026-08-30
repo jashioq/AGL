@@ -3,7 +3,7 @@ import shutil
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 
-from agl.ports.errors import AglError, DeniedError, UpstreamUnavailable
+from agl.adapters.git._trees import _translated
 
 __all__ = ["applied", "restored", "snapshot"]
 
@@ -90,9 +90,3 @@ def _removed(directory: Path, path: str) -> None:
 
 def _at(directory: Path, path: str) -> Path:
     return directory.joinpath(*path.split("/"))
-
-
-def _translated(error: OSError, what: str) -> AglError:
-    if isinstance(error, PermissionError):
-        return DeniedError(f"the filesystem refused {what}: {error}")
-    return UpstreamUnavailable(f"the filesystem could not reach {what}: {error}")

@@ -59,12 +59,26 @@ and came back as AGL's own bug - exit 2 against exit 70, decided by which field 
 arrived in. Both fields are asked in one walk at the bottom of this file, because the disagreement
 is only visible when the two answers are put beside each other.
 
+**Two more sit beside it, and together the three are the whole of what `_check_result` refuses.**
+A result is a value JSON has to be able to hold, and there are exactly three ways one fails to
+survive the round trip: a surrogate in its text, a key that is not a string, and a float that is
+not finite. The guard covered the first and passed the other two - the key **silently**, coerced
+to its own text by `json.dumps` and landing on the record as something the worker never returned,
+which is the only failure in this file that is both invisible and permanent; the float loudly, as
+exit 70 for a number a workflow's step chose to return. `_canonical` already refuses all three on
+the fingerprint side of the same module, so the pair below is that walker's mirror for the output
+side. There is a *fourth* class it deliberately does not refuse - a value that is no JSON type at
+all - and the argument for leaving it, together with what leaving it costs, is written out in
+`test_a_steps_result_refuses_a_float_json_has_no_spelling_for`'s own docstring, because it is the
+same asymmetry that test turns on.
+
 Named `test_journal_walk.py`: `tests/` carries no `__init__.py` - see `tests/conftest.py` for why
 it must not - so pytest's module names are the bare filenames and every one has to be unique.
 """
 
 import asyncio
 import hashlib
+import json
 from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from types import MappingProxyType
@@ -1156,4 +1170,174 @@ async def test_a_steps_result_answers_a_lone_surrogate_the_way_its_inputs_do(
         "reserved in the *fingerprint*, where a mapping spelling it would canonicalise to the same "
         "text as some dataclass; a result is neither canonicalised nor compared, so that "
         "reservation has no meaning here and would refuse a document for a reason untrue of it"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_steps_result_refuses_a_key_the_encoder_would_rename(tmp_path: Path) -> None:
+    """The worst failure shape this codebase has a name for: silent, and it lands on the record.
+
+    `json.dumps({1: "x"})` is `{"1": "x"}`. The encoder *coerces* a non-string key to its own text
+    rather than refusing it, so `{None: "z"}` is written `"null"`, `{2.5: "y"}` is written `"2.5"`
+    and `{True: "t"}` is written `"true"`. Nothing raises and no exit code is wrong. The ledger
+    simply ends up holding a value the worker never produced - and because a hit returns the
+    recorded value untouched, every resume from then on hands that one back in its place, for the
+    life of the run directory.
+
+    **The guard already visited the key and had nothing to say about it.** `_check_result` recurses
+    into `_check_result(key, f"the key {key!r} in {where}")`, but the only question it asked of a
+    string was whether it held a surrogate, so a key that was not a string matched no branch at all
+    and fell out of the walk. Both of AGL's other two key checkers refuse one already -
+    `ports/run.py::_checked_key` for a run record's params, `journal.py::_checked_key` for a step's
+    fingerprint - and each says the same sentence about renaming. The result path was the third,
+    and it was the one that did not, so one value reached three different verdicts depending on
+    which argument of `step` it arrived in.
+
+    `InputError`, exit 2, for the reason the surrogate test above gives at length: a result is what
+    an agent produced, and a key JSON cannot spell is that data being wrong, not AGL being broken.
+
+    The mapping is buried under a key and an index rather than sitting at the top of the result,
+    for that test's reason too - a check that only inspected a bare top-level mapping would pass a
+    shallow test and admit every shape an agent actually returns.
+    """
+    harness, workspace, base = await _opened(tmp_path)
+    journal = _journal(harness, workspace, base)
+
+    assert json.dumps({1: "x"}) == '{"1": "x"}', (
+        "the premise of this test: `json` renames a non-string key instead of refusing it. If "
+        "this ever fails, the encoder started refusing and the guard below is arguing for nothing"
+    )
+
+    produced = _Worker({"tickets": [{1: "x"}]})  # type: ignore[dict-item]
+    with pytest.raises(InputError, match="keyed by") as caught:
+        await _step(journal, TICKETS, produced)
+    assert produced.runs == 1, "the result is only knowable after the worker has returned it"
+    assert exit_code_for(caught.value) == 2, (
+        f"a key JSON has no spelling for came back with exit {exit_code_for(caught.value)}. It is "
+        f"a value an agent produced, and 70 sends whoever hit it to file a bug against AGL"
+    )
+    assert "step tickets's result.tickets[0]" in str(caught.value), (
+        "the refusal does not name the path it walked to. A result is a whole document an agent "
+        "produced, and 'somewhere in it' is not a thing anyone can go and fix"
+    )
+    assert "rename" in str(caught.value), (
+        "the refusal no longer says what happens to the key. That it would be *renamed* rather "
+        "than rejected is the entire reason this is refused here instead of at the store"
+    )
+    assert await _entry_at(harness, TICKETS, _digest(base)) is None, (
+        "a refused result still left an entry on the ledger, so a resume would replay a value "
+        "AGL had just declared it could not write down"
+    )
+
+    for key in (None, 2.5, True, ()):
+        rejected = _Worker({"row": {key: "v"}})  # type: ignore[dict-item]
+        with pytest.raises(InputError, match="keyed by"):
+            await _step(_journal(harness, workspace, base), REVIEW, rejected)
+
+    kept: JsonValue = {"1": "x", "null": "z", "true": "t"}
+    assert await _step(_journal(harness, workspace, base), SPEC, _Worker(kept)) == kept, (
+        "the strings those keys would have been coerced *to* are ordinary keys and must still "
+        "record - the rule is the type of the key, not its spelling"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_steps_result_refuses_a_float_json_has_no_spelling_for(tmp_path: Path) -> None:
+    """The third class, and the one the type system cannot see.
+
+    `float` is a member of `JsonValue`, so a workflow whose step returns `float("nan")` type-checks
+    clean under `mypy --strict`. It then reached `FilesystemStore._encoded`, whose
+    `json.dumps(..., allow_nan=False)` raises `ValueError`, which both stores translate into
+    `InternalError` - **exit 70**, this codebase's "AGL's own bug" (`ports/errors.py::EXIT_CODES`),
+    for a number a workflow's own step handed over. Nothing about that is AGL's bug, and 70 sends
+    the wrong person looking.
+
+    `_canonical` answers the identical value with `InputError` and exit 2 - the same `isfinite`
+    call, seventy lines up the same module - because a step fingerprinted with a NaN could never
+    match the entry it wrote. The output side had no clause at all. It has the same verdict now,
+    for its own reason: the entry cannot be written, and the caller here still knows a worker
+    produced the number.
+
+    `allow_nan=False` is what makes this an exception rather than a silent corruption, and it is
+    the store's choice rather than `json`'s default: left alone, `json` writes the bare tokens
+    `NaN` and `Infinity`, which are not JSON and which no other reader accepts - so the entry would
+    be a file AGL had written and could not load back. Both stores set it; `tests/adapters/
+    test_store_parity.py` is where that pair is held together.
+
+    **And the value really does arrive from outside, which is what settles the exit code.**
+    `json.loads` accepts those same bare tokens *on the way in* - `json.loads('{"score": NaN}')`
+    hands back `float("nan")` without complaining - and `adapters/openai/_session.py` reads the
+    Codex CLI's frames with a plain `json.loads`. So a model that answers a reporting tool with
+    `"score": NaN` mints one of these through a real adapter, and it lands in `_Capture._payload`,
+    which is a step's result verbatim. Both port fakes round-trip their payload through
+    `json.dumps(..., allow_nan=False)` and refuse it there, which is exactly why a suite driven on
+    fakes could not see this seam and why this test drives the worker directly.
+
+    **A fourth class exists, it is not refused, and this is where that is written down** so it is
+    not re-proposed as an oversight. A result that is no JSON type at all - a `set`, a `datetime`,
+    an arbitrary object - reaches the store too and exits 70 too. It stays unrefused, and the
+    argument is this docstring's first paragraph read backwards.
+
+    *The types cover it and did not cover NaN, which is the whole of it.* `float` is a member of
+    `JsonValue`, so `mypy --strict` waves a NaN through; a `set` it refuses at the declaration. A
+    runtime guard earns its place where the type checker cannot see, and here it can.
+
+    *The only producer is a consumer nobody has written.* Every route to `Entry.value` in this
+    repository is checked - `_Capture._payload` is a `dict[str, JsonValue]` built from the
+    `Mapping[str, JsonValue]` a `Tool` handler is handed - so a `set` arrives here only out of a
+    third-party `AgentRunner` violating its own declared port type. A clause written for a caller
+    that does not exist yet is the same mistake as a clause kept for one that has gone, and this
+    build removes those; the rule has to cut both ways or it is not a rule.
+
+    *And the failure is already loud and already points the right way.* The store names the type
+    and says "something above this port handed it one that is not". What it lacks is the walked
+    path and the step's name - a better message, not a missed defect. Exit 70 is honest for it,
+    because the thing that broke really is code violating a declared contract, and `_checked_json`
+    in `ports/run.py` already gives the identical class that identical verdict for a run record's
+    params.
+
+    **The price is real and is not hidden.** `_check_result`'s branches are not exhaustive and are
+    not claimed to be: `None`, a `bool` and an `int` fall out of every one of them into silence,
+    deliberately, and so does everything else. Closing the fourth class means turning that chain
+    into a match with an `else` that raises, which first has to let those three out by name - which
+    is `_canonical`'s opening line, one walker up the same module. That is the shape to write on
+    the day the argument above stops holding, and that day is the day somebody ships an
+    `AgentRunner` this repository does not type-check.
+
+    All three non-finite spellings, because `isfinite` is one call and "we tested NaN" is how
+    `inf` gets through a hand-written check that compared a value with itself.
+    """
+    harness, workspace, base = await _opened(tmp_path)
+    journal = _journal(harness, workspace, base)
+
+    produced = _Worker({"tickets": [{"score": float("nan")}]})
+    with pytest.raises(InputError, match="no spelling for") as caught:
+        await _step(journal, TICKETS, produced)
+    assert produced.runs == 1, "the result is only knowable after the worker has returned it"
+    assert exit_code_for(caught.value) == 2, (
+        f"a non-finite float in a step's result came back with exit "
+        f"{exit_code_for(caught.value)}. 70 is where this started - the store refusing a document "
+        f"and reporting it as AGL's own failure - and it is the number being complained about"
+    )
+    assert "step tickets's result.tickets[0].score" in str(caught.value), (
+        "the refusal does not name the path it walked to, which is the field somebody has to go "
+        "and change"
+    )
+    assert await _entry_at(harness, TICKETS, _digest(base)) is None, (
+        "a refused result still left an entry on the ledger, so a resume would replay a value "
+        "AGL had just declared it could not write down"
+    )
+
+    for spelling in (float("nan"), float("inf"), float("-inf")):
+        bare = _Worker(spelling)
+        with pytest.raises(InputError, match="no spelling for"):
+            await _step(_journal(harness, workspace, base), REVIEW, bare)
+        nested = _Worker(["ok", {"deep": [spelling]}])
+        with pytest.raises(InputError, match="no spelling for"):
+            await _step(_journal(harness, workspace, base), REVIEW, nested)
+
+    finite: JsonValue = {"ratio": 0.5, "big": 1e300, "negative_zero": -0.0, "whole": 4}
+    assert await _step(_journal(harness, workspace, base), SPEC, _Worker(finite)) == finite, (
+        "a finite float is an ordinary result and must still record - the rule is `isfinite`, not "
+        "a refusal of the float type, and a workflow reporting a score is entitled to one"
     )

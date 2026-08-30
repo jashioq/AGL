@@ -125,11 +125,12 @@ PRIMITIVES: Final = frozenset(
 # dependencies at all - AGL's core is stdlib-only.
 LOCK_MODULES: Final = frozenset({"filelock"})
 
-# The floor, in the spirit of the hermeticity test's `sessions >= 2`. Three `.py` files today - the
-# package's `__init__.py` and the two `Store` implementations - and 1,750 AST nodes across them. The
-# node figure is a floor and not a measurement: it is a quarter of what is there, so an ordinary
-# edit never moves it, and a scan that stopped parsing cannot clear it.
-MODULES_TODAY: Final = 3
+# The floor, in the spirit of the hermeticity test's `sessions >= 2`. Four `.py` files today - the
+# package's `__init__.py`, the two `Store` implementations, and `_documents.py`, which holds the
+# addressing and the JSON encoding both of them had written out twice - and 1,555 AST nodes across
+# them. The node figure is a floor and not a measurement: it is roughly a quarter of what is there,
+# so an ordinary edit never moves it, and a scan that stopped parsing cannot clear it.
+MODULES_TODAY: Final = 4
 NODES_TODAY: Final = 400
 
 
@@ -142,10 +143,11 @@ def test_no_module_in_the_filesystem_package_names_a_synchronisation_primitive()
     is entered. And the scan is asserted to have found the package and walked it, so that a version
     of this file matching nothing could not be green while checking nothing.
 
-    Both stores are covered, `store.py` and `memory_store.py`, by globbing the package the way
-    `test_claude_code_runner.py` globs its own. The fake and the real adapter are held to one
-    standard - that is what `tests/contracts/` is for - and a fake that serialised its writes would
-    be a `--dry-run` whose concurrency is a fiction the real run does not share.
+    Both stores are covered, `store.py` and `memory_store.py`, and `_documents.py` beneath them, by
+    globbing the package the way `test_claude_code_runner.py` globs its own. The fake and the real
+    adapter are held to one standard - that is what `tests/contracts/` is for - and a fake that
+    serialised its writes would be a `--dry-run` whose concurrency is a fiction the real run does
+    not share.
     """
     package = Path(filesystem_package.__file__).parent
     walked: list[str] = []
@@ -174,13 +176,14 @@ def test_no_module_in_the_filesystem_package_names_a_synchronisation_primitive()
 
     assert len(walked) >= MODULES_TODAY, (
         f"only {len(walked)} module(s) were found under {package} - {sorted(walked)} - and there "
-        f"were {MODULES_TODAY} when this was written: the package's `__init__.py` and the two "
-        f"`Store` implementations. Every assertion above is silent about a module that names no "
-        f"primitive, so a scan that found none of them would be green and checking nothing"
+        f"were {MODULES_TODAY} when this was written: the package's `__init__.py`, the two "
+        f"`Store` implementations, and the `_documents.py` they share. Every assertion above is "
+        f"silent about a module that names no primitive, so a scan that found none of them would "
+        f"be green and checking nothing"
     )
     assert nodes >= NODES_TODAY, (
         f"the {len(walked)} module(s) under {package} parsed to {nodes} AST nodes, and the package "
-        f"held 1,750 when this was written. {NODES_TODAY} is a floor rather than a measurement, so "
+        f"held 1,555 when this was written. {NODES_TODAY} is a floor rather than a measurement, so "
         f"reaching it means something stopped parsing rather than that somebody wrote less code"
     )
 

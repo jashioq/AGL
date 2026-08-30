@@ -122,7 +122,6 @@ from agl.adapters.rich_terminal.terminal import RichTerminal
 from agl.config import container, registry
 from agl.ports.agent import AgentOutcome, Claude, StopReason, Tool, ToolResult
 from agl.ports.ids import Namespace, ProjectName, RunLabel
-from agl.ports.questions import Question
 from agl.ports.tree_layout import TreesRoot
 from agl.sdk._engine.integration import Integration
 from agl.sdk.roles import Role, role
@@ -237,12 +236,29 @@ _STAGED: Final[list[_Scene]] = []
 have to be: `EntryPoint.load` imports a module and reads an attribute in it, and sees no local."""
 
 @dataclass(frozen=True, slots=True)
+class Question:
+    """What the handler below maps a payload into, and what `choose` renders. This file's own.
+
+    AGL has no question type either. There was one in `ports/` until `Question` and `Answer`
+    followed `ask_the_operator` into `workflows/fix/`, the one workflow that ever spoke them, and
+    reaching into that workflow from a suite about *terminal priorities* would import a shipped
+    workflow's vocabulary to stand up two screens whose contents nothing here reads. Two fields,
+    because two is what `choose` shows and what `_Asked` carries.
+    """
+
+    prompt: str
+
+    options: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class _Asked:
     """The payload of the asking tool the workflow below supplies. A question, and what it offers.
 
     The framework has no asking tool and no `Question` on the wire: a workflow declares its own
     payload class, `sdk/tools.py` derives the schema from it, and the workflow maps what arrives
-    into whatever its views take. This one maps into a `Question` because `choose` renders one.
+    into whatever its views take. This one maps into the `Question` above because `choose` renders
+    one.
     """
 
     question: str = describe("What you are asking, in full.")
@@ -310,8 +326,8 @@ def choose(question: Question) -> Screen[str]:
     """The screen an agent's question becomes: what it asked, and the answers it offered.
 
     Interactive, so it joins a queue at whatever priority the handler showed it with. It returns the
-    option a person picked, and the workflow's handler maps that down to an `Answer` at its own
-    layer - which is where that mapping belongs.
+    option a person picked, and the workflow's handler maps that down to the one string a
+    `ToolResult` carries, at its own layer - which is where that mapping belongs.
     """
     return Screen(
         body=Text(question.prompt),

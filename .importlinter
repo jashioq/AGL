@@ -70,7 +70,6 @@ source_modules =
     agl.ports.run
     agl.ports.home_layout
     agl.ports.tree_layout
-    agl.ports.questions
 forbidden_modules =
     agl.ports.agent
     agl.ports.workspace

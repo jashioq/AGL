@@ -2,8 +2,9 @@
 
 `from agl.sdk import Screen` became true late: `ARCHITECTURE.md`'s "The layers" and
 `ports/terminal.py` had both written that line for most of the build, and until then it raised
-`ImportError`. What a package-level re-export costs is a second list to keep in step with seven
-others, and this file is what notices when they stop agreeing. `tests/test_contract_listings.py` is
+`ImportError`. What a package-level re-export costs is a second list to keep in step with eight
+others - the `__all__` of every module directly under `src/agl/sdk/`, `_declarations.py` now among
+them - and this file is what notices when they stop agreeing. `tests/test_contract_listings.py` is
 the precedent and the argument is its own: "the silence is the defect, not the gap" - a name missing
 from `sdk/__init__.py` is not an error, it is a name an author imports from `agl.ports` instead,
 which is the thing the facades exist to prevent.
@@ -12,7 +13,7 @@ which is the thing the facades exist to prevent.
 
 **Nothing below carries a copy of what is on the door.** `_DOOR` maps each submodule to *how much*
 of it the door takes - all of it, or a named few - and every comparison is between `agl.sdk.__all__`
-and the submodules' own `__all__`. A test holding its own list of the door's forty-five names would
+and the submodules' own `__all__`. A test holding its own list of the door's forty-three names would
 be a second hand-maintained list, free to drift from the first, and its agreement would mean only
 that one person updated both at once.
 
@@ -35,7 +36,7 @@ that one person updated both at once.
 
 ## What `sdk/params.py` costs, and why it is the only partial one
 
-Six of the seven submodules put their whole `__all__` on the door. `sdk/params.py` puts one name of
+Five of the six submodules put their whole `__all__` on the door. `sdk/params.py` puts one name of
 six, and the other five are framework: `parse` is what `api.run` does to argv, `from_json` what
 `api.resume` does to a record, `parser_for` and `RefusingParser` what `agl workflows <name>`
 formats, `to_json` what the record is written with. An author declares fields with `arg()` and reads
@@ -45,7 +46,7 @@ unclassified fails here.
 
 ## And a fifth claim, about the facade that takes part of its port
 
-`sdk/errors.py` arrived late and is whole-on-the-door like the other five, so the four claims
+`sdk/errors.py` arrived late and is whole-on-the-door like the other four, so the four claims
 above cover it - but it is the first facade whose *port* module it takes only part of, `ports/
 errors.py` holding the hierarchy and the exit-code table both. That cut is checked separately and
 in both directions, over `ports.errors.__all__` rather than over a list here, so a tenth class on
@@ -65,7 +66,6 @@ import pytest
 
 import agl.sdk
 from agl.ports import errors as ports_errors
-from agl.ports import questions as ports_questions
 from agl.ports import terminal as ports_terminal
 from agl.sdk import errors as sdk_errors
 
@@ -80,7 +80,6 @@ _DOOR: Final[Mapping[str, frozenset[str] | None]] = {
     "agl.sdk.roles": None,
     "agl.sdk.tools": None,
     "agl.sdk.terminal": None,
-    "agl.sdk.questions": None,
     "agl.sdk.errors": None,
     "agl.sdk.params": frozenset({"arg"}),
 }
@@ -118,6 +117,11 @@ _ABSENT: Final[Mapping[str, str]] = {
 _OFF_THE_SURFACE: Final[Mapping[str, str]] = {
     "agl.sdk.testing": "the scripting vocabulary, re-exported by `agl/testing.py` beside the "
     "`harness` that is useless without it - one front door for a test, one for a workflow",
+    "agl.sdk._declarations": "internal: the two helpers `params.py`, `tools.py` and `workflow.py` "
+    "read an author's declaration with - `_hints` resolves its annotations and `_describe` names a "
+    "class in the refusal when they will not resolve. Its whole `__all__` is those two private "
+    "names, so nothing here could reach the door even by accident, and it is listed anyway "
+    "because a module under `agl.sdk` that is in neither `_DOOR` nor here is unclassified",
     "agl.sdk._engine.services": "internal: `sdk/_engine/__init__.py` says it is not part of the "
     "surface a workflow author imports",
     "agl.sdk._engine.journal": "internal, for the same reason",
@@ -173,7 +177,7 @@ def test_every_name_on_the_door_is_the_submodules_own_object(name: str) -> None:
 def test_every_authoring_name_a_submodule_exports_is_on_the_door() -> None:
     """The drift check, in the direction that fails open: a name added and never re-exported.
 
-    Six of the seven submodules put their whole surface on the door, so this is what notices a tenth
+    Five of the six submodules put their whole surface on the door, so this is what notices a tenth
     terminal component or a second declaration helper. `sdk/params.py` is the partial one and its
     five framework names are in `_ABSENT` with a reason each, so it is checked here too - just from
     the other side.
@@ -276,17 +280,23 @@ def test_stop_reaches_the_door_through_the_workflow_module_and_not_through_the_f
     assert "Stop" not in _exported(sdk_errors)
 
 
-def test_the_two_sentences_the_repository_writes_about_this_are_true() -> None:
-    """`ARCHITECTURE.md`'s "The layers", `ports/terminal.py` and `sdk/questions.py` all spell it.
+def test_the_sentence_the_repository_writes_about_the_terminal_is_true() -> None:
+    """`ARCHITECTURE.md`'s "The layers" spells it: a workflow author writes `from agl.sdk import
+    Screen` and never reaches into `agl.ports` for a view's vocabulary.
 
-    Asserted as identity against `ports/` rather than as "the attribute exists", because what those
-    sentences promise is that an author never reaches into `ports` - which is only worth anything if
+    Asserted as identity against `ports/` rather than as "the attribute exists", because what that
+    sentence promises is that an author never reaches into `ports` - which is only worth anything if
     what they get instead is the same object.
+
+    **There was a second half and it is gone rather than relaxed.** The same two lines stood for
+    `Question` and `Answer`, which `sdk/questions.py` re-exported off `ports/questions.py`. Neither
+    module exists: no port ABC spoke those two types and no adapter named them, so they followed
+    their one caller into `workflows/fix/questions.py` and the door stopped carrying them. A
+    workflow that asks a person a question now declares what a question is, exactly as it already
+    declared the tool that asks one.
     """
     assert agl.sdk.Screen is ports_terminal.Screen
     assert agl.sdk.Terminal is ports_terminal.Terminal
-    assert agl.sdk.Question is ports_questions.Question
-    assert agl.sdk.Answer is ports_questions.Answer
 
 
 def test_no_module_under_the_package_imports_the_package() -> None:

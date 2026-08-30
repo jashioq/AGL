@@ -14,6 +14,7 @@ import json
 import unicodedata
 from dataclasses import FrozenInstanceError, replace
 from datetime import UTC, datetime, timedelta, timezone
+from pathlib import Path
 from typing import Final
 
 import pytest
@@ -178,7 +179,7 @@ _WRONG_EXIT: Final = (
     "a lone surrogate came back with an exit code other than 2. It is malformed input - a "
     "command-line byte `sys.argv` decoded with `surrogateescape`, or a value an agent produced - "
     "and 70 would tell whoever hit it that AGL is broken when what is broken is their data. "
-    "`journal.py`'s `_checked_text` is this same test over this same category and answers 2"
+    "`journal.py`'s `_checked_text` spends this same scan and answers 2"
 )
 
 
@@ -193,11 +194,14 @@ def test_a_surrogate_is_refused_at_write_time_wherever_it_sits() -> None:
     the whole document down rather than one field of it.
 
     **`InputError`, and the exit code is asserted beside the class.** This module and
-    `sdk/_engine/journal.py` each hold a `_checked_text` whose surrogate test is character for
-    character the same, and they used to disagree about what it raised - so the same string was
-    exit 2 or exit 70 depending only on which module inspected it first. Both say `InputError`
-    now, for the reason `_WRONG_EXIT` gives: a lone surrogate arrives from outside, and the two
-    messages are kept different because the consequences they name are different and both real.
+    `sdk/_engine/journal.py` used to hold one surrogate scan each, character for character the
+    same, and they disagreed about what it raised - so the same string was exit 2 or exit 70
+    depending only on which module inspected it first. There is one scan now, `checked_text`
+    below, and `journal.py` calls it; the class it raises is settled by that, for the reason
+    `_WRONG_EXIT` gives. What did *not* collapse with it is the explanation: each caller passes
+    the `cost=` its own refusal names, because the consequences are different and all three are
+    real - the store cannot encode this record, or two inputs would share a fingerprint, or the
+    ledger cannot hold what a worker just returned.
     """
     for surrogate in ("\ud800", "\udfff", "before \udc00 after"):
         with pytest.raises(InputError, match="surrogate") as as_value:
@@ -441,9 +445,19 @@ def test_there_is_no_run_status() -> None:
     before handing it to `History.resolve` - a constructor's arguments are all evaluated before its
     body, so the check in `__post_init__` sat behind the git call it was written to precede. One
     implementation with two call sites rather than a second spelling of the rule in `api.py`, which
-    is the copy that would be free to be wrong. `tests/test_api.py` holds the ordering claim."""
+    is the copy that would be free to be wrong. `tests/test_api.py` holds the ordering claim.
+
+    **`WireShape` and `wire_moment` are on it for that same argument, one layer wider.** They are
+    the machinery for writing a JSON record and reading it back - the wire timestamp, the
+    missing/unknown key refusal, the "this field is a string" refusal, the timezone rule - which
+    `sdk/_engine/journal.py` held a second copy of, for `Entry`, until it imported this one
+    instead. The fold runs into `ports` because that is the only direction contract 1 permits, and
+    into this module rather than a new one under `ports/` because the shared machinery is what this
+    module was already made of. Each record type builds one `WireShape` carrying its own nouns, so
+    the two refusals still read as the record they are about - `test_journal_entries.py` pins both
+    texts, character for character, beside each other."""
     assert not hasattr(run, "RunStatus")
-    assert run.__all__ == ["JsonValue", "RunSpec", "checked_text"]
+    assert run.__all__ == ["JsonValue", "RunSpec", "WireShape", "checked_text", "wire_moment"]
     assert "status" not in run._WIRE_KEYS
 
 
@@ -458,3 +472,49 @@ def test_the_module_never_opens_the_file_it_describes() -> None:
     assert impurities(run) == set()
     assert imported_modules(run) <= allowed
     assert "json" not in imported_modules(run)
+
+
+# --- one place knows, and this is the test that keeps it that way -------------------------------
+
+_SOURCE_ROOT: Final = Path(__file__).resolve().parent.parent.parent / "src"
+
+# What a second copy has cost, said once and cited by the test below. Two earlier sessions closed
+# four surrogate seams one at a time - a step's inputs, a run record's `params`, `base_ref`, a
+# step's result - and each was found by looking one field over from the last, because the rule was
+# written down twice and only one copy had been thought about. The count is the argument: a rule
+# with one home cannot have a seam that home does not cover.
+_SECOND_COPY: Final = (
+    "is spelled in more than one module under src/. Both of these used to be - `ports/run.py` and "
+    "`sdk/_engine/journal.py` each held their own - and the surrogate rule in particular took four "
+    "separate repairs to close, each one found a field over from the last. A rule with one home "
+    "has no seam its home does not cover; a rule with two has as many as nobody has looked at "
+    "yet. If a third record type needs this, it builds a `WireShape` and calls `checked_text`, "
+    "the way `journal.py` does"
+)
+
+
+@pytest.mark.parametrize(
+    "spelling, what",
+    [
+        ('"Cs"', "the Unicode category a lone surrogate has"),
+        ("%Y-%m-%dT%H:%M:%SZ", "the wire spelling of a timestamp"),
+    ],
+)
+def test_the_rule_is_written_down_in_exactly_one_module(spelling: str, what: str) -> None:
+    """`ports/run.py` owns both, and the grep is the assertion that nothing else re-spells them.
+
+    Read off the text of every `.py` under `src/` rather than off imports, because a second copy
+    is not an import - it is somebody writing `unicodedata.category(c) == "Cs"` again, in a module
+    that had every right to and no way to know. `ids.py` is deliberately *not* a hit: it refuses a
+    whole family of invisible categories by their first letter and never names this one, which is
+    why `test_a_surrogate_ids_refuses_in_a_name_is_refused_here_too_and_nothing_else_is` above has
+    to compare the two rules through a corpus instead of through a shared constant.
+    """
+    holders = sorted(
+        str(source.relative_to(_SOURCE_ROOT))
+        for source in _SOURCE_ROOT.rglob("*.py")
+        if spelling in source.read_text(encoding="utf-8")
+    )
+    assert holders == ["agl/ports/run.py"], (
+        f"{what} ({spelling}) {_SECOND_COPY}. Found in {holders}"
+    )

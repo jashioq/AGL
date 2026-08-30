@@ -41,6 +41,64 @@ suite would notice if that stopped being true, because noticing costs a build; t
 rather than covered, since a workflow whose prompts did not ship would fail at import with
 `prompt_file`'s own `InputError` naming the missing path, which is a legible failure and not a
 silent one.
+
+## Deleting the `__init__.py` files under `src/` was proposed, measured and refused
+
+The proposal was to delete the twelve zero-byte `__init__.py` files below `src/agl/`, let PEP 420
+namespace packages carry the tree, and delete this file with them - keeping only
+`src/agl/__init__.py`, which the package-root gate requires to exist. It is refused on the tooling
+and not on taste, and the measurement lives here because this file is the assertion somebody
+removes in order to do it. A survey that reported "`lint-imports`: fine, all six contracts kept"
+reached that answer by measuring a *thirteen*-file deletion, which is a different tree and one the
+gates already refuse; everything below is the twelve-file tree, measured twice.
+
+**`grimp` stops descending the moment a directory has no `__init__.py` and something above it
+does.** `_get_python_files_and_namespace_dirs_inside_package`, in
+`grimp/adaptors/modulefinder.py`, treats the first directory holding an `__init__.py` as a
+*portion*, and from there down prunes any directory without one - its own comment calls what it
+drops "orphans". `src/agl/__init__.py` stays, so `src/agl` is that portion root and every namespace
+subpackage beneath it leaves the graph entirely. `grimp` holds 106 `agl` modules today and 12 with
+the twelve deleted, of which three are `agl`'s eight children: `api` and `testing`, which are
+single modules, and `sdk`, which carries an `__init__.py` of its own. `lint-imports` - which
+reports `Analyzed 141 files, 669 dependencies` and six contracts kept today - then exits 1 on
+`Missing layer in container 'agl': module <one of them> does not exist` and evaluates **no contract
+at all**. Which one it names varies between runs, the layers being checked in set order, so the
+message is not a fingerprint to match on - what is stable is that it stops there. Not five kept and
+one broken: a layers contract naming a module the graph does not hold
+fails before a single import is looked at, and the other five are never reached. The eleven tests
+in `tests/test_contract_firing.py` fail with it, that file existing to fire each contract at the
+real graph.
+
+**The one tree `grimp` reads correctly is the tree that drops `src/agl/__init__.py` too** - all
+eight children back, and the whole package in the graph. That tree fails the package-root gate,
+which prints that the file "does not exist. This gate has nothing to check, which is itself wrong."
+The gate is not tradable for this, and `.importlinter`'s comment on contract 5 is where the reason
+is written: `agl.*` does not include `agl` itself, adding it changes nothing because the pair
+(agl, agl.adapters) is skipped as overlapping, so that file - and only that file - could import an
+adapter with all six contracts still reported kept. That comment ends "Do not drop that gate."
+
+**`explicit_package_bases` is not the enabler it was taken for; it runs the other way.** With the
+twelve deleted, `mypy --strict` passes clean *without* it - 220 source files, no `Duplicate module
+named "fake"` anywhere - because `src/agl/__init__.py` is what `_crawl_up_helper` in
+`mypy/find_sources.py` climbs to, and it names every module below it against `src`. Turning the
+flag on replaces that anchor with `MYPYPATH`, `mypy_path` and the working directory, which makes
+the repo root the base for everything under `tests/`, renames those modules `tests.contracts.store`
+and takes `tests/` off the search path: 68 errors in 29 files, most of them `Cannot find
+implementation or library stub for module named "contracts.store"`. That is precisely the
+resolution `tests/conftest.py`'s first paragraph depends on, broken by the setting proposed to
+protect it. The `Duplicate module named "fake"` the survey reported is real and reproduces only on
+the thirteen-file deletion - the one that takes `src/agl/__init__.py` with it.
+
+**Packaging was the one question the survey could not settle, and it is not the obstacle.** Two
+wheels built from this tree, before the deletion and after: 114 entries and 102, the difference
+exactly the twelve `__init__.py` files and nothing else. The post-deletion wheel installs into a
+clean environment and works from outside the repository - every module imports, both
+`agl.workflows` entry points resolve and load, both workflows' `prompts/` markdown ships, and the
+`agl workflows` console script prints its two names. Recorded so nobody buys that measurement
+twice: what refuses the deletion is the import graph, never the distribution.
+
+Those two figures are this tree's and belong to this section. The 113 and 115 above are the earlier
+change that deleted the two `prompts/__init__.py` files, and they stay as they are.
 """
 
 from pathlib import Path

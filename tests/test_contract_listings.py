@@ -106,7 +106,7 @@ missing section or a missing list, which is the failure mode of a mistyped path.
 
 ## One module, well past the ceiling
 
-At 448 code lines this file is half again `scripts/check`'s 300-line convention - the largest
+At 449 code lines this file is half again `scripts/check`'s 300-line convention - the largest
 margin over it in the repository outside the big adapter suites - and two ways of splitting it were
 considered and refused rather than overlooked.
 
@@ -177,8 +177,14 @@ PORT_EXEMPT: Final[Mapping[str, str]] = {
 # while a listing there applies it. Nothing is pre-authorised, and one hypothetical name was left
 # here early to say so - a shared `_process.py`, which the second vendor adapter was expected to
 # want and did not write: the git package kept `_runner.py`, the shell verifier and the OpenAI
-# runner each spawn their own, and no top-level module arrived. The list has been confirmed against
-# the tree and both entries below are still the whole of it.
+# runner each spawn their own, and no top-level module arrived. Two candidates that were written
+# have since been weighed here and refused: the port fake, 182 lines of which `claude_code/` and
+# `openai/` hold in common, and `Caller` with its two message constants, 24 byte-identical lines in
+# both `_tools.py`. Both stay duplicated. An entry here is the only shape either could have taken -
+# a directory cannot be exempted, and a listed peer package is forbidden to the very adapters that
+# would import it - which is why the refusal is recorded here. ARCHITECTURE.md's "No shared module
+# under `adapters/`" carries the argument in full. The list has been confirmed against the tree and
+# both entries below are still the whole of it.
 ADAPTER_EXEMPT: Final[Mapping[str, str]] = {
     "__init__.py": "the adapters package's own docstring; no adapter lives in it",
     "routing.py": "contract 4's one sanctioned exception: dispatching on task.model.provider "

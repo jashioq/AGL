@@ -2,10 +2,9 @@
 import asyncio
 import dataclasses
 import json
-import unicodedata
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from collections.abc import Set as AbstractSet
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 from hashlib import sha256
 from math import isfinite
 from typing import Final
@@ -15,7 +14,7 @@ from agl.ports.clock import Clock
 from agl.ports.errors import InputError, InternalError
 from agl.ports.home_layout import RunScope
 from agl.ports.ids import StepName
-from agl.ports.run import JsonValue
+from agl.ports.run import JsonValue, WireShape, checked_text, wire_moment
 from agl.ports.store import Store
 from agl.ports.workspace import Workspace
 
@@ -36,9 +35,25 @@ _TYPE_KEY: Final = "__agl_type__"
 
 _WIRE_KEYS: Final = ("fingerprint", "value", "head", "at")
 
-_WIRE_TIME: Final = "%Y-%m-%dT%H:%M:%SZ"
+_WIRE: Final = WireShape(
+    keys=_WIRE_KEYS,
+    document="a step entry",
+    schema_name="an entry",
+    instance_name="an entry",
+    plural_name="entries",
+    moment_name="a step entry's 'at'",
+)
 
-_SURROGATE: Final = "Cs"
+_FINGERPRINT_COLLIDES: Final = (
+    "and the canonical text escapes it to the same characters as the astral code point it stands "
+    "for - so two different inputs would share a fingerprint, and one would replay the other's "
+    "result"
+)
+
+_STORED_RESULT: Final = (
+    "so the store refuses the write and this refuses it here, where the caller still knows a "
+    "worker handed it over"
+)
 
 
 def canonical_json(value: object) -> str:
@@ -110,38 +125,31 @@ class Entry:
         for name, value in (("fingerprint", self.fingerprint), ("head", self.head)):
             if not value:
                 raise InternalError(f"a step entry's {name!r} is empty, and that names nothing")
-        object.__setattr__(self, "at", _normalised(self.at))
+        object.__setattr__(self, "at", _WIRE.normalised(self.at))
 
     def to_json(self) -> dict[str, JsonValue]:
         return {
             "fingerprint": self.fingerprint,
             "value": self.value,
             "head": self.head,
-            "at": format(self.at, _WIRE_TIME),
+            "at": wire_moment(self.at),
         }
 
     @classmethod
     def from_json(cls, data: object) -> Entry:
         if not isinstance(data, Mapping):
             raise InternalError(f"a step entry is a JSON object, not a {type(data).__name__}")
-        missing = [key for key in _WIRE_KEYS if key not in data]
-        unknown = sorted(repr(key) for key in data if key not in _WIRE_KEYS)
-        if missing or unknown:
-            raise InternalError(
-                f"a step entry's keys are not an entry's: missing {missing}, unexpected {unknown}. "
-                f"An entry carrying keys AGL does not know was written by another version of it, "
-                f"and this module refuses entries rather than migrating them"
-            )
+        _WIRE.checked(data)
         try:
-            at = datetime.fromisoformat(_wire_text(data, "at"))
+            at = datetime.fromisoformat(_WIRE.text(data, "at"))
         except ValueError as error:
             raise InternalError(
                 f"a step entry holds an 'at' AGL cannot read back: {error}"
             ) from error
         return cls(
-            fingerprint=_wire_text(data, "fingerprint"),
+            fingerprint=_WIRE.text(data, "fingerprint"),
             value=data["value"],
-            head=_wire_text(data, "head"),
+            head=_WIRE.text(data, "head"),
             at=at,
         )
 
@@ -319,25 +327,6 @@ def _canonical(value: object, where: str) -> JsonValue:
     )
 
 
-def _wire_text(data: Mapping[str, object], key: str) -> str:
-    value = data[key]
-    if not isinstance(value, str):
-        raise InternalError(
-            f"a step entry's {key!r} is a {type(value).__name__}, and an entry's {key} is a string"
-        )
-    return value
-
-
-def _normalised(moment: datetime) -> datetime:
-    if moment.tzinfo is None or moment.utcoffset() is None:
-        raise InternalError(
-            f"a step entry's 'at' {moment!r} has no timezone, and a wall-clock reading with no "
-            f"place is not a moment - an entry carries an instant, written as UTC"
-        )
-    utc = moment.astimezone(UTC)
-    return utc - timedelta(microseconds=utc.microsecond)
-
-
 def _checked_key(key: object, where: str) -> str:
     if not isinstance(key, str):
         raise InputError(
@@ -355,45 +344,38 @@ def _checked_key(key: object, where: str) -> str:
     return _checked_text(key, f"the key {key!r} in {where}")
 
 
-def _surrogate_at(value: str) -> tuple[int, str] | None:
-    for index, character in enumerate(value):
-        if unicodedata.category(character) == _SURROGATE:
-            return index, character
-    return None
-
-
 def _checked_text(value: str, where: str) -> str:
-    found = _surrogate_at(value)
-    if found is not None:
-        index, character = found
+    return checked_text(value, where, cost=_FINGERPRINT_COLLIDES)
+
+
+def _stored_key(key: object, where: str) -> str:
+    if not isinstance(key, str):
         raise InputError(
-            f"{where} holds U+{ord(character):04X} at position {index}, which is a surrogate: "
-            f"UTF-8 has no encoding for one at all, and the canonical text escapes it to the "
-            f"same characters as the astral code point it stands for - so two different inputs "
-            f"would share a fingerprint, and one would replay the other's result"
+            f"{where} is keyed by {key!r}, a {type(key).__name__}, and a JSON object is keyed by "
+            f"strings - storing this result would rename the key to its own text, so the entry "
+            f"would carry a value no worker produced and a resume would hand that one back. "
+            f"Refused here, where the caller still knows a worker handed it over"
         )
-    return value
-
-
-def _check_stored_text(value: str, where: str) -> None:
-    found = _surrogate_at(value)
-    if found is None:
-        return
-    index, character = found
-    raise InputError(
-        f"{where} holds U+{ord(character):04X} at position {index}, which is a surrogate: UTF-8 "
-        f"has no encoding for one at all, so the store refuses the write and this refuses it here, "
-        f"where the caller still knows a worker handed it over"
-    )
+    return key
 
 
 def _check_result(value: object, where: str) -> None:
     if isinstance(value, str):
-        _check_stored_text(value, where)
+        checked_text(value, where, cost=_STORED_RESULT)
+    elif isinstance(value, float):
+        if not isfinite(value):
+            raise InputError(
+                f"{where} is {value!r}, which JSON has no spelling for: it would be written as a "
+                f"bare token no reader accepts, so the store refuses the whole entry and reports "
+                f"that as AGL's own bug - sending whoever hit it to file one, when what cannot be "
+                f"written is the number a step returned. Refused here, where the caller still "
+                f"knows a worker handed it over"
+            )
     elif isinstance(value, Mapping):
         for key, item in value.items():
-            _check_result(key, f"the key {key!r} in {where}")
-            _check_result(item, f"{where}.{key}")
+            named = _stored_key(key, where)
+            _check_result(named, f"the key {named!r} in {where}")
+            _check_result(item, f"{where}.{named}")
     elif isinstance(value, list | tuple):
         for index, item in enumerate(value):
             _check_result(item, f"{where}[{index}]")

@@ -84,23 +84,7 @@ async def run(
 
     async with services.workspaces.hold(label):
         await services.store.write_record(scope, spec.to_json())
-
-        await services.workspaces.open(label, None, spec.base_sha)
-
-        leases = Leases()
-        try:
-            async with services.terminal:
-                await wf.fn(
-                    Run(
-                        params=given,
-                        services=services,
-                        scope=scope,
-                        base=spec.base_sha,
-                        leases=leases,
-                    )
-                )
-        finally:
-            leases.release_all()
+        await _walked(services, wf, scope, spec, given)
 
 
 async def resume(
@@ -135,22 +119,7 @@ async def resume(
     await preflight.check(services.agents, wf.fn)
 
     async with services.workspaces.hold(label):
-        await services.workspaces.open(label, None, spec.base_sha)
-
-        leases = Leases()
-        try:
-            async with services.terminal:
-                await wf.fn(
-                    Run(
-                        params=given,
-                        services=services,
-                        scope=scope,
-                        base=spec.base_sha,
-                        leases=leases,
-                    )
-                )
-        finally:
-            leases.release_all()
+        await _walked(services, wf, scope, spec, given)
 
 
 async def clear(
@@ -211,6 +180,26 @@ def list_workflows(*, points: Iterable[EntryPoint] | None = None) -> tuple[str, 
 def workflow_help(name: str, *, points: Iterable[EntryPoint] | None = None) -> str:
     wf: Workflow[object] = registry.load(_points(points), name, Workflow)
     return params.parser_for(wf.params, prog=f"agl run {name}").format_help()
+
+
+async def _walked(
+    services: Services, wf: Workflow[object], scope: RunScope, spec: RunSpec, given: object
+) -> None:
+    await services.workspaces.open(scope.label, None, spec.base_sha)
+    leases = Leases()
+    try:
+        async with services.terminal:
+            await wf.fn(
+                Run(
+                    params=given,
+                    services=services,
+                    scope=scope,
+                    base=spec.base_sha,
+                    leases=leases,
+                )
+            )
+    finally:
+        leases.release_all()
 
 
 async def _under(store: Store, scope: RunScope) -> tuple[Namespace, ...]:

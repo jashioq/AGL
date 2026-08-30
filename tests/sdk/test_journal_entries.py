@@ -363,13 +363,16 @@ def test_from_json_refuses_a_missing_key_an_unknown_one_and_a_non_object() -> No
 
 
 def test_an_entry_and_a_run_record_write_one_spelling_of_a_timestamp() -> None:
-    """`journal.py::_WIRE_TIME` is a deliberate second copy of `ports/run.py`'s, so it is pinned.
+    """`_WIRE_TIME` was a deliberate second copy here; it is now one constant in `ports/run.py`.
 
     Two spellings of a timestamp in one AGL_HOME is a bug waiting for a reader, and a comment
-    saying "the same as run.py's" is not something that fails when it stops being true. So both
-    records are built from one `datetime` and their text compared - which also asserts the two
-    halves of the normalisation rule they share: an offset is converted rather than kept, and the
-    microseconds go, because whole seconds is all the wire form can hold.
+    saying "the same as run.py's" is not something that fails when it stops being true - so this
+    compared the two rendered texts instead. The copy is gone: both records now format through
+    `ports/run.py::wire_moment`, and `tests/ports/test_run.py` greps `src/` to hold it at one.
+    What this still asserts is the *text* that one format produces, which no amount of sharing
+    settles, and the two halves of the normalisation rule the two records share: an offset is
+    converted rather than kept, and the microseconds go, because whole seconds is all the wire
+    form can hold.
     """
     moment = datetime(2026, 8, 18, 9, 16, 41, 123456, tzinfo=timezone(timedelta(hours=2)))
     entry = Entry(fingerprint=FIRST, value=None, head=HEAD, at=moment)
@@ -388,12 +391,93 @@ def test_an_entry_and_a_run_record_write_one_spelling_of_a_timestamp() -> None:
 
 
 def test_a_naive_at_is_refused_rather_than_read_as_the_machines_local_time() -> None:
-    """Refused *before* `astimezone` is called, which is `ports/run.py::_normalised`'s reason:
+    """Refused *before* `astimezone` is called, which is `WireShape.normalised`'s reason:
     `astimezone` on a naive value quietly reads the local timezone, and an entry that recorded
     where the machine thought it was would be reading a hidden input into the one field an
     injectable clock exists to make answerable."""
     with pytest.raises(InternalError, match="no timezone"):
         Entry(fingerprint=FIRST, value=None, head=HEAD, at=datetime(2026, 8, 18, 9, 16, 41))
+
+
+def test_one_wire_shape_speaks_for_both_records_and_neither_lost_its_own_words() -> None:
+    """The fold's assertion: one implementation, two vocabularies, and the texts unchanged.
+
+    `ports/run.py` and `sdk/_engine/journal.py` each held their own `_wire_text`, `_normalised`,
+    `_WIRE_TIME`, `_SURROGATE` and missing/unknown-key block - the same computations, differing
+    only in the nouns. They now run one implementation, `ports/run.py::WireShape`, which each
+    module instantiates with its own nouns: `run.json`/`a run record`/`a record`/`records`/
+    `created_at` here, `a step entry`/`an entry`/`an entry`/`entries`/`a step entry's 'at'` there.
+
+    **The nouns are the whole point of the parameterisation and this is why they are pinned
+    literally.** These are what somebody reads at 2am when a record will not load, and the cheap
+    version of this fold - one generic sentence about "a record" covering both - would have traded
+    a real thing for a line count. `run.json's 'label' is a int, and a record's label is a string`
+    against `a step entry's 'at' is a int, and an entry's at is a string`: the reader is told which
+    of the two files under AGL_HOME to go and open. So the strings below are spelled out in full
+    rather than matched on a fragment, because a fragment stays green while the half that names
+    the record drifts, and that half is the half that is useful.
+
+    The messages here are byte for byte what the two modules produced before the fold; they were
+    captured from the running code first and compared after.
+    """
+    document = _entry(FIRST, value={"tickets": []}).to_json()
+    record: dict[str, JsonValue] = {
+        "workflow": "tickets",
+        "workflow_version": "1.0.0",
+        "label": "auth",
+        "base_ref": "main",
+        "base_sha": "8c19f7ae4d2b0913e5f6" * 2,
+        "branch": "agl/auth",
+        "params": {},
+        "created_at": "2026-08-18T09:14:02Z",
+    }
+    naive = datetime(2026, 8, 18, 9, 16, 41)
+
+    with pytest.raises(InternalError) as entry_field:
+        Entry.from_json({**document, "head": 7})
+    with pytest.raises(InternalError) as record_field:
+        RunSpec.from_json({**record, "label": 7})
+    assert str(entry_field.value) == (
+        "a step entry's 'head' is a int, and an entry's head is a string"
+    )
+    assert str(record_field.value) == (
+        "run.json's 'label' is a int, and a record's label is a string"
+    )
+
+    with pytest.raises(InternalError) as entry_keys:
+        Entry.from_json({**document, "duration_ms": 1400})
+    with pytest.raises(InternalError) as record_keys:
+        RunSpec.from_json({**record, "status": "running"})
+    assert str(entry_keys.value) == (
+        "a step entry's keys are not an entry's: missing [], unexpected [\"'duration_ms'\"]. An "
+        "entry carrying keys AGL does not know was written by another version of it, and this "
+        "module refuses entries rather than migrating them"
+    )
+    assert str(record_keys.value) == (
+        "run.json's keys are not a run record's: missing [], unexpected [\"'status'\"]. A record "
+        "carrying keys AGL does not know was written by another version of it, and this module "
+        "refuses records rather than migrating them"
+    )
+
+    with pytest.raises(InternalError) as entry_missing:
+        Entry.from_json({key: value for key, value in document.items() if key != "head"})
+    with pytest.raises(InternalError) as record_missing:
+        RunSpec.from_json({key: value for key, value in record.items() if key != "branch"})
+    assert "missing ['head'], unexpected []" in str(entry_missing.value)
+    assert "missing ['branch'], unexpected []" in str(record_missing.value)
+
+    with pytest.raises(InternalError) as entry_naive:
+        Entry(fingerprint=FIRST, value=None, head=HEAD, at=naive)
+    with pytest.raises(InternalError) as record_naive:
+        RunSpec.from_json({**record, "created_at": "2026-08-18T09:16:41"})
+    assert str(entry_naive.value) == (
+        f"a step entry's 'at' {naive!r} has no timezone, and a wall-clock reading with no place "
+        f"is not a moment - an entry carries an instant, written as UTC"
+    )
+    assert str(record_naive.value) == (
+        f"created_at {datetime(2026, 8, 18, 9, 16, 41)!r} has no timezone, and a wall-clock "
+        f"reading with no place is not a moment - a run record carries an instant, written as UTC"
+    )
 
 
 def test_an_empty_fingerprint_or_head_names_nothing() -> None:

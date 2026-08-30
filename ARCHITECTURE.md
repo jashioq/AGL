@@ -209,7 +209,48 @@ The reasoning is the point — without it these get re-proposed.
   inside one adapter, which is the one place a stopping sequence can be shared for free. It stopped
   nothing at all until it was given both that session and a deadline. The helper would also have
   nowhere to live: the adapter-independence contract in `.importlinter` forbids one adapter
-  importing another.
+  importing another — the entry below is that sentence in its general form.
+- **No shared module under `adapters/`.** The adapters repeat themselves, and every one of the
+  repeats stays. The port fakes are the bulk of it: `claude_code/fake.py` (204 lines) and
+  `openai/fake.py` (195) hold 182 lines in common line for line and the same four-name `__all__`,
+  with `Conversation`, `_payload`, `_value` and `_said` byte-identical and `_as_json` differing in
+  one clause of its error prose. All that differs is vendor-shaped: the model check — `_served`,
+  Claude-only, against `translate.model_slug` — the backend's name in three message constants, and
+  the activity line, `f"{declared.name}: {said}"` against `f"{_LABEL_CALLING}: {declared.name}"`,
+  each fake keeping the shape of the line its own real adapter emits. Beside them, `Caller` with
+  `_FAILED` and `_STOPPING` is 24 byte-identical lines in two `_tools.py` that are otherwise an MCP
+  server registration and a JSON-RPC listener; `_shortened` is seven byte-identical lines in
+  `claude_code/translate.py` and `openai/translate.py`; `_translated` is four lines that
+  `git/_trees.py` writes and `filesystem/store.py` writes again with one parameter renamed —
+  `git/_working.py` held a third copy and now imports `_trees.py`'s, a sibling inside one package
+  being the one place that is free; and
+  `_GRACE: Final = 5.0` stands in each of the three modules above that stop a child. Contract 4
+  forbids one adapter importing another, so an adapter-spanning duplicate folds into `ports/`, into
+  something new under `adapters/`, or nowhere. `ports/` is wrong for all of it — it is the ABCs and
+  the plain types they speak and everything imports it, so what lands there reaches every layer at
+  once: a fake implements a port and is not one, `Caller` is adapter mechanics, and how a filesystem
+  error or a vendor CLI's output line is phrased is that adapter's own business. **The peer package
+  under `adapters/` is not an available shape.** `adapter_drift` in
+  `tests/test_contract_listings.py` requires every *directory* under `src/agl/adapters/` to appear
+  in contract 4's `modules =`, and a directory has no exemption route at all — `ADAPTER_EXEMPT`
+  there is keyed by filename and holds only single-file members. The package would therefore be
+  listed, and being listed is exactly what forbids the two adapters importing it. The one shape that
+  folds is a top-level `.py` with an `ADAPTER_EXEMPT` entry — `routing.py`'s shape — and it has been
+  refused in writing already, for a structurally identical case: that constant's comment carries a
+  hypothetical shared `_process.py`, left there to say that nothing is pre-authorised, and warns
+  against taking an exemption to spare an edit to `.importlinter`, an exemption removing a module
+  from the rule where a listing applies it. `routing.py`'s own exemption is no precedent for a
+  second. It *is* an adapter: it implements `AgentRunner`, and dispatching on `task.model.provider`
+  to the vendor runners is its whole job, so importing them is the thing it does. A shared fake or a
+  shared `Caller` would be the first module under `adapters/` that is neither an adapter nor the
+  router — a library the adapters depend on, which is a different kind of thing and creates a
+  dependency edge contract 4 would see in neither direction. `tests/test_contract_listings.py`'s
+  docstring names that ending as the one contract 4 exists to catch: without the guard, "the first
+  sign of it would have been two vendors quietly sharing a helper". **The price is paid rather than
+  hidden.** Those 182 lines and those 24 get fixed twice, and both `_tools.py` have already been
+  edited in parallel once. What holds the two fakes together is grading and not sharing: each is
+  subclassed into the same `AgentContract` suite under `tests/contracts/`, so a divergence in what
+  they *promise* fails the build, while a divergence in how they spell it does not.
 - **No single `Tool` class.** `ReportingTool[P]` in `sdk/tools.py` reads as "a `ports/` `Tool` with
   a payload and no handler", and `tool()` beside it — an ordinary `Tool` whose schema is derived
   from a payload dataclass and whose handler is called with the built instance — makes the

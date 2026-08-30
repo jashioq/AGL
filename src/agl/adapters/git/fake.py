@@ -1,7 +1,6 @@
 
 from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
@@ -9,20 +8,13 @@ from agl.adapters.git._conflicts import already_holding, collided, unresolved
 from agl.adapters.git._merging import combined, contested
 from agl.adapters.git._patches import differences, patch
 from agl.adapters.git._snapshots import FakeRepository, Hold, Tree
-from agl.adapters.git._trees import deleted, made, tidied
+from agl.adapters.git._trees import _Place, _place, deleted, made, tidied
 from agl.adapters.git._working import applied, restored, snapshot
 from agl.ports.errors import ConflictError, InternalError, NotFoundError, UpstreamUnexpected
 from agl.ports.history import FileChange, History
 from agl.ports.ids import Namespace, RunLabel
 from agl.ports.integration import IntegrationOutcome, Integrator
-from agl.ports.tree_layout import (
-    TreesRoot,
-    base_worktree,
-    run_branch,
-    run_trees_dir,
-    worktree_branch,
-    worktree_dir,
-)
+from agl.ports.tree_layout import TreesRoot, run_trees_dir
 from agl.ports.workspace import Workspace, WorkspaceProvider
 
 __all__ = ["FakeHistory", "FakeIntegrator", "FakeRepository", "FakeWorkspaceProvider"]
@@ -39,7 +31,7 @@ class FakeWorkspaceProvider(WorkspaceProvider):
         self._trees = trees
 
     async def open(self, label: RunLabel, namespace: Namespace | None, base: str) -> Workspace:
-        place = self._place(label, namespace)
+        place = _place(self._trees, label, namespace)
         if place.path.is_dir():
             held = self._repository.checked_out_at(place.path)
             if held == place.branch:
@@ -67,14 +59,14 @@ class FakeWorkspaceProvider(WorkspaceProvider):
         return _FakeWorkspace(place, self._repository)
 
     async def remove(self, label: RunLabel, namespace: Namespace | None) -> None:
-        place = self._place(label, namespace)
+        place = _place(self._trees, label, namespace)
         deleted(place.path)
         tidied(run_trees_dir(self._trees, label))
         self._repository.detach(place.path)
         self._repository.prune()
 
     async def discard(self, label: RunLabel, namespace: Namespace | None) -> None:
-        place = self._place(label, namespace)
+        place = _place(self._trees, label, namespace)
         holder = self._repository.checkout_of(place.branch)
         if holder is not None:
             raise ConflictError(
@@ -94,20 +86,6 @@ class FakeWorkspaceProvider(WorkspaceProvider):
                 f"{base!r} names no state in this repository, so there is nothing to cut "
                 f"{branch!r} from. Nothing was changed"
             ) from absent
-
-    def _place(self, label: RunLabel, namespace: Namespace | None) -> _Place:
-        if namespace is None:
-            return _Place(base_worktree(self._trees, label), run_branch(label))
-        return _Place(
-            worktree_dir(self._trees, label, namespace), worktree_branch(label, namespace)
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class _Place:
-
-    path: Path
-    branch: str
 
 
 class _FakeWorkspace(Workspace):

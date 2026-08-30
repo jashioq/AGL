@@ -62,7 +62,6 @@ from agl.ports.agent import (
     ToolResult,
 )
 from agl.ports.errors import EXIT_CODES, AglError, InputError, UpstreamError, exit_code_for
-from agl.ports.questions import Answer, Question
 from agl.ports.run import JsonValue
 from agl.sdk._engine.journal import base_of
 from agl.sdk.roles import Role, RoleIncompleteError, prompt_file, role
@@ -125,12 +124,6 @@ def _plain(name: str) -> Tool:
         payload_schema={"type": "object", "properties": {}},
         handler=_never_called,
     )
-
-
-async def _answer(question: Question) -> Answer:
-    """The handler shape: one `Question` in, one `Answer` out, async because answering may mean
-    waiting on a person."""
-    return Answer(text=question.options[0] if question.options else "carry on")
 
 
 def _reporting_of[P](role: Role[P]) -> ReportingTool[P] | None:
@@ -773,9 +766,22 @@ def test_one_reporting_tool_beside_plain_tools_is_ordinary() -> None:
 
 
 def test_a_duplicate_tool_name_is_refused_as_an_agent_task_would_refuse_it() -> None:
-    """`AgentTask.__post_init__`'s check, one layer earlier and in its words - `ReportingTool` does
-    the same for `Tool`'s two. A model names the tool it is calling, so a duplicate is a call no
-    backend can resolve to one handler."""
+    """`AgentTask.__post_init__`'s check, one layer earlier and in its words. A model names the
+    tool it is calling, so a duplicate is a call no backend can resolve to one handler.
+
+    **This one is double entry and stays double entry**, which is the opposite call from the two
+    refusals `Tool` and `ReportingTool` share - those became one
+    `ports.agent.checked_tool_declaration` because they were one rule spelled twice. These are two
+    rules about two different things. `Role` catches a duplicate at the *declaration*, where the
+    author is looking at the list they just wrote and the fix is on screen; `AgentTask` catches it
+    again at the *dispatch*, where a tool list assembled from any source - a workflow that built
+    one, a caller of the port that is not this SDK at all - reaches an adapter, and by then the
+    line to fix is a run away. One is about the code somebody typed, the other about what any
+    caller of the port hands over, so folding them would delete a refusal rather than deduplicate
+    one. The computation being identical is what makes that easy to miss. Their prose deliberately
+    differs, and `test_a_plain_tool_colliding_with_the_reporting_tool_is_refused_too` below is the
+    case only the earlier one can see at all.
+    """
     with pytest.raises(InputError) as refusal:
         Role(
             name="review",
@@ -801,8 +807,12 @@ def test_a_plain_tool_colliding_with_the_reporting_tool_is_refused_too() -> None
 #
 # There was a second folded implication here and it is gone: `on_question` implied
 # `MID_RUN_QUESTIONS`, and both the field and the member were deleted when a question became an
-# ordinary tool a workflow supplies. What survives is the half that was never about questions -
-# `requires` is not a fingerprint term - and it is measured on the fold that is left.
+# ordinary tool a workflow supplies. A helper at the top of this file outlived them by a session -
+# `_answer`, one `Question` in and one `Answer` out, the handler shape that field took, called by
+# nothing - and went when those two types left `ports/` for `workflows/fix/questions.py`, since the
+# alternative was an SDK suite importing a shipped workflow's vocabulary to declare a function
+# nobody runs. What survives is the half that was never about questions - `requires` is not a
+# fingerprint term - and it is measured on the fold that is left.
 
 
 def test_the_requirements_do_not_reach_the_fingerprint() -> None:

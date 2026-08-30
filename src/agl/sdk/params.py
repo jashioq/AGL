@@ -5,10 +5,11 @@ from dataclasses import MISSING, dataclass, field, fields, is_dataclass
 from math import isfinite
 from string import ascii_letters, digits
 from types import MappingProxyType
-from typing import Any, Final, NoReturn, get_type_hints, overload
+from typing import Any, Final, NoReturn, overload
 
 from agl.ports.errors import InputError
 from agl.ports.run import JsonValue
+from agl.sdk._declarations import _describe, _hints
 
 __all__ = ["RefusingParser", "arg", "from_json", "parse", "parser_for", "to_json"]
 
@@ -183,16 +184,6 @@ def _consumes(where: str, hint: object, default: object) -> dict[str, Any]:
     )
 
 
-def _hints(params: type[object]) -> Mapping[str, object]:
-    try:
-        return get_type_hints(params)
-    except (NameError, TypeError) as error:
-        raise InputError(
-            f"{_describe(params)} has an annotation that cannot be resolved: {error}. Its fields "
-            f"are read for their types, so each has to name something importable where it is"
-        ) from error
-
-
 def _unusable_flag(flag: str) -> str | None:
     if not flag.startswith("-"):
         return "it is a positional, and `agl run <workflow>` already occupies that position"
@@ -210,9 +201,3 @@ def _unusable_flag(flag: str) -> str | None:
                 f"A-Z a-z, digits, '-' and '_'"
             )
     return None
-
-
-def _describe(thing: object) -> str:
-    if not isinstance(thing, type):
-        return repr(thing)
-    return f"{thing.__module__}.{thing.__qualname__}"

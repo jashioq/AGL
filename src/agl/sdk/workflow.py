@@ -10,13 +10,14 @@ from agl.ports.ids import Namespace
 from agl.ports.integration import Conflict
 from agl.ports.terminal import Terminal
 from agl.ports.verifier import VerifierOutcome
+from agl.sdk._declarations import _describe
 from agl.sdk._engine.integration import Integration, Leases
 from agl.sdk._engine.integration import integrate as _integrate
 from agl.sdk._engine.journal import Fingerprints
 from agl.sdk._engine.preflight import Capabilities
 from agl.sdk._engine.services import Services
 from agl.sdk._engine.steps import Steps
-from agl.sdk._engine.worktrees import Worktrees
+from agl.sdk._engine.worktrees import Worktrees, _where
 from agl.sdk.roles import Role
 
 __all__ = ["Conflict", "Namespace", "Run", "Stop", "VerifierOutcome", "Workflow", "workflow"]
@@ -113,12 +114,6 @@ def _unaddressable(scope: RunScope) -> str:
         f"so `main` and every branch of yours is unaddressable rather than protected - "
         f"there is no rule here that could be relaxed and no spelling that would name one"
     )
-
-
-def _where(scope: RunScope) -> str:
-    if not scope.namespaces:
-        return "the run itself"
-    return "the worktree " + " -> ".join(str(name) for name in scope.namespaces)
 
 
 type _Function[P] = Callable[[Run[P]], Awaitable[None]]
@@ -227,9 +222,3 @@ def _hints(fn: Callable[..., object]) -> tuple[list[str], Mapping[str, object]]:
 def _written_at(fn: Callable[..., object]) -> str:
     code = fn.__code__
     return f"`{fn.__qualname__}` at {code.co_filename}:{code.co_firstlineno}"
-
-
-def _describe(thing: object) -> str:
-    if not isinstance(thing, type):
-        return repr(thing)
-    return f"{thing.__module__}.{thing.__qualname__}"

@@ -41,7 +41,7 @@ tests, and there is no third that the port would license.
 spends a section on it - "Aware, never naive" - because the promise is not for this port's own
 sake: it is for the record at the far end of the run. Both halves of the check are here, because
 they are not one question. A `tzinfo` that returns `None` from `utcoffset` passes the cheap half
-and is naive in every way that matters, and `RunSpec._normalised` checks both for that reason.
+and is naive in every way that matters, and `WireShape.normalised` checks both for that reason.
 
 **A reading is a moment the run record accepts and keeps.** The clause above exists because a
 reading ends up in `run.json`, and `RunSpec` is the only thing in AGL that judges whether something
@@ -148,7 +148,7 @@ class ClockContract:
         """The port's one promise about what `now()` hands back, checked the way `run.py` checks it.
 
         "Aware, always" is the whole of the clause, and its reason lives one module away: a naive
-        value is a wall-clock reading with no place, and `RunSpec._normalised` refuses one *before*
+        value is a wall-clock reading with no place, and `WireShape.normalised` refuses one *before*
         calling `astimezone`, because `astimezone` on a naive value quietly reads the machine's
         local timezone and so turns a hidden input into a stored one.
 

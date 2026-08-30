@@ -362,10 +362,11 @@ async def test_a_script_may_answer_with_a_stop_reason_of_none(tmp_path: Path) ->
 
     All three are driven, because the interesting property is that the script decides and this
     class does not substitute: an adapter that quietly turned `None` into `COMPLETED` would look
-    correct in every other test in this file. `LIMIT` is included deliberately even though
-    `_reading.py` records it as unreachable for the real backend - the fake passes a script's
-    outcome through untouched rather than auditing it, because rewriting one would be the adapter
-    substituting a fact, and `unscripted` is where the "never `LIMIT`" property lives instead.
+    correct in every other test in this file. `LIMIT` is included deliberately even though it is
+    unreachable for the real backend - `_session.py` answers `COMPLETED` or `None` and nothing
+    else - and the fake passes a script's outcome through untouched rather than auditing it,
+    because rewriting one would be the adapter substituting a fact, and `unscripted` is where the
+    "never `LIMIT`" property lives instead.
     """
     for reason in (None, StopReason.COMPLETED, StopReason.LIMIT):
 
@@ -512,11 +513,14 @@ async def test_the_default_composes_a_payload_out_of_the_tools_own_schema(tmp_pa
 
 @pytest.mark.asyncio
 async def test_the_default_never_reports_a_limit_it_did_not_reach(tmp_path: Path) -> None:
-    """`_reading.py` records `StopReason.LIMIT` as unreachable for this backend, and it is here too.
+    """`StopReason.LIMIT` is unreachable for the real backend, and it is unreachable here too.
 
-    A usage limit on this harness arrives as `UpstreamUnavailable` and never as a stop reason -
-    that module argues it at length and calls it a decision a reader is entitled to know about. So
-    a default that produced `LIMIT` would have a `--dry-run` exercising a consumer branch this
+    A usage limit on this harness arrives as `UpstreamUnavailable` and never as a stop reason, and
+    that is a decision rather than an oversight: `translate.failure` sends a `turn.failed` out as a
+    refusal whatever it reported, so `_session.py` has only `COMPLETED` and `None` left to answer
+    with. `tests/adapters/test_openai_translate.py::test_each_failure_maps_to_its_meaning` pins the
+    usage-limit row and `tests/adapters/test_openai_runner.py` drives the same message end to end.
+    So a default that produced `LIMIT` would have a `--dry-run` exercising a consumer branch this
     backend never takes, which is fake drift with the arrow reversed and just as invisible.
     """
     both: tuple[tuple[Tool, ...], ...] = ((), (Recorded(NOTE).tool,))
@@ -885,7 +889,7 @@ async def test_a_scripts_activity_line_arrives_untouched_and_a_reporter_that_rai
     is the adapter's voice, so the intended line is known.
 
     The default's own lines are read for their *shape* rather than their wording, because that is
-    the part that carries a decision: `_reading._LABELS` gives this backend one word and a colon,
+    the part that carries a decision: `translate._LABELS` gives this backend one word and a colon,
     and `fake.py` keeps that so a `--dry-run` dashboard reads like the backend it stands in for.
     What it deliberately does not keep is the `server/tool` subject, which is `_tools.py`'s private
     naming and would be a copy that can drift.

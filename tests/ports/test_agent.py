@@ -183,7 +183,23 @@ def test_a_task_that_could_not_be_run_is_refused(task: dict[str, object]) -> Non
 
 @pytest.mark.parametrize("blank", ["name", "description"])
 def test_a_tool_the_model_could_not_choose_is_refused(blank: str) -> None:
-    """A tool with no name cannot be called, and one with no description cannot be chosen."""
+    """A tool with no name cannot be called, and one with no description cannot be chosen.
+
+    **The two refusals are `checked_tool_declaration`'s, and it is on `__all__` although it is not
+    a type.** `ports/run.py`'s `checked_text` is the precedent and the argument is the same one:
+    `sdk/tools.py`'s `ReportingTool` had a byte-identical copy of both `raise`s, error prose
+    included, because it declares the same two fields for the same reader - a model choosing which
+    tool to call. Two spellings of one rule is one spelling free to be wrong, and the way it would
+    be wrong here is quiet: a `ReportingTool` that accepted an empty description would hand a
+    vendor a tool the model has nothing to choose it by, and every test about payloads would still
+    pass. One implementation with two call sites, folded into `ports/` because that is the only
+    direction contract 1 permits.
+
+    This test is one of the two that reach it - `tests/sdk/test_tools.py`'s
+    `test_an_empty_name_and_an_empty_description_are_refused_as_a_tools_would_be` is the other, and
+    both are needed: a checker only one class actually called would leave the other silently
+    unchecked with this file still green.
+    """
     declared = {
         "name": _TOOL.name,
         "description": _TOOL.description,

@@ -2,8 +2,9 @@
 from dataclasses import dataclass
 from typing import Final
 
-from agl.sdk import Question, Terminal, Tool, ToolResult, describe, tool
+from agl.sdk import Terminal, Tool, ToolResult, describe, tool
 from agl.workflows.fix import views
+from agl.workflows.fix.questions import Question
 
 __all__ = ["ASK", "Asked", "NO_QUESTION", "SAID_NOTHING", "asking"]
 

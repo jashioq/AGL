@@ -20,6 +20,12 @@ against `InternalError` and `UpstreamUnavailable` both.
 services bundle. The `registered` on the `Invocation` raises if it is called, which is `main`'s own
 seam used as the instrument - nothing here reaches into a module to count anything.
 
+**`_perhaps` here is this module's own.** `run.py` and `resume.py` share one argv reader out of
+`cli/commands/__init__.py`; this one is not a third caller of it. It returns `str | None` rather
+than `str`, and its refusal says "a string it took off the command line or nothing at all", which
+is the whole of what an optional positional means here. `tests/cli/test_clear_command.py` carries
+the same decision for `clear.py`, and the argument for both.
+
 The bundle is not needed at all, which is itself the point: these tests build no `container.fakes()`
 and no trees root, because a command that listed what is installed and needed a repository to do it
 would be a defect.

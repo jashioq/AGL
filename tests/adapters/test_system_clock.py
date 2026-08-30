@@ -135,7 +135,7 @@ def test_a_system_clock_reading_is_aware_by_both_of_the_tests_that_decide_it() -
     """`tzinfo is not None` is the cheap half; `utcoffset() is not None` is the one that decides.
 
     A `tzinfo` that returns `None` from `utcoffset` passes the first and is naive in every way
-    that matters - `RunSpec._normalised` checks both for that reason, and a clock checked on the
+    that matters - `WireShape.normalised` checks both for that reason, and a clock checked on the
     first alone could satisfy this test and still hand that record something it refuses.
     """
     reading = SystemClock().now()

@@ -60,6 +60,16 @@ capture.reported(outcome)` is the whole of it, and that value becomes `Entry.val
 tool, `tool()`'s included, answers with a `ToolResult` that every adapter turns into content for the
 model and that reaches no store. One class buries that in `handler is None`.
 
+**What the two classes do share is one line, and it is not the line above.** Both call
+`ports.agent.checked_tool_declaration` for the two refusals every tool declaration owes - an empty
+name cannot be called, an empty description cannot be chosen - which used to be a byte-identical
+copy in each. That fold is not the merge this section refuses and does not start it: it moves no
+`payload` into `ports/`, derives no schema there, and leaves the two classes as disjoint as they
+were, which is the only property `Role[P]` binds through.
+`test_two_payload_types_of_one_shape_are_two_schemas_and_two_fingerprints` still holds - validating
+a name and a description is not learning what a payload class is - and
+`test_a_role_promising_one_payload_refuses_a_tool_that_reports_another` still spends the check.
+
 `ARCHITECTURE.md`'s "No single `Tool` class" carries the argument; what is here is the measurement.
 `test_a_role_promising_one_payload_refuses_a_tool_that_reports_another` spends the check, so a merge
 that lost it fails a line instead of passing a review.
@@ -476,7 +486,14 @@ def test_a_payload_instance_where_the_class_belonged_is_refused() -> None:
 
 
 def test_an_empty_name_and_an_empty_description_are_refused_as_a_tools_would_be() -> None:
-    """`Tool.__post_init__`'s two checks, made where the declaration is written."""
+    """The same two checks a `Tool` makes, made where the declaration is written.
+
+    "As a tool's would be" is now literal rather than a resemblance: both classes call
+    `ports.agent.checked_tool_declaration`, which is where the two `raise`s live and where
+    `tests/ports/test_agent.py` argues why they are one implementation instead of two copies.
+    This is the `ReportingTool` half of that claim, and it is what makes "one checker, two classes"
+    measurable - a fold that quietly left this class checking nothing would pass over there.
+    """
     with pytest.raises(InputError):
         reporting_tool("", "report it", Findings)
     with pytest.raises(InputError):

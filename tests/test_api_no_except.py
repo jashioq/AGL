@@ -37,9 +37,10 @@ is asserted here, and the pair is the whole of what the docstring used to carry.
 ## The subtlety, and why this file counts handlers and not statements
 
 **`api.py` contains a `try` and must keep it.** The framework takes a lease per integration target
-and makes `run` exit the sweeper rather than the lifetime, so the last two lines of both `run` and
-`resume` are a `finally` around the workflow's function. A `finally` sees no exception, names no
-class and can decide nothing: control leaves it carrying whatever arrived, `Stop` subclass and all.
+and makes `run` exit the sweeper rather than the lifetime, so the last two lines of `_walked` - the
+tail `run` and `resume` both call, and the only place in this module either of them reaches the
+workflow's function - are a `finally` around it. A `finally` sees no exception, names no class and
+can decide nothing: control leaves it carrying whatever arrived, `Stop` subclass and all.
 The `async with services.terminal` inside it is in the same position and survives for a second
 reason besides - `Terminal.__aexit__` is annotated `-> None` on the port, suppressing an exception
 from a context manager means returning something *truthy*, `None` is falsy, and `mypy --strict` is
@@ -48,7 +49,7 @@ signature rather than a promise an implementation keeps. What would break the cr
 `except` of any width, which is why the rule is written about that word and not about `try`.
 
 So the node type asserted absent below is `ast.ExceptHandler`, and `ast.Try` is asserted *present*.
-Two `try` statements stand in that file today and a version of this test that forbade them would be
+One `try` statement stands in that file today and a version of this test that forbade it would be
 red against the correct source - which is the mistake worth naming here, because it is the one a
 reader who has only heard the rule as "no exception handling in `api.py`" would make.
 
@@ -81,18 +82,20 @@ from agl import api as api_module
 
 # The floor, in the spirit of `test_filesystem_no_lock.py`'s `MODULES_TODAY`. The assertion below
 # is silent about a file that holds no handler, which is what a green run looks like and also what
-# a run against an empty file, a wrong path or a parse that gave up looks like. `api.py` is 1,282
+# a run against an empty file, a wrong path or a parse that gave up looks like. `api.py` is 1,279
 # AST nodes as this is written; 300 is under a quarter of that, so an ordinary edit never moves it
 # and only something that stopped reading the real module can fail it.
 NODES_TODAY: Final = 300
 
-# The `try` statements, asserted present. Two today - one in `run`, one in `resume` - each a
-# `finally` giving back the integration leases its workflow was still holding. A measurement rather
-# than a floor with a life of its own: if the sweep is ever written some other way this number is
-# lowered on purpose, by somebody who has read the paragraph above and knows they are removing this
-# file's witness that the rule is about `except`. What must not happen instead is the assertion
+# The `try` statements, asserted present. One today, in `_walked` - the tail `run` and `resume`
+# share - a `finally` giving back the integration leases the workflow was still holding. There were
+# two, one written out per caller, until that tail was folded into one function; the number came
+# down on purpose and the witness survives, which is what this paragraph is for. A measurement
+# rather than a floor with a life of its own: if the sweep is ever written some other way this
+# number is lowered again, by somebody who has read the paragraph above and knows they are removing
+# this file's witness that the rule is about `except`. What must not happen instead is the assertion
 # above being widened from `ast.ExceptHandler` to `ast.Try` to make the two agree again.
-SWEEPS_TODAY: Final = 2
+SWEEPS_TODAY: Final = 1
 
 # A fabricated `except*`, for the last assertion. Nothing in AGL spells one; it is here so that the
 # claim "one walk catches both spellings" is checked against the interpreter running the suite
@@ -142,7 +145,7 @@ def test_api_holds_no_except_clause_of_any_width_anywhere_in_it() -> None:
 
     nodes = sum(1 for _ in ast.walk(tree))
     assert nodes >= NODES_TODAY, (
-        f"{module} parsed to {nodes} AST nodes and held 1,282 when this was written. "
+        f"{module} parsed to {nodes} AST nodes and held 1,279 when this was written. "
         f"{NODES_TODAY} is a floor rather than a measurement, so reaching it means something "
         f"stopped parsing, or this is not the module it is meant to be reading - not that "
         f"somebody wrote less code. The assertion above is silent about a file with nothing in it"
@@ -151,8 +154,9 @@ def test_api_holds_no_except_clause_of_any_width_anywhere_in_it() -> None:
     sweeps = sum(1 for node in ast.walk(tree) if isinstance(node, ast.Try | ast.TryStar))
     assert sweeps >= SWEEPS_TODAY, (
         f"{module} holds {sweeps} `try` statement(s) and held {SWEEPS_TODAY} when this was "
-        f"written, one in `run` and one in `resume`, each a `finally` releasing the integration "
-        f"leases its workflow was still holding. A `try` is legal here and a handler is not - that "
+        f"written, in `_walked` - the tail `run` and `resume` share - a `finally` releasing the "
+        f"integration leases the workflow was still holding. A `try` is legal here and a handler "
+        f"is not - that "
         f"is the whole distinction this file exists to hold, and this assertion is its witness. If "
         f"a sweep genuinely went away, lower `SWEEPS_TODAY`. Do not reconcile the two by making "
         f"the assertion above forbid `ast.Try`: that fails against the correct source"

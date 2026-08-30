@@ -60,7 +60,6 @@ import pytest
 
 from agl import api
 from agl.config import container, registry
-from agl.ports import questions as ports_questions
 from agl.ports import terminal as ports_terminal
 from agl.ports.errors import ConflictError, InternalError
 from agl.ports.home_layout import RunScope
@@ -69,7 +68,6 @@ from agl.ports.terminal import Rows, Screen, Terminal, Text
 from agl.ports.tree_layout import TreesRoot
 from agl.ports.workspace import Workspace, WorkspaceProvider
 from agl.sdk import errors as sdk_errors
-from agl.sdk import questions as sdk_questions
 from agl.sdk import terminal as sdk_terminal
 from agl.sdk.workflow import Run, workflow
 
@@ -505,27 +503,22 @@ def test_the_terminal_facade_re_exports_the_ports_objects_themselves() -> None:
         assert getattr(sdk_terminal, name) is getattr(ports_terminal, name)
 
 
-def test_the_questions_facade_re_exports_the_ports_objects_themselves() -> None:
-    """The same claim for `Question` and `Answer`, and here the cost of a copy is a live session.
-
-    An adapter builds a `Question` out of what a model produced and reads back whatever the
-    workflow's handler returned. A second `Answer` class defined in `sdk/` would type-check against
-    a handler annotated with it and then fail whatever the adapter does to narrow what came back.
-    """
-    for name in ports_questions.__all__:
-        assert getattr(sdk_questions, name) is getattr(ports_questions, name)
-
-
-def test_the_facades_re_export_the_whole_of_each_ports_surface() -> None:
+def test_the_terminal_facade_re_exports_the_whole_of_its_ports_surface() -> None:
     """Every name, not a chosen subset - which is the part of "no logic" that can rot quietly.
 
     A curated facade is one that decided which names an author needs, and the decision would be
     found by whoever needed the missing one and reached into `agl.ports` for it, which is the exact
     thing these modules exist to prevent. Asserted as list equality so that order drifts loudly too:
-    the lists are written out by hand in both modules and there is nothing else to keep them level.
+    the two lists are written out by hand, one in each module, and there is nothing else to keep
+    them level.
+
+    **One module here and not two.** `sdk/questions.py` stood beside it and made the same claim
+    about `Question` and `Answer` until those two left `ports/` for `workflows/fix/questions.py` -
+    the one workflow that ever spoke them - and a facade over a port module that no longer exists
+    went with it. `sdk/errors.py` is the third facade and is deliberately not here either: it takes
+    a *part* of its port module, which is what the next test's own docstring is about.
     """
     assert sdk_terminal.__all__ == ports_terminal.__all__
-    assert sdk_questions.__all__ == ports_questions.__all__
 
 
 def test_the_facades_declare_nothing_of_their_own() -> None:
@@ -535,21 +528,22 @@ def test_the_facades_declare_nothing_of_their_own() -> None:
 
     `sdk/tools.py` is deliberately not held to this - it re-exports `Tool` *and* carries the
     reporting-tool declaration, and says so in its first paragraph - so this is a test about the
-    three modules that are pure re-export facades and no fourth.
+    two modules that are pure re-export facades and no third. There were three until `Question` and
+    `Answer` left `ports/` for the one workflow that spoke them, taking `sdk/questions.py` with
+    them.
 
-    **`sdk/errors.py` is compared against its own `__all__` where the other two are compared
-    against their port's**, and that is the one asymmetry here. It joined late and it takes the
-    `AglError` hierarchy out of `ports/errors.py` while leaving that module's exit-code table to
+    **`sdk/errors.py` is compared against its own `__all__` where the other is compared against its
+    port's**, and that is the one asymmetry here. It joined late and it takes the `AglError`
+    hierarchy out of `ports/errors.py` while leaving that module's exit-code table to
     `cli/exit_codes.py` - a seam the port itself draws, which is why the test above asserts whole-
-    surface equality for two modules and not for three. Where that cut falls is pinned in
-    `tests/sdk/test_front_door.py`, in both directions and over `ports.errors.__all__`, so a class
-    added to the hierarchy and left off the facade fails there. What is asserted *here* is the
-    claim this test is about and it is the same for all three: the module declares nothing beyond
-    the names it re-exports.
+    surface equality for one of these two modules and not for both. Where that cut falls is pinned
+    in `tests/sdk/test_front_door.py`, in both directions and over `ports.errors.__all__`, so a
+    class added to the hierarchy and left off the facade fails there. What is asserted *here* is the
+    claim this test is about and it is the same for both: the module declares nothing beyond the
+    names it re-exports.
     """
     facades = (
         (sdk_terminal, ports_terminal.__all__),
-        (sdk_questions, ports_questions.__all__),
         (sdk_errors, sdk_errors.__all__),
     )
     for facade, expected in facades:

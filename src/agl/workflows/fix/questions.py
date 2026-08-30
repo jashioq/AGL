@@ -1,7 +1,7 @@
 
 from dataclasses import dataclass
 
-from agl.ports.errors import InternalError
+from agl.sdk import InternalError
 
 __all__ = ["Answer", "Question"]
 

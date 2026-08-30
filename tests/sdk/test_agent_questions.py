@@ -109,7 +109,6 @@ from agl.ports.agent import AgentOutcome, AgentTask, Claude, StopReason, Tool, T
 from agl.ports.errors import InputError
 from agl.ports.home_layout import AglHome, RunScope, step_dir
 from agl.ports.ids import ProjectName, RunLabel, StepName
-from agl.ports.questions import Question
 from agl.ports.run import JsonValue
 from agl.ports.terminal import Choice, Response, Screen, Text, TextInput
 from agl.ports.tree_layout import TreesRoot
@@ -192,6 +191,38 @@ run - so a model that sent a blank question would kill the step over a correctab
 
 
 # --- the views a workflow shows, and the answer type they produce ---------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class Question:
+    """What this file's workflow maps an agent's payload into, declared here because it is its own.
+
+    **AGL has no question type and this is not a stand-in for one.** There was one in `ports/` and
+    a facade over it on the SDK's front door; both are gone, and `Question` and `Answer` now live in
+    `workflows/fix/questions.py`, beside the tool that asks and the view that renders - the same
+    move `ask_the_operator` made, one layer down. Importing that workflow's copy here would be an
+    SDK suite reaching into a shipped workflow for a vocabulary the framework is being asserted not
+    to have, on the one file whose whole thesis is that it has none. So this is a throwaway, three
+    fields wide because `Asked` above is, and it is what `approve` renders.
+
+    **The two refusals are load-bearing rather than decoration.** `_asking` below guards a blank
+    question and normalises the offer-nothing-and-refuse-free-text pair, and both of those lines are
+    written *because* a question nobody could answer raises rather than arriving on screen. A
+    stand-in that accepted anything would leave the guard unexplained, the paragraph arguing for it
+    untrue, and a step that a blank question should have corrected passing either way.
+    """
+
+    prompt: str
+
+    options: tuple[str, ...] = ()
+
+    allow_free_text: bool = True
+
+    def __post_init__(self) -> None:
+        if not self.prompt:
+            raise ValueError("a question with an empty prompt asks nothing and shows nothing")
+        if not self.options and not self.allow_free_text:
+            raise ValueError("that question offers no options and forbids free text")
 
 
 @dataclass(frozen=True)

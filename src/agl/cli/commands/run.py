@@ -6,8 +6,7 @@ from importlib.metadata import EntryPoint
 from typing import Final
 
 from agl import api
-from agl.cli.commands import Registered
-from agl.ports.errors import InternalError
+from agl.cli.commands import Registered, _said
 from agl.ports.ids import RunLabel
 from agl.sdk.params import RefusingParser
 
@@ -67,8 +66,8 @@ def execute(
     *,
     points: Iterable[EntryPoint] | None = None,
 ) -> int:
-    name = _said(parsed, _WORKFLOW)
-    label = RunLabel(_said(parsed, _LABEL))
+    name = _said(parsed, _WORKFLOW, command=NAME)
+    label = RunLabel(_said(parsed, _LABEL, command=NAME))
     project, services = registered()
     asyncio.run(
         api.run(
@@ -85,17 +84,6 @@ def execute(
     return _NOTHING_TO_REPORT
 
 
-def _said(parsed: argparse.Namespace, dest: str) -> str:
-    value = getattr(parsed, dest)
-    if isinstance(value, str):
-        return value
-    raise InternalError(
-        f"the `{NAME}` parser produced {value!r} for {dest!r}, and every argument this module "
-        f"declares is a string it took off the command line. That is AGL's own bug: the parser and "
-        f"the reader are in one file and they disagree"
-    )
-
-
 def _perhaps(parsed: argparse.Namespace, dest: str) -> str | None:
     value = getattr(parsed, dest)
-    return None if value is None else _said(parsed, dest)
+    return None if value is None else _said(parsed, dest, command=NAME)

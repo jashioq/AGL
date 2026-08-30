@@ -1,21 +1,21 @@
 
 from contextlib import AbstractAsyncContextManager
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
 from agl.adapters.git._runner import GitRunner, unreadable
-from agl.adapters.git._trees import deleted, made, registry_lock, run_lock, tidied
+from agl.adapters.git._trees import (
+    _Place,
+    _place,
+    deleted,
+    made,
+    registry_lock,
+    run_lock,
+    tidied,
+)
 from agl.ports.errors import ConflictError, NotFoundError, UpstreamUnexpected
 from agl.ports.ids import Namespace, RunLabel
-from agl.ports.tree_layout import (
-    TreesRoot,
-    base_worktree,
-    run_branch,
-    run_trees_dir,
-    worktree_branch,
-    worktree_dir,
-)
+from agl.ports.tree_layout import TreesRoot, run_trees_dir
 from agl.ports.workspace import Workspace, WorkspaceProvider
 
 __all__ = ["GitWorkspaceProvider"]
@@ -37,7 +37,7 @@ class GitWorkspaceProvider(WorkspaceProvider):
         self._trees = trees
 
     async def open(self, label: RunLabel, namespace: Namespace | None, base: str) -> Workspace:
-        place = self._place(label, namespace)
+        place = _place(self._trees, label, namespace)
         if place.path.is_dir():
             held = await self._branch_at(place.path)
             if held == place.branch:
@@ -61,14 +61,14 @@ class GitWorkspaceProvider(WorkspaceProvider):
         return _GitWorkspace(place, self._git)
 
     async def remove(self, label: RunLabel, namespace: Namespace | None) -> None:
-        place = self._place(label, namespace)
+        place = _place(self._trees, label, namespace)
         deleted(place.path)
         tidied(run_trees_dir(self._trees, label))
         async with registry_lock(self._trees):
             await self._git.run("worktree", "prune", refusal=UpstreamUnexpected, timeout=_ASKING)
 
     async def discard(self, label: RunLabel, namespace: Namespace | None) -> None:
-        place = self._place(label, namespace)
+        place = _place(self._trees, label, namespace)
         try:
             await self._git.run(
                 "branch",
@@ -85,13 +85,6 @@ class GitWorkspaceProvider(WorkspaceProvider):
 
     def hold(self, label: RunLabel) -> AbstractAsyncContextManager[None]:
         return run_lock(run_trees_dir(self._trees, label), str(label))
-
-    def _place(self, label: RunLabel, namespace: Namespace | None) -> _Place:
-        if namespace is None:
-            return _Place(base_worktree(self._trees, label), run_branch(label))
-        return _Place(
-            worktree_dir(self._trees, label, namespace), worktree_branch(label, namespace)
-        )
 
     async def _branch_at(self, path: Path) -> str | None:
         listing = await self._git.run(
@@ -121,13 +114,6 @@ class GitWorkspaceProvider(WorkspaceProvider):
             refusal=UpstreamUnexpected,
             timeout=_ASKING,
         )
-
-
-@dataclass(frozen=True, slots=True)
-class _Place:
-
-    path: Path
-    branch: str
 
 
 class _GitWorkspace(Workspace):

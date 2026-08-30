@@ -23,6 +23,7 @@ __all__ = [
     "StopReason",
     "Tool",
     "ToolResult",
+    "checked_tool_declaration",
 ]
 
 
@@ -97,14 +98,18 @@ class Tool:
     handler: Callable[[Mapping[str, JsonValue]], Awaitable[ToolResult]]
 
     def __post_init__(self) -> None:
-        if not self.name:
-            raise InputError("a tool with an empty name cannot be named by anything calling it")
-        if not self.description:
-            raise InputError(
-                f"tool {self.name!r} has an empty description, and the description is the whole of "
-                f"what the model reads to decide whether this tool is the one it wants"
-            )
+        checked_tool_declaration(self.name, self.description)
         object.__setattr__(self, "payload_schema", MappingProxyType(dict(self.payload_schema)))
+
+
+def checked_tool_declaration(name: str, description: str) -> None:
+    if not name:
+        raise InputError("a tool with an empty name cannot be named by anything calling it")
+    if not description:
+        raise InputError(
+            f"tool {name!r} has an empty description, and the description is the whole of "
+            f"what the model reads to decide whether this tool is the one it wants"
+        )
 
 
 @dataclass(frozen=True, slots=True)

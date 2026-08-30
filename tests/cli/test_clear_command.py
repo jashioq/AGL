@@ -23,6 +23,17 @@ holds no row for success.
 the dispatch. That refusal was written for a grammar that is a label and nothing else; this command
 has a flag on it legitimately, so what the helper says had to become true of both.
 
+**`clear.py`'s `_said` is its own, and stays that way.** `run.py` and `resume.py` held
+byte-identical copies of that argv reader and now share one out of `cli/commands/__init__.py`,
+taking the verb's `NAME`. This module's is deliberately not a third caller of it. Its refusal reads
+"either a string it took off the command line or a flag that is on or off", because this is the one
+command that declares a flag, and `_flagged` raises that same sentence beside it through
+`_disagreeing`. Folding it in would mean handing the shared helper a parameter whose only value is
+that clause - at which point the caller is writing the message again and the helper is saving a line
+by making the sentence somebody else's. `workflows.py`'s `_perhaps` is out for its own reason as
+well as this one: it returns `str | None`, so it is a different function and not a third copy of
+this one.
+
 The bundle is substituted through `main`'s one seam and nothing is monkeypatched, exactly as
 `tests/cli/test_main.py` and `tests/cli/test_resume_command.py` do it.
 """
