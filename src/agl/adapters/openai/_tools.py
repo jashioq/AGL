@@ -3,7 +3,7 @@ from collections.abc import Mapping
 from types import TracebackType
 from typing import Final, Self
 
-from agl.adapters.openai._http import Answer, Listener, token
+from agl.adapters.openai._http import Listener, RpcAnswer, token
 from agl.ports.agent import Tool, ToolResult
 from agl.ports.run import JsonValue
 
@@ -31,7 +31,7 @@ class Caller:
     def __init__(self) -> None:
         self.failure: Exception | None = None
 
-    def failed(self, raised: Exception) -> None:
+    def fail(self, raised: Exception) -> None:
         if self.failure is None:
             self.failure = raised
 
@@ -43,7 +43,7 @@ class Caller:
         try:
             return await tool.handler(payload)
         except Exception as raised:
-            self.failed(raised)
+            self.fail(raised)
             return ToolResult(text=_FAILED.format(name=tool.name, raised=raised), rejected=True)
 
 
@@ -83,7 +83,7 @@ class _Route:
         self._offered = offered
         self._caller = caller
 
-    async def __call__(self, message: Mapping[str, JsonValue]) -> Answer:
+    async def __call__(self, message: Mapping[str, JsonValue]) -> RpcAnswer:
         if "id" not in message:
             return None
         ident = message["id"]

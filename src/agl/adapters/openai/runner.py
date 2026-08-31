@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Final
 
-from agl.adapters.openai._session import _halted, _signal, outcome_of
+from agl.adapters.openai._session import _halt, _signal, outcome_of
 from agl.adapters.openai._tools import Caller, Supply
 from agl.adapters.openai.translate import (
     APPROVAL,
@@ -39,10 +39,14 @@ _CAPABILITIES: Final = frozenset(
     }
 )
 
+# Free on this backend: it exits 0 printing that it is logged in and 1 printing that it is not,
+# both measured, the second against a credential-free home directory.
 _READY: Final = ("login", "status")
 _READY_SECONDS: Final = 30.0
 
 _EXEC: Final = "exec"
+# `-` is what asks the harness to read the prompt from standard input: it is the largest untrusted
+# string here, and one beginning with `-` would parse as a flag while a long one would meet ARG_MAX.
 _FROM_STDIN: Final = "-"
 
 _ALWAYS: Final[tuple[str, ...]] = (
@@ -59,6 +63,8 @@ _ALWAYS: Final[tuple[str, ...]] = (
     *APPROVAL,
 )
 
+# The harness gives an MCP tool call `tool_timeout_sec`, which defaults to 60 - shorter than a
+# person takes to answer, and so the number a mid-run question actually rests on.
 _TOOL_SECONDS: Final = 86_400
 _STARTUP_SECONDS: Final = 30
 
@@ -99,7 +105,7 @@ class OpenAiRunner(AgentRunner):
                 async with asyncio.timeout(_READY_SECONDS):
                     said, _ = await child.communicate()
             except TimeoutError:
-                await _halted(child)
+                await _halt(child)
                 await child.wait()
                 raise unanswered(_READY_SECONDS) from None
             except BaseException:

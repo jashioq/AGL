@@ -140,7 +140,8 @@ def test_abbreviation_is_off_on_the_resume_subparser() -> None:
 
 
 def test_the_command_calls_exactly_one_api_function() -> None:
-    """"Commands stay dumb", made mechanical: this module reaches `api` once, for `resume`.
+    """`ARCHITECTURE.md`'s "Commands stay dumb", made mechanical: this module reaches `api` once,
+    for `resume`.
 
     The same scan `tests/cli/test_run_command.py` makes of the run command, and the same argument:
     a second `api.` name appearing here is a use case moving back into the CLI.

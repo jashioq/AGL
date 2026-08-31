@@ -25,15 +25,25 @@ __all__ = [
 
 
 _READ_ONLY: Final = "read-only"
+# Under `workspace-write` the harness's own default already leaves `.git`, `.codex` and `.agents`
+# read-only inside the working root, which is `NO_VCS_WRITES` enforced by adding nothing.
 _WORKSPACE_WRITE: Final = "workspace-write"
 
 
+# A `-c` override and not a flag: `codex exec` on 0.149.0 has no `-a/--ask-for-approval`, measured
+# against its own parser. `never` rather than `on-request`, which replaces the sentence telling the
+# model not to escalate with a section teaching it to - into a mode that refuses every escalation.
 APPROVAL: Final[tuple[str, ...]] = ("-c", 'approval_policy="never"')
 
 
+# Emitted for `false` as well as `true`, and only under `workspace-write`: `read-only` takes the
+# network with it unasked, and an override there is accepted and changes nothing at all.
 _NETWORK: Final = "sandbox_workspace_write.network_access"
 
 
+# Both `stable` and both on by default. Two rather than one because a harness whose working model is
+# running commands plausibly has a second route - and nothing establishes that a feature switched
+# off in the registry removes the tool from what the model is offered, which is why words go.
 _SHELL_FEATURES: Final = ("features.shell_tool", "features.unified_exec")
 
 

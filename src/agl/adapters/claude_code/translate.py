@@ -30,6 +30,8 @@ __all__ = [
 
 
 def _bash(*commands: str) -> tuple[str, ...]:
+    # The space-star form and not `Bash(x:*)`: the harness classifies a rule ending `:*` as a prefix
+    # rule and an unescaped `*` elsewhere as a glob, and matches the two differently.
     return tuple(f"Bash({command} *)" for command in commands)
 
 
@@ -55,6 +57,8 @@ _GIT_WRITES: Final = (
     "git switch",
     "git tag",
     "git clone",
+    # `config` is here although it is mostly a read: `pull.twohead = ours` makes a merge land none
+    # of the child's work and exit 0, so an agent editing it edits what AGL's own integration means.
     "git config",
     "git fetch",
     "git filter-branch",
@@ -85,8 +89,16 @@ _GIT_WRITES: Final = (
 
 _DENIALS: Final[Mapping[Restriction, tuple[str, ...]]] = MappingProxyType(
     {
+        # `EnterWorktree`/`ExitWorktree` are the harness's own git-worktree management: writing to
+        # version control through a tool rather than through `git`, which is what the pattern rules
+        # cannot see.
         Restriction.NO_VCS_WRITES: ("EnterWorktree", "ExitWorktree", *_bash(*_GIT_WRITES)),
+        # An output redirect's target is checked as a file write against `Edit` rules, and `//`
+        # anchors at the filesystem root rather than at the settings source, so it reaches outside
+        # the workspace too.
         Restriction.NO_FILE_WRITES: ("Edit", "Write", "NotebookEdit", "MultiEdit", "Edit(//**)"),
+        # `Monitor` is here because the PowerShell tool's own refusal message says "Monitor runs
+        # bash"; nothing in the permission reference mentions it.
         Restriction.NO_SHELL: ("Bash", "PowerShell", "Monitor"),
         Restriction.NO_NETWORK: ("WebFetch", "WebSearch"),
     }

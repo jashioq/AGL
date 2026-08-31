@@ -56,7 +56,7 @@ contract 2's lists - so the package root in `source_modules` would be skipped ag
 in `forbidden_modules` skipped against every pure type. No entry there would police it, and
 requiring one would be requiring a decoration. Stated plainly, because it is a real gap rather than
 a covered one: `ports/__init__.py` could import an ABC and contract 2 could not say so. It is one
-line of docstring today, and what guards it is partial and worth knowing exactly:
+empty today, and what guards it is partial and worth knowing exactly:
 `tests/test_ports_stdlib_only.py` holds it, like every module beside it, to importing stdlib and
 `agl.ports` alone - so the reach is bounded, and an ABC is the one import it can still make
 unremarked. The same blind spot `agl/__init__.py` has one ring out, narrowed rather than closed.
@@ -106,8 +106,8 @@ missing section or a missing list, which is the failure mode of a mistyped path.
 
 ## One module, well past the ceiling
 
-At 449 code lines this file is half again `scripts/check`'s 300-line convention - the largest
-margin over it in the repository outside the big adapter suites - and two ways of splitting it were
+At 449 code lines this file is half again `scripts/check`'s 300-line convention - one of the 36
+modules over that ceiling, seventeen of which are larger - and two ways of splitting it were
 considered and refused rather than overlooked.
 
 Splitting **per contract** would make three guards out of one, and what makes this one guard is
@@ -167,7 +167,7 @@ ADAPTERS_PACKAGE: Final = "agl.adapters"
 
 # The one `ports/` member contract 2 cannot police from either list, whatever it were to say.
 PORT_EXEMPT: Final[Mapping[str, str]] = {
-    "__init__.py": "the ports package's own docstring, and the one module import-linter would "
+    "__init__.py": "the ports package root, and the one module import-linter would "
     "skip in both of this contract's lists - see the docstring above",
 }
 
@@ -186,7 +186,7 @@ PORT_EXEMPT: Final[Mapping[str, str]] = {
 # under `adapters/`" carries the argument in full. The list has been confirmed against the tree and
 # both entries below are still the whole of it.
 ADAPTER_EXEMPT: Final[Mapping[str, str]] = {
-    "__init__.py": "the adapters package's own docstring; no adapter lives in it",
+    "__init__.py": "the adapters package root; no adapter lives in it",
     "routing.py": "contract 4's one sanctioned exception: dispatching on task.model.provider "
     "to the vendor runners is its entire job, so it must import other adapters",
 }

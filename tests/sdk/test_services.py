@@ -4,9 +4,9 @@
 and covers it through `container.Services`, the name every existing caller uses. That is exactly
 why it cannot notice the one thing the move could get wrong. A **second** `Services` declared in
 `container.py` beside the imported one would satisfy every assertion in that file -
-`get_type_hints(container.Services) == _PORTS` included - while `Run.services` referred to a
-different class and no bundle the container ever built would be one of them. Identity is the claim
-that file cannot make, so it is made here and nothing else is repeated.
+`get_type_hints(container.Services) == _PORTS | _CONFIGURED` included - while `Run.services`
+referred to a different class and no bundle the container ever built would be one of them. Identity
+is the claim that file cannot make, so it is made here and nothing else is repeated.
 
 The other half is that the type stayed a shape. It may live under `sdk/` while being constructed in
 `config/` only because it holds no decision about how a bundle is assembled; a method on it would
@@ -33,7 +33,7 @@ def test_the_bundle_a_run_carries_is_the_bundle_the_container_builds() -> None:
 
 
 def test_the_bundle_holds_a_shape_and_no_behaviour() -> None:
-    """Eight fields and not one member beside them.
+    """Nine fields and not one member beside them.
 
     This is what makes the split between the type and its construction hold: `config/container.py`
     knows how a bundle is assembled and nothing else does, so a `Services.default()` or a

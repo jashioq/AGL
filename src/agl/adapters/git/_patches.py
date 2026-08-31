@@ -7,6 +7,7 @@ from agl.ports.history import ChangeKind, FileChange
 
 __all__ = ["differences", "patch"]
 
+# git's own rule for a file that is not text: a NUL is the byte a line-oriented format cannot hold.
 _NOT_TEXT: Final = b"\0"
 
 _BEFORE: Final = "a/"

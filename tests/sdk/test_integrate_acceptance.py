@@ -1438,7 +1438,7 @@ async def test_a_landing_a_person_concluded_by_hand_still_goes_through_the_build
     through `retry()` after somebody resolved a collision **by hand** is the landing least like the
     one the framework composed - a person invented it, under time pressure, in a checkout - so a
     `retry` that advanced the parent's chain without building would send exactly that past the one
-    check there is. It does not: `Integrator.retry` concludes the merge, and `_concluded` then
+    check there is. It does not: `Integrator.retry` concludes the merge, and `_conclude` then
     carries it down the same path a first landing takes, gate included.
 
     That is the first half and it is what this test is for. **The second half is what the revert

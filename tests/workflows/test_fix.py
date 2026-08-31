@@ -370,11 +370,13 @@ def test_the_implement_prompt_names_the_asking_tool_this_package_supplies() -> N
     reached only if a model went looking through its tool list for something it had never been told
     was there.
 
-    That paragraph went when the mechanism did and nothing followed it into this package: the
-    sibling prompt names `report_findings` and argues for it at length, and `implement.md` said
-    nothing about asking at all - the same silence, now one layer down and against a tool this
-    workflow supplies itself. Against the fakes it makes no difference, because a scripted agent
-    calls whatever it was written to call; a live model reads the prompt.
+    That paragraph went when the mechanism did, and this package wrote its own in place of it:
+    `implement.md` carries a "How to ask instead of guessing" section naming `ask_the_operator` and
+    saying what each of its fields is for, exactly as the sibling prompt names `report_findings`
+    and argues for it at length. The instruction is a workflow's now rather than the framework's,
+    and it is about a tool this workflow supplies itself. Against the fakes it makes no difference,
+    because a scripted agent calls whatever it was written to call; a live model reads the
+    prompt.
 
     Asserted through `ASK` rather than against the literal name, so renaming the tool fails here
     rather than leaving the prompt naming a tool no session declares. Nothing else couples the two:
@@ -420,7 +422,7 @@ def test_the_workflow_declares_its_params_and_its_version_and_no_roles_at_all() 
     resume that missed would have been re-bought silently; the bump turns that into a refusal that
     names the mismatch. `ARCHITECTURE.md`'s "Bump `@workflow(version=…)` when a workflow's shape
     changes" is the rule, and `test_the_declared_implementer_requires_less_than_the_asking_one_and
-    _says_so` above is where the digest moving is measured rather than asserted.
+    _says_so` below is where the digest moving is measured rather than asserted.
 
     `fix.params` is still `FixParams` and the assertion below did not move, but what it asserts did:
     the class is now read off `async def fix(run: Run[FixParams])` rather than off a second copy of
@@ -1025,10 +1027,9 @@ def _agent(seen: list[testing.AgentTask], *, found: Sequence[Finding]) -> testin
     which is now also visible in what it does *not* call: `ASK` is on `task.tools` for both
     implement steps and this agent never names it.
 
-    `seen` is the instrument, and the agent fakes say outright that this is where a test's
-    knowledge belongs: there is no recorder on either of them, because "what a test wants to know is
-    already held by the tool handlers it supplied itself"
-    (`adapters/claude_code/fake.py`, and `adapters/openai/fake.py` word for word). Every claim below
+    `seen` is the instrument, and it is where a test's knowledge belongs: neither agent fake
+    carries a recorder, because what a test wants to know is already held by the tool handlers it
+    supplied itself. Every claim below
     about *what an agent was asked* - the composed prompt, the model, the provider, how many times
     it was paid for - is read out of this list.
     """

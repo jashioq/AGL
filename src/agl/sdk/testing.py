@@ -28,6 +28,8 @@ class Call:
                 "a call to a tool the task does not declare - refused here, the line that needs "
                 "fixing is the one on screen rather than one inside a run"
             )
+        # A plain `dict` and never a `MappingProxyType`: a payload goes through `json.dumps` inside
+        # both fakes on its way to a handler, and `json.dumps` has no encoder for a proxy.
         object.__setattr__(self, "payload", dict(self.payload))
 
 

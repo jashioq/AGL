@@ -1,5 +1,6 @@
 
 from abc import ABC, abstractmethod
+from typing import Final
 
 from rich.console import Console, RenderableType
 from rich.live import Live
@@ -7,7 +8,7 @@ from rich.text import Text as RichText
 
 __all__ = ["Display", "display_for"]
 
-_NOTHING: RenderableType = RichText("")
+_NOTHING: Final[RenderableType] = RichText("")
 
 
 class Display(ABC):
@@ -38,6 +39,9 @@ class Animating(Display):
     __slots__ = ("_live",)
 
     def __init__(self, console: Console) -> None:
+        # `Live` replaces the process-global `sys.stdout` and `sys.stderr` while it is up and only
+        # `stop()` puts them back; `transient=True` would erase the region, taking the final board
+        # with it.
         self._live = Live(console=console, auto_refresh=False, transient=False)
 
     def start(self) -> None:

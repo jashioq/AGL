@@ -63,9 +63,9 @@ and `HeadlessTerminalContract` never asks for one.
 
 An interactive `show` blocks until someone answers, and several tests below turn on something that
 might never resolve at all. Without a deadline those are hanging tests, which look like slow ones -
-`_agent_questions` makes the same argument about a run that never returns. `DEADLINE` is generous
-enough that nothing under it is slowness; anything over it is a screen nobody is ever going to
-answer.
+`_agent_tasks.py`'s `RUN_DEADLINE` makes the same argument about a run that never returns.
+`DEADLINE` is generous enough that nothing under it is slowness; anything over it is a screen
+nobody is ever going to answer.
 
 `SETTLE` is the other direction and is the one number here that touches frames. It is how long a
 test waits before asserting that something did *not* happen - that a queued question stayed queued,

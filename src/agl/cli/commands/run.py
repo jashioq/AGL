@@ -16,6 +16,8 @@ NAME: Final = "run"
 
 _WORKFLOW: Final = "workflow"
 _LABEL: Final = "label"
+# `--from` would otherwise land on the attribute `from`, a keyword and unreachable except by
+# `getattr`.
 _BASE_REF: Final = "base_ref"
 
 _LABEL_FLAGS: Final = ("-n", "--name")
@@ -23,6 +25,8 @@ _BASE_REF_FLAGS: Final = ("--from",)
 
 _NOTHING_TO_REPORT: Final = 0
 
+# `argparse` has no public spelling for what `add_subparsers` returns, and the alternative is
+# `Any`, which is the one thing `mypy --strict` is here to keep out of the seam.
 type _Commands = argparse._SubParsersAction[RefusingParser]
 
 

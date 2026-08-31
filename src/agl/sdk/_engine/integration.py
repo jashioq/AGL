@@ -32,7 +32,7 @@ class Leases:
         except BaseException:
             lock.release()
             raise
-        lease = Lease(target, lock, admit, self._returned)
+        lease = Lease(target, lock, admit, self._forget)
         self._live[target] = lease
         return lease
 
@@ -40,7 +40,7 @@ class Leases:
         for lease in tuple(self._live.values()):
             lease.release()
 
-    def _returned(self, lease: Lease) -> None:
+    def _forget(self, lease: Lease) -> None:
         if self._live.get(lease.target) is lease:
             del self._live[lease.target]
 
@@ -52,21 +52,23 @@ class Lease:
         target: RunScope,
         lease: asyncio.Lock,
         admit: Callable[[], None],
-        returned: Callable[[Lease], None],
+        forget: Callable[[Lease], None],
     ) -> None:
         self.target = target
         self._lease = lease
         self._admit = admit
-        self._returned = returned
+        self._forget = forget
         self._released = False
 
     def release(self) -> None:
+        # Idempotent because `release_all` runs from `api.run`'s `finally` over whatever is already
+        # ending the run, and `asyncio.Lock.release` on a lock nobody holds raises `RuntimeError`.
         if self._released:
             return
         self._released = True
         self._admit()
         self._lease.release()
-        self._returned(self)
+        self._forget(self)
 
 
 class Integration:
@@ -129,7 +131,7 @@ class Integration:
                 outcome = None
             if outcome is None:
                 outcome = await self._integrator.land(self._source, self._target)
-            await self._concluded(outcome, again=False)
+            await self._conclude(outcome, again=False)
         except BaseException:
             self._settle()
             raise
@@ -142,7 +144,7 @@ class Integration:
         finally:
             self._settle()
 
-    async def _concluded(self, outcome: IntegrationOutcome, *, again: bool) -> None:
+    async def _conclude(self, outcome: IntegrationOutcome, *, again: bool) -> None:
         if outcome.conflicted:
             self._conflict = outcome.conflict
             self._head = None
@@ -157,7 +159,7 @@ class Integration:
         if not await self._history.contains(await self._source.head(), head):
             if again:
                 raise InternalError(_still_not_in(self._source.branch, self._target.branch, head))
-            await self._concluded(
+            await self._conclude(
                 await self._integrator.land(self._source, self._target), again=True
             )
             return
@@ -211,7 +213,7 @@ async def integrate(
             before=await parent.head(),
             lease=lease,
         )
-        await integration._concluded(
+        await integration._conclude(
             await services.integrator.land(child, parent), again=False
         )
     except BaseException:

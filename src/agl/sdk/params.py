@@ -9,7 +9,7 @@ from typing import Any, Final, NoReturn, overload
 
 from agl.ports.errors import InputError
 from agl.ports.run import JsonValue
-from agl.sdk._declarations import _describe, _hints
+from agl.sdk._declarations import annotations_of, named
 
 __all__ = ["RefusingParser", "arg", "from_json", "parse", "parser_for", "to_json"]
 
@@ -19,6 +19,8 @@ _FLAG_CHARACTERS: Final = frozenset(ascii_letters + digits + "-_")
 
 _PARSEABLE: Final = (str, int, float)
 
+# `float` admits an `int` because `arg(default=3)` on a float field stores an `int` and `from_json`
+# must read back what `to_json` wrote; PEP 484 widens the same way. A `bool` is already an `int`.
 _ADMITTED: Final = ((bool, (bool,)), (int, (int,)), (float, (int, float)), (str, (str,)))
 
 
@@ -62,12 +64,12 @@ def arg(*flags: str, default: Any = MISSING, help: str = "") -> Any:
 
 def parser_for(params: type[object], *, prog: str | None = None) -> RefusingParser:
     if not is_dataclass(params):
-        raise InputError(f"{_describe(params)} is not a dataclass of `arg()` fields")
+        raise InputError(f"{named(params)} is not a dataclass of `arg()` fields")
     parser = RefusingParser(prog=prog, add_help=False, allow_abbrev=False)
-    hints = _hints(params)
+    hints = annotations_of(params)
     claimed: dict[str, str] = {}
     for spec in fields(params):
-        where = f"{_describe(params)}.{spec.name}"
+        where = f"{named(params)}.{spec.name}"
         declared = spec.metadata.get(_METADATA_KEY)
         if not isinstance(declared, _Declared):
             raise InputError(
@@ -97,10 +99,10 @@ def parse[T](params: type[T], argv: Sequence[str], *, prog: str | None = None) -
 def to_json(instance: object) -> Mapping[str, JsonValue]:
     if isinstance(instance, type) or not is_dataclass(instance):
         raise InputError(
-            f"{_describe(instance)} is not an instance of a params dataclass: a run record stores "
+            f"{named(instance)} is not an instance of a params dataclass: a run record stores "
             f"the parameters a workflow was given, not the class describing them"
         )
-    kind = _describe(type(instance))
+    kind = named(type(instance))
     return MappingProxyType({
         spec.name: _storable(f"{kind}.{spec.name}", getattr(instance, spec.name))
         for spec in fields(instance)
@@ -108,9 +110,9 @@ def to_json(instance: object) -> Mapping[str, JsonValue]:
 
 
 def from_json[T](params: type[T], data: Mapping[str, JsonValue]) -> T:
-    kind = _describe(params)
+    kind = named(params)
     declared = _field_names(params)
-    hints = _hints(params)
+    hints = annotations_of(params)
     missing = [name for name in declared if name not in data]
     unknown = sorted(repr(key) for key in data if key not in declared)
     if missing or unknown:
@@ -129,7 +131,7 @@ def from_json[T](params: type[T], data: Mapping[str, JsonValue]) -> T:
 
 def _field_names(params: object) -> tuple[str, ...]:
     if not is_dataclass(params):
-        raise InputError(f"{_describe(params)} is not a dataclass of `arg()` fields")
+        raise InputError(f"{named(params)} is not a dataclass of `arg()` fields")
     return tuple(spec.name for spec in fields(params))
 
 
@@ -139,13 +141,13 @@ def _restored(where: str, hint: object, value: JsonValue) -> JsonValue:
             if isinstance(value, admitted):
                 return value
             raise InputError(
-                f"{where} is declared a {_describe(hint)} and the record holds {value!r}. A run's "
+                f"{where} is declared a {named(hint)} and the record holds {value!r}. A run's "
                 f"parameters are read back exactly as they were stored and never converted into "
                 f"what a field now says it holds, so this is the workflow's params class having "
                 f"moved under a version that did not"
             )
     raise InputError(
-        f"{where} is a {_describe(hint)}, and a parameter is a str, an int, a float or a bool: "
+        f"{where} is a {named(hint)}, and a parameter is a str, an int, a float or a bool: "
         f"what a shell hands over as text and what `run.json` holds unchanged. This record was "
         f"written when the field was one of the four, and reading it back needs it to still be"
     )
@@ -167,6 +169,7 @@ def _storable(where: str, value: object) -> JsonValue:
 
 
 def _consumes(where: str, hint: object, default: object) -> dict[str, Any]:
+    # `bool("false")` is `True`, which is why a bool field is a switch and never a converter.
     if hint is bool:
         if default is not False:
             raise InputError(
@@ -179,7 +182,7 @@ def _consumes(where: str, hint: object, default: object) -> dict[str, Any]:
         if hint is kind:
             return {"type": kind}
     raise InputError(
-        f"{where} is a {_describe(hint)}, and a parameter is a str, an int, a float or a bool: "
+        f"{where} is a {named(hint)}, and a parameter is a str, an int, a float or a bool: "
         f"what a shell hands over as text and what `run.json` holds unchanged"
     )
 
@@ -192,6 +195,9 @@ def _unusable_flag(flag: str) -> str | None:
         return "it is dashes and nothing else"
     if not flag.startswith("--") and len(name) != 1:
         return f"a single dash introduces a one-character flag - write '--{name}' for a longer name"
+    # A flag's name starts with a letter because `argparse` decides whether `-1` on the command line
+    # is a number or a flag by looking at what flags exist - so one such declaration would change
+    # how every *other* argument is read.
     if name[0] not in ascii_letters:
         return "a flag's name starts with an ASCII letter"
     for index, character in enumerate(name):

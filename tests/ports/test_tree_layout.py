@@ -333,9 +333,9 @@ def test_one_run_addressed_in_both_layouts_is_two_different_places(tmp_path: Pat
 def test_the_layout_is_pure_computation_and_imports_nothing_that_could_make_it_otherwise() -> None:
     """No worktree is created here, nothing is read, and `agl.ports.home_layout` is not imported.
 
-    Read off the parsed source, so the prose in that module may name the things its code may
-    not. `PURE_IMPORTS` holds neither layout module, which is how "neither imports the other"
-    is checked rather than promised.
+    Read off the parsed source rather than grepped, so a module named in a string or a comment is
+    not read as an import of it. `PURE_IMPORTS` holds neither layout module, which is how "neither
+    imports the other" is checked rather than promised.
     """
     assert impurities(tree_layout) == set()
     assert imported_modules(tree_layout) <= PURE_IMPORTS

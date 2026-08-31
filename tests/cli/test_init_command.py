@@ -237,7 +237,8 @@ def test_the_init_parser_holds_no_arguments_at_all(tmp_path: Path) -> None:
 
 
 def test_the_command_calls_exactly_one_api_function() -> None:
-    """"Commands stay dumb", made mechanical - and this is a command the rule was written for.
+    """`ARCHITECTURE.md`'s "Commands stay dumb", made mechanical - and this is a command the rule
+    was written for.
 
     The command this replaces did build-tool detection, TOML rendering and template writing in ~150
     lines. The same scan the other command suites make: a second `api.` name here is that use case

@@ -21,10 +21,7 @@ all = ["agl[claude,terminal]"]
 agl = "agl.cli.main:main"
 
 # Workflows register themselves here: one line per workflow, and no central table to edit.
-# Both lines are shipped workflows. A third stood here from stage 10 to 19.1 - `noop`, the wiring
-# probe that did nothing, whose only job was to prove that argv reached a workflow function through
-# the installed group; stage 12 gave `run.step` to workflows that do work, and 19.1 deleted the
-# probe, its package and this line together.
+# Both lines below are shipped workflows.
 # An edit here is not seen until the distribution is rebuilt: `entry_points.txt` is a build
 # artifact, and tests/config/test_registry.py reads the real installed group. Refresh with
 # `uv pip install -e . --no-deps` after touching this table - that test compares this table against
@@ -86,7 +83,35 @@ src = ["src", "tests"]
 extend-exclude = ["reference", "scratchpad"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B"]
+# `N` is pep8-naming, and it is what makes the naming convention in `CLAUDE.md` mechanical rather
+# than a thing reviewers remember: N801 for classes, N806 for locals, N803 for arguments, N815 for
+# class attributes. The rules `N` cannot see - a past participle on a `-> None` function, `_check_x`
+# against `_checked_x`, a `ports/` type redefined elsewhere, a test name that is not a sentence -
+# are in `tests/test_naming_convention.py`, and the two are meant to be read together.
+select = ["E", "F", "I", "UP", "B", "N"]
+
+# N818 wants every exception named `...Error`, and AGL's are named for what happened. `Stop` is the
+# case that settles it: it is on the SDK front door, listed in `ARCHITECTURE.md`'s `sdk/` layer
+# alongside `@workflow` and `Run`, and a workflow author raises it to end a run - `StopError` would
+# be a worse name for the thing an author writes. `ports/errors.py`'s `UpstreamUnavailable` and
+# `UpstreamUnexpected` read the same way, and thirteen test exceptions under nine names are
+# deliberately named so that a failure reads as a sentence: `_Barricade`, `Wobble`, `Exploded`,
+# `_Crash`, `ToolFailed`, `ReporterFailed`, `Refused`, `Interrupted`, `_UnmappedBranch`. The base
+# class is what makes them errors; the name is what says which one. Repo-wide because the decision
+# is repo-wide - the hierarchy in `ports/errors.py` is where it is made and every test class
+# follows it - and this is the only one of pep8-naming's rules that is off. Note that a `ruff
+# check --select N` on the command line outranks this line and reports all sixteen again; the lint
+# gate runs a bare `ruff check`, which reads it.
+ignore = ["N818"]
+
+[tool.ruff.lint.per-file-ignores]
+# `do_HEAD`, `do_GET`, `do_POST` and their four siblings are `http.server`'s dispatch table:
+# `BaseHTTPRequestHandler.handle_one_request` looks up `"do_" + command` by exact spelling, so the
+# capitals are the standard library's and not ours to rename. That is the naming convention's
+# "mirror the vendor exactly and never translate" applied to the stdlib. Scoped to the one file
+# rather than ignored globally, so the exemption says where it applies - a `do_GET` written
+# anywhere else is a mistake and still fails.
+"tests/instruments/loopback.py" = ["N815"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -97,13 +122,14 @@ asyncio_default_fixture_loop_scope = "function"
 #
 # What it is for: a test that hangs is worse than one that fails. A failure names a clause; a hang
 # stalls the run, and a mutation that survived is then indistinguishable from a machine that wedged.
-# `tests/sdk/test_leases.py:249` is the case that bought this - two `await leases.claim(...)` calls
-# on two different targets, neither of them under a bound, so a lease made coarser than per-target
-# suspends the second one forever - and the very next test in that file is the one whose docstring
-# promises "nothing here can hang and pass". Whatever else that pair is, it is not the last one
-# anybody will write, which is the argument for a **global default** over a marker on whichever
-# tests somebody already thought about: the same argument `scripts/check`'s paid-endpoint probe
-# makes when it writes a file that did not exist when the guard did. A default protects the test
+# `tests/sdk/test_leases.py`'s `test_release_all_gives_back_every_live_lease_and_not_merely_one` is
+# the case that bought this - two `await leases.claim(...)` calls on two different targets, neither
+# of them under a bound, so a lease made coarser than per-target suspends the second one forever -
+# and the very next test in that file is the one whose docstring promises "nothing here can hang
+# and pass". Whatever else that pair is, it is not the last one anybody will write, which is the
+# argument for a **global default** over a marker on whichever tests somebody already thought
+# about: the same argument `scripts/check`'s paid-endpoint probe makes when it writes a file that
+# did not exist when the guard did. A default protects the test
 # written next year; a marker protects the test whose author already knew.
 #
 # Why 60: measured, not guessed. `pytest --durations=20` puts the slowest single test in this suite

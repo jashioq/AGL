@@ -200,7 +200,7 @@ async def test_a_released_lease_leaves_the_live_table_and_run_exit_then_says_not
     """`_live` holds a lease exactly while it is unreleased, which is what makes run exit safe.
 
     `Leases.release_all` iterates that table over whatever exception is already ending the run, and
-    `Lease.release` evicts through `_returned` - so a lease that stayed in the table after being
+    `Lease.release` evicts through `_forget` - so a lease that stayed in the table after being
     released would be released a second time from `api.run`'s `finally`, and an `asyncio.Lock`
     released twice raises `RuntimeError`. That would replace the workflow's real failure with an
     error about a lock, on the way out.

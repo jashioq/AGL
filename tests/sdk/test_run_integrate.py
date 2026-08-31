@@ -391,7 +391,7 @@ async def test_the_root_run_refuses_to_integrate_and_says_main_is_unaddressable(
     )
     assert "worktree" in said, (
         "the refusal does not say what a caller should have done instead. Only a child opened with "
-        "`run.worktree(name)` has a parent to land into, and that is the whole of the fix"
+        "`run.worktree(namespace)` has a parent to land into, and that is the whole of the fix"
     )
 
 
@@ -1222,7 +1222,7 @@ async def test_retry_after_a_failed_gate_lands_again_and_goes_through_the_gate_a
     is the least framework-shaped landing there is: either a person resolved a collision by hand in
     the target's checkout, or a build was fixed and offered again. Either way it is a state nothing
     in AGL composed, and a `retry` that advanced the parent's chain without building would send
-    exactly that state past the one check there is. There is one path and `_concluded` is it, so
+    exactly that state past the one check there is. There is one path and `_conclude` is it, so
     every landing - first, re-landed, or human-concluded - is checked for containment and then built
     before anything advances.
 
@@ -1281,7 +1281,7 @@ async def test_a_retry_that_collides_leaves_no_trace_of_the_gate_that_refused_th
     """One outcome reaching a *second* terminal state, which no other test in this file produces.
 
     Every other conflict here follows an outcome to one ending and stops, so `_verdict` is already
-    `None` when the conflicted branch of `_concluded` runs and clearing it is indistinguishable
+    `None` when the conflicted branch of `_conclude` runs and clearing it is indistinguishable
     from not clearing it. The sequence below is the one where it is not:
 
       * the gate refuses the landing, so the field is set - the `VerifierOutcome` of the build that
@@ -1361,7 +1361,7 @@ async def test_refused_by_the_gate_is_true_for_a_red_build_and_false_for_a_textu
     one branch, by an author who does not have to ask which kind of "would not combine" this is.
 
     **`verdict` is what tells them apart**, and this predicate is that reading given a name.
-    `_gated` sets the field on every refusal and `_concluded` clears it on every textual conflict,
+    `_gated` sets the field on every refusal and `_conclude` clears it on every textual conflict,
     so a live conflict carrying a verdict is the gate's and one carrying none is the integrator's.
     The distinction earns a name because the two screens are different things: a list of files
     somebody has to open, against a build log with no file in it anywhere.
@@ -1491,7 +1491,7 @@ async def test_a_retry_whose_landing_raises_settles_it_and_gives_the_targets_lea
 
       * released but unsettled, the guard at the top of `retry()` lets a second call through, and
         that call acts on a landing nothing is holding - the lease is gone, so that namespace's
-        step lock is gone with it. Should it succeed, `_concluded` calls `_journal.advance(head)`
+        step lock is gone with it. Should it succeed, `_conclude` calls `_journal.advance(head)`
         having given the step lock back, so a step in the parent may be running against the very
         checkout the landing is writing. That is precisely what the lease is for, and it is the
         state `_nothing_to_retry` exists to refuse;

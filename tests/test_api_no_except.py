@@ -37,7 +37,7 @@ is asserted here, and the pair is the whole of what the docstring used to carry.
 ## The subtlety, and why this file counts handlers and not statements
 
 **`api.py` contains a `try` and must keep it.** The framework takes a lease per integration target
-and makes `run` exit the sweeper rather than the lifetime, so the last two lines of `_walked` - the
+and makes `run` exit the sweeper rather than the lifetime, so the last two lines of `_walk` - the
 tail `run` and `resume` both call, and the only place in this module either of them reaches the
 workflow's function - are a `finally` around it. A `finally` sees no exception, names no class and
 can decide nothing: control leaves it carrying whatever arrived, `Stop` subclass and all.
@@ -87,7 +87,7 @@ from agl import api as api_module
 # and only something that stopped reading the real module can fail it.
 NODES_TODAY: Final = 300
 
-# The `try` statements, asserted present. One today, in `_walked` - the tail `run` and `resume`
+# The `try` statements, asserted present. One today, in `_walk` - the tail `run` and `resume`
 # share - a `finally` giving back the integration leases the workflow was still holding. There were
 # two, one written out per caller, until that tail was folded into one function; the number came
 # down on purpose and the witness survives, which is what this paragraph is for. A measurement
@@ -154,7 +154,7 @@ def test_api_holds_no_except_clause_of_any_width_anywhere_in_it() -> None:
     sweeps = sum(1 for node in ast.walk(tree) if isinstance(node, ast.Try | ast.TryStar))
     assert sweeps >= SWEEPS_TODAY, (
         f"{module} holds {sweeps} `try` statement(s) and held {SWEEPS_TODAY} when this was "
-        f"written, in `_walked` - the tail `run` and `resume` share - a `finally` releasing the "
+        f"written, in `_walk` - the tail `run` and `resume` share - a `finally` releasing the "
         f"integration leases the workflow was still holding. A `try` is legal here and a handler "
         f"is not - that "
         f"is the whole distinction this file exists to hold, and this assertion is its witness. If "

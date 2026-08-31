@@ -20,11 +20,15 @@ _WIRE_KEYS: Final = (
     "created_at",
 )
 
+# The `Z` and not `isoformat`'s `+00:00`, and whole seconds, which is all this wire form holds.
 _WIRE_TIME: Final = "%Y-%m-%dT%H:%M:%SZ"
 
 _SHA_CHARACTERS: Final = frozenset("0123456789abcdef")
+# A git object id: sha1 is 40 characters of lowercase hexadecimal, sha256 is 64.
 _SHA_LENGTHS: Final = frozenset({40, 64})
 
+# Unicode's category for a surrogate: the one kind of code point a `str` may hold and UTF-8 cannot
+# encode at all.
 _SURROGATE: Final = "Cs"
 
 _STORE_REFUSES: Final = (
@@ -48,7 +52,7 @@ class WireShape:
 
     moment_name: str
 
-    def checked(self, data: Mapping[str, object]) -> None:
+    def check(self, data: Mapping[str, object]) -> None:
         missing = [key for key in self.keys if key not in data]
         unknown = sorted(repr(key) for key in data if key not in self.keys)
         if missing or unknown:
@@ -140,7 +144,7 @@ class RunSpec:
     def from_json(cls, data: object) -> RunSpec:
         if not isinstance(data, Mapping):
             raise InternalError(f"a run record is a JSON object, not a {type(data).__name__}")
-        _WIRE.checked(data)
+        _WIRE.check(data)
         params = data["params"]
         if not isinstance(params, Mapping):
             raise InternalError(

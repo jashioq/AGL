@@ -84,7 +84,7 @@ async def run(
 
     async with services.workspaces.hold(label):
         await services.store.write_record(scope, spec.to_json())
-        await _walked(services, wf, scope, spec, given)
+        await _walk(services, wf, scope, spec, given)
 
 
 async def resume(
@@ -119,7 +119,7 @@ async def resume(
     await preflight.check(services.agents, wf.fn)
 
     async with services.workspaces.hold(label):
-        await _walked(services, wf, scope, spec, given)
+        await _walk(services, wf, scope, spec, given)
 
 
 async def clear(
@@ -182,7 +182,7 @@ def workflow_help(name: str, *, points: Iterable[EntryPoint] | None = None) -> s
     return params.parser_for(wf.params, prog=f"agl run {name}").format_help()
 
 
-async def _walked(
+async def _walk(
     services: Services, wf: Workflow[object], scope: RunScope, spec: RunSpec, given: object
 ) -> None:
     await services.workspaces.open(scope.label, None, spec.base_sha)

@@ -17,6 +17,9 @@ __all__ = [
 
 
 _BASE_DIRNAME: Final = "_base"
+# Refs are files under `refs/heads/`, so `agl/<label>` and `agl/<label>/<name>` cannot both exist -
+# one would have to be a file and a directory at once - in either creation order. The infix is what
+# keeps them apart, and `git check-ref-format` passes each name on its own and never sees the pair.
 _WORK_INFIX: Final = "_work"
 _BRANCH_PREFIX: Final = "agl"
 _BRANCH_SEPARATOR: Final = "/"

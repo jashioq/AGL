@@ -174,12 +174,12 @@ class TestTheSetCollapsesOntoOneScalar:
     def test_no_file_writes_is_the_only_thing_that_decides_the_mode(
         self, restrictions: frozenset[Restriction]
     ) -> None:
-        """The three-row table in the module docstring, asserted as the one branch it claims to be.
+        """One membership test decides the mode, asserted over every subset of `Restriction`.
 
-        This is the assertion that keeps the collapse *legible*: a reader is told that one
-        membership test decides the mode, and a second condition creeping in - a mode that also
-        depended on `NO_SHELL`, say - would make the docstring's table a description of something
-        that no longer happens.
+        This is the assertion that keeps the collapse *legible*: `sandbox` reads `NO_FILE_WRITES`
+        and nothing else to choose between the two modes, and a second condition creeping in - a
+        mode that also depended on `NO_SHELL`, say - would be a branch no reader of this file was
+        told about.
         """
         expected = "read-only" if Restriction.NO_FILE_WRITES in restrictions else "workspace-write"
         assert sandbox(restrictions).mode == expected

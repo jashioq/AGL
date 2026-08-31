@@ -1,8 +1,8 @@
 """The SDK's front door: `agl.sdk` re-exports the authoring surface, and this is what keeps it true.
 
-`from agl.sdk import Screen` became true late: `ARCHITECTURE.md`'s "The layers" and
-`ports/terminal.py` had both written that line for most of the build, and until then it raised
-`ImportError`. What a package-level re-export costs is a second list to keep in step with eight
+`from agl.sdk import Screen` became true late: for most of the build there was no package-level
+re-export and that line raised `ImportError`, so an author reached for `agl.ports` instead. What a
+package-level re-export costs is a second list to keep in step with eight
 others - the `__all__` of every module directly under `src/agl/sdk/`, `_declarations.py` now among
 them - and this file is what notices when they stop agreeing. `tests/test_contract_listings.py` is
 the precedent and the argument is its own: "the silence is the defect, not the gap" - a name missing
@@ -118,10 +118,10 @@ _OFF_THE_SURFACE: Final[Mapping[str, str]] = {
     "agl.sdk.testing": "the scripting vocabulary, re-exported by `agl/testing.py` beside the "
     "`harness` that is useless without it - one front door for a test, one for a workflow",
     "agl.sdk._declarations": "internal: the two helpers `params.py`, `tools.py` and `workflow.py` "
-    "read an author's declaration with - `_hints` resolves its annotations and `_describe` names a "
-    "class in the refusal when they will not resolve. Its whole `__all__` is those two private "
-    "names, so nothing here could reach the door even by accident, and it is listed anyway "
-    "because a module under `agl.sdk` that is in neither `_DOOR` nor here is unclassified",
+    "read an author's declaration with - `annotations_of` resolves its annotations and `named` "
+    "names a class in the refusal when they will not resolve. Both are public spellings, as every "
+    "private module's members are: the underscore is on the module and is what says the surface, "
+    "so this listing is what keeps them off the door and not the names themselves",
     "agl.sdk._engine.services": "internal: `sdk/_engine/__init__.py` says it is not part of the "
     "surface a workflow author imports",
     "agl.sdk._engine.journal": "internal, for the same reason",

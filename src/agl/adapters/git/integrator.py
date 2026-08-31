@@ -17,12 +17,19 @@ _MERGING: Final = (
     "-c",
     "rerere.enabled=false",
     "merge",
+    # Named because `pull.twohead = ours` is a user setting that makes a two-head merge exit 0,
+    # report a head, and contain none of the child's work.
     "--strategy=ort",
     "--no-ff",
+    # Both the merge and the commit that concludes one open an editor otherwise, and this child has
+    # none.
     "--no-edit",
     "--no-verify",
     "--no-gpg-sign",
     "--no-verify-signatures",
+    # `git merge` takes `--abort`, `--quit` and `--continue`, and `-F <path>` reads a file into the
+    # message - so a branch named `--abort` would release a landing and `--file=/etc/passwd` publish
+    # one.
     "--end-of-options",
 )
 
@@ -51,6 +58,9 @@ class GitIntegrator(Integrator):
             await self._git.run(
                 *_MERGING, source.branch, cwd=target.path, refusal=UpstreamUnexpected
             )
+        # `git merge` exits 1 both for a conflict and for "that is not something we can merge", so
+        # the exit status alone cannot tell a held target from a refused one - only asking what the
+        # target is now can.
         except UpstreamUnexpected:
             if not await self._held(target):
                 raise

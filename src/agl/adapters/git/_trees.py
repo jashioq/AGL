@@ -20,9 +20,11 @@ from agl.ports.tree_layout import (
     worktree_dir,
 )
 
-__all__ = ["deleted", "made", "registry_lock", "run_lock", "tidied"]
+__all__ = ["delete", "make", "registry_lock", "run_lock", "tidy"]
 
 
+# Never unlinked. A lock file deleted on release is one a second process can still hold by inode
+# while a third creates a new file at the same path and takes that - two holders of one mutex.
 _LOCK_FILENAME: Final = "worktrees.lock"
 
 _LOCK_TIMEOUT: Final = 600.0
@@ -37,7 +39,7 @@ async def registry_lock(trees: TreesRoot) -> AsyncIterator[None]:
     lock = trees.path / _LOCK_FILENAME
     handle = _opened(lock)
     try:
-        await _held(handle, lock)
+        await _hold(handle, lock)
         try:
             yield
         finally:
@@ -48,10 +50,10 @@ async def registry_lock(trees: TreesRoot) -> AsyncIterator[None]:
 
 @asynccontextmanager
 async def run_lock(directory: Path, label: str) -> AsyncIterator[None]:
-    made(directory)
+    make(directory)
     handle = _opened_run(directory)
     try:
-        _claimed(handle, directory, label)
+        _claim(handle, directory, label)
         try:
             yield
         finally:
@@ -60,14 +62,14 @@ async def run_lock(directory: Path, label: str) -> AsyncIterator[None]:
         os.close(handle)
 
 
-def made(directory: Path) -> None:
+def make(directory: Path) -> None:
     try:
         directory.mkdir(parents=True, exist_ok=True)
     except OSError as error:
         raise _translated(error, f"the run directory at {directory}") from error
 
 
-def deleted(checkout: Path) -> None:
+def delete(checkout: Path) -> None:
     try:
         shutil.rmtree(checkout)
     except (FileNotFoundError, NotADirectoryError):
@@ -76,7 +78,7 @@ def deleted(checkout: Path) -> None:
         raise _translated(error, f"the checkout at {checkout}") from error
 
 
-def tidied(directory: Path) -> None:
+def tidy(directory: Path) -> None:
     try:
         directory.rmdir()
     except OSError:
@@ -106,12 +108,15 @@ def _opened(lock: Path) -> int:
 
 def _opened_run(directory: Path) -> int:
     try:
+        # `flock(2)` excludes on the inode behind a descriptor rather than on a path, and takes one
+        # on a directory as readily as on a file - so nothing is ever read or written through this
+        # one.
         return os.open(directory, os.O_RDONLY)
     except OSError as error:
         raise _translated(error, f"the run directory at {directory}") from error
 
 
-def _claimed(handle: int, directory: Path, label: str) -> None:
+def _claim(handle: int, directory: Path, label: str) -> None:
     try:
         fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
@@ -125,7 +130,7 @@ def _claimed(handle: int, directory: Path, label: str) -> None:
         raise _translated(error, f"the run directory at {directory}") from error
 
 
-async def _held(handle: int, lock: Path) -> None:
+async def _hold(handle: int, lock: Path) -> None:
     deadline = time.monotonic() + _LOCK_TIMEOUT
     while True:
         try:

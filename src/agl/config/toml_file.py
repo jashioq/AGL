@@ -41,8 +41,12 @@ _PROJECT_KEYS: Final = (_NAME, _REPO, _TREES_ROOT, _BUILD, _BUILD_TIMEOUT)
 
 _HOME_KEYS: Final = frozenset({"home", "agl_home", "AGL_HOME"})
 
+# Tested for existence and never for being a directory: a linked worktree or a submodule writes a
+# file holding a `gitdir:` line there instead.
 _GIT: Final = ".git"
 
+# The escapes a TOML basic string requires, as the format defines them; every other control
+# character takes the format's own `\u00xx` fallback, `\x7f` included.
 _ESCAPED: Final = {
     "\\": "\\\\",
     '"': '\\"',
@@ -200,6 +204,9 @@ def resolve_project(home: AglHome, start: Path) -> FileProject:
         if project.repo is None:
             continue
         try:
+            # `samefile` asks the filesystem - device and inode - so a repository reached through a
+            # symlink and the same one reached directly are one project, as are two spellings
+            # differing only in case.
             if project.repo.samefile(root):
                 return project
         except OSError:

@@ -124,13 +124,13 @@ def _digest(base: str, count: int) -> str:
 def _take(counter: Fingerprints, scope: RunScope, step: StepName, base: str = _BASE) -> str:
     """One address, and the claim that follows an entry landing at it.
 
-    `Journal.step` spends `digest` and `claimed` a whole step apart - "the counter advances
+    `Journal.step` spends `digest` and `claim` a whole step apart - "the counter advances
     when an entry is written, not when a step is called" - and the two tests below this section's
     heading are the ones about that gap. Everything under "Rule 1" is about the counter's *key*
     instead, so it takes the pair together and reads the way one invocation reads.
     """
     digest = counter.digest(scope, step, base)
-    counter.claimed(scope, step, base)
+    counter.claim(scope, step, base)
     return digest
 
 
@@ -163,7 +163,7 @@ def test_a_step_that_claims_nothing_leaves_the_next_call_at_the_same_address() -
     counter = Fingerprints()
     crashed = counter.digest(_SCOPE, _STEP, _BASE)
     retried = counter.digest(_SCOPE, _STEP, _BASE)
-    counter.claimed(_SCOPE, _STEP, _BASE)
+    counter.claim(_SCOPE, _STEP, _BASE)
     after = counter.digest(_SCOPE, _STEP, _BASE)
 
     assert crashed == retried == _digest(_BASE, 0), "an invocation that claimed nothing advanced n"

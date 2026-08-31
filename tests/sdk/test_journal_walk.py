@@ -744,7 +744,7 @@ async def test_a_retry_loop_with_nothing_varying_counts_up_and_replays_in_order(
 class _Watching(Fingerprints):
     """A `Fingerprints` that writes down when it was asked, so a test can ask *when*.
 
-    `digest` and not `claimed`: the question is when the walk takes its **address**, which is the
+    `digest` and not `claim`: the question is when the walk takes its **address**, which is the
     call that has to happen before anything can suspend. The claim comes a whole step later by
     design, and a test that watched it would be asking about the other end of the method.
     """
@@ -1108,8 +1108,8 @@ async def test_a_steps_result_answers_a_lone_surrogate_the_way_its_inputs_do(
     The surrogate is buried under a key and an index rather than sitting at the top of the result: a
     check that only inspected a bare string result would pass a shallow test and admit every shape
     an agent actually returns. `chr(0xD800)` and not the escape `"\\ud800"`, and inside the function
-    body - `test_journal.py:448-459` records why a module-level `Final` holding one crashes
-    `mypy --strict` outright, with an `INTERNAL ERROR` naming no file.
+    body - the comment above `test_journal.py`'s `_LONE_SURROGATE` records why a module-level
+    `Final` holding one crashes `mypy --strict` outright, with an `INTERNAL ERROR` naming no file.
     """
     harness, workspace, base = await _opened(tmp_path)
     journal = _journal(harness, workspace, base)
@@ -1246,8 +1246,8 @@ async def test_a_steps_result_refuses_a_float_json_has_no_spelling_for(tmp_path:
     """The third class, and the one the type system cannot see.
 
     `float` is a member of `JsonValue`, so a workflow whose step returns `float("nan")` type-checks
-    clean under `mypy --strict`. It then reached `FilesystemStore._encoded`, whose
-    `json.dumps(..., allow_nan=False)` raises `ValueError`, which both stores translate into
+    clean under `mypy --strict`. It then reached `adapters/filesystem/_documents.py`'s `_encoded`,
+    whose `json.dumps(..., allow_nan=False)` raises `ValueError`, which both stores translate into
     `InternalError` - **exit 70**, this codebase's "AGL's own bug" (`ports/errors.py::EXIT_CODES`),
     for a number a workflow's own step handed over. Nothing about that is AGL's bug, and 70 sends
     the wrong person looking.

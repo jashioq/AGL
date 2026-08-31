@@ -156,10 +156,12 @@ def test_an_unmapped_branch_resolves_to_the_internal_error_code() -> None:
 
 
 def test_every_error_class_is_exported() -> None:
-    """`cli/exit_codes.py` and `sdk/workflow.py` are pure re-exports over this module.
+    """`ports/errors.py`'s `__all__` names every error class it defines, and nothing it does not.
 
-    A class missing from `__all__` is a class those facades will not carry, and a name left
-    in `__all__` after a rename breaks `from ... import *` at whichever stage tries it.
+    `__all__` is this module's surface: a class missing from it is a class a `from ... import *`
+    will not carry, and a name left in it after a rename breaks that import outright. The two
+    names on it that are not classes are the table and its reader, and they are spelled out here so
+    that a third arrival is a failure rather than a coincidence.
     """
     defined = {cls.__name__ for cls in _error_classes()}
     exported = set(errors.__all__)

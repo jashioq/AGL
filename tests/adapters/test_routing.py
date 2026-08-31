@@ -11,13 +11,13 @@ Every implementation of a port passes that port's suite under `tests/contracts/`
 holds, since `config/container.py` puts this in the services bundle and the vendor runners behind
 it. Declining the suite on the grounds that this class is "only a dispatcher" would leave the one
 runner every step addresses as the one implementation nobody held to the port. A dispatcher is
-precisely where a promise gets dropped in transit: seven of the suite's ten tests pass through
-`run` holding a callback, a tool or a question, and each of them is a thing this class could
-silently fail to carry.
+precisely where a promise gets dropped in transit: six of the suite's eight tests pass through
+`run` holding a callback or a tool, and each of them is a thing this class could silently fail to
+carry.
 
 So `TestRoutingOverBothFakes` is `AgentContract` with the two fixtures overridden and nothing else
 touched, and the `model` fixture is parametrised over **every model both providers serve**, which
-the suite blesses as "the honest way to cover them all". Ten tests, six models: the whole port,
+the suite blesses as "the honest way to cover them all". Eight tests, six models: the whole port,
 end to end through the dispatch path, once per member of both enums.
 
 **Over fakes, and never over the vendor runners.** Forty-eight harness sessions is a bill and a
@@ -107,7 +107,7 @@ class TestRoutingOverBothFakes(AgentContract):
 
     Two overrides and nothing else, which is what the suite asks for. Neither is gated: nothing
     here starts a process, binds a socket or spends a token, so a skip would be hiding something
-    rather than declining to do it. All ten tests run against every model, and each one of them
+    rather than declining to do it. All eight tests run against every model, and each one of them
     reaches its fake through `RoutingAgentRunner._serving` and back.
     """
 
@@ -132,7 +132,7 @@ class TestRoutingOverBothFakes(AgentContract):
 
         The one runner in the repository for which this parametrisation is not a thoroughness
         decision: a router answers for several providers, so a suite that named one model would be
-        ten tests about one arm of a dispatch and silence about the other.
+        eight tests about one arm of a dispatch and silence about the other.
         """
         return cast(ModelId, request.param)
 
@@ -283,7 +283,7 @@ async def test_a_query_is_answered_by_the_runner_under_the_key_and_not_by_the_mo
 
     The router here is wired **deliberately wrongly** - the OpenAI fake registered under
     `Provider.CLAUDE` - and no correct bundle ever looks like this. It is the only instrument that
-    can see these two dispatch at all: both fakes report the same four capabilities and neither
+    can see these two dispatch at all: both fakes report the same three capabilities and neither
     `check_ready` can fail, so two correct answers are indistinguishable and a wrong one is not.
 
     Asked for a Claude model, the router hands it to the runner under `claude`, which refuses it

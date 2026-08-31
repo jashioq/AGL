@@ -2,10 +2,10 @@
 
 Three of these tests are about absences, which is unusual enough to say why. `Project` holding
 exactly five fields, `AgentSettings` holding exactly one section per `Provider`, and no field
-anywhere carrying a default are each a rule the module states in prose, and each is the kind of
-rule a later stage breaks by *adding* something reasonable - a sixth project field, a shared
-connector type, a `cli_path: Path | None = None` that looks like a convenience. Prose does not
-notice; these do.
+anywhere carrying a default are each a rule `config/schema.py` cannot state about itself, and
+each is the kind of rule a later stage breaks by *adding* something reasonable - a sixth project
+field, a shared connector type, a `cli_path: Path | None = None` that looks like a convenience. The
+module's own shape does not notice; these do.
 
 The no-default rule is checked twice on purpose. `dataclasses.fields` proves it of every field
 mechanically, including any field added tomorrow. The `TypeError` assertions prove the consequence
@@ -109,7 +109,10 @@ def test_no_field_on_any_of_these_types_carries_a_default() -> None:
             )
 
 
-def test_omitting_any_value_is_a_TypeError_rather_than_a_quietly_supplied_one() -> None:
+# The capital is `TypeError`, a real class name, inside a name that reads as a sentence - which is
+# the test-naming rule working rather than failing. N802 stays selected everywhere else, because a
+# camelCase test function anywhere it is *not* quoting a class is the mistake the rule catches.
+def test_omitting_any_value_is_a_TypeError_rather_than_a_quietly_supplied_one() -> None:  # noqa: N802
     """The rule stated as behaviour: every construction states every value, or does not happen."""
     with pytest.raises(TypeError):
         ClaudeSettings(enabled=True)  # type: ignore[call-arg]

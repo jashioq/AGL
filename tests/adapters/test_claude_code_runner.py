@@ -1374,16 +1374,16 @@ async def _answered(call: Awaitable[ToolResult], what: str) -> ToolResult:
 
 @pytest.mark.asyncio
 async def test_the_first_of_two_concurrent_failures_is_the_one_the_caller_latches() -> None:
-    """`Caller.failed` keeps the *first* exception, and two calls in flight is the only way to see.
+    """`Caller.fail` keeps the *first* exception, and two calls in flight is the only way to see.
 
-    **The clause.** `failed` is written `if self.failure is None: self.failure = raised`, and the
+    **The clause.** `fail` is written `if self.failure is None: self.failure = raised`, and the
     guard is the whole of it. Every other test in this repository drives one failing handler, and
     against one failure that guard and a bare `self.failure = raised` are the same three lines - so
     the line is untested by everything around it, and a mutation of it survived a session. It is not
     dead code either: `handled` is `async`, and the guard it reads at the top and the assignment it
     makes at the bottom are separated by `await tool.handler(payload)`.
 
-    **Why this interleaving is the only way in, and why it is real.** `failed` is called from one
+    **Why this interleaving is the only way in, and why it is real.** `fail` is called from one
     place in `_tools.py` - inside `handled`'s own `except` - so `self.failure` can only be set when
     a call has passed the guard, and it can only be *already* set when a second call passed that
     guard before the first one raised. That is two tool calls in flight at once, which this backend
@@ -1461,7 +1461,7 @@ async def test_the_first_of_two_concurrent_failures_is_the_one_the_caller_latche
 
     assert caller.failure is first, (
         f"`caller.failure` is {caller.failure!r} after a second handler failed inside a call that "
-        f"had already passed the guard. `failed` is a first-wins latch, and `_session.py` ends "
+        f"had already passed the guard. `fail` is a first-wins latch, and `_session.py` ends "
         f"with `raise caller.failure` - so last-wins means the step is stopped by the later "
         f"exception and reports it as the cause, with the failure that actually stopped the run "
         f"named nowhere at all"
@@ -1996,7 +1996,7 @@ def _always(result: ToolResult) -> Callable[[Mapping[str, JsonValue]], Awaitable
 
 
 def test_capabilities_are_the_ports_own_members_and_not_equivalent_strings() -> None:
-    """The suite asserts this too; what it cannot assert is *which* four, and why they are static.
+    """The suite asserts this too; what it cannot assert is *which* three, and why they are static.
 
     `Capability` is a `StrEnum`, so this is a statement about the members and not about a set that
     compares equal to them today. The three are all of them: Claude Code edits files, runs a shell
@@ -2020,7 +2020,7 @@ def test_a_model_this_adapter_does_not_serve_is_refused_by_both_query_members() 
 
     The contract suite can only ever name a model the adapter serves - it has one `model` fixture -
     so the refusal is invisible to it. Both members are asserted because a `capabilities` that
-    ignored its argument would answer "I can do all four" for a model this runner would then refuse
+    ignored its argument would answer "I can do all three" for a model this runner would then refuse
     to run, which is a preflight that admits a run and kills it at second one.
     """
     with pytest.raises(InputError):

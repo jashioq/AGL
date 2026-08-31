@@ -121,11 +121,11 @@ class FakeAgentRunner(AgentRunner):
         self._script: Final = script if script is not None else unscripted
 
     async def capabilities(self, model: ModelId) -> frozenset[Capability]:
-        _served(model)
+        _check_model(model)
         return _CAPABILITIES
 
     async def check_ready(self, model: ModelId) -> None:
-        _served(model)
+        _check_model(model)
 
     async def run(
         self,
@@ -133,7 +133,7 @@ class FakeAgentRunner(AgentRunner):
         *,
         on_activity: ActivityReporter | None = None,
     ) -> AgentOutcome:
-        _served(task.model)
+        _check_model(task.model)
         conversation = Conversation(task, on_activity=on_activity)
         outcome = await self._script(conversation)
         if conversation.failure is not None:
@@ -141,7 +141,7 @@ class FakeAgentRunner(AgentRunner):
         return outcome
 
 
-def _served(model: ModelId) -> None:
+def _check_model(model: ModelId) -> None:
     if not isinstance(model, Claude):
         served = sorted(str(member) for member in Claude)
         raise InputError(

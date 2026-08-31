@@ -35,8 +35,7 @@ their roles, so the resolution is exercised by every one of those files.
 **The packaging half was measured rather than reasoned about, and it is a gap in this suite.**
 `[tool.hatch.build.targets.wheel] packages = ["src/agl"]` is a rule about a *directory*, not about
 importable packages: hatchling copies what is under it. A wheel built with these two files deleted
-carries `agl/workflows/fix/prompts/review.md`, `implement.md` and `split`'s two, and 113 entries
-where the previous wheel had 115 - the two `__init__.py` files and nothing else. Nothing in this
+carries `agl/workflows/fix/prompts/review.md`, `implement.md` and `split`'s two. Nothing in this
 suite would notice if that stopped being true, because noticing costs a build; that is stated here
 rather than covered, since a workflow whose prompts did not ship would fail at import with
 `prompt_file`'s own `InputError` naming the missing path, which is a legible failure and not a
@@ -60,14 +59,14 @@ drops "orphans". `src/agl/__init__.py` stays, so `src/agl` is that portion root 
 subpackage beneath it leaves the graph entirely. `grimp` holds 106 `agl` modules today and 12 with
 the twelve deleted, of which three are `agl`'s eight children: `api` and `testing`, which are
 single modules, and `sdk`, which carries an `__init__.py` of its own. `lint-imports` - which
-reports `Analyzed 141 files, 669 dependencies` and six contracts kept today - then exits 1 on
+reports `Analyzed 141 files, 670 dependencies` and six contracts kept today - then exits 1 on
 `Missing layer in container 'agl': module <one of them> does not exist` and evaluates **no contract
 at all**. Which one it names varies between runs, the layers being checked in set order, so the
 message is not a fingerprint to match on - what is stable is that it stops there. Not five kept and
 one broken: a layers contract naming a module the graph does not hold
-fails before a single import is looked at, and the other five are never reached. The eleven tests
-in `tests/test_contract_firing.py` fail with it, that file existing to fire each contract at the
-real graph.
+fails before a single import is looked at, and the other five are never reached. The fourteen
+tests `tests/test_contract_firing.py` collects fail with it, that file existing to fire each
+contract at the real graph.
 
 **The one tree `grimp` reads correctly is the tree that drops `src/agl/__init__.py` too** - all
 eight children back, and the whole package in the graph. That tree fails the package-root gate,
@@ -96,9 +95,6 @@ clean environment and works from outside the repository - every module imports, 
 `agl.workflows` entry points resolve and load, both workflows' `prompts/` markdown ships, and the
 `agl workflows` console script prints its two names. Recorded so nobody buys that measurement
 twice: what refuses the deletion is the import graph, never the distribution.
-
-Those two figures are this tree's and belong to this section. The 113 and 115 above are the earlier
-change that deleted the two `prompts/__init__.py` files, and they stay as they are.
 """
 
 from pathlib import Path

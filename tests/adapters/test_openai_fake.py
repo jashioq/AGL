@@ -5,9 +5,9 @@ else touched. That suite was written against the port's docstrings and before an
 existed, which is the inversion `tests/contracts/` rests on and why nothing below re-asserts it.
 It runs **unconditionally and in full** here - no opt-in, no `check_ready` gate, no binary to
 install and nothing to authenticate against - which is the difference between a fake and the real
-adapter one file over, where eight of the same ten tests skip on every machine because their
-evidence is a model's conduct
-and the only instrument that produces conduct on this backend is a paid turn. The `model` fixture is
+adapter one file over, where six of the same eight tests skip on every machine - five of them
+because their evidence is a model's conduct, and the only instrument that produces conduct on this
+backend is a paid turn. The `model` fixture is
 parametrised over every model this runner serves, which `tests/contracts/agent.py` names as "the
 honest way to cover them all", so the whole suite runs three times.
 
@@ -89,7 +89,7 @@ class TestOpenAiFake(AgentContract):
 
     Two overrides and nothing else, which is what the suite asks for. There is no gate on either
     of them: nothing here starts a process, binds a socket or spends a token, so a skip would be
-    hiding something rather than declining to do it. All ten tests run and all ten pass, which
+    hiding something rather than declining to do it. All eight tests run and all eight pass, which
     is the whole claim a shared suite makes about a fake - the same suite, unweakened, over both
     implementations.
     """
@@ -557,6 +557,10 @@ async def test_both_runners_refuse_exactly_the_same_models_with_the_same_words(
     `translate.model_slug`, so there is one table and one sentence - and the assertion available is
     the one that would fail if a later edit ever forked them.
 
+    One table is also what this cannot catch: a `model_slug` that stopped refusing `Claude` moves
+    both sides at once and leaves this green. `test_openai_translate.py`'s `TestModelSlugs` covers
+    that over every `Claude` member, in `test_a_model_this_adapter_does_not_serve_is_refused`.
+
     **`capabilities` is the member asked of both, and the choice is forced.** It is the only one of
     the three whose refusal happens before the real adapter would touch the world: `check_ready`
     goes on to start the CLI's credential probe, and `run` binds a socket and starts a child. Both
@@ -602,14 +606,14 @@ async def test_both_runners_report_the_same_capabilities_for_a_served_model() ->
 
     `FILE_EDIT` and `SHELL` are reported by a runner whose scripted agent edits no file and runs no
     command, and that is deliberate: `capabilities()` is "what can this backend be asked for", the
-    backend this stands in for can be asked for all four, and preflight refuses a role that
+    backend this stands in for can be asked for all three, and preflight refuses a role that
     requires more than is reported. A fake reporting less would have every `--dry-run` of a
     realistic role refused at second zero, which is target #8 dead for a technicality about a fake.
 
-    Written as a comparison rather than as a literal set so that a fifth `Capability` member is one
-    decision in `runner.py` and one here - two places on purpose, so that a member the real adapter
-    has not claimed cannot arrive in this fake through a line nobody edited - and so that the two
-    lists agreeing is asserted rather than assumed.
+    Written as a comparison rather than as a literal set so that a fourth `Capability` member is
+    one decision in `runner.py` and one here - two places on purpose, so that a member the real
+    adapter has not claimed cannot arrive in this fake through a line nobody edited - and so that
+    the two lists agreeing is asserted rather than assumed.
     """
     for model in OpenAI:
         assert await FakeAgentRunner().capabilities(model) == await OpenAiRunner().capabilities(

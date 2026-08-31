@@ -61,7 +61,7 @@ tool, `tool()`'s included, answers with a `ToolResult` that every adapter turns 
 model and that reaches no store. One class buries that in `handler is None`.
 
 **What the two classes do share is one line, and it is not the line above.** Both call
-`ports.agent.checked_tool_declaration` for the two refusals every tool declaration owes - an empty
+`ports.agent.check_tool_declaration` for the two refusals every tool declaration owes - an empty
 name cannot be called, an empty description cannot be chosen - which used to be a byte-identical
 copy in each. That fold is not the merge this section refuses and does not start it: it moves no
 `payload` into `ports/`, derives no schema there, and leaves the two classes as disjoint as they
@@ -270,10 +270,11 @@ def test_a_payload_with_no_fields_is_a_declaration_and_not_a_refusal() -> None:
 
 # --- a field that says what it is: `describe()` ---------------------------------------------------
 #
-# A gap found and closed late. `sdk/tools.py` refuses an enum field and advises "a `str` field
-# whose description names them"; until this existed there was nowhere in a derived schema to write
-# one, so a payload's vocabulary lived in the tool's description and the prompt and was enforced a
-# third time in a `__post_init__` - which `test_journal.py`'s rule 6 says the digest cannot see.
+# A gap found and closed late. `sdk/tools.py`'s `_schema_for` refuses an enum field with every
+# other type outside `_SUPPORTED`, and until `describe()` existed there was nowhere in a derived
+# schema to write a vocabulary down: it lived in the tool's description and in the prompt, and was
+# enforced a third time in a `__post_init__` - which `test_journal.py`'s rule 6 says the digest
+# cannot see.
 
 
 # A fixed vocabulary, which is the case `sdk/tools.py` refuses an enum in favour of and the one
@@ -489,7 +490,7 @@ def test_an_empty_name_and_an_empty_description_are_refused_as_a_tools_would_be(
     """The same two checks a `Tool` makes, made where the declaration is written.
 
     "As a tool's would be" is now literal rather than a resemblance: both classes call
-    `ports.agent.checked_tool_declaration`, which is where the two `raise`s live and where
+    `ports.agent.check_tool_declaration`, which is where the two `raise`s live and where
     `tests/ports/test_agent.py` argues why they are one implementation instead of two copies.
     This is the `ReportingTool` half of that claim, and it is what makes "one checker, two classes"
     measurable - a fold that quietly left this class checking nothing would pass over there.

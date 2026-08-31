@@ -69,7 +69,7 @@ number the assertion rests on.
 
 ## One module, and it is one of the longest in the repository
 
-773 code lines against `scripts/check`'s 300-line convention, which is among the largest of the 35
+773 code lines against `scripts/check`'s 300-line convention, which is among the largest of the 36
 modules over it and more than half again `tests/test_contract_listings.py`, the file whose rule
 this one applies a floor up. The module size ceiling warns rather than fails, and this is the
 warning answered rather than ignored.
@@ -225,9 +225,9 @@ def _modules(root: Path) -> list[Path]:
 def _imported(source: str) -> set[str]:
     """Every module name `source` imports, from both statement shapes.
 
-    Parsed rather than grepped, which is the whole point: this repository's docstrings quote import
-    statements - `config/registry.py` quotes the dynamic import it exists to have replaced - and a
-    text search cannot tell a rule from a paragraph about the rule.
+    Parsed rather than grepped, which is the whole point: a package name is spelled in string
+    literals as well as in imports - `config/registry.py`'s `GROUP: Final = "agl.workflows"` is one
+    - and a text search cannot tell a name in a message from an import of it.
     """
     found: set[str] = set()
     for node in ast.walk(ast.parse(source)):
@@ -388,12 +388,12 @@ def test_nothing_outside_the_workflows_package_imports_a_workflow() -> None:
     through a table the *packaging system* holds - and the test for that is the neighbour below,
     which asks what the resolver is made of rather than who imports whom.
 
-    Parsed and not grepped, because five modules under `src/` quote a workflow module path in
-    prose - `config/registry.py` quotes the `importlib.import_module(f"agl.workflows.{name}.
-    workflow")` it exists to have replaced, twice, and `sdk/workflow.py`, `testing.py` and
-    `registry.py` all spell an entry-point line out to explain one. Every one of those is a
-    paragraph and none is an import; a text search cannot tell the difference and reports eight
-    violations where there are none.
+    Parsed and not grepped, because three lines under `src/` outside `src/agl/workflows/` spell
+    `agl.workflows` in a string rather than in an import - `config/registry.py`'s
+    `GROUP: Final = "agl.workflows"`, and the lines in `cli/commands/run.py` and
+    `cli/commands/workflows.py` that name the entry-point group to an operator. None of the three
+    is an import; a text search cannot tell the difference and reports three violations where there
+    are none.
     """
     outsiders = {
         module: names
@@ -1086,16 +1086,17 @@ def test_deleting_an_adapter_package_dangles_the_container_alone(
 # policed - which is the property, since a hand-maintained list here would agree with whoever last
 # edited it.
 #
-# **The honest exception, recorded rather than skipped past.** Eight of the agent suite's ten
+# **The honest exception, recorded rather than skipped past.** Six of the agent suite's eight
 # clauses **skip** against the real adapters, and that is a fact about what a free instrument can
-# reach rather than about coverage. Seven of the eight read a model's conduct as their evidence -
-# that it called a tool, that it answered a question, that it ignored a poisoned repository - which
-# no instrument that spends no tokens can supply, so they are deferred to the manual QA pass. The
-# eighth, the activity reporter that raised, needs no conduct at all and is deferred only because
-# the suite's one knob is the runner; it is asserted for real offline, further down each adapter's
-# own module. The target states this exception itself, and `tests/contracts/agent.py`'s docstring
-# carries the argument in full. Everything a free instrument *can* reach - hermeticity, tool
-# registration, deny-rule enforcement, the composed request - is covered for the real adapters too.
+# reach rather than about coverage. Five of the six read a model's conduct as their evidence -
+# that it called a tool, that it corrected a refused call, that it ignored a poisoned repository -
+# which no instrument that spends no tokens can supply, so they are deferred to the manual QA pass.
+# The sixth, the activity reporter that raised, needs no conduct at all and is deferred only
+# because the suite's one knob is the runner; it is asserted for real offline, further down each
+# adapter's own module. The target states this exception itself, and `tests/contracts/agent.py`'s
+# docstring carries the argument in full. Everything a free instrument *can* reach - hermeticity,
+# tool registration, deny-rule enforcement, the composed request - is covered for the real adapters
+# too.
 
 
 def _ports_with_an_abc() -> dict[str, tuple[str, ...]]:

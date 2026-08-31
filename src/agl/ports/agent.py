@@ -23,7 +23,7 @@ __all__ = [
     "StopReason",
     "Tool",
     "ToolResult",
-    "checked_tool_declaration",
+    "check_tool_declaration",
 ]
 
 
@@ -98,11 +98,11 @@ class Tool:
     handler: Callable[[Mapping[str, JsonValue]], Awaitable[ToolResult]]
 
     def __post_init__(self) -> None:
-        checked_tool_declaration(self.name, self.description)
+        check_tool_declaration(self.name, self.description)
         object.__setattr__(self, "payload_schema", MappingProxyType(dict(self.payload_schema)))
 
 
-def checked_tool_declaration(name: str, description: str) -> None:
+def check_tool_declaration(name: str, description: str) -> None:
     if not name:
         raise InputError("a tool with an empty name cannot be named by anything calling it")
     if not description:

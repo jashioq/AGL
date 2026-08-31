@@ -204,7 +204,7 @@ def test_the_git_root_is_found_from_a_directory_deep_inside_the_repository(tmp_p
 def test_the_build_command_is_asked_for_once_and_the_prompt_says_what_it_is_for(
     tmp_path: Path,
 ) -> None:
-    """`init` asks for the build command, `_BUILD_GUESSES` existing only to say why not.
+    """`init` asks for the build command, and nothing anywhere in AGL guesses at one.
 
     There is no build-tool detection anywhere in AGL, so this one question is the whole mechanism,
     and the prompt has to name the thing being asked about: there are two build commands in AGL's

@@ -7,6 +7,7 @@ __all__ = ["EXIT_CODES", "exit_code_for", "exit_status", "leaves"]
 
 
 def exit_status(error: Exception) -> int:
+    # `BaseExceptionGroup` refuses an empty sequence at construction, so this set cannot be empty.
     agreed, *disagreeing = {_resolved(leaf) for leaf in leaves(error)}
     return exit_code_for(InternalError) if disagreeing else agreed
 

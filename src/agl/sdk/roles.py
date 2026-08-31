@@ -128,6 +128,8 @@ def role(*, model: ModelId) -> _RoleDecorator:
 
 def prompt_file(path: str | Path) -> str:
     asked = Path(path)
+    # `sys._getframe(1)` is the caller of *this* function, so the lookup happens here and not in the
+    # helper below: a frame index is a fact about where the line is written.
     where = asked if asked.is_absolute() else _beside_the_caller(sys._getframe(1).f_globals, asked)
     try:
         text = where.read_text(encoding="utf-8")

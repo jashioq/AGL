@@ -5,7 +5,7 @@ nothing else touched. Everything `History` promises is asserted there, by a suit
 the port's docstrings and before this adapter existed - which is the inversion `tests/contracts/`
 rests on, and the reason nothing below re-asserts any of it.
 
-What is below is what that suite says outright it cannot see. Its own docstring lists eight gaps and
+What is below is what that suite says outright it cannot see. Its own docstring lists nine gaps and
 three assumptions; these are the ones a real repository can close:
 
   * **That renames are detected** (gap 1). The suite accepts either legal answer to a move and so

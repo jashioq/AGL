@@ -14,6 +14,7 @@ _SPLIT: Final = b"=======\n"
 _CLOSED: Final = b">>>>>>> "
 _NEWLINE: Final = b"\n"
 
+# git's own rule for a file that is not text: a NUL is the byte a line-oriented format cannot hold.
 _NOT_TEXT: Final = b"\0"
 
 

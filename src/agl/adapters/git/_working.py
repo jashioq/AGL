@@ -5,7 +5,7 @@ from pathlib import Path
 
 from agl.adapters.git._trees import _translated
 
-__all__ = ["applied", "restored", "snapshot"]
+__all__ = ["apply", "restore", "snapshot"]
 
 
 def snapshot(directory: Path) -> dict[str, bytes]:
@@ -14,19 +14,19 @@ def snapshot(directory: Path) -> dict[str, bytes]:
     return found
 
 
-def restored(directory: Path, tree: Mapping[str, bytes]) -> None:
-    _emptied(directory)
+def restore(directory: Path, tree: Mapping[str, bytes]) -> None:
+    _empty(directory)
     for path, content in tree.items():
-        _written(directory, path, content)
+        _write(directory, path, content)
 
 
-def applied(directory: Path, tree: Mapping[str, bytes], paths: Iterable[str]) -> None:
+def apply(directory: Path, tree: Mapping[str, bytes], paths: Iterable[str]) -> None:
     for path in paths:
         content = tree.get(path)
         if content is None:
-            _removed(directory, path)
+            _remove(directory, path)
         else:
-            _written(directory, path, content)
+            _write(directory, path, content)
 
 
 def _gather(at: Path, under: str, found: dict[str, bytes]) -> None:
@@ -47,7 +47,7 @@ def _gather(at: Path, under: str, found: dict[str, bytes]) -> None:
                 raise _translated(error, f"the file at {entry}") from error
 
 
-def _emptied(directory: Path) -> None:
+def _empty(directory: Path) -> None:
     try:
         entries = list(directory.iterdir())
     except OSError as error:
@@ -64,7 +64,7 @@ def _emptied(directory: Path) -> None:
             raise _translated(error, f"the leaving at {entry}") from error
 
 
-def _written(directory: Path, path: str, content: bytes) -> None:
+def _write(directory: Path, path: str, content: bytes) -> None:
     at = _at(directory, path)
     try:
         at.parent.mkdir(parents=True, exist_ok=True)
@@ -73,7 +73,7 @@ def _written(directory: Path, path: str, content: bytes) -> None:
         raise _translated(error, f"the file at {at}") from error
 
 
-def _removed(directory: Path, path: str) -> None:
+def _remove(directory: Path, path: str) -> None:
     at = _at(directory, path)
     try:
         at.unlink(missing_ok=True)

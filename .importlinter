@@ -16,16 +16,17 @@ include_external_packages = True
 
 # 1. The one dependency rule, high to low. `sdk` and `adapters` sit at the same level and are
 #    independent of each other: `|` means neither may import the other (`:` would mean they may).
-#    `agl.testing` joins `agl.cli` at the top for the same reason, added at 16.5: it is the harness
+#    `agl.testing` joins `agl.cli` at the top for the same reason: it is the harness
 #    a workflow author tests against, it imports `agl.api` and `agl.config` exactly as `agl.cli`
 #    does, and nothing in AGL imports it - so it is a sibling of the CLI rather than a layer of its
 #    own, and the `|` is what says the two may not import each other.
-#    Fail-closed since 19.1, and it is `containers` plus `exhaustive = True` that made it so. Until
-#    then `layers =` named absolute modules and this contract had no opinion about one it did not
-#    mention: a top-level member nobody added below was not at the bottom of the stack but outside
-#    it, free to import anything with all six contracts kept, and a hand-maintained meta-test in
-#    tests/test_contract_listings.py was what noticed. Naming `agl` as the container makes the
-#    layers relative names and lets `exhaustive` require that every child of `agl` is one of them,
+#    Fail-closed, and it is `containers` plus `exhaustive = True` that made it so. An earlier
+#    spelling named absolute modules in `layers =`, and this contract then had no opinion about one
+#    it did not mention: a top-level member nobody added below was not at the bottom of the stack
+#    but outside it, free to import anything with all six contracts kept, and a hand-maintained
+#    meta-test in tests/test_contract_listings.py was what noticed. Naming `agl` as the container
+#    makes the layers relative names and lets `exhaustive` require that every child of `agl` is one
+#    of them,
 #    so an unlisted package now breaks this contract and is named in the failure. The rewrite
 #    changes nothing about the ordering, and that is measured rather than assumed: every fabricated
 #    violation in tests/test_contract_firing.py, plus both directions of each `|` pair, was run
@@ -106,16 +107,16 @@ ignore_imports =
 # Those two are the only permitted vendor imports in the repo, and they are held to import-linter's
 # default alerting: an ignore expression matching nothing in the graph is an error, so an exception
 # granted here stops being granted the moment nothing needs it. That default was suppressed with
-# `unmatched_ignore_imports_alerting = none` from stage 0, when the tree was empty and all four
-# expressions matched nothing; 19.1 removed the suppression, which is what this comment is now
-# about. `warn` was the other candidate and lost: a warning does not fail scripts/check, and a
-# report that fails nothing stops being read - which is how the debt got old in the first place.
+# `unmatched_ignore_imports_alerting = none` while the tree was empty and all four expressions
+# matched nothing; the suppression is gone, which is what this comment is now about. `warn` was the
+# other candidate and lost: a warning does not fail scripts/check, and a report that fails nothing
+# stops being read - which is how the debt got old in the first place.
 # What the flip found: `agl.adapters.claude_code -> claude_agent_sdk` and
 # `agl.adapters.rich_terminal -> rich` had been stale since the adapters were written, and are
 # gone above. Those two named the *package roots* - src/agl/adapters/claude_code/__init__.py and
-# src/agl/adapters/rich_terminal/__init__.py - and both hold a docstring and nothing else, by
-# design; the SDK imports live in the modules beside them, which is what `.**` covers. The import
-# was not missing and has not been added: `.**` matches every descendant and not the package
+# src/agl/adapters/rich_terminal/__init__.py - and both are empty files; the SDK imports live in
+# the modules beside them, which is what `.**` covers. The import was not missing and has not been
+# added: `.**` matches every descendant and not the package
 # itself, so if an `__init__.py` ever does need its vendor, this contract breaks and the expression
 # comes back with somebody having been asked. That is the exception being granted deliberately
 # rather than inherited.
@@ -174,8 +175,8 @@ allow_indirect_imports = True
 ignore_imports =
     agl.config.container -> agl.adapters.**
 # One expression, held to import-linter's default alerting, for contract 3's reasons and with the
-# same history: `unmatched_ignore_imports_alerting = none` was set here at stage 0, when the
-# container constructed nothing and neither expression matched, and 19.1 removed it. The flip
+# same history: `unmatched_ignore_imports_alerting = none` was set here while the container
+# constructed nothing and neither expression matched, and has since been removed. The flip
 # found `agl.config.container -> agl.adapters` stale and it is gone above - that expression named
 # the adapters package itself, and the composition root has never imported it as a whole. It
 # imports the modules it constructs from (`from agl.adapters.git.workspace import ...`), which is

@@ -75,6 +75,9 @@ def main(argv: Sequence[str] | None = None, *, compose: Compose | None = None) -
 
 
 def parser() -> RefusingParser:
+    # With abbreviation on, `argparse` matches any unambiguous prefix of a long flag - so a workflow
+    # declaring `--fro`, `--nam` or `--hel` would have it eaten, value and all, by `--from`,
+    # `--name` or `--help`, and would then be told its required parameter was missing.
     root = RefusingParser(prog=_PROGRAM, description=_DESCRIPTION, allow_abbrev=False)
     declared = root.add_subparsers(
         dest=_COMMAND, metavar="<command>", required=True, parser_class=RefusingParser

@@ -48,6 +48,8 @@ class StdinKeys(Keys):
             stream = sys.stdin
             try:
                 ready, _, _ = select.select([stream], [], [], _POLL)
+            # A closed stdin, or one replaced by something with no file descriptor. Windows lands
+            # here too: its `select` cannot poll a console handle.
             except (OSError, ValueError):
                 return None
             if not ready:
@@ -132,6 +134,9 @@ class RichTerminal(Terminal):
                 "once, so arriving here twice is AGL's own ordering bug"
             )
         self._display.start()
+        # Its own executor and not the default one: `asyncio.run` waits for the default executor's
+        # threads on the way out, so a read nobody answers would hold the process open after the
+        # terminal is back.
         self._reads = ThreadPoolExecutor(max_workers=1, thread_name_prefix="agl-terminal-keys")
         self._open = True
         self._tasks = (

@@ -8,6 +8,7 @@ from agl.ports.history import ChangeKind, FileChange
 
 __all__ = ["changes"]
 
+# What ends every field of the `-z` form: NUL is the one byte a repository path cannot hold.
 _FIELD_END: Final = "\0"
 
 _KINDS: Final[Mapping[str, ChangeKind]] = MappingProxyType(
@@ -23,6 +24,7 @@ _KINDS: Final[Mapping[str, ChangeKind]] = MappingProxyType(
 
 _PAIRED: Final = frozenset("CR")
 
+# A rename or copy status may carry a similarity percentage: `R100` is a file moved untouched.
 _SCORE: Final = frozenset("0123456789")
 
 _WHAT: Final = "a list of changed files"

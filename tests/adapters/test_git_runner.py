@@ -158,9 +158,9 @@ async def test_output_that_is_not_utf8_comes_back_with_replacements_rather_than_
     """Git's output is bytes, and AGL's records are text a store has to be able to write.
 
     `surrogateescape` would round-trip and would mint exactly the lone surrogates `ports/run.py`
-    and `FilesystemStore._encoded` refuse, so an odd byte in a path would surface three layers
-    later as an `InternalError` at a write. U+FFFD is lossy, visible, and storable, which is the
-    trade `_runner.py` states rather than hides.
+    and `adapters/filesystem/_documents.py`'s `_encoded` refuse, so an odd byte in a path would
+    surface three layers later as an `InternalError` at a write. U+FFFD is lossy, visible, and
+    storable, which is the trade `_runner.py` states rather than hides.
     """
     (repository / "bytes.bin").write_bytes(b"a\xffb")
     _git(repository, "add", "bytes.bin")
@@ -363,7 +363,7 @@ async def test_a_command_that_runs_too_long_is_stopped_and_the_repository_still_
     Three claims in one test, because they are one claim. The call raises `UpstreamUnavailable`.
     It returns in far less time than the command would have taken, which is what says the process
     was actually stopped rather than waited out. And the next git command in that repository
-    works - the reason `_stopped` sends SIGTERM before SIGKILL is that git unlinks its own lock
+    works - the reason `_stop` sends SIGTERM before SIGKILL is that git unlinks its own lock
     files when asked to stop, and a stale `index.lock` would fail every later command until
     somebody deleted it by hand.
     """
@@ -418,9 +418,9 @@ async def test_a_cancelled_call_raises_cancellation_and_not_an_agl_error(
     assert _git(repository, "status", "--porcelain") == ""
 
 
-# --- The two clauses inside `_signalled` that no answer can witness ------------------------------
+# --- The two clauses inside `_signal` that no answer can witness ---------------------------------
 
-# `_signalled` is what `_stopped` spends twice for its terminate-then-kill escalation, and what
+# `_signal` is what `_stop` spends twice for its terminate-then-kill escalation, and what
 # `_completed`'s `except BaseException` spends once on the way out. It is the third copy of a
 # sequence `src/agl/adapters/shell/verifier.py` and `src/agl/adapters/openai/_session.py` already
 # share, and it differs from them in exactly one line: those two escalate against the child's
@@ -518,8 +518,8 @@ async def test_a_git_that_has_already_been_reaped_is_never_signalled(
 
     monkeypatch.setattr(os, "kill", recorded)
     try:
-        git_runner._signalled(process, signal.SIGTERM)
-        git_runner._signalled(process, signal.SIGKILL)
+        git_runner._signal(process, signal.SIGTERM)
+        git_runner._signal(process, signal.SIGKILL)
     finally:
         monkeypatch.undo()
         orphan = _orphan(repository)
@@ -540,7 +540,7 @@ async def test_a_signal_the_os_refuses_leaves_the_timeout_saying_what_it_always_
 ) -> None:
     """`PermissionError` may not leave this adapter, and the deadline is where it would.
 
-    `_stopped` is called from inside `except TimeoutError:`, one line before the
+    `_stop` is called from inside `except TimeoutError:`, one line before the
     `UpstreamUnavailable` that says the command was stopped. A signal the kernel refuses used to
     raise straight out of there - `suppress(ProcessLookupError)` does not cover it - so the whole
     call came back as a bare `PermissionError`. That is an `OSError`, not an `AglError`, so
@@ -551,7 +551,7 @@ async def test_a_signal_the_os_refuses_leaves_the_timeout_saying_what_it_always_
     This module has no group to be denied - it signals the process, which is the one line
     `ARCHITECTURE.md` allows to differ - so there is nothing left to fall back *to*, and what it
     owes is the other half of what they promise: the escalation carries on and the caller gets this
-    adapter's own answer. `_stopped` still waits the child out, which is why the alias here sleeps
+    adapter's own answer. `_stop` still waits the child out, which is why the alias here sleeps
     for a second rather than three.
 
     Asserted by effect through `run`, not by a spy: what is being claimed is what a caller sees.

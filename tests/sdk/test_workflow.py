@@ -641,9 +641,10 @@ def test_a_run_subclass_is_refused_rather_than_read_through() -> None:
 def test_an_annotation_naming_something_unresolvable_is_refused_as_an_input_error() -> None:
     """`get_type_hints` raises `NameError` here, and a workflow package's typo is not a crash.
 
-    `sdk/params.py::_hints` catches the same two exceptions for the same situation one level down -
-    a params class whose own field annotations will not resolve - and this is that shape reused
-    rather than reinvented, with the original chained so the traceback still shows the name."""
+    `sdk/_declarations.py::annotations_of` catches the same two exceptions for the same situation
+    one level down - a params class whose own field annotations will not resolve - and this is that
+    shape reused rather than reinvented, with the original chained so the traceback still shows the
+    name."""
     assert "cannot be resolved" in _refused(_unresolvable)
 
 

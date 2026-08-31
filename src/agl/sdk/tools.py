@@ -5,10 +5,10 @@ from math import isfinite
 from types import MappingProxyType, UnionType
 from typing import Any, Final, get_args, get_origin, overload
 
-from agl.ports.agent import Tool, ToolResult, checked_tool_declaration
+from agl.ports.agent import Tool, ToolResult, check_tool_declaration
 from agl.ports.errors import InputError, InternalError
 from agl.ports.run import JsonValue
-from agl.sdk._declarations import _describe, _hints
+from agl.sdk._declarations import annotations_of, named
 
 __all__ = [
     "JsonValue",
@@ -34,7 +34,7 @@ _SUPPORTED: Final = (
     "`tuple[X, ...]` of any of those, or `X | None`"
 )
 
-_SHOWN = 80
+_SHOWN: Final = 80
 
 _METADATA_KEY: Final = "agl.sdk.tools"
 
@@ -51,7 +51,7 @@ class ReportingTool[P]:
     payload_schema: Mapping[str, JsonValue] = field(init=False)
 
     def __post_init__(self) -> None:
-        checked_tool_declaration(self.name, self.description)
+        check_tool_declaration(self.name, self.description)
         _check_payload(self.payload, self.name)
         object.__setattr__(
             self, "payload_schema", MappingProxyType(_object_schema(self.payload, self.name, ()))
@@ -65,7 +65,7 @@ class ReportingTool[P]:
         instance, problems = self._read(value)
         if instance is None:
             raise InternalError(
-                f"a recorded {self.name} payload does not fit {_describe(self.payload)}: "
+                f"a recorded {self.name} payload does not fit {named(self.payload)}: "
                 f"{_refusal(self.name, problems)}. AGL wrote this value and AGL is reading it, so "
                 f"the ledger and the payload type have come apart - the fingerprint should have "
                 f"discarded this entry. It covers a tool's name, description and derived schema, "
@@ -128,11 +128,11 @@ def _object_schema(
 ) -> dict[str, JsonValue]:
     if kind in inside:
         raise InputError(
-            f"{where} is {_describe(kind)}, which is already being derived - a payload dataclass "
+            f"{where} is {named(kind)}, which is already being derived - a payload dataclass "
             f"that contains itself has no finite schema, and a model has no way to know when to "
             f"stop nesting one"
         )
-    hints = _hints(kind)
+    hints = annotations_of(kind)
     nested = (*inside, kind)
     properties: dict[str, JsonValue] = {}
     required: list[JsonValue] = []
@@ -166,7 +166,7 @@ def _schema_for(hint: object, where: str, inside: tuple[type[Any], ...]) -> dict
     if isinstance(hint, type) and is_dataclass(hint):
         return _object_schema(hint, where, inside)
     raise InputError(
-        f"{where} is a {_describe(hint)}, which a tool payload cannot carry: {_SUPPORTED}. A "
+        f"{where} is a {named(hint)}, which a tool payload cannot carry: {_SUPPORTED}. A "
         f"payload is filled in as JSON by the model and converted back into this dataclass, and "
         f"where it is also a step's result it is stored and read back the same way, so a field "
         f"type that does not survive JSON unchanged is one nothing could return"
@@ -182,7 +182,7 @@ def _instance(kind: type[Any], value: object, where: str, problems: list[str]) -
     try:
         return factory(**given)
     except Exception as raised:
-        problems.append(f"`{where}` is not a valid {_describe(kind)}: {raised}")
+        problems.append(f"`{where}` is not a valid {named(kind)}: {raised}")
         return None
 
 
@@ -190,7 +190,7 @@ def _given(kind: type[Any], value: object, where: str, problems: list[str]) -> d
     if not isinstance(value, Mapping):
         problems.append(f"`{where}` should be an object and {_shown(value)} arrived")
         return {}
-    hints = _hints(kind)
+    hints = annotations_of(kind)
     declared = {spec.name: spec for spec in fields(kind)}
     for key in value:
         if key not in declared:
@@ -217,7 +217,7 @@ def _converted(hint: object, value: object, where: str, problems: list[str]) -> 
     item = _item(hint)
     if item is not None:
         if not isinstance(value, list):
-            _wrong(hint, value, where, problems)
+            _note_wrong(hint, value, where, problems)
             return None
         built = [
             _converted(item, element, f"{where}[{index}]", problems)
@@ -226,7 +226,7 @@ def _converted(hint: object, value: object, where: str, problems: list[str]) -> 
         return tuple(built) if get_origin(hint) is tuple else built
     if isinstance(hint, type) and is_dataclass(hint):
         return _instance(hint, value, where, problems)
-    _wrong(hint, value, where, problems)
+    _note_wrong(hint, value, where, problems)
     return None
 
 
@@ -244,11 +244,11 @@ def _scalar(hint: object, value: object, where: str, problems: list[str]) -> obj
         and isfinite(value)
     ):
         return float(value)
-    _wrong(hint, value, where, problems)
+    _note_wrong(hint, value, where, problems)
     return None
 
 
-def _wrong(hint: object, value: object, where: str, problems: list[str]) -> None:
+def _note_wrong(hint: object, value: object, where: str, problems: list[str]) -> None:
     problems.append(f"`{where}` should be {_wording(hint)} and {_shown(value)} arrived")
 
 
@@ -264,10 +264,11 @@ def _wording(hint: object) -> str:
         return f"an array of {_wording(item)}"
     if isinstance(hint, type) and is_dataclass(hint):
         return f"an object with the fields of {hint.__qualname__}"
-    return f"a {_describe(hint)}, which is not a payload type at all"
+    return f"a {named(hint)}, which is not a payload type at all"
 
 
 def _optional(hint: object) -> object | None:
+    # `Optional[X]` and `X | None` are one type as of 3.14, so `UnionType` covers both spellings.
     if get_origin(hint) is not UnionType:
         return None
     args: tuple[object, ...] = get_args(hint)
@@ -289,7 +290,7 @@ def _check_payload(payload: object, name: str) -> None:
     if isinstance(payload, type) and is_dataclass(payload):
         return
     raise InputError(
-        f"the tool {name!r} was declared with {_describe(payload)}, and a payload is a "
+        f"the tool {name!r} was declared with {named(payload)}, and a payload is a "
         f"dataclass - the class itself, never an instance of it. Its fields are what the "
         f"schema is derived from and what the agent is asked to fill in"
     )

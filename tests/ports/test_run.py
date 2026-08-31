@@ -188,9 +188,9 @@ def test_a_surrogate_is_refused_at_write_time_wherever_it_sits() -> None:
 
     `JsonValue` admits any `str`, and `json.loads('"\\ud800"')` hands back an unpaired UTF-16 code
     unit without complaining, so an agent's reporting-tool payload really can carry one this far.
-    `FilesystemStore._encoded` refuses it at the write and argues the whole of why; this refuses it
-    at the call that produced it, which is the trade the non-finite float and the non-string key
-    above already take. Keys as well as values, because a key reaches the same encoder and takes
+    `adapters/filesystem/_documents.py`'s `_encoded` refuses it at the write; this refuses it at
+    the call that produced it, which is the trade the non-finite float and the non-string key above
+    already take. Keys as well as values, because a key reaches the same encoder and takes
     the whole document down rather than one field of it.
 
     **`InputError`, and the exit code is asserted beside the class.** This module and
@@ -268,8 +268,9 @@ def test_the_ref_a_run_starts_from_is_checked_the_way_a_param_is() -> None:
     The two seams above are a *step's* inputs and a run record's `params`, and both are values
     somebody put inside a container this module or `journal.py` walks. `base_ref` is neither. It is
     a field of `RunSpec`, it goes into `to_json()` verbatim with nothing between it and
-    `Store.write_record`, and there `FilesystemStore._encoded` does `text.encode("utf-8")` - a
-    `UnicodeEncodeError`, which is a `ValueError`, which both stores translate into `InternalError`.
+    `Store.write_record`, and there `adapters/filesystem/_documents.py`'s `_encoded` does
+    `text.encode(_ENCODING)` - a `UnicodeEncodeError`, which is a `ValueError`, which both stores
+    translate into `InternalError`.
     Exit 70 for a string a person typed, which is why the check belongs here beside `_check_sha`
     rather than at the port that would report it as AGL's own bug.
 

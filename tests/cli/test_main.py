@@ -301,7 +301,8 @@ def test_a_workflow_that_returns_exits_zero(tmp_path: Path) -> None:
 
 
 def test_the_workflow_is_handed_the_bundle_that_was_composed(tmp_path: Path) -> None:
-    """"Commands stay dumb", from the far end: one composition, and the ports reach the workflow.
+    """`ARCHITECTURE.md`'s "Commands stay dumb", from the far end: one composition, and the ports
+    reach the workflow.
 
     `Git(Path.cwd())` was constructed four times and the whole `RunContext` twice. Identity is what
     makes this a test of that - an equal-looking second bundle would pass anything weaker.
@@ -654,7 +655,8 @@ def test_help_still_exits_zero_through_system_exit(tmp_path: Path) -> None:
 
 
 def test_the_composition_happens_once_and_only_after_argv_is_understood(tmp_path: Path) -> None:
-    """"Commands stay dumb", measured: one resolution per invocation, and none for a wrong line.
+    """`ARCHITECTURE.md`'s "Commands stay dumb", measured: one resolution per invocation, and none
+    for a wrong line.
 
     Four `Git(Path.cwd())` and two `RunContext`s is what this counts against. The second half is the
     ordering `main` is written in: a person who typed the command wrong is told what they typed
@@ -746,8 +748,8 @@ def test_main_writes_no_exit_code_of_its_own(tmp_path: Path) -> None:
 
 
 def test_the_working_directory_is_read_exactly_once_in_the_whole_of_agl() -> None:
-    """"Commands stay dumb", counted: `Git(Path.cwd())` was constructed **four times**, once per
-    command.
+    """`ARCHITECTURE.md`'s "Commands stay dumb", counted: `Git(Path.cwd())` was constructed **four
+    times**, once per command.
 
     This stopped being free when `init` arrived. `Path.cwd()` used to sit inside the thunk that
     resolves a project, which was the whole of what needed it; `agl init` is the second reader - it

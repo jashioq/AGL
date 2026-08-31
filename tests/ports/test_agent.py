@@ -185,7 +185,7 @@ def test_a_task_that_could_not_be_run_is_refused(task: dict[str, object]) -> Non
 def test_a_tool_the_model_could_not_choose_is_refused(blank: str) -> None:
     """A tool with no name cannot be called, and one with no description cannot be chosen.
 
-    **The two refusals are `checked_tool_declaration`'s, and it is on `__all__` although it is not
+    **The two refusals are `check_tool_declaration`'s, and it is on `__all__` although it is not
     a type.** `ports/run.py`'s `checked_text` is the precedent and the argument is the same one:
     `sdk/tools.py`'s `ReportingTool` had a byte-identical copy of both `raise`s, error prose
     included, because it declares the same two fields for the same reader - a model choosing which

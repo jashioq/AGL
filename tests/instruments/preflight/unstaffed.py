@@ -1,4 +1,4 @@
-"""A workflow module with no role factory in it at all - `workflows/noop/`'s shape.
+"""A workflow module with no role factory in it at all.
 
 The whole content of this file is an *absence*: nothing here is decorated with `@role`, and nothing
 here imports something that is, so `vars(sys.modules[__name__])` holds no `RoleFactory` and

@@ -205,7 +205,8 @@ def test_a_workflows_flags_are_left_in_the_tail_and_never_in_the_namespace() -> 
 
 
 def test_the_command_calls_exactly_one_api_function() -> None:
-    """"Commands stay dumb", made mechanical: this module reaches `api` once, for `run`.
+    """`ARCHITECTURE.md`'s "Commands stay dumb", made mechanical: this module reaches `api` once,
+    for `run`.
 
     `_cmd_clean` iterated worktrees, deleted branches and called `shutil.rmtree` past the `Store`
     port; `_cmd_init` did build-tool detection and TOML rendering in ~150 lines. The repair is not
@@ -337,10 +338,10 @@ def test_a_workflow_declaring_a_generic_spelling_is_shadowed_loudly_when_it_is_r
 
     Neither `sdk/params.py` nor this layer refuses a workflow that declares `-n`: refusing would
     mean loading the workflow to look at its params, which is the first line of `api.run`
-    re-implemented in a command, which "commands stay dumb" forbids. So the generic parser wins -
-    it runs first - and the workflow's required flag is simply never given a value, which
-    `sdk/params.py` refuses by name at exit 2 before anything runs. The user is told which flag
-    went missing.
+    re-implemented in a command, which `ARCHITECTURE.md`'s "Commands stay dumb" forbids. So the
+    generic parser wins - it runs first - and the workflow's required flag is simply never given a
+    value, which `sdk/params.py` refuses by name at exit 2 before anything runs. The user is told
+    which flag went missing.
     """
     required_with.clear()
     harness = _fakes(tmp_path)

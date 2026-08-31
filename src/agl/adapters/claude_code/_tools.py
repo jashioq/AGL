@@ -9,6 +9,9 @@ from agl.ports.run import JsonValue
 
 __all__ = ["ASKING_MECHANISMS_DENIED", "Caller", "servers"]
 
+# Absent from a probed session even on a machine carrying
+# `CLAUDE_CODE_ENABLE_ASK_USER_QUESTION_TOOL`, and denied anyway: a rule naming a tool that is not
+# there costs a startup warning, and a tool that is there and unnamed costs the restriction.
 ASKING_MECHANISMS_DENIED: Final = ("AskUserQuestion",)
 
 _SUPPLIED: Final = "agl"
@@ -37,7 +40,7 @@ class Caller:
     def __init__(self) -> None:
         self.failure: Exception | None = None
 
-    def failed(self, raised: Exception) -> None:
+    def fail(self, raised: Exception) -> None:
         if self.failure is None:
             self.failure = raised
 
@@ -49,7 +52,7 @@ class Caller:
         try:
             return await tool.handler(payload)
         except Exception as raised:
-            self.failed(raised)
+            self.fail(raised)
             return ToolResult(text=_FAILED.format(name=tool.name, raised=raised), rejected=True)
 
 

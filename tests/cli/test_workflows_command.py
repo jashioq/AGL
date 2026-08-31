@@ -254,7 +254,8 @@ def test_the_workflows_parser_holds_one_optional_positional_and_no_flags() -> No
 
 
 def test_the_command_calls_api_and_nothing_else() -> None:
-    """"Commands stay dumb", made mechanical, on the command whose subject is workflows.
+    """`ARCHITECTURE.md`'s "Commands stay dumb", made mechanical, on the command whose subject is
+    workflows.
 
     Two `api` names and no third, which is the shape of the deviation: the listing and the help are
     two functions because one of them imports a package and the other must never. A `registry.` or

@@ -34,7 +34,7 @@ CODEX_BINARY="codex"
 CODEX_ADAPTER_DIR="src/agl/adapters/openai/"
 
 # Gate 6: the project's own module size convention, in *code* lines - see the gate for what that
-# counts and what it does not. The value has not moved since stage 0; what it measures has.
+# counts and what it does not. The value has never moved; what it measures has.
 MAX_MODULE_LINES=300
 
 # Gate 7: the package root, and what an import statement looks like at the start of a line.
@@ -207,10 +207,10 @@ fi
 # is "is this module still holding one idea" - a question about what the module *does*, which a
 # docstring is not. The measured cost of getting that wrong: `src/agl/sdk/params.py` landed at
 # exactly 300 by `wc -l` after five compression passes, so the convention bought an author's time
-# and caught nothing; it is 181 code lines, and was never near the ceiling in the sense the gate
+# and caught nothing; it is 171 code lines, and was never near the ceiling in the sense the gate
 # means. Against that, this build's prose has repeatedly been its best artifact - `ports/store.py`
-# predicted its own global-lock hole in its docstring, and stage 17 found a missing `commit=` by
-# reading a docstring's table against the code while all eight gates were green. A ceiling that
+# predicted its own global-lock hole in its docstring, and a missing `commit=` was found by reading
+# a docstring's table against the code while all eight gates were green. A ceiling that
 # charges for prose is a ceiling pushing in the wrong direction.
 #
 # Note the *attribute* docstring: a bare string statement after a dataclass field, which this repo
@@ -234,11 +234,12 @@ fi
 # **Blank lines are out, and this is the decision that set the number.** The case for keeping them
 # is the best one on this list: blank lines are the one thing that honestly tracks how much of a
 # screen a module fills, and unlike prose they cannot be argued away. The case against is a
-# measurement. Under `src/`, 3800 of 5508 blank lines - 68% - sit directly against a docstring line.
-# They are the blank line PEP 8 asks for *because* a block of prose is there, and this repo puts one
-# there every time. So counting blank lines does not measure bulk independently of prose; it
-# re-charges for the prose at about two-thirds rate, through a line the author did not choose. The
-# remaining third tracks how many definitions a module has, which the code count already counts.
+# measurement. Under `tests/` - the half of this walk that carries prose today, `src/` having none
+# - 4,195 of 12,929 blank lines, 32%, sit directly against a docstring line. They are the blank
+# line PEP 8 asks for *because* a block of prose is there, and this repo puts one there every time.
+# So counting blank lines does not measure bulk independently of prose; it re-charges for the prose
+# at about a third rate, through a line the author did not choose. The rest tracks how many
+# definitions a module has, which the code count already counts.
 #
 # (PEP 8 and habit, not a gate: `ruff`'s E3 blank-line rules are preview-only and are not in
 # `pyproject.toml`'s select list, so nothing here would stop an author deleting those lines to get
@@ -412,7 +413,7 @@ fi
 # 8. No test module can reach a paid endpoint
 #
 # A test that spends a token is indistinguishable from one that does not: same green, a second
-# slower. Stage 7.1 found the last one by accident. So "no test in this repository reaches a paid
+# slower. The last one was found by accident. So "no test in this repository reaches a paid
 # endpoint" is not left to a docstring, and not left to a fixture either - it is measured here, on
 # every run, in the two shapes it can fail.
 #
@@ -444,7 +445,7 @@ fi
 # the half that was measured: CODEX_HOME names a directory with no auth.json in it, so a `codex`
 # any test starts has no ChatGPT token to send anywhere. There is deliberately no assertion about
 # where Codex would send one - `codex --help` documents no endpoint environment variable, the
-# endpoint is configuration, and proving a redirect works costs a `codex exec`. Deliverable 8.0.
+# endpoint is configuration, and proving a redirect works costs a `codex exec`.
 #
 # (Named, not numbered: gates get inserted, and the numbers move. tests/conftest.py and
 # tests/adapters/test_claude_code_runner.py refer to this one as the paid-endpoint gate.)

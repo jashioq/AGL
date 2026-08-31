@@ -16,8 +16,11 @@ _ENCODING: Final = "utf-8"
 
 def _encoded(value: Mapping[str, JsonValue], address: str, *, indent: int | None) -> bytes:
     try:
+        # `ensure_ascii=False` leaves a lone surrogate in the text, so the encode below is what
+        # refuses it; escaped, it would be written and read back as a `str` UTF-8 cannot encode.
         text = json.dumps(dict(value), ensure_ascii=False, allow_nan=False, indent=indent)
         return text.encode(_ENCODING)
+    # `UnicodeEncodeError` is a `ValueError`, so the encode needs no branch of its own.
     except (TypeError, ValueError) as error:
         raise InternalError(
             f"{address} holds a value AGL cannot write down: {error}. A stored document is JSON, "

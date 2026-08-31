@@ -7,6 +7,8 @@ from agl.ports.integration import Conflict
 
 __all__ = ["already_holding", "collided", "unmerged", "unresolved"]
 
+# The `-z` form: NUL ends a record and is the one byte a path cannot hold, and the path is the tail
+# after one tab - so a filename holding a tab of its own still survives this parse.
 _RECORD_END: Final = "\0"
 _NAME_START: Final = "\t"
 

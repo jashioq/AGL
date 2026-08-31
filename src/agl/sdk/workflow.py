@@ -10,7 +10,7 @@ from agl.ports.ids import Namespace
 from agl.ports.integration import Conflict
 from agl.ports.terminal import Terminal
 from agl.ports.verifier import VerifierOutcome
-from agl.sdk._declarations import _describe
+from agl.sdk._declarations import named
 from agl.sdk._engine.integration import Integration, Leases
 from agl.sdk._engine.integration import integrate as _integrate
 from agl.sdk._engine.journal import Fingerprints
@@ -64,11 +64,11 @@ class Run[P = object]:
     async def step[R](self, role: Role[R], *, commit: str | None = None, **inputs: object) -> R:
         return await self._steps.step(role, commit=commit, inputs=inputs)
 
-    def worktree(self, name: str, base: Run[object] | str | None = None) -> Run[P]:
+    def worktree(self, namespace: str, base: Run[object] | str | None = None) -> Run[P]:
         return cast(
             "Run[P]",
             self.worktrees.open(
-                name, scope=self.scope, base=_starts_at(self, base), build=self._child
+                namespace, scope=self.scope, base=_starts_at(self, base), build=self._child
             ),
         )
 
@@ -108,8 +108,8 @@ def _starts_at(run: Run[object], base: Run[object] | str | None) -> str:
 def _unaddressable(scope: RunScope) -> str:
     return (
         f"there is no parent to integrate into: {_where(scope)} called `run.integrate()`, and a "
-        f"landing goes into the worktree of the `Run` that cut this one. Only a child "
-        f"opened with `run.worktree(name)` has one. There is no argument to point it elsewhere, "
+        f"landing goes into the worktree of the `Run` that cut this one. Only a child opened "
+        f"with `run.worktree(namespace)` has one. There is no argument to point it elsewhere, "
         f"and that is not a policy: AGL never checks out or writes to any ref outside `agl/*`, "
         f"so `main` and every branch of yours is unaddressable rather than protected - "
         f"there is no rule here that could be relaxed and no spelling that would name one"
@@ -191,7 +191,7 @@ def _declared(fn: Callable[..., object]) -> object:
 def _not_a_run(fn: Callable[..., object], first: str, annotation: object, subject: object) -> str:
     if isinstance(subject, type) and issubclass(subject, Run):
         return (
-            f"the workflow {_written_at(fn)} annotates {first!r} as {_describe(annotation)}, which "
+            f"the workflow {_written_at(fn)} annotates {first!r} as {named(annotation)}, which "
             f"is a subclass of `Run`. A workflow is handed the `Run` the framework builds, never a "
             f"class of its own, so the annotation would be describing an object this run cannot "
             f"produce - and the params are read from it precisely because it and the object agree. "
@@ -199,7 +199,7 @@ def _not_a_run(fn: Callable[..., object], first: str, annotation: object, subjec
             f"`Run` for a workflow that never reads `run.params`"
         )
     return (
-        f"the workflow {_written_at(fn)} annotates {first!r} as {_describe(annotation)}, and a "
+        f"the workflow {_written_at(fn)} annotates {first!r} as {named(annotation)}, and a "
         f"workflow is one async function taking a `Run`. That annotation is also where it "
         f"declares its parameters, now that `@workflow` takes only `version=`, so this is not a "
         f"style note: there is nothing here to read the params class out of. Write `{first}: "
@@ -209,6 +209,9 @@ def _not_a_run(fn: Callable[..., object], first: str, annotation: object, subjec
 
 def _hints(fn: Callable[..., object]) -> tuple[list[str], Mapping[str, object]]:
     try:
+        # `signature` is inside this guard too: 3.14 evaluates no annotation until something asks,
+        # and `signature` asks - a first parameter naming a class nothing binds raises before
+        # `get_type_hints`.
         return list(signature(fn).parameters), get_type_hints(fn)
     except (NameError, TypeError) as error:
         raise InputError(

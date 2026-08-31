@@ -8,7 +8,7 @@ from typing import cast
 from agl.ports.errors import InternalError, UpstreamUnavailable
 from agl.ports.terminal import Choice, Response, Screen, TextInput
 
-__all__ = ["Entry", "Registration", "Screens", "View"]
+__all__ = ["Queued", "Registration", "Screens", "View"]
 
 
 type View[T] = Callable[..., Screen[T]]
@@ -26,7 +26,7 @@ class Registration:
 
 
 @dataclass(frozen=True, slots=True, eq=False)
-class Entry(Registration):
+class Queued(Registration):
 
     priority: int
 
@@ -39,14 +39,14 @@ class Screens:
 
     def __init__(self) -> None:
         self._slot: Registration | None = None
-        self._queues: dict[int, list[Entry]] = {}
+        self._queues: dict[int, list[Queued]] = {}
 
     def hold(self, view: View[object], /, **params: object) -> None:
         self._slot = Registration(view, params)
 
     def queue[T](self, view: View[T], /, *, priority: int = 0, **params: object) -> Awaitable[T]:
         answered: asyncio.Future[object] = asyncio.get_running_loop().create_future()
-        entry = Entry(view, params, priority, answered)
+        entry = Queued(view, params, priority, answered)
         self._queues.setdefault(priority, []).append(entry)
         answered.add_done_callback(lambda _: self._retire(entry))
         return cast("Awaitable[T]", answered)
@@ -56,7 +56,7 @@ class Screens:
         return self._slot
 
     @property
-    def current(self) -> Entry | None:
+    def current(self) -> Queued | None:
         busy = (priority for priority, entries in self._queues.items() if entries)
         busiest = max(busy, default=None)
         return None if busiest is None else self._queues[busiest][0]
@@ -113,7 +113,7 @@ class Screens:
             entries.clear()
         self._slot = None
 
-    def _retire(self, entry: Entry) -> None:
+    def _retire(self, entry: Queued) -> None:
         entries = self._queues.get(entry.priority)
         if entries is not None and entry in entries:
             entries.remove(entry)

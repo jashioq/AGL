@@ -14,8 +14,12 @@ __all__ = ["ShellVerifier"]
 
 _DEFAULT_BUILD_TIMEOUT: Final = 1800.0
 
+# Build tools hold locks - a daemon's pid file, a package manager's cache lock - and unlink them on
+# SIGTERM, so this is the difference between a tree the next build can use and one that refuses.
 _GRACE: Final = 5.0
 
+# Build output is not promised to be UTF-8 - a filename on POSIX is bytes - and `surrogateescape`
+# would mint exactly the lone surrogates `ports/run.py` and the store refuse.
 _ENCODING: Final = "utf-8"
 _UNDECODABLE: Final = "replace"
 
@@ -34,7 +38,7 @@ class ShellVerifier(Verifier):
         captured: list[bytes] = []
         try:
             async with asyncio.timeout(self._build_timeout):
-                await _drained(process, captured)
+                await _drain(process, captured)
                 finished = await process.wait()
         except TimeoutError:
             stopped = await _halted(process)
@@ -44,7 +48,7 @@ class ShellVerifier(Verifier):
                 output=_text(captured) + _expired(self._build_timeout),
             )
         except BaseException:
-            _signalled(process, signal.SIGTERM)
+            _signal(process, signal.SIGTERM)
             raise
         return VerifierOutcome(passed=finished == _PASSED, status=finished, output=_text(captured))
 
@@ -67,7 +71,7 @@ async def _started(command: str, workdir: Path) -> asyncio.subprocess.Process:
         ) from error
 
 
-async def _drained(process: asyncio.subprocess.Process, captured: list[bytes]) -> None:
+async def _drain(process: asyncio.subprocess.Process, captured: list[bytes]) -> None:
     if process.stdout is None:
         raise UpstreamUnexpected(
             "the build was started with its output on a pipe and there is no pipe to read. "
@@ -79,15 +83,15 @@ async def _drained(process: asyncio.subprocess.Process, captured: list[bytes]) -
 
 
 async def _halted(process: asyncio.subprocess.Process) -> int:
-    _signalled(process, signal.SIGTERM)
+    _signal(process, signal.SIGTERM)
     with suppress(TimeoutError):
         async with asyncio.timeout(_GRACE):
             await process.wait()
-    _signalled(process, signal.SIGKILL)
+    _signal(process, signal.SIGKILL)
     return await process.wait()
 
 
-def _signalled(process: asyncio.subprocess.Process, sign: signal.Signals) -> None:
+def _signal(process: asyncio.subprocess.Process, sign: signal.Signals) -> None:
     if process.returncode is not None:
         return
     try:

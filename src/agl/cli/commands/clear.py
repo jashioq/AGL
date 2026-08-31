@@ -21,6 +21,8 @@ _FORCE_FLAGS: Final = ("-f", "--force")
 
 _NOTHING_TO_REPORT: Final = 0
 
+# `argparse` has no public spelling for what `add_subparsers` returns, and the alternative is
+# `Any`, which is the one thing `mypy --strict` is here to keep out of the seam.
 type _Commands = argparse._SubParsersAction[RefusingParser]
 
 

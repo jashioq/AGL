@@ -251,9 +251,9 @@ def _never_called_factory() -> Role:
 
 # --- `@role(model=…)`: what the decorator registers, and where the model lives --------------------
 #
-# A role *is* "a `@role(model=…)` factory returning a frozen `Role`", and `ARCHITECTURE.md`'s
-# "Deliberately not built" rejects what it replaced: "a bare `replace()` on a module-level `Role`
-# ... lets a call site change the model or the restrictions - a mutation with pleasant syntax". The
+# A role *is* a `@role(model=…)` factory returning a frozen `Role`, and what it replaced is refused
+# deliberately: a bare `replace()` on a module-level `Role` lets a call site change the model or
+# the restrictions, which is a mutation with pleasant syntax. The
 # two halves of that are measured separately below, because they fail differently: a decorator that
 # forgot to bind the model gives every step a role that refuses at the first read, and a factory
 # whose parameter list is wider than the author wrote gives a call site knobs the author never
@@ -771,7 +771,7 @@ def test_a_duplicate_tool_name_is_refused_as_an_agent_task_would_refuse_it() -> 
 
     **This one is double entry and stays double entry**, which is the opposite call from the two
     refusals `Tool` and `ReportingTool` share - those became one
-    `ports.agent.checked_tool_declaration` because they were one rule spelled twice. These are two
+    `ports.agent.check_tool_declaration` because they were one rule spelled twice. These are two
     rules about two different things. `Role` catches a duplicate at the *declaration*, where the
     author is looking at the list they just wrote and the fix is on screen; `AgentTask` catches it
     again at the *dispatch*, where a tool list assembled from any source - a workflow that built

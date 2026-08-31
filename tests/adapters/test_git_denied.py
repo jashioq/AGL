@@ -21,18 +21,18 @@ Named for the invariant rather than for a module, because the rule is about the 
 asserting it from inside `test_git_fake.py` would be a test about the fake that is not, which is
 `test_filesystem_no_lock.py`'s reason for its own name. `tests/` carries no `__init__.py` - see
 `tests/conftest.py` for why it must not - so pytest's module names are the bare filenames and this
-one has to be distinct from the seven other `test_git_*.py`.
+one has to be distinct from the eight other `test_git_*.py`.
 
 ## Both call sites, because one function with two callers is what is being asserted
 
 Two provocations per class, deliberately: `shutil.rmtree` reaches `_translated` from `_trees.py`'s
-own `deleted`, and `Path.iterdir` reaches it from `_working.py`'s `_gather`. A version of this file
+own `delete`, and `Path.iterdir` reaches it from `_working.py`'s `_gather`. A version of this file
 that provoked only the first would pass against a `git/_working.py` that had quietly grown a second
 copy of the function back, translating a refusal as an outage on the half of the package this file
 never touched.
 
-`deleted` is reached through the fake provider rather than the real one, and the choice is not a
-compromise: `_trees.deleted` is the *same* function `GitWorkspaceProvider.remove` calls - the two
+`delete` is reached through the fake provider rather than the real one, and the choice is not a
+compromise: `_trees.delete` is the *same* function `GitWorkspaceProvider.remove` calls - the two
 providers differ in what they do about git's registry afterwards and not in this - and
 `_working.py` is reached from the fake and from nowhere else, so one instrument reaches both call
 sites and a real repository would buy nothing here but a subprocess.

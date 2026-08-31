@@ -95,6 +95,8 @@ def _worktrees_container(home: AglHome, scope: RunScope) -> Path:
 def _write_atomically(destination: Path, payload: bytes, address: str) -> None:
     try:
         destination.parent.mkdir(parents=True, exist_ok=True)
+        # `dir=` is load-bearing: `os.replace` is atomic within one filesystem and raises `EXDEV`
+        # across two, and the system temp directory is its own mount on plenty of machines.
         handle, partial = tempfile.mkstemp(dir=destination.parent, prefix=_PARTIAL_PREFIX)
     except OSError as error:
         raise _translated(error, address) from error
@@ -102,6 +104,9 @@ def _write_atomically(destination: Path, payload: bytes, address: str) -> None:
         with os.fdopen(handle, "wb") as opened:
             opened.write(payload)
             opened.flush()
+            # The file and never the parent directory: this stops a crash publishing a name over
+            # unwritten content, where the directory's would only make the rename itself survive
+            # one.
             os.fsync(opened.fileno())
         os.replace(partial, destination)
     except OSError as error:
@@ -138,6 +143,7 @@ def _read(path: Path, address: str) -> dict[str, JsonValue] | None:
 
 
 def _translated(error: OSError, address: str) -> AglError:
+    # `PermissionError` is `EACCES` and `EPERM`, and nothing of AGL's own.
     if isinstance(error, PermissionError):
         return DeniedError(f"the filesystem refused {address}: {error}")
     return UpstreamUnavailable(f"the filesystem could not reach {address}: {error}")

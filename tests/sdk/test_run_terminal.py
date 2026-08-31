@@ -16,9 +16,10 @@ terminal in a run tree and no line that could make a second. A terminal per `Run
 four children five slots and five sets of queues, four of them drawing over each other; every test
 in the adapter suite passes on such a build, because each of the five works perfectly alone.
 
-**The context is genuinely open around `wf.fn`, and around nothing else.** `ports/terminal.py`
-makes `show` outside the context an `InternalError`, so until the context was opened here every
-screen in a real run raised. Three assertions, because each of the other two is satisfied by a
+**The context is genuinely open around `wf.fn`, and around nothing else.** All three terminal
+implementations make `show` outside the context an `InternalError` - it is `ARCHITECTURE.md`'s "The
+terminal" that states the rule - so until the context was opened here every screen in a real run
+raised. Three assertions, because each of the other two is satisfied by a
 build that gets the third wrong: it is open while the workflow runs, it is shut when `api.run`
 returns, and it was never entered at all by a run that died before the workflow - which is where
 the `async with`'s placement after the record and after `_base` becomes observable.
@@ -288,9 +289,10 @@ def test_the_terminal_is_a_read_and_not_a_field(tmp_path: Path) -> None:
 async def test_a_workflow_can_show_a_screen_through_api_run(tmp_path: Path) -> None:
     """The gap this closes, and it was a real one.
 
-    `ports/terminal.py` refuses a `show` outside the context, so until `api.run` entered the
-    terminal every screen in every real run raised `InternalError` - a failure invisible from the
-    SDK's own suite, where a test that constructs a `Run` never goes through `api.run` at all. What
+    Every terminal implementation refuses a `show` outside the context, so until `api.run` entered
+    the terminal every screen in every real run raised `InternalError` - a failure invisible from
+    the SDK's own suite, where a test that constructs a `Run` never goes through `api.run` at all.
+    What
     this asserts is that the workflow got all the way through a `show` and returned: the exception
     would come straight back out of `api.run`, which catches nothing.
 
@@ -382,7 +384,8 @@ async def test_the_terminal_is_entered_once_around_a_resumed_workflow(tmp_path: 
     zero times", and zero is the state this section exists to rule out. The recorder's count is
     reset after the first invocation so that what is counted is the resume's own entry, and the
     terminal is entered again rather than for a second time: `api.run` left its context before this
-    one opened, which is the case `ports/terminal.py` deliberately leaves open.
+    one opened, which is the case none of the three refuses - each clears its own flag on the way
+    out, and only a second entry while still open is an ordering bug.
     """
     harness = _fakes(tmp_path)
     recorder = _Recording()

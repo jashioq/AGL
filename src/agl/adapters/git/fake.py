@@ -8,8 +8,8 @@ from agl.adapters.git._conflicts import already_holding, collided, unresolved
 from agl.adapters.git._merging import combined, contested
 from agl.adapters.git._patches import differences, patch
 from agl.adapters.git._snapshots import FakeRepository, Hold, Tree
-from agl.adapters.git._trees import _Place, _place, deleted, made, tidied
-from agl.adapters.git._working import applied, restored, snapshot
+from agl.adapters.git._trees import _Place, _place, delete, make, tidy
+from agl.adapters.git._working import apply, restore, snapshot
 from agl.ports.errors import ConflictError, InternalError, NotFoundError, UpstreamUnexpected
 from agl.ports.history import FileChange, History
 from agl.ports.ids import Namespace, RunLabel
@@ -21,6 +21,9 @@ __all__ = ["FakeHistory", "FakeIntegrator", "FakeRepository", "FakeWorkspaceProv
 
 _CLAIMED: Final[set[Path]] = set()
 
+# What git's message cleanup takes away, measured character by character rather than taken from a
+# definition of whitespace: a vertical tab, a form feed, U+0085 and a no-break space are all
+# `str.isspace()` in Python and all ordinary characters to git, so a message of one is recorded.
 _CLEANED_AWAY: Final = " \t\r\n"
 
 
@@ -53,15 +56,15 @@ class FakeWorkspaceProvider(WorkspaceProvider):
                 f"cannot be open in two places at once. Nothing was changed"
             )
         cut_from = self._repository.tip(place.branch) or self._cut_from(base, place.branch)
-        made(place.path)
+        make(place.path)
         self._repository.attach(place.path, place.branch, cut_from)
-        restored(place.path, self._repository.tree_of(cut_from))
+        restore(place.path, self._repository.tree_of(cut_from))
         return _FakeWorkspace(place, self._repository)
 
     async def remove(self, label: RunLabel, namespace: Namespace | None) -> None:
         place = _place(self._trees, label, namespace)
-        deleted(place.path)
-        tidied(run_trees_dir(self._trees, label))
+        delete(place.path)
+        tidy(run_trees_dir(self._trees, label))
         self._repository.detach(place.path)
         self._repository.prune()
 
@@ -116,14 +119,14 @@ class _FakeWorkspace(Workspace):
         held = snapshot(self.path)
         if held == self._repository.tree_of(at):
             return at
-        _cleaned_away(message, self.path)
+        _check_message(message, self.path)
         recorded = self._repository.record(held, (at,), message)
         self._repository.move(self._at.branch, recorded)
         return recorded
 
     async def restore(self, head: str) -> None:
         at = self._repository.resolve(head)
-        restored(self.path, self._repository.tree_of(at))
+        restore(self.path, self._repository.tree_of(at))
         self._repository.move(self._at.branch, at)
 
 
@@ -209,7 +212,7 @@ class FakeIntegrator(Integrator):
         )
         self._refuse_to_overwrite(target, recorded, changing)
 
-        applied(target.path, wanted, changing)
+        apply(target.path, wanted, changing)
         called = _merged(source.branch, target.branch)
         if not combination.collisions:
             arrived = self._repository.record(combination.tree, (settled, landing), called)
@@ -259,7 +262,7 @@ class FakeIntegrator(Integrator):
         pending = self._repository.held(target.path)
         if pending is None:
             return
-        applied(target.path, self._repository.tree_of(pending.target), pending.touched)
+        apply(target.path, self._repository.tree_of(pending.target), pending.touched)
         self._repository.move(target.branch, pending.target)
         self._repository.release(target.path)
 
@@ -278,7 +281,7 @@ class FakeIntegrator(Integrator):
 
 @asynccontextmanager
 async def _claimed(directory: Path, label: str) -> AsyncIterator[None]:
-    made(directory)
+    make(directory)
     key = directory.resolve()
     if key in _CLAIMED:
         raise ConflictError(
@@ -302,7 +305,7 @@ def _merged(source: str, target: str) -> str:
     return f"Merge branch '{source}' into {target}"
 
 
-def _cleaned_away(message: str, where: Path) -> None:
+def _check_message(message: str, where: Path) -> None:
     if message.strip(_CLEANED_AWAY) == "":
         raise UpstreamUnexpected(
             f"the message for this commit is {message!r}, and git cleans that away to nothing: it "

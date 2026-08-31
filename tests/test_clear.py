@@ -347,7 +347,7 @@ async def test_every_namespace_at_every_depth_comes_away(tmp_path: Path) -> None
 
     A child and a grandchild, asserted as three things each: the checkout is gone, the line of work
     is gone, and - because the trees root is flat and every checkout in a run is a sibling -
-    `.trees/auth/` itself is gone, which is the `rmdir` `_trees.tidied` does once the last one has
+    `.trees/auth/` itself is gone, which is the `rmdir` `_trees.tidy` does once the last one has
     been taken away. That directory is asked for by name.
 
     **This is also where "the records go last" is falsifiable.** `Store.namespaces` is the only

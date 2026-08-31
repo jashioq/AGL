@@ -12,12 +12,17 @@ __all__ = ["Namespace", "ProjectName", "RunLabel", "StepName"]
 
 _ALLOWED_CHARACTERS: Final = frozenset(string.ascii_letters + string.digits + "._-")
 
+# `\` is a separator on Windows and illegal in a git ref component; `/` is both at once.
 _PATH_SEPARATORS: Final = frozenset("/\\")
 
+# Unicode's top-level categories for what renders as nothing or as a space: `Cc` control, `Cf`
+# format, `Cs` surrogate, `Co` private use, `Cn` unassigned, and every `Z`.
 _INVISIBLE_CATEGORIES: Final = frozenset("CZ")
 
+# NAME_MAX: the longest single path segment every filesystem AGL runs on will take, in bytes.
 _MAX_BYTES: Final = 255
 
+# `con.toml` and `NUL.txt` are the devices too - whatever the extension, whatever the case.
 _RESERVED_DEVICE_NAMES: Final = frozenset(
     {"CON", "PRN", "AUX", "NUL"}
     | {f"COM{digit}" for digit in range(1, 10)}
@@ -33,6 +38,7 @@ def _describe(character: str) -> str:
     return f"{character!r} ({name})" if name else f"{character!r} (U+{ord(character):04X})"
 
 
+# Casefold then NFC: the two ways a filesystem merges names that git keeps apart.
 def _collision_key(value: str) -> str:
     return unicodedata.normalize("NFC", value.casefold())
 

@@ -12,8 +12,12 @@ __all__ = ["GitHistory"]
 
 _ASKING: Final = 30.0
 
+# An annotated tag names a tag object and a ref can name a tree, each with an id of exactly the
+# right shape; `^{commit}` is what makes this answer about a commit rather than about the ref.
 _PEELED: Final = "^{commit}"
 
+# `--find-renames` with no number is git's own default of fifty percent similarity, so a file moved
+# and rewritten past that point is reported as the deletion and the addition it has become.
 _COMPARING: Final = ("diff-tree", "-r", "--find-renames")
 
 
@@ -40,6 +44,9 @@ class GitHistory(History):
             answer = await self._git.run(
                 "rev-parse",
                 "--verify",
+                # `git diff-tree` accepts `--output=<file>`, so a ref spelled
+                # `--output=/etc/anything` is a write performed by a port that promises to change
+                # nothing. Argv discipline does not reach it.
                 "--end-of-options",
                 f"{ref}{_PEELED}",
                 refusal=NotFoundError,

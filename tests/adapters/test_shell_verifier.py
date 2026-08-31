@@ -326,8 +326,8 @@ def test_the_adapter_never_builds_a_command_out_of_the_workspace_path() -> None:
     shell would fire the marker, and this pair - the syntax and the effect - is the strongest
     thing available from outside the module. `shlex` is asserted absent from the *code* for the
     reason the port names it - quoting the path into the command is the plausible wrong fix rather
-    than the obvious one - and absent from the code only, since the module docstring says as much
-    in prose and a check that could not tell a mention from a call would punish the explanation.
+    than the obvious one - and absent from the *code* only, so that a mention of `shlex` in a
+    comment or in a message is not read as a call of it.
     """
     source_path = verifier_module.__file__
     assert source_path is not None, "the verifier module has no source file to read"
@@ -506,9 +506,9 @@ def _alive(pid: int) -> bool:
     return True
 
 
-# --- The two clauses inside `_signalled` that no outcome can witness -----------------------------
+# --- The two clauses inside `_signal` that no outcome can witness --------------------------------
 
-# `_signalled` is what `_halted` spends twice for its terminate-then-kill escalation, and what
+# `_signal` is what `_halted` spends twice for its terminate-then-kill escalation, and what
 # `verify`'s `except BaseException` spends once on the way out. Neither property below is visible
 # from a `VerifierOutcome`: one is a signal that must *not* be sent, and the other is a signal sent
 # down a path no build that finishes ever takes. So both reach into the module by name, the way the
@@ -537,7 +537,7 @@ async def test_a_child_that_has_already_been_reaped_is_never_signalled(
     process the machine starts. `os.killpg` against that number then reaches an unrelated process
     group, and because the group is addressed by the *pid* of a child that no longer exists, what
     dies is not anything this adapter ever started. `returncode is not None` is what makes that
-    unreachable, and it is exact rather than best-effort: `_signalled` has no `await` in it, so the
+    unreachable, and it is exact rather than best-effort: `_signal` has no `await` in it, so the
     event loop's reaping callback - the thing that sets `returncode` - cannot run between the check
     and the call.
 
@@ -561,8 +561,8 @@ async def test_a_child_that_has_already_been_reaped_is_never_signalled(
 
     monkeypatch.setattr(os, "killpg", recorded)
 
-    verifier_module._signalled(process, signal.SIGTERM)
-    verifier_module._signalled(process, signal.SIGKILL)
+    verifier_module._signal(process, signal.SIGTERM)
+    verifier_module._signal(process, signal.SIGKILL)
 
     assert signalled == [], (
         f"a child that had already exited and been reaped was signalled anyway: {signalled}. Its "
@@ -598,7 +598,7 @@ async def test_a_group_signal_that_is_denied_falls_back_to_the_child_itself(
     process = await verifier_module._started(f"exec sleep {SLEEP:g}", tmp_path)
     monkeypatch.setattr(os, "killpg", denied)
 
-    verifier_module._signalled(process, signal.SIGKILL)
+    verifier_module._signal(process, signal.SIGKILL)
 
     try:
         status = await asyncio.wait_for(process.wait(), FALLBACK_WAIT)

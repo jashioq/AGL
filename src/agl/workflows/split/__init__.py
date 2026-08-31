@@ -28,11 +28,11 @@ async def split(run: Run[SplitParams]) -> None:
             group.create_task(_implement(children[chunk.id], chunk))
 
 
-async def _implement(w: Run[SplitParams], chunk: Chunk) -> None:
-    await w.step(implementer(), chunk=chunk, commit=f"implement {chunk.id}")
-    outcome = await w.integrate()
+async def _implement(child: Run[SplitParams], chunk: Chunk) -> None:
+    await child.step(implementer(), chunk=chunk, commit=f"implement {chunk.id}")
+    outcome = await child.integrate()
     while outcome.conflicted:
-        if await w.terminal.show(
+        if await child.terminal.show(
             views.conflict, conflict=outcome.conflict, build=outcome.verdict, priority=10
         ):
             await outcome.retry()

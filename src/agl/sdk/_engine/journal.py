@@ -31,6 +31,8 @@ __all__ = [
 
 _SEPARATORS: Final = (",", ":")
 
+# A perfectly legal dataclass field name - two trailing underscores mean no name mangling - which
+# is why `_checked_key` is spent on field names and not only on a mapping's.
 _TYPE_KEY: Final = "__agl_type__"
 
 _WIRE_KEYS: Final = ("fingerprint", "value", "head", "at")
@@ -105,7 +107,7 @@ class Fingerprints:
         count = self._counts.get(_counter_key(scope, step, base), 0)
         return sha256(f"{base}:{count}".encode()).hexdigest()
 
-    def claimed(self, scope: RunScope, step: StepName, base: str) -> None:
+    def claim(self, scope: RunScope, step: StepName, base: str) -> None:
         key = _counter_key(scope, step, base)
         self._counts[key] = self._counts.get(key, 0) + 1
 
@@ -139,7 +141,7 @@ class Entry:
     def from_json(cls, data: object) -> Entry:
         if not isinstance(data, Mapping):
             raise InternalError(f"a step entry is a JSON object, not a {type(data).__name__}")
-        _WIRE.checked(data)
+        _WIRE.check(data)
         try:
             at = datetime.fromisoformat(_WIRE.text(data, "at"))
         except ValueError as error:
@@ -235,7 +237,7 @@ class Journal:
             digest = self._fingerprints.digest(self._scope, name, base)
             entry = await read_entry(self._store, self._scope, name, digest)
             if entry is not None:
-                self._fingerprints.claimed(self._scope, name, base)
+                self._fingerprints.claim(self._scope, name, base)
                 self._last_good = entry.head
                 return entry.value
 
@@ -243,7 +245,7 @@ class Journal:
             try:
                 result = await worker()
             finally:
-                await self._ended(commit)
+                await self._end(commit)
 
             _check_result(result, f"step {name}'s result")
             head = await self._workspace.head()
@@ -254,15 +256,19 @@ class Journal:
                 digest,
                 Entry(fingerprint=digest, value=result, head=head, at=self._clock.now()),
             )
-            self._fingerprints.claimed(self._scope, name, base)
+            self._fingerprints.claim(self._scope, name, base)
             self._last_good = head
             return result
 
-    async def _ended(self, commit: str | None) -> None:
+    async def _end(self, commit: str | None) -> None:
         ending = asyncio.create_task(self._ending(commit))
         cancellation: asyncio.CancelledError | None = None
         while not ending.done():
             try:
+                # The shield inside the loop and not on its own: a bare
+                # `await asyncio.shield(ending)` re-raises in *this* task at the first cancellation
+                # and leaves the ending running, detached. The loop takes the shield again,
+                # absorbing one cancellation per turn, until the ending is genuinely finished.
                 await asyncio.shield(ending)
             except asyncio.CancelledError as raised:
                 cancellation = raised
@@ -284,10 +290,15 @@ class Journal:
 
 
 def _dumps(value: JsonValue) -> str:
+    # `ensure_ascii=True` writes an astral character and the surrogate pair encoding it as the same
+    # text - `json.dumps(chr(0x1F600))` and `json.dumps(chr(0xD83D) + chr(0xDE00))` are
+    # byte-identical - which is why `_checked_text` refuses surrogates: one input to one digest.
     return json.dumps(value, sort_keys=True, separators=_SEPARATORS, ensure_ascii=True)
 
 
 def _canonical(value: object, where: str) -> JsonValue:
+    # `bool` and `int` together and first: a `bool` is an `int`, so an int-only branch that coerced
+    # would make `{"x": True}` and `{"x": 1}` one fingerprint.
     if value is None or isinstance(value, bool | int):
         return value
     if isinstance(value, str):
@@ -306,6 +317,7 @@ def _canonical(value: object, where: str) -> JsonValue:
             for key, item in value.items()
         }
     if isinstance(value, AbstractSet):
+        # Sorted on each element's own canonical text, because `frozenset({1, "a"})` has no `<`.
         return sorted((_canonical(item, f"{where}[]") for item in value), key=_dumps)
     if isinstance(value, list | tuple):
         return [_canonical(item, f"{where}[{index}]") for index, item in enumerate(value)]
@@ -314,6 +326,9 @@ def _canonical(value: object, where: str) -> JsonValue:
         tagged: dict[str, JsonValue] = {
             _TYPE_KEY: _checked_text(f"{kind.__module__}.{kind.__qualname__}", f"{where}'s type")
         }
+        # Walked here rather than through `dataclasses.asdict`, which recurses: a nested dataclass
+        # would arrive as a plain `dict`, and a tag on what it returned would name the outer type
+        # only.
         for field in dataclasses.fields(value):
             tagged[_checked_key(field.name, where)] = _canonical(
                 getattr(value, field.name), f"{where}.{field.name}"

@@ -7,11 +7,11 @@ from agl.adapters.git._runner import GitRunner, unreadable
 from agl.adapters.git._trees import (
     _Place,
     _place,
-    deleted,
-    made,
+    delete,
+    make,
     registry_lock,
     run_lock,
-    tidied,
+    tidy,
 )
 from agl.ports.errors import ConflictError, NotFoundError, UpstreamUnexpected
 from agl.ports.ids import Namespace, RunLabel
@@ -23,10 +23,14 @@ __all__ = ["GitWorkspaceProvider"]
 
 _ASKING: Final = 30.0
 
+# git's worktree registry in the `-z` form (git 2.36): every attribute ends in a NUL and an empty
+# attribute ends the record, which the newline form documents itself as unable to promise.
 _ATTRIBUTE_END: Final = "\0"
 _REGISTERED_AT: Final = "worktree "
 _REGISTERED_ON: Final = "branch "
 
+# `rev-parse` resolves `refs/tags/<name>` before `refs/heads/<name>`, so a short name in a
+# repository holding both answers about the tag.
 _BRANCH_REF: Final = "refs/heads/"
 
 
@@ -49,7 +53,7 @@ class GitWorkspaceProvider(WorkspaceProvider):
                 )
 
         attaching = await self._branch_exists(place.branch)
-        made(run_trees_dir(self._trees, label))
+        make(run_trees_dir(self._trees, label))
         adding = (
             ("worktree", "add", "--end-of-options", str(place.path), place.branch)
             if attaching
@@ -62,8 +66,8 @@ class GitWorkspaceProvider(WorkspaceProvider):
 
     async def remove(self, label: RunLabel, namespace: Namespace | None) -> None:
         place = _place(self._trees, label, namespace)
-        deleted(place.path)
-        tidied(run_trees_dir(self._trees, label))
+        delete(place.path)
+        tidy(run_trees_dir(self._trees, label))
         async with registry_lock(self._trees):
             await self._git.run("worktree", "prune", refusal=UpstreamUnexpected, timeout=_ASKING)
 
@@ -90,6 +94,9 @@ class GitWorkspaceProvider(WorkspaceProvider):
         listing = await self._git.run(
             "worktree", "list", "--porcelain", "-z", refusal=UpstreamUnexpected, timeout=_ASKING
         )
+        # Both sides resolved: git records a worktree's real path, and `/tmp` is a symlink on macOS
+        # - so a trees root reached through one would register under one spelling and be looked up
+        # under another.
         wanted = path.resolve()
         registered: Path | None = None
         for attribute in listing.split(_ATTRIBUTE_END):

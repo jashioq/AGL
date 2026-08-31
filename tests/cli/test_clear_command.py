@@ -203,7 +203,8 @@ def test_abbreviation_is_off_on_the_clear_subparser(tmp_path: Path) -> None:
 
 
 def test_the_command_calls_exactly_one_api_function() -> None:
-    """"Commands stay dumb", made mechanical - and this is the command the rule is about.
+    """`ARCHITECTURE.md`'s "Commands stay dumb", made mechanical - and this is the command the rule
+    is about.
 
     The command this replaces iterated worktrees, deleted branches and called `shutil.rmtree` past
     the `Store` port. The same scan `tests/cli/test_run_command.py` and

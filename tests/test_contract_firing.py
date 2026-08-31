@@ -74,7 +74,7 @@ a fabrication plus the reason the fabrication is the right shape - the reason be
 later reader needs and the part no mechanism can hold. Splitting the table off from the machinery
 that runs it would put the argument for a row one file away from the assertion that prints it, and
 buy nothing: what is left is two fixtures, one loop and the failure messages. This file stood over
-the ceiling while the gate counted every line; the gate counts code now, and 243 of these 472 lines
+the ceiling while the gate counted every line; the gate counts code now, and 243 of these 473 lines
 are code, so the warning that prompted this section no longer fires. The section stays because the
 question it answers - why is the table not its own module - is asked by the file's shape, not by
 the gate.

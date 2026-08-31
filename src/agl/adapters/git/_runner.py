@@ -20,11 +20,18 @@ __all__ = ["GitRunner", "unreadable"]
 
 _DEFAULT_TIMEOUT: Final = 120.0
 
+# git installs handlers that unlink its own `*.lock` files on a fatal signal, so SIGTERM plus a
+# moment is the difference between a usable repository and a stale `index.lock`.
 _GRACE: Final = 5.0
 
+# git does not promise UTF-8 - a path on POSIX is bytes - and `surrogateescape` would mint exactly
+# the lone surrogates `ports/run.py` and the store refuse, three layers from here.
 _ENCODING: Final = "utf-8"
 _UNDECODABLE: Final = "replace"
 
+# git's own convention for a question answered by the exit status: 0 is yes, 1 is no, anything else
+# failed. `merge-base --is-ancestor`, `diff --quiet` and `rev-parse --verify --quiet` all spell it
+# so.
 _ANSWERED_NO: Final = 1
 
 _REASON_LIMIT: Final = 500
@@ -82,14 +89,14 @@ class GitRunner:
             async with asyncio.timeout(seconds):
                 out, err = await process.communicate()
         except TimeoutError:
-            await _stopped(process)
+            await _stop(process)
             raise UpstreamUnavailable(
                 f"{_asked(argv, where)} did not finish within {seconds:g}s and was stopped. "
                 f"Whatever it had already done is done, and git unlinks its own lock files when "
                 f"it is asked to stop, so the same call may well succeed later"
             ) from None
         except BaseException:
-            _signalled(process, signal.SIGTERM)
+            _signal(process, signal.SIGTERM)
             raise
         code = process.returncode if process.returncode is not None else 0
         return _Completed(code, _text(out), _text(err))
@@ -143,6 +150,8 @@ async def _spawned(argv: Sequence[str], where: Path) -> asyncio.subprocess.Proce
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            # A git that stops to ask for a credential has no terminal to ask on and waits out the
+            # deadline; `stdin=DEVNULL` above closes the other door, an editor.
             env=os.environ | {"GIT_TERMINAL_PROMPT": "0"},
         )
     except ValueError as error:
@@ -160,17 +169,17 @@ async def _spawned(argv: Sequence[str], where: Path) -> asyncio.subprocess.Proce
         ) from error
 
 
-async def _stopped(process: asyncio.subprocess.Process) -> None:
-    _signalled(process, signal.SIGTERM)
+async def _stop(process: asyncio.subprocess.Process) -> None:
+    _signal(process, signal.SIGTERM)
     try:
         async with asyncio.timeout(_GRACE):
             await process.wait()
     except TimeoutError:
-        _signalled(process, signal.SIGKILL)
+        _signal(process, signal.SIGKILL)
         await process.wait()
 
 
-def _signalled(process: asyncio.subprocess.Process, sign: signal.Signals) -> None:
+def _signal(process: asyncio.subprocess.Process, sign: signal.Signals) -> None:
     if process.returncode is not None:
         return
     with suppress(ProcessLookupError, PermissionError):

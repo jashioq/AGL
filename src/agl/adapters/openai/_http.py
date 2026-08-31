@@ -7,10 +7,10 @@ from typing import Final
 
 from agl.ports.run import JsonValue
 
-__all__ = ["Answer", "Listener", "Rpc"]
+__all__ = ["Listener", "Rpc", "RpcAnswer"]
 
-type Answer = Mapping[str, JsonValue] | None
-type Rpc = Callable[[Mapping[str, JsonValue]], Awaitable[Answer]]
+type RpcAnswer = Mapping[str, JsonValue] | None
+type Rpc = Callable[[Mapping[str, JsonValue]], Awaitable[RpcAnswer]]
 
 
 _TOKEN_BYTES: Final = 16
@@ -83,6 +83,8 @@ class Listener:
         }
         body = await _body(reader, headers)
 
+        # `codex doctor` sends a bare `HEAD` at a configured server's URL before anything speaks
+        # MCP.
         if method == "HEAD":
             await _write(writer, "200 OK", b"")
         elif method != "POST":

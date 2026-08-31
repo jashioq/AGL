@@ -37,6 +37,8 @@ _CAPABILITIES: Final = frozenset(
 
 _PRESET: Final[SystemPromptPreset] = {"type": "preset", "preset": "claude_code"}
 
+# The only honest test of "is this session authenticated": the `init` message's `apiKeySource`
+# reports `"none"` for a perfectly good subscription session, so nothing short of asking says.
 _READY_PROMPT: Final = "Reply with the single word: ready"
 
 _PLAN_ONLY: Final = (
@@ -117,11 +119,15 @@ def _options(
         system_prompt=_PRESET,
         setting_sources=[],
         strict_mcp_config=True,
+        # Every option is written out even at the SDK's own default: its `skills` option silently
+        # defaults `setting_sources` to `["user", "project"]` when that is left unset, and this
+        # session reads none.
         settings=None,
         add_dirs=[],
         extra_args={},
         mcp_servers=supplied,
         disallowed_tools=_rules(limits, ASKING_MECHANISMS_DENIED),
+        # A managed policy forbidding this mode makes the CLI refuse to start, with its own message.
         permission_mode="bypassPermissions",
         cli_path=cli_path,
         stderr=stderr,
@@ -137,6 +143,8 @@ def _prompt(task: AgentTask, limits: Restraint) -> str:
     return "\n\n".join([*(part for part in standing if part), task.instructions])
 
 
+# The SDK appends most options as two tokens, so a value beginning with `-` reaches argv as a flag
+# of its own; it writes `--flag=value` for exactly four options, and these are not among them.
 def _inert(value: str, what: str) -> str:
     if value.startswith("-"):
         raise InputError(

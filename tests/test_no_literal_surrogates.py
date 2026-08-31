@@ -1,11 +1,11 @@
 """Structural test: no lone surrogate reaches `mypy`'s cache as a `Literal`, over `src` and `tests`.
 
-`tests/sdk/test_journal.py:459` writes its lone surrogate as `chr(0xD800)` and not as the escape
+`tests/sdk/test_journal.py`'s `_LONE_SURROGATE` is written as `chr(0xD800)` and not as the escape
 `"\\ud800"`, and the comment above it says why: **a module-level `Final` holding a surrogate
 *literal* crashes `mypy --strict` outright.** A `Final` keeps its value as a `Literal` type, mypy
 writes that type into its own cache as UTF-8, a lone surrogate has no UTF-8 encoding, and the
 process exits with `INTERNAL ERROR` naming no file at all. That is the types gate failing with the
-worst diagnostic in the build: no line, no module, no clue which of 231 files moved.
+worst diagnostic in the build: no line, no module, no clue which of 234 files moved.
 
 That comment is necessary and it is not sufficient, which is what this file is.
 
@@ -16,8 +16,9 @@ reads as the long way round of writing a character - and a reader who never open
 `tests/sdk/test_journal.py` never meets the paragraph. Worse, the comment states the rule slightly
 narrower than the rule is: it says a module constant, and by that it means the scalar it guards.
 Measured against `mypy 2.3.1` on Python 3.14, the crash is wider, and the two other module-level
-surrogates in this repository - `tests/ports/test_ids.py:66` and `tests/ports/_corpus.py:44` - are
-safe only by an accident of container choice that nothing anywhere writes down.
+surrogates in this repository - the `"\\ud800"` in `tests/ports/test_ids.py`'s `_NON_ASCII` and the
+one in `tests/ports/_corpus.py`'s `_NON_ASCII` - are safe only by an accident of container choice
+that nothing anywhere writes down.
 
 ## The boundary, measured rather than reasoned about
 
@@ -48,11 +49,11 @@ while a tuple is typed element by element and every element keeps its own `Liter
 is the mechanism, not the checker**: the same file under `--cache-dir=/dev/null` reports success,
 which is why nothing about this is visible in an error message.
 
-So `test_ids.py:66` and `_corpus.py:44` are green because somebody wrote `[` and not `(`. Both are
-frozen tables of constants in a repository that reaches for immutability everywhere else -
-`ANSWER_TOKENS: Final = ("alpha-K41", "bravo-Q73")` two directories away is the same shape written
-the other way - so "make this constant a tuple" is a one-character edit somebody will eventually
-propose, and it fails the types gate with no file named.
+So both `_NON_ASCII` tables are green because somebody wrote `[` and not `(`. Both are frozen
+tables of constants in a repository that reaches for immutability everywhere else -
+`tests/sdk/test_tools.py`'s `_VOCABULARY: Final = ("high", "medium", "low")` is the same shape
+written the other way - so "make this constant a tuple" is a one-character edit somebody will
+eventually propose, and it fails the types gate with no file named.
 
 ## Why a test rather than a `scripts/check` gate
 
@@ -248,11 +249,11 @@ def _crashes_the_types_gate(shown: str, finding: Finding) -> str:
         f"anything is cached. A tuple does not: it is typed element by element.\n"
         f"\n"
         f"Write it as `chr(0x{finding.codepoint:04X})`. That is a call and not a literal, so no "
-        f"literal type is stored and nothing reaches the encoder; `tests/sdk/test_journal.py:459` "
-        f"is the constant this rule was written for and the comment above it has the history. If "
-        f"the value must stay a literal, put it in a list rather than a tuple - which is why "
-        f"`tests/ports/test_ids.py` and `tests/ports/_corpus.py` are green - or annotate the "
-        f"binding with a declared type rather than a bare `Final`.\n"
+        f"literal type is stored and nothing reaches the encoder; `tests/sdk/test_journal.py`'s "
+        f"`_LONE_SURROGATE` is the constant this rule was written for and the comment above it "
+        f"has the history. If the value must stay a literal, put it in a list rather than a "
+        f"tuple - which is why `tests/ports/test_ids.py` and `tests/ports/_corpus.py` are "
+        f"green - or annotate the binding with a declared type rather than a bare `Final`.\n"
         f"\n"
         f"If mypy has since fixed this, the honest edit is to delete this file and that comment "
         f"together and to say which release made it safe. Do not exempt one line."
@@ -368,7 +369,7 @@ def test_the_scan_reports_both_halves_of_a_surrogate_pair_written_as_escapes() -
 
 
 def test_the_scan_is_silent_on_a_final_list_which_is_why_two_files_here_are_green() -> None:
-    """`tests/ports/test_ids.py:66` and `tests/ports/_corpus.py:44`, in miniature."""
+    """`tests/ports/test_ids.py`'s and `tests/ports/_corpus.py`'s `_NON_ASCII`, in miniature."""
     assert not literal_surrogates(
         'from typing import Final\nX: Final = ["\\x85", "\\ud800", "\\ue000"]\n'
     )

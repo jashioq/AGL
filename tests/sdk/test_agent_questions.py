@@ -10,9 +10,10 @@ between it and the agent.
 
 Every test below goes through `api.run`, which is not ceremony. The tool's handler is a closure over
 the workflow's own `Run`, so it does not exist until a workflow is running; and the terminal it
-shows on is only legal inside the context `api.run` opens (`ports/terminal.py` makes a `show`
-outside it an `InternalError`). A test that built a `Run` by hand could still call the handler, but
-it could not exercise the thing this file is about, which is that all of it composes.
+shows on is only legal inside the context `api.run` opens (every terminal implementation makes a
+`show` outside that context an `InternalError`). A test that built a `Run` by hand could still
+call the handler, but it could not exercise the thing this file is about, which is that all of it
+composes.
 
 ## What is asserted here, and what is deliberately not
 

@@ -20,8 +20,12 @@ _STDERR_LINES: Final = 50
 
 _FRAME_BYTES: Final = 8 << 20
 
+# `create_subprocess_exec`'s own `limit=` default is 64 KiB, smaller than one frame carrying a
+# build's output; a longer line is recovered rather than refused, so this costs round trips only.
 _BUFFER_BYTES: Final = 1 << 20
 
+# The agent's own subprocesses hold locks - a build daemon's pid file, a package manager's cache -
+# and unlink them on being asked to stop.
 _GRACE: Final = 5.0
 
 
@@ -60,6 +64,9 @@ async def outcome_of(
     try:
         child = await asyncio.create_subprocess_exec(
             *argv,
+            # All three piped and all three read: a child whose output pipe fills while nobody reads
+            # it blocks forever, and a prompt larger than a pipe buffer written before anything
+            # reads stdout deadlocks both.
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -203,7 +210,7 @@ async def _closed(
     early: bool,
 ) -> int:
     if early:
-        await _halted(child)
+        await _halt(child)
     status = await child.wait()
     for task in aside:
         task.cancel()
@@ -211,7 +218,7 @@ async def _closed(
     return status
 
 
-async def _halted(child: asyncio.subprocess.Process) -> None:
+async def _halt(child: asyncio.subprocess.Process) -> None:
     _signal(child, signal.SIGTERM)
     with contextlib.suppress(TimeoutError):
         async with asyncio.timeout(_GRACE):

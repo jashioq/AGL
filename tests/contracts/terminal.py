@@ -22,7 +22,8 @@ Three classes run these, which is the whole mechanism keeping a fake from drifti
 and here it matters more than anywhere else in the package, because the headless behaviour
 *doubles* as the fake. They are not one implementation and two stand-ins for it; they are three
 implementations of one port, and this is what keeps them honest. `RichTerminal` is the one a person
-sits in front of, `HeadlessTerminal` is the one that runs unattended, and `ScriptedTerminal` - what
+sits in front of, `HeadlessTerminal` is the one that displays nothing - what `container.fakes()`
+builds, and the port's headless clause in a class - and `ScriptedTerminal` - what
 `agl.testing.answering([...])` builds - is the one written *for* tests, which is precisely why it
 is graded here rather than trusted: a terminal a test drives that is under no suite's eye is a
 mock, and a mock is the fiction a contract suite exists to keep out. It is written against the port

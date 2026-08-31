@@ -11,8 +11,8 @@ every claim about what a namespace does *not* contain, or about how a factory re
 
 So they live here, as four modules that are each nothing but the thing they are about:
 
-  * `unstaffed` - no role factory at all, so preflight asks no backend anything. `workflows/noop/`'s
-    shape, and what keeps a workflow that runs no agent runnable on a machine with no harness.
+  * `unstaffed` - no role factory at all, so preflight asks no backend anything: what keeps a
+    workflow that runs no agent runnable on a machine with no harness.
   * `unused` - one factory imported and never stepped with, a known cost that was accepted: the
     run is refused for a provider it was never going to use.
   * `late` - a factory written *below* the workflow function, which is not bound when the decorator

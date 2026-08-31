@@ -4,9 +4,9 @@ The first class is the port in full: `AgentContract` with its two fixtures overr
 else touched. That suite was written against the port's docstrings and before any adapter
 existed, which is the inversion `tests/contracts/` rests on and why nothing below re-asserts it.
 It runs **unconditionally** here - no opt-in, no `check_ready` gate, nothing to authenticate and
-nothing to install - which is
-the difference between a fake and the real adapter one file over, where eight of the same ten tests
-skip on a logged-out machine. The `model` fixture is parametrised over every model this runner
+nothing to install - which is the difference between a fake and the real adapter one file over,
+where six of the same eight tests skip on every machine, deferred to a manual pass against an
+authenticated CLI. The `model` fixture is parametrised over every model this runner
 serves, which `tests/contracts/agent.py` names as "the honest way to cover them all", so the whole
 suite runs three times.
 
@@ -535,12 +535,12 @@ async def test_both_runners_report_the_same_capabilities_for_a_served_model() ->
 
     `FILE_EDIT` and `SHELL` are reported by a runner whose scripted agent edits no file and runs no
     command, and that is deliberate: `capabilities()` is "what can this backend be asked for", the
-    backend this stands in for can be asked for all four, and preflight refuses a role that
+    backend this stands in for can be asked for all three, and preflight refuses a role that
     requires more than is reported. A fake reporting less would have every `--dry-run` of a
     realistic role refused at second zero, which is target #8 dead for a technicality about a fake.
 
-    Written as a comparison rather than as a literal set so that a fifth `Capability` member is one
-    decision in one place - `runner.py`'s - rather than two lists that agree today.
+    Written as a comparison rather than as a literal set so that a fourth `Capability` member is
+    one decision in one place - `runner.py`'s - rather than two lists that agree today.
     """
     for model in Claude:
         assert await FakeAgentRunner().capabilities(model) == await ClaudeCodeRunner().capabilities(
@@ -682,9 +682,10 @@ async def test_a_tool_handler_that_raises_ends_the_run_with_its_own_exception(
 
     A tool handler is a workflow's own Python and it can hit a bug or refuse to go on: the tool
     behind an approval gate raises when nobody approved. `Conversation.call` records the exception
-    the way `ask` records an asker's, and `run` raises it in place of an outcome - so a fake that
-    carried the run on would report a `--dry-run` passing with the gate silently absent, which is
-    the outcome `sdk/roles.py` spends four paragraphs refusing.
+    on `failure`, answers every later call with `_STOPPING` rather than running a handler again,
+    and `run` raises it in place of an outcome - so a fake that carried the run on would report a
+    `--dry-run` passing with the gate silently absent, which is the outcome `sdk/roles.py` spends
+    four paragraphs refusing.
 
     **This fake used to absorb it**, answering `f"{tool} failed: {raised}"` with `rejected=True`
     and letting the script go on; `tests/contracts/agent.py` argues the inversion in full and pins

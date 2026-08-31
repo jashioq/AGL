@@ -49,7 +49,7 @@ class Steps:
     async def landing(self) -> tuple[Journal, Workspace]:
         return await self._namespace()
 
-    def _reported(self, line: str) -> None:
+    def _report(self, line: str) -> None:
         self._activity = line
 
     async def step[R](
@@ -79,7 +79,7 @@ class Steps:
                         restrictions=frozenset(role.restrictions),
                         tools=offered,
                     ),
-                    on_activity=self._reported,
+                    on_activity=self._report,
                 )
             finally:
                 self._activity = None

@@ -1077,7 +1077,7 @@ async def test_a_red_gate_leaves_the_branch_unmerged_and_the_target_clean(tmp_pa
     away", and `prompts/implement.md` tells an implementer as much because nothing else will.
 
     What is asserted is the revert - `Workspace.restore(before)`, which is `reset --hard` **and**
-    `clean -fd`, and which `ARCHITECTURE.md`'s "Invariants where a mistake is silent" names as what
+    `clean -ffd`, and which `ARCHITECTURE.md`'s "Invariants where a mistake is silent" names as what
     discards a hand-resolved conflict - in the two halves that fail separately:
 
     * **the branch is left unmerged.** The run's branch is exactly where it was cut, so neither
@@ -1124,7 +1124,7 @@ async def test_a_red_gate_leaves_the_branch_unmerged_and_the_target_clean(tmp_pa
     assert _files(_target(seen)) == SEED, (
         f"the target's checkout holds {sorted(_files(_target(seen)))} after two rejected landings, "
         f"where it holds what the run was cut from. The revert is `Workspace.restore`, which is "
-        f"`reset --hard` and `clean -fd` together - a tree that keeps the landing means only the "
+        f"`reset --hard` and `clean -ffd` together - a tree that keeps the landing means only the "
         f"head moved, and the next step and the next person to look read the tree"
     )
     for chunk in plan:

@@ -61,7 +61,7 @@ one they cannot reach is not reached in an hour.
 
 **`asyncio.gather` in one event loop still exercises the `flock`.** `flock(2)` is per open file
 description and `_trees.registry_lock` opens the file per call, so three coroutines each taking it
-exclude one another exactly as three processes would - and `_held` waits with a non-blocking
+exclude one another exactly as three processes would - and `_hold` waits with a non-blocking
 attempt and an `await`, never by parking a thread, so the waiter yields and the holder gets to
 finish. What one process cannot show is that the lock is cross-process *at all*;
 `tests/adapters/test_git_workspace.py` provokes it from a real second process, and that claim is

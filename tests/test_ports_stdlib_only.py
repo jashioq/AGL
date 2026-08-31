@@ -76,8 +76,8 @@ which department it was.
 source/forbidden pair where one module is inside the other's package, and `agl.ports` contains every
 module on both of that contract's lists. This file narrows that gap without closing it: the package
 root is scanned like every other module here, so it cannot reach outside the ring, but an ABC is
-inside the ring and so an import of one is not something this scan has any opinion about. It holds a
-docstring and nothing else today. `tests/test_contract_listings.py` states the same gap from the
+inside the ring and so an import of one is not something this scan has any opinion about. It is
+empty today. `tests/test_contract_listings.py` states the same gap from the
 other side.
 
 The file is a little over three hundred lines to scroll through and well inside the ceiling, which
