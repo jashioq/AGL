@@ -102,7 +102,6 @@ from pathlib import Path
 
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent / "src" / "agl"
 
-
 def _directories() -> list[Path]:
     """Every directory in the tree, the root included and `__pycache__` left out.
 
@@ -112,7 +111,6 @@ def _directories() -> list[Path]:
     """
     found = [PACKAGE_ROOT, *(path for path in PACKAGE_ROOT.rglob("*") if path.is_dir())]
     return [path for path in found if path.name != "__pycache__"]
-
 
 def test_every_directory_holding_python_under_src_agl_is_a_package() -> None:
     """A directory some module's dotted name runs through must carry an `__init__.py`.
@@ -131,7 +129,6 @@ def test_every_directory_holding_python_under_src_agl_is_a_package() -> None:
         f"one of them has a dotted name that runs through a directory the import system does not "
         f"treat as a regular package"
     )
-
 
 def test_a_directory_holding_no_python_is_left_alone() -> None:
     """The other half of the clause, asserted rather than left as an absence.

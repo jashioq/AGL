@@ -89,9 +89,7 @@ here rests on a second one being allowed, being equal, or being different.
 
 from datetime import UTC, datetime
 from typing import Final
-
 import pytest
-
 from agl.ports.clock import Clock
 from agl.ports.ids import RunLabel
 from agl.ports.run import RunSpec
@@ -99,7 +97,6 @@ from agl.ports.run import RunSpec
 # A `run.json` base pin, doubled to a full sha1: `RunSpec` refuses an abbreviated one, which
 # is a fact about that type and about nothing this suite is asking a clock.
 _SHA: Final = "8c19f7ae4d2b0913e5f6" * 2
-
 
 def _record_at(moment: datetime) -> RunSpec:
     """A run record, stamped with `moment` - the one thing every reading ends up in.
@@ -118,7 +115,6 @@ def _record_at(moment: datetime) -> RunSpec:
         params={"request": "add oauth"},
         created_at=moment,
     )
-
 
 class ClockContract:
     """The suite. One method, two assertions, and the parity that is the whole point of them.

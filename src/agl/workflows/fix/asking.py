@@ -1,7 +1,5 @@
-
 from dataclasses import dataclass
 from typing import Final
-
 from agl.sdk import Terminal, Tool, ToolResult, describe, tool
 from agl.workflows.fix import views
 from agl.workflows.fix.questions import Question
@@ -27,10 +25,8 @@ SAID_NOTHING: Final = (
     "own judgement, and carry on."
 )
 
-
 @dataclass(frozen=True, slots=True)
 class Asked:
-
     question: str = describe("What you are asking, in full, in your own words.")
 
     options: tuple[str, ...] = describe(
@@ -44,7 +40,6 @@ class Asked:
         "set it to false only when you are asking for a choice among them.",
         default=True,
     )
-
 
 def asking(terminal: Terminal) -> Tool:
 

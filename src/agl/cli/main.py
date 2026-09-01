@@ -1,4 +1,3 @@
-
 import argparse
 import sys
 from collections.abc import Callable, Iterable, Sequence
@@ -7,7 +6,6 @@ from importlib.metadata import EntryPoint
 from pathlib import Path
 from traceback import print_exception
 from typing import Final
-
 from agl.api import Ask
 from agl.cli import commands
 from agl.cli.commands import clear as clear_command
@@ -37,10 +35,8 @@ _OUR_BUG: Final = (
     "so nothing above it could report the failure in words. Please report it with the lines above"
 )
 
-
 @dataclass(frozen=True, slots=True)
 class Invocation:
-
     registered: commands.Registered
 
     settings: Settings
@@ -51,9 +47,7 @@ class Invocation:
 
     ask: Ask = input
 
-
 type Compose = Callable[[], Invocation]
-
 
 def main(argv: Sequence[str] | None = None, *, compose: Compose | None = None) -> int:
     try:
@@ -73,7 +67,6 @@ def main(argv: Sequence[str] | None = None, *, compose: Compose | None = None) -
         print(f"{_PROGRAM}: {_OUR_BUG}", file=sys.stderr)
         return exit_status(bug)
 
-
 def parser() -> RefusingParser:
     # With abbreviation on, `argparse` matches any unambiguous prefix of a long flag - so a workflow
     # declaring `--fro`, `--nam` or `--hel` would have it eaten, value and all, by `--from`,
@@ -89,7 +82,6 @@ def parser() -> RefusingParser:
     workflows_command.declare(declared)
     return root
 
-
 def _compose() -> Invocation:
     resolved = sources.resolve(sources.Overrides())
     cwd = Path.cwd()
@@ -97,11 +89,9 @@ def _compose() -> Invocation:
         registered=lambda: _registered(resolved, cwd), settings=resolved.settings, cwd=cwd
     )
 
-
 def _registered(resolved: sources.Resolved, cwd: Path) -> tuple[ProjectName, Services]:
     project = resolved.project(cwd)
     return project.name, container.real(resolved.settings, project)
-
 
 def _dispatch(invocation: Invocation, parsed: argparse.Namespace, tail: Sequence[str]) -> int:
     command = getattr(parsed, _COMMAND)
@@ -125,7 +115,6 @@ def _dispatch(invocation: Invocation, parsed: argparse.Namespace, tail: Sequence
         f"rather than anything you typed - a command was declared and never given a clause here"
     )
 
-
 def _no_tail(command: str, tail: Sequence[str]) -> None:
     if tail:
         raise InputError(
@@ -140,7 +129,6 @@ def _no_tail(command: str, tail: Sequence[str]) -> None:
             f"takes"
         )
 
-
 def _concurrent(group: ExceptionGroup[Exception]) -> int:
     deliberate, failed = group.split(Stop)
     if deliberate is not None:
@@ -153,7 +141,6 @@ def _concurrent(group: ExceptionGroup[Exception]) -> int:
             print(f"{_PROGRAM}: {_OUR_BUG}", file=sys.stderr)
         print(f"{_PROGRAM}: {_severally(group)}", file=sys.stderr)
     return exit_status(group)
-
 
 def _severally(group: ExceptionGroup[Exception]) -> str:
     held = tuple(leaves(group))

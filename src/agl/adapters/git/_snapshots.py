@@ -1,15 +1,12 @@
-
 import hashlib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
 from typing import Final
-
 from agl.ports.errors import NotFoundError
 
 __all__ = ["FakeRepository", "Hold", "Tree"]
-
 
 type Tree = Mapping[str, bytes]
 
@@ -23,18 +20,14 @@ _INITIAL: Final = "the state this repository starts at"
 _ENCODING: Final = "utf-8"
 _SURROGATES: Final = "surrogatepass"
 
-
 @dataclass(frozen=True, slots=True)
 class _State:
-
     tree: Tree
     parents: tuple[str, ...]
     message: str
 
-
 @dataclass(frozen=True, slots=True)
 class Hold:
-
     source: str
 
     target: str
@@ -47,9 +40,7 @@ class Hold:
 
     touched: frozenset[str]
 
-
 class FakeRepository:
-
     def __init__(
         self, files: Mapping[str, bytes] | None = None, default_branch: str = "main"
     ) -> None:
@@ -170,7 +161,6 @@ class FakeRepository:
             known[at] = 1 + max((known[parent] for parent in parents), default=-1)
             pending.pop()
         return known[state]
-
 
 def _identity(tree: Tree, parents: tuple[str, ...], message: str) -> str:
     digest = hashlib.sha256()

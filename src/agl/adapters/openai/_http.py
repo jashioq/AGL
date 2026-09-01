@@ -1,10 +1,8 @@
-
 import asyncio
 import json
 import secrets
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Final
-
 from agl.ports.run import JsonValue
 
 __all__ = ["Listener", "Rpc", "RpcAnswer"]
@@ -12,20 +10,15 @@ __all__ = ["Listener", "Rpc", "RpcAnswer"]
 type RpcAnswer = Mapping[str, JsonValue] | None
 type Rpc = Callable[[Mapping[str, JsonValue]], Awaitable[RpcAnswer]]
 
-
 _TOKEN_BYTES: Final = 16
-
 
 _PARSE_ERROR: Final = -32700
 _INVALID_REQUEST: Final = -32600
 
-
 def token() -> str:
     return secrets.token_urlsafe(_TOKEN_BYTES)
 
-
 class Listener:
-
     def __init__(self, routes: Mapping[str, Rpc]) -> None:
         self._routes = dict(routes)
         self._server: asyncio.Server | None = None
@@ -115,14 +108,11 @@ class Listener:
         payload = answers if isinstance(decoded, list) else answers[0]
         await _write(writer, "200 OK", _encoded(payload), content_type="application/json")
 
-
 def _failed(code: int, why: str) -> dict[str, JsonValue]:
     return {"jsonrpc": "2.0", "id": None, "error": {"code": code, "message": why}}
 
-
 def _encoded(payload: object) -> bytes:
     return json.dumps(payload, ensure_ascii=False).encode("utf-8")
-
 
 async def _body(reader: asyncio.StreamReader, headers: Mapping[str, str]) -> bytes:
     length = headers.get("content-length")
@@ -136,7 +126,6 @@ async def _body(reader: asyncio.StreamReader, headers: Mapping[str, str]) -> byt
         await reader.readline()
     await reader.readline()
     return b"".join(chunks)
-
 
 async def _write(
     writer: asyncio.StreamWriter, status: str, payload: bytes, *, content_type: str = ""

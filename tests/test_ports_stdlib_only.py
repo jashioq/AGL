@@ -99,7 +99,6 @@ PORTS_DIR: Final = SOURCE_ROOT / "agl" / "ports"
 # The one package a `ports/` module may name besides the standard library: its own.
 RING: Final = "agl.ports"
 
-
 @dataclass(frozen=True)
 class Foreign:
     """One import in a `ports/` module that is neither stdlib nor inside the ring.
@@ -111,7 +110,6 @@ class Foreign:
 
     line: int
     imported: str
-
 
 def foreign_imports(source: str, *, package: str) -> list[Foreign]:
     """Every import in `source` whose root is neither stdlib nor `agl.ports`, in the order written.
@@ -135,7 +133,6 @@ def foreign_imports(source: str, *, package: str) -> list[Foreign]:
                 found.append(Foreign(node.lineno, imported))
     return sorted(found, key=lambda finding: (finding.line, finding.imported))
 
-
 def _resolve(node: ast.ImportFrom, package: str) -> str:
     """The dotted module `node` names, with a relative import resolved against `package`.
 
@@ -152,14 +149,12 @@ def _resolve(node: ast.ImportFrom, package: str) -> str:
     base = ".".join(parts[: len(parts) - node.level + 1])
     return f"{base}.{node.module}" if node.module else base
 
-
 def _is_permitted(imported: str) -> bool:
     """Whether a `ports/` module may name `imported`: the standard library, or its own ring."""
     if imported == RING or imported.startswith(f"{RING}."):
         return True
     root = imported.partition(".")[0]
     return bool(root) and root in sys.stdlib_module_names
-
 
 def _reaches_outside_the_ring(shown: str, finding: Foreign) -> str:
     return (
@@ -191,14 +186,11 @@ def _reaches_outside_the_ring(shown: str, finding: Foreign) -> str:
         f"signature, and this scan reads the whole module."
     )
 
-
 def _package_of(path: Path) -> str:
     """The dotted package a source file lives in - `agl.ports` for `src/agl/ports/clock.py`."""
     return ".".join(path.relative_to(SOURCE_ROOT).parts[:-1])
 
-
 # --- The real comparison -------------------------------------------------------------------------
-
 
 def test_every_module_under_ports_imports_nothing_but_stdlib_and_its_own_ring() -> None:
     """`src/agl/ports/`, module by module, against `ARCHITECTURE.md`'s "The layers"."""
@@ -216,7 +208,6 @@ def test_every_module_under_ports_imports_nothing_but_stdlib_and_its_own_ring() 
     ]
     assert not problems, "\n\n".join(problems)
 
-
 def test_the_scan_reaches_the_ports_package_root_as_well_as_its_modules() -> None:
     """`ports/__init__.py` is in the walk above, which is the half contract 2 cannot reach.
 
@@ -226,12 +217,10 @@ def test_the_scan_reaches_the_ports_package_root_as_well_as_its_modules() -> Non
     """
     assert (PORTS_DIR / "__init__.py") in set(PORTS_DIR.rglob("*.py"))
 
-
 # ---------------------------------------------------------------------------------------------
 # Non-vacuity: the scan on fabricated source, so that a rewrite which broke it into always
 # answering "nothing foreign here" fails below instead of passing over the whole tree.
 # ---------------------------------------------------------------------------------------------
-
 
 def test_the_scan_is_silent_on_the_imports_ports_modules_actually_use() -> None:
     """The agreeing case, and it is not a token one: every form in `src/agl/ports/` today."""
@@ -257,18 +246,15 @@ def test_the_scan_is_silent_on_the_imports_ports_modules_actually_use() -> None:
         package=RING,
     )
 
-
 def test_the_scan_reports_a_third_party_import() -> None:
     """The failure this file exists for, in the shape that proved the hole: `import pydantic`."""
     findings = foreign_imports("import pydantic\nfrom abc import ABC\n", package=RING)
     assert findings == [Foreign(1, "pydantic")]
 
-
 def test_the_scan_reports_a_third_party_from_import() -> None:
     """`from x import y` and `import x` are one rule; a scan reading only one is half a rule."""
     findings = foreign_imports("from attrs import define\n", package=RING)
     assert findings == [Foreign(1, "attrs")]
-
 
 def test_the_scan_reports_a_type_checking_only_import() -> None:
     """Guarded by `TYPE_CHECKING`, invisible at runtime, and still in the port's signature."""
@@ -281,7 +267,6 @@ def test_the_scan_reports_a_type_checking_only_import() -> None:
     )
     assert findings == [Foreign(4, "pydantic")]
 
-
 def test_the_scan_reports_an_import_nested_inside_a_function() -> None:
     """A deferred import is the other way a dependency hides, and `ast.walk` sees it."""
     findings = foreign_imports(
@@ -290,29 +275,24 @@ def test_the_scan_reports_an_import_nested_inside_a_function() -> None:
     )
     assert findings == [Foreign(2, "pydantic")]
 
-
 def test_the_scan_reports_a_relative_import_that_leaves_the_ring() -> None:
     """Resolved rather than skipped, and reported under the name a reader can go and look for."""
     findings = foreign_imports("from ..sdk import Run\n", package=RING)
     assert findings == [Foreign(1, "agl.sdk")]
 
-
 def test_the_scan_permits_a_relative_import_that_stays_inside_the_ring() -> None:
     """Level 1 is the ring itself, from a submodule and from the package root alike."""
     assert not foreign_imports("from .ids import Namespace\nfrom . import errors\n", package=RING)
-
 
 def test_the_scan_reports_an_absolute_agl_import_from_another_ring() -> None:
     """Contract 1 catches this too. Reported anyway - see this file's docstring for why."""
     findings = foreign_imports("from agl.adapters.git.history import GitHistory\n", package=RING)
     assert findings == [Foreign(1, "agl.adapters.git.history")]
 
-
 def test_the_scan_reports_a_dotted_third_party_import_by_what_was_written() -> None:
     """`import a.b` names `a`, and the message says the whole of what the line said."""
     findings = foreign_imports("import pydantic.dataclasses\n", package=RING)
     assert findings == [Foreign(1, "pydantic.dataclasses")]
-
 
 def test_the_scan_reports_every_offending_import_at_once() -> None:
     """Separate lines are separate findings in one run, not one discovered per fix."""
@@ -321,7 +301,6 @@ def test_the_scan_reports_every_offending_import_at_once() -> None:
         package=RING,
     )
     assert findings == [Foreign(1, "pydantic"), Foreign(3, "attrs")]
-
 
 def test_a_relative_import_that_runs_off_the_top_is_reported_and_not_crashed_on() -> None:
     """Python refuses it too. This scan should not be what hides a module that will not import."""

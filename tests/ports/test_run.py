@@ -16,10 +16,8 @@ from dataclasses import FrozenInstanceError, replace
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Final
-
 import pytest
 from _corpus import ACCEPTED, CORPUS, imported_modules, impurities
-
 from agl.ports import run
 from agl.ports.errors import InputError, InternalError, exit_code_for
 from agl.ports.ids import RunLabel
@@ -43,9 +41,7 @@ _WIRE: Final[dict[str, JsonValue]] = {
 }
 _SPEC: Final = RunSpec.from_json(_WIRE)
 
-
 # --- The wire shape, and the round trip ---------------------------------------------------------
-
 
 def test_the_wire_shape_is_eight_keys_in_one_order_with_those_spellings() -> None:
     """`run.json`, spelled out - eight keys, in that order, with those spellings."""
@@ -66,7 +62,6 @@ def test_the_wire_shape_is_eight_keys_in_one_order_with_those_spellings() -> Non
     assert _SPEC.label == RunLabel("auth"), "the label is a validated type, not the string on disk"
     assert _SPEC.created_at == datetime(2026, 8, 18, 9, 14, 2, tzinfo=UTC)
 
-
 def test_a_record_round_trips_in_both_directions_and_through_a_real_encoder() -> None:
     """`from_json(to_json(spec)) == spec`, `to_json(from_json(wire)) == wire`, and `json` agrees."""
     assert RunSpec.from_json(_SPEC.to_json()) == _SPEC
@@ -74,7 +69,6 @@ def test_a_record_round_trips_in_both_directions_and_through_a_real_encoder() ->
     text = json.dumps(_SPEC.to_json())
     assert RunSpec.from_json(json.loads(text)) == _SPEC
     assert '"created_at": "2026-08-18T09:14:02Z"' in text, "not the `+00:00` isoformat would give"
-
 
 def test_every_label_ids_accepts_survives_a_round_trip() -> None:
     """Where this suite meets `ids.py`: a run that cannot be read back cannot be resumed."""
@@ -85,15 +79,12 @@ def test_every_label_ids_accepts_survives_a_round_trip() -> None:
         assert spec.to_json() == wire
         assert RunSpec.from_json(json.loads(json.dumps(wire))) == spec
 
-
 def test_the_keys_are_written_out_so_a_field_rename_cannot_move_the_wire() -> None:
     """The field names match the wire keys today, which is why `to_json` must not read them off."""
     assert tuple(_SPEC.to_json()) == run._WIRE_KEYS
     assert tuple(_SPEC.__dataclass_fields__) == run._WIRE_KEYS
 
-
 # --- params are opaque --------------------------------------------------------------------------
-
 
 @pytest.mark.parametrize(
     "params",
@@ -117,7 +108,6 @@ def test_params_are_stored_exactly_as_given(params: dict[str, JsonValue]) -> Non
     assert json.loads(json.dumps(spec.to_json()))["params"] == params
     assert RunSpec.from_json(spec.to_json()) == spec
 
-
 def test_a_record_never_shares_mutable_state_with_anything() -> None:
     """Copied in and copied out, so neither the caller's dict nor the emitted one is the record."""
     source: dict[str, JsonValue] = {"outer": {"inner": [1]}}
@@ -133,13 +123,11 @@ def test_a_record_never_shares_mutable_state_with_anything() -> None:
     with pytest.raises(TypeError):
         spec.params["late"] = 1  # type: ignore[index]
 
-
 def test_a_tuple_becomes_the_list_it_would_be_on_the_way_back() -> None:
     """Otherwise a params dataclass with a tuple field round-trips to an almost-equal record."""
     with_tuple = replace(_SPEC, params={"tags": ("a", "b")})  # type: ignore[dict-item]
     assert with_tuple.params == {"tags": ["a", "b"]}
     assert RunSpec.from_json(with_tuple.to_json()) == with_tuple
-
 
 @pytest.mark.parametrize(
     "value",
@@ -152,15 +140,12 @@ def test_params_refuse_what_could_not_be_read_back(value: object) -> None:
     with pytest.raises(InternalError):
         replace(_SPEC, params={"nested": [{"deep": value}]})  # type: ignore[dict-item]
 
-
 def test_a_param_key_that_is_not_a_string_is_refused_rather_than_renamed() -> None:
     """`json` would write `{1: "a"}` as `{"1": "a"}`, and the record would come back different."""
     with pytest.raises(InternalError, match="keyed by strings"):
         replace(_SPEC, params={1: "a"})  # type: ignore[dict-item]
 
-
 # --- The one string that cannot be written down -------------------------------------------------
-
 
 def _has_surrogate(value: str) -> bool:
     """Category `Cs`, asked of Unicode rather than of either module.
@@ -171,7 +156,6 @@ def _has_surrogate(value: str) -> bool:
     """
     return any(unicodedata.category(character) == "Cs" for character in value)
 
-
 # What a wrong verdict here costs, said once and cited by both tests below. The class alone is not
 # the assertion: the class is what a reader of the source sees and the number is what a user sees,
 # and it was the number that was wrong.
@@ -181,7 +165,6 @@ _WRONG_EXIT: Final = (
     "and 70 would tell whoever hit it that AGL is broken when what is broken is their data. "
     "`journal.py`'s `_checked_text` spends this same scan and answers 2"
 )
-
 
 def test_a_surrogate_is_refused_at_write_time_wherever_it_sits() -> None:
     """The one `str` UTF-8 cannot encode, refused as a value, as a key, and at any depth.
@@ -221,7 +204,6 @@ def test_a_surrogate_is_refused_at_write_time_wherever_it_sits() -> None:
         "refusing it would refuse the emoji a workflow's summary is entitled to hold"
     )
 
-
 def test_a_surrogate_ids_refuses_in_a_name_is_refused_here_too_and_nothing_else_is() -> None:
     """The parity, in both directions, over the corpus `ids.py`'s own suite is checked against.
 
@@ -260,7 +242,6 @@ def test_a_surrogate_ids_refuses_in_a_name_is_refused_here_too_and_nothing_else_
             RunLabel(legal_param)
         one_param: dict[str, JsonValue] = {legal_param: legal_param}
         assert replace(_SPEC, params=one_param).params == one_param
-
 
 def test_the_ref_a_run_starts_from_is_checked_the_way_a_param_is() -> None:
     """The third seam, and the one nothing walked: a `str` field of the record itself.
@@ -317,9 +298,7 @@ def test_the_ref_a_run_starts_from_is_checked_the_way_a_param_is() -> None:
     landed = json.loads(json.dumps(replace(_SPEC, base_ref="caf\u00e9").to_json()))
     assert landed["base_ref"] == "caf\u00e9", "the field must survive the encoder it is refused for"
 
-
 # --- The pin ------------------------------------------------------------------------------------
-
 
 def test_the_pin_is_a_full_object_id_and_a_printed_abbreviation_is_not_one() -> None:
     """An abbreviation is unique when printed and stops being unique as the repository grows. The
@@ -329,7 +308,6 @@ def test_the_pin_is_a_full_object_id_and_a_printed_abbreviation_is_not_one() -> 
     assert replace(_SPEC, base_sha=_SHA256).base_sha == _SHA256
     with pytest.raises(InternalError, match="not a resolved commit"):
         replace(_SPEC, base_sha=_ABBREVIATED)
-
 
 @pytest.mark.parametrize(
     "sha",
@@ -343,9 +321,7 @@ def test_a_sha_that_is_not_a_full_lowercase_object_id_is_refused(sha: str) -> No
     with pytest.raises(InternalError, match="not a resolved commit"):
         replace(_SPEC, base_sha=sha)
 
-
 # --- The timestamp ------------------------------------------------------------------------------
-
 
 def test_the_timestamp_is_one_instant_in_utc_held_to_whole_seconds() -> None:
     """Any aware spelling is accepted and normalised; `Z` at second precision is what is written."""
@@ -358,7 +334,6 @@ def test_the_timestamp_is_one_instant_in_utc_held_to_whole_seconds() -> None:
     assert replace(_SPEC, created_at=fine) == _SPEC, "a field cannot hold more than it stores"
     assert RunSpec.from_json({**_WIRE, "created_at": "2026-08-18T09:14:02.987654Z"}) == _SPEC
 
-
 def test_a_naive_timestamp_is_refused_rather_than_read_in_local_time() -> None:
     """A wall-clock reading with no place is not a moment, and `astimezone` would guess one."""
     with pytest.raises(InternalError, match="no timezone"):
@@ -366,9 +341,7 @@ def test_a_naive_timestamp_is_refused_rather_than_read_in_local_time() -> None:
     with pytest.raises(InternalError):
         RunSpec.from_json({**_WIRE, "created_at": "2026-08-18T09:14:02"})
 
-
 # --- Everything a record is not -----------------------------------------------------------------
-
 
 @pytest.mark.parametrize(
     "payload",
@@ -382,7 +355,6 @@ def test_a_record_is_an_object_carrying_exactly_these_keys(payload: object) -> N
     """`InternalError` for all of it - see the module docstring for why nothing here is exit 2."""
     with pytest.raises(InternalError):
         RunSpec.from_json(payload)
-
 
 @pytest.mark.parametrize(
     "key, value",
@@ -403,7 +375,6 @@ def test_a_field_that_is_not_what_the_schema_says_is_refused(key: str, value: Js
     with pytest.raises(InternalError):
         RunSpec.from_json({**_WIRE, key: value})
 
-
 def test_a_record_written_by_another_version_of_agl_is_refused_rather_than_migrated() -> None:
     """The version is stamped and compared, never upgraded, and an unknown key is that rule too."""
     with pytest.raises(InternalError, match="another version"):
@@ -412,7 +383,6 @@ def test_a_record_written_by_another_version_of_agl_is_refused_rather_than_migra
         RunSpec.from_json({**_WIRE, "targets": []})
     assert replace(_SPEC, workflow_version="2.0.0") != _SPEC, "the stamp is part of the record"
 
-
 def test_a_labels_own_refusal_is_re_spoken_as_ours() -> None:
     """`ids.py` says `InputError`, which is exit 2 - and nobody typed the contents of this file."""
     with pytest.raises(InternalError) as caught:
@@ -420,7 +390,6 @@ def test_a_labels_own_refusal_is_re_spoken_as_ours() -> None:
     assert "cannot read back" in str(caught.value)
     assert caught.value.__cause__ is not None, "the rule actually broken stays in the traceback"
     assert "run label" in str(caught.value.__cause__)
-
 
 def test_a_record_is_frozen() -> None:
     """Validated once on the way in is worth nothing if the value can be edited afterwards."""
@@ -431,9 +400,7 @@ def test_a_record_is_frozen() -> None:
     with pytest.raises(TypeError):
         hash(_SPEC)  # a record holds params, and no dict is hashable: it is a value, not a key
 
-
 # --- What this module is not allowed to be ------------------------------------------------------
-
 
 def test_there_is_no_run_status() -> None:
     """`ARCHITECTURE.md`'s "Deliberately not built" refuses one by name, and the module docstring
@@ -461,7 +428,6 @@ def test_there_is_no_run_status() -> None:
     assert run.__all__ == ["JsonValue", "RunSpec", "WireShape", "checked_text", "wire_moment"]
     assert "status" not in run._WIRE_KEYS
 
-
 def test_the_module_never_opens_the_file_it_describes() -> None:
     """It defines `run.json`'s shape and does not import `json`, know a path, or touch a disk. Read
     off the parsed source, so prose may name what the code may not. `home_layout` is absent for the
@@ -473,7 +439,6 @@ def test_the_module_never_opens_the_file_it_describes() -> None:
     assert impurities(run) == set()
     assert imported_modules(run) <= allowed
     assert "json" not in imported_modules(run)
-
 
 # --- one place knows, and this is the test that keeps it that way -------------------------------
 
@@ -492,7 +457,6 @@ _SECOND_COPY: Final = (
     "yet. If a third record type needs this, it builds a `WireShape` and calls `checked_text`, "
     "the way `journal.py` does"
 )
-
 
 @pytest.mark.parametrize(
     "spelling, what",

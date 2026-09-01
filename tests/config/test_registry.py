@@ -44,9 +44,7 @@ import tomllib
 from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Final
-
 import pytest
-
 from agl.config.registry import GROUP, installed, load, names
 from agl.ports.errors import ConflictError, InputError, NotFoundError
 
@@ -55,28 +53,22 @@ from agl.ports.errors import ConflictError, InputError, NotFoundError
 _WORKFLOW: Final = "tickets"
 _OTHER: Final = "split"
 
-
 def _point(name: str, value: str) -> EntryPoint:
     return EntryPoint(name=name, value=value, group=GROUP)
-
 
 class _Workflow:
     """Stands in for the type `api.py` passes as `load`'s `kind`. Any class does - that is why."""
 
-
 def _loadable(name: str) -> EntryPoint:
     """An entry point resolving to something this module can be asked to narrow to `_Workflow`."""
     return _point(name, f"{__name__}:_instance")
-
 
 # The two objects the entry points below resolve to. Module level, because `EntryPoint.load`
 # imports a module and reads a dotted attribute path in it - it cannot see a local.
 _instance = _Workflow()
 _not_a_workflow = "a workflow name is not a workflow"
 
-
 # --- listing -----------------------------------------------------------------------------------
-
 
 def test_names_lists_every_registered_workflow_sorted() -> None:
     """Sorted, so `agl workflows` prints the same list on two machines that scanned differently.
@@ -90,32 +82,25 @@ def test_names_lists_every_registered_workflow_sorted() -> None:
     points = (_loadable(_WORKFLOW), _loadable(_OTHER), _loadable("backlog"))
     assert names(points) == ("backlog", "split", "tickets")
 
-
 def test_names_of_an_empty_group_is_empty() -> None:
     assert names(()) == ()
-
 
 def test_names_imports_nothing_so_a_broken_workflow_is_still_listed() -> None:
     """One package that will not import must not take down the command that lists what is there."""
     points = (_loadable(_WORKFLOW), _point("broken", "agl.no.such.module:anything"))
     assert names(points) == ("broken", "tickets")
 
-
 # --- loading, and the narrowing that keeps `Any` out of the caller -----------------------------
-
 
 def test_load_returns_the_registered_object_narrowed_to_the_expected_type() -> None:
     loaded = load((_loadable(_WORKFLOW),), _WORKFLOW, _Workflow)
     assert loaded is _instance
 
-
 def test_load_picks_the_named_entry_point_out_of_several() -> None:
     points = (_loadable(_OTHER), _loadable(_WORKFLOW))
     assert load(points, _WORKFLOW, _Workflow) is _instance
 
-
 # --- a name in no entry point: NotFoundError, exit 3 -------------------------------------------
-
 
 def test_an_unknown_name_is_not_found_and_the_message_lists_what_is_registered() -> None:
     points = (_loadable(_WORKFLOW), _loadable(_OTHER))
@@ -126,7 +111,6 @@ def test_an_unknown_name_is_not_found_and_the_message_lists_what_is_registered()
     assert _WORKFLOW in message
     assert _OTHER in message
 
-
 def test_an_unknown_name_in_an_empty_registry_says_nothing_is_installed() -> None:
     """A different situation from "not that one", and a refusal ending in an empty list is a bug."""
     with pytest.raises(NotFoundError) as raised:
@@ -135,9 +119,7 @@ def test_an_unknown_name_in_an_empty_registry_says_nothing_is_installed() -> Non
     assert "no workflow is installed at all" in message
     assert GROUP in message
 
-
 # --- one name, two packages: ConflictError, exit 4 ---------------------------------------------
-
 
 def test_two_packages_registering_one_name_is_refused_on_load() -> None:
     points = (_loadable(_WORKFLOW), _point(_WORKFLOW, "somewhere.else:tickets"))
@@ -147,7 +129,6 @@ def test_two_packages_registering_one_name_is_refused_on_load() -> None:
     assert _WORKFLOW in message
     assert "somewhere.else:tickets" in message
 
-
 def test_two_packages_registering_one_name_is_refused_when_listing_too() -> None:
     """The refusal is raised while indexing, so `agl workflows` refuses rather than printing one
     row for two installed workflows and letting the operator pick blind."""
@@ -155,9 +136,7 @@ def test_two_packages_registering_one_name_is_refused_when_listing_too() -> None
     with pytest.raises(ConflictError):
         names(points)
 
-
 # --- a declaration that does not hold up: InputError, exit 2 -----------------------------------
-
 
 def test_an_entry_point_whose_module_is_missing_is_refused_with_the_original_chained() -> None:
     value = "agl.no.such.module:anything"
@@ -169,14 +148,12 @@ def test_an_entry_point_whose_module_is_missing_is_refused_with_the_original_cha
     # saying one happened.
     assert isinstance(raised.value.__cause__, ModuleNotFoundError)
 
-
 def test_an_entry_point_whose_attribute_is_missing_is_refused_with_the_original_chained() -> None:
     value = f"{__name__}:_no_such_attribute"
     with pytest.raises(InputError) as raised:
         load((_point(_WORKFLOW, value),), _WORKFLOW, _Workflow)
     assert value in str(raised.value)
     assert isinstance(raised.value.__cause__, AttributeError)
-
 
 def test_an_entry_point_that_loads_the_wrong_kind_of_object_is_refused() -> None:
     """It imported fine and resolved to something. Being the wrong type is the remaining failure."""
@@ -187,7 +164,6 @@ def test_an_entry_point_that_loads_the_wrong_kind_of_object_is_refused() -> None
     assert value in message
     assert _Workflow.__qualname__ in message
     assert "str" in message
-
 
 # --- the one impure line ------------------------------------------------------------------------
 
@@ -200,7 +176,6 @@ _PYPROJECT: Final = Path(__file__).resolve().parents[2] / "pyproject.toml"
 # The one command that turns a stale editable install into a fresh one. Spelled once, because it
 # goes into two failure messages and a command retyped wrong is a command that did not help.
 _REFRESH: Final = "uv pip install -e . --no-deps"
-
 
 def _declared() -> tuple[str, ...]:
     """The workflow names `pyproject.toml`'s own entry-point table holds, read from the file.
@@ -232,7 +207,6 @@ def _declared() -> tuple[str, ...]:
     )
     return tuple(sorted(table))
 
-
 def _ours() -> tuple[str, ...]:
     """The names this environment's installed `agl` distribution contributes to the group.
 
@@ -247,7 +221,6 @@ def _ours() -> tuple[str, ...]:
             if point.dist is not None and point.dist.name == "agl"
         )
     )
-
 
 def test_the_real_entry_point_group_is_readable_and_holds_fix_and_split() -> None:
     """`pyproject.toml` declares `agl.workflows`, and registers `fix` and `split` into it.

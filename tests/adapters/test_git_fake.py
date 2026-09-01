@@ -38,9 +38,7 @@ files of one name under different directories would collide at import.
 
 from pathlib import Path
 from typing import Final
-
 import pytest
-
 from agl.adapters.git.fake import (
     FakeHistory,
     FakeIntegrator,
@@ -89,7 +87,6 @@ LATER: Final = b"what the latecomer wrote, while the target was held\n"
 # rather than reading a constant back out of the implementation that would then agree with itself.
 LOCK: Final = "worktrees.lock"
 
-
 @pytest.fixture
 def repository() -> FakeRepository:
     """A fresh in-memory repository, seeded with one file and on its default branch.
@@ -100,30 +97,25 @@ def repository() -> FakeRepository:
     """
     return FakeRepository({SOURCE: BODY})
 
-
 @pytest.fixture
 def trees(tmp_path: Path) -> TreesRoot:
     """The trees root, empty. Absolute, which is all `TreesRoot` asks."""
     return TreesRoot(tmp_path / "trees")
-
 
 @pytest.fixture
 def provider(repository: FakeRepository, trees: TreesRoot) -> WorkspaceProvider:
     """The provider the module-level tests drive. The contract suites have their own overrides."""
     return FakeWorkspaceProvider(repository, trees)
 
-
 @pytest.fixture
 def integrator(repository: FakeRepository) -> Integrator:
     """The integrator those tests land with - over the same repository as the provider above."""
     return FakeIntegrator(repository)
 
-
 @pytest.fixture
 def base(repository: FakeRepository) -> str:
     """The state a run is cut from, resolved - the pinned `RunSpec.base_sha` shape of a base."""
     return repository.resolve(repository.default_ref)
-
 
 class TestFakeWorkspaceProvider(WorkspaceContract):
     """Both workspace ports in full, against no git at all.
@@ -142,7 +134,6 @@ class TestFakeWorkspaceProvider(WorkspaceContract):
         """A resolved commit id, which is the shape a run's own workspace is cut from."""
         return repository.resolve(repository.default_ref)
 
-
 class TestFakeHistory(HistoryContract):
     """The `History` port in full. Three overrides, all over one repository."""
 
@@ -160,7 +151,6 @@ class TestFakeHistory(HistoryContract):
     def base(self, repository: FakeRepository) -> str:
         """A state of that same repository for the workspaces this suite records into."""
         return repository.resolve(repository.default_ref)
-
 
 class TestFakeIntegrator(IntegratorContract):
     """The `Integrator` port in full, including the conflict protocol. Three overrides."""
@@ -181,7 +171,6 @@ class TestFakeIntegrator(IntegratorContract):
         are."""
         return repository.resolve(repository.default_ref)
 
-
 async def test_two_repositories_share_nothing(tmp_path: Path) -> None:
     """A bundle built twice is two repositories, which is two `.git/` directories' worth of
     apart.
@@ -201,7 +190,6 @@ async def test_two_repositories_share_nothing(tmp_path: Path) -> None:
     assert await FakeHistory(first).contains(recorded, recorded) is True
     with pytest.raises(NotFoundError):
         await FakeHistory(second).resolve(recorded)
-
 
 async def test_one_repository_is_one_integrator_however_many_are_built_over_it(
     repository: FakeRepository, trees: TreesRoot, base: str
@@ -240,7 +228,6 @@ async def test_one_repository_is_one_integrator_however_many_are_built_over_it(
     assert await target.head() == settled
     with pytest.raises(InternalError):
         await took.retry(target)
-
 
 async def test_an_integrator_landing_into_a_hold_another_one_took_is_told_so_and_touches_nothing(
     repository: FakeRepository, trees: TreesRoot, base: str
@@ -313,7 +300,6 @@ async def test_an_integrator_landing_into_a_hold_another_one_took_is_told_so_and
         "the first child's work is not what the target holds after the release"
     )
 
-
 async def test_the_registry_lock_is_deliberately_not_taken(
     provider: WorkspaceProvider, trees: TreesRoot, base: str
 ) -> None:
@@ -331,7 +317,6 @@ async def test_the_registry_lock_is_deliberately_not_taken(
         f"the fake created {LOCK} in the trees root. That lock is cross-process, and two "
         f"processes running on fakes share no repository at all - so a lock here excludes nothing"
     )
-
 
 async def test_a_checkout_left_by_a_dead_process_is_refused_rather_than_adopted(
     repository: FakeRepository, trees: TreesRoot, base: str
@@ -360,7 +345,6 @@ async def test_a_checkout_left_by_a_dead_process_is_refused_rather_than_adopted(
     assert not (reopened.path / "agl-acceptance" / "left-by-a-crash.txt").is_file(), (
         "the dead run's leavings are in a checkout provisioned after it was taken back"
     )
-
 
 def _put(directory: Path, name: str, content: bytes) -> None:
     """Put `content` at a repository-relative, forward-slash separated `name` in a checkout.

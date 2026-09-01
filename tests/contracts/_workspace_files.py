@@ -28,7 +28,6 @@ fails as a fixture problem, in those words, rather than as an implementation one
 
 from pathlib import Path
 from typing import Final
-
 from agl.ports.ids import Namespace, RunLabel
 from agl.ports.workspace import Workspace
 
@@ -80,7 +79,6 @@ AWKWARD_MESSAGE: Final = (
 
 _MESSAGE_PREFIX: Final = "record"
 
-
 def body(marker: str) -> str:
     """A file's contents, derived from `marker` so that two files differ on every line.
 
@@ -94,7 +92,6 @@ def body(marker: str) -> str:
     ]
     return "\n".join(lines) + "\n"
 
-
 def _at(workspace: Workspace, name: str) -> Path:
     """Where `name` is inside `workspace`.
 
@@ -105,29 +102,24 @@ def _at(workspace: Workspace, name: str) -> Path:
     """
     return workspace.path.joinpath(*name.split("/"))
 
-
 def write(workspace: Workspace, name: str, text: str) -> None:
     """Put `text` at `name`, making whatever directories it needs on the way."""
     path = _at(workspace, name)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
-
 def read(workspace: Workspace, name: str) -> str | None:
     """What is at `name`, or `None` if nothing is - which is what "it was removed" looks like."""
     path = _at(workspace, name)
     return path.read_text(encoding="utf-8") if path.is_file() else None
 
-
 def is_directory(workspace: Workspace, name: str) -> bool:
     """Whether `name` is a directory in this workspace. Only `restore` asks, and it asks once."""
     return _at(workspace, name).is_dir()
 
-
 def delete(workspace: Workspace, name: str) -> None:
     """Remove `name`, which is how a `DELETED` change gets made."""
     _at(workspace, name).unlink()
-
 
 def rename(workspace: Workspace, old: str, new: str) -> None:
     """Move `old` to `new` with its contents untouched, which is how a rename gets made.
@@ -139,7 +131,6 @@ def rename(workspace: Workspace, old: str, new: str) -> None:
     source, target = _at(workspace, old), _at(workspace, new)
     target.parent.mkdir(parents=True, exist_ok=True)
     source.rename(target)
-
 
 def assert_absent(workspace: Workspace, *names: str) -> None:
     """Refuse to build on a file the fixture's repository already holds.
@@ -154,7 +145,6 @@ def assert_absent(workspace: Workspace, *names: str) -> None:
         f"to add those files and assert that they were added. Point the suite at a repository "
         f"that does not carry a directory named {_UNDER!r}"
     )
-
 
 async def record(workspace: Workspace, marker: str) -> str:
     """`commit_all` under a message naming `marker`, and hand back the head it answers with.

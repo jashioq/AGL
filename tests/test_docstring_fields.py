@@ -215,7 +215,6 @@ _FIELD_LINE: Final = re.compile(r"^:([A-Za-z][^:\n]*):(.*)$")
 # sits directly in a class body - which is the only thing that makes a first `self` implicit.
 type Definition = tuple[str, ast.FunctionDef | ast.AsyncFunctionDef, bool]
 
-
 @dataclass(frozen=True)
 class Finding:
     """One disagreement between a docstring and the code it describes.
@@ -229,7 +228,6 @@ class Finding:
     symbol: str
     problem: str
 
-
 @dataclass(frozen=True)
 class DocField:
     """One `:field arguments: description` line: which field, what it was given, and what it says.
@@ -241,7 +239,6 @@ class DocField:
     field: str
     arguments: tuple[str, ...]
     description: str
-
 
 def field_block_problems(source: str, *, documented: bool) -> list[Finding]:
     """Every way a docstring in `source` disagrees with the code around it, in the order written.
@@ -268,7 +265,6 @@ def field_block_problems(source: str, *, documented: bool) -> list[Finding]:
         ]
     return sorted(found, key=lambda finding: (finding.line, finding.symbol, finding.problem))
 
-
 def undocumented_callables(source: str) -> list[str]:
     """Every public callable in `source` carrying no docstring, by its dotted name in the module.
 
@@ -282,7 +278,6 @@ def undocumented_callables(source: str) -> list[str]:
         if ast.get_docstring(node) is None
     ]
 
-
 def _definitions(
     body: Sequence[ast.stmt], prefix: str, *, method: bool
 ) -> Iterator[Definition]:
@@ -294,7 +289,6 @@ def _definitions(
             yield f"{prefix}{statement.name}", statement, method
             yield from _definitions(statement.body, f"{prefix}{statement.name}.", method=False)
 
-
 def _classes(body: Sequence[ast.stmt], prefix: str) -> Iterator[tuple[str, ast.ClassDef]]:
     """Every class under `body` at any depth, by its dotted name inside the module."""
     for statement in body:
@@ -302,7 +296,6 @@ def _classes(body: Sequence[ast.stmt], prefix: str) -> Iterator[tuple[str, ast.C
             yield f"{prefix}{statement.name}", statement
         if isinstance(statement, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
             yield from _classes(statement.body, f"{prefix}{statement.name}.")
-
 
 def _surface(
     body: Sequence[ast.stmt], prefix: str
@@ -315,7 +308,6 @@ def _surface(
             if statement.name.startswith("_") or _decorated(statement, OVERLOAD_DECORATOR):
                 continue
             yield f"{prefix}{statement.name}", statement
-
 
 def _disagreements(
     node: ast.FunctionDef | ast.AsyncFunctionDef, docstring: str, *, method: bool
@@ -352,7 +344,6 @@ def _disagreements(
         yield _misdescribes_the_signature(expected, written)
     yield from _return_line_problems(_promised(node), returns)
 
-
 def _named_wrongly(one: DocField) -> Iterator[str]:
     """What a `:param:` line got wrong about the name it carries, the name itself set aside.
 
@@ -375,7 +366,6 @@ def _named_wrongly(one: DocField) -> Iterator[str]:
             f"parameter, so it is `:param {name.lstrip('*')}:` - one spelling per thing, under N5"
         )
 
-
 def _return_line_problems(promised: str, returns: int) -> Iterator[str]:
     """Whether `:return:` is present exactly where the signature says something comes back."""
     if returns > 1:
@@ -393,7 +383,6 @@ def _return_line_problems(promised: str, returns: int) -> Iterator[str]:
             "back at all, so the line describes a value no caller can ever be handed"
         )
 
-
 def _not_a_field_of_this_format(one: DocField) -> str:
     written = " ".join([one.field, *one.arguments])
     return (
@@ -402,7 +391,6 @@ def _not_a_field_of_this_format(one: DocField) -> str:
         f"compare them against, and `:returns:` is a second spelling of `:return:` - N5 takes one "
         f"name per thing. Anything else is prose and belongs in the summary"
     )
-
 
 def _misdescribes_the_signature(expected: list[str], written: list[str]) -> str:
     missing = [name for name in expected if name not in written]
@@ -423,7 +411,6 @@ def _misdescribes_the_signature(expected: list[str], written: list[str]) -> str:
         f"{f'; written twice {repeated}' if repeated else ''}"
     )
 
-
 def _fields(docstring: str) -> list[DocField]:
     """Every field line in a docstring, read from its own left margin after `cleandoc`."""
     found: list[DocField] = []
@@ -433,7 +420,6 @@ def _fields(docstring: str) -> list[DocField]:
             head = match.group(1).split()
             found.append(DocField(head[0], tuple(head[1:]), match.group(2).strip()))
     return found
-
 
 def _expected(node: ast.FunctionDef | ast.AsyncFunctionDef, *, method: bool) -> list[str]:
     """The parameters a caller supplies, in the order the signature writes them.
@@ -452,7 +438,6 @@ def _expected(node: ast.FunctionDef | ast.AsyncFunctionDef, *, method: bool) -> 
         written.append(node.args.kwarg.arg)
     return written
 
-
 def _promised(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
     """What the return annotation says comes back, in the three answers `:return:` turns on."""
     if node.returns is None:
@@ -460,7 +445,6 @@ def _promised(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
     if ast.unparse(node.returns) == "None":
         return RETURNS_NOTHING
     return RETURNS_NEVER if _spelled(node.returns) in NEVER_RETURNS else RETURNS_A_VALUE
-
 
 def _strings_in_the_wrong_place(body: Sequence[ast.stmt], prefix: str) -> Iterator[Finding]:
     """Every bare string standing above a `def` or a `class`, which Python evaluates and discards.
@@ -488,7 +472,6 @@ def _strings_in_the_wrong_place(body: Sequence[ast.stmt], prefix: str) -> Iterat
             "the whole of what this convention buys. Move it below the `def` line",
         )
 
-
 def _fields_outside_a_callable(docstring: str | None, symbol: str, line: int) -> list[Finding]:
     """A field block on a module or a class docstring, which describes no signature at all."""
     if docstring is None or not _fields(docstring):
@@ -503,7 +486,6 @@ def _fields_outside_a_callable(docstring: str | None, symbol: str, line: int) ->
         )
     ]
 
-
 def _is_a_bare_string(statement: ast.stmt) -> bool:
     return (
         isinstance(statement, ast.Expr)
@@ -511,10 +493,8 @@ def _is_a_bare_string(statement: ast.stmt) -> bool:
         and isinstance(statement.value.value, str)
     )
 
-
 def _decorated(node: ast.FunctionDef | ast.AsyncFunctionDef, name: str) -> bool:
     return any(_spelled(one) == name for one in node.decorator_list)
-
 
 def _spelled(node: ast.expr) -> str:
     """The name a node spells, by its own last segment: `overload` and `typing.overload` alike."""
@@ -522,19 +502,16 @@ def _spelled(node: ast.expr) -> str:
         return node.id
     return node.attr if isinstance(node, ast.Attribute) else ""
 
-
 def _module_of(path: Path) -> str:
     """The dotted module a source file under `src/` is imported as, package roots included."""
     dotted = ".".join(path.relative_to(SOURCE_ROOT).with_suffix("").parts)
     return dotted.removesuffix(".__init__")
-
 
 def _is_documented_surface(module: str) -> bool:
     """Whether a block is mandatory in this module: on the two packages, and public all the way."""
     if not any(module == one or module.startswith(f"{one}.") for one in DOCUMENTED_PACKAGES):
         return False
     return not any(part.startswith("_") for part in module.split("."))
-
 
 def _describes_a_signature_that_moved(shown: str, finding: Finding) -> str:
     return (
@@ -556,7 +533,6 @@ def _describes_a_signature_that_moved(shown: str, finding: Finding) -> str:
         f"and the tooltip an author reads at the call site now names an argument that is gone."
     )
 
-
 def _went_undocumented(missing: Sequence[str]) -> str:
     return (
         f"{len(missing)} public callable(s) under {DOCUMENTED_PACKAGES} carry no docstring:\n"
@@ -573,9 +549,7 @@ def _went_undocumented(missing: Sequence[str]) -> str:
         "order the signature writes them, and `:return:` exactly where something comes back."
     )
 
-
 # --- The real comparison -------------------------------------------------------------------------
-
 
 def test_every_docstring_field_block_in_this_repository_agrees_with_its_signature() -> None:
     """`src/` and `tests/`, parsed, against the format the docstring convention sets out.
@@ -607,7 +581,6 @@ def test_every_docstring_field_block_in_this_repository_agrees_with_its_signatur
         f"docstring, so a walk that found none of them would be green and checking nothing"
     )
 
-
 def test_every_public_callable_in_sdk_and_ports_carries_a_docstring_of_its_own() -> None:
     """The stronger half: the two packages' public callables, all of which must carry a block.
 
@@ -634,7 +607,6 @@ def test_every_public_callable_in_sdk_and_ports_carries_a_docstring_of_its_own()
         f"standing between a walk that found nothing and a green run"
     )
 
-
 def test_an_overload_stub_docstring_never_reaches_the_function_at_run_time() -> None:
     """Why the implementation carries the block and a stub is not required to.
 
@@ -655,7 +627,6 @@ def test_an_overload_stub_docstring_never_reaches_the_function_at_run_time() -> 
 
     assert described.__doc__ == "The implementation's, which is what `described.__doc__` holds."
 
-
 # ---------------------------------------------------------------------------------------------
 # Non-vacuity: the scans on fabricated source, one case per rule and one per decision, so that a
 # rewrite which broke them into always answering "nothing here" fails below instead of passing
@@ -675,24 +646,20 @@ def tool(name: str, description: str, payload: type, handler: object) -> Tool:
     """
 '''
 
-
 def _one_problem(source: str, *, documented: bool = False) -> str:
     """The single problem a fabricated snippet is written to produce, asserted to be single."""
     found = field_block_problems(source, documented=documented)
     assert len(found) == 1, [finding.problem for finding in found]
     return found[0].problem
 
-
 def test_the_scan_is_silent_on_the_block_the_convention_is_written_around() -> None:
     """The agreeing case, and it is not a token one: the worked example out of `CLAUDE.md`."""
     assert not field_block_problems(_WORKED, documented=True)
-
 
 def test_the_scan_reports_a_parameter_renamed_without_the_docstring_following_it() -> None:
     """The failure this whole file exists for, and the only one that costs a reader anything."""
     problem = _one_problem(_WORKED.replace("payload: type", "shape: type", 1))
     assert "'payload'" in problem and "'shape'" in problem
-
 
 def test_the_scan_reports_a_parameter_the_block_never_names_at_all() -> None:
     """A parameter added to the signature and not to the block: the line is simply missing."""
@@ -701,13 +668,11 @@ def test_the_scan_reports_a_parameter_the_block_never_names_at_all() -> None:
                         "the tool\n", "")
     )
 
-
 def test_the_scan_reports_a_param_line_naming_something_that_is_not_a_parameter() -> None:
     """The other direction: a line left behind after the parameter it described was deleted."""
     assert "named but not a parameter ['timeout']" in _one_problem(
         _WORKED.replace(":return: a tool", ":param timeout: how long to wait\n    :return: a tool")
     )
-
 
 def test_the_scan_reports_two_param_lines_written_in_the_wrong_order() -> None:
     """Both names real, both present, and every description against the wrong one."""
@@ -719,12 +684,10 @@ def test_the_scan_reports_two_param_lines_written_in_the_wrong_order() -> None:
     )
     assert "in a different order" in _one_problem(swapped)
 
-
 def test_the_scan_reports_a_type_written_into_a_param_line_beside_the_name() -> None:
     """`:param str name:` is a second copy of the annotation, and nothing compares the two."""
     problem = _one_problem(_WORKED.replace(":param name:", ":param str name:"))
     assert "writes a type into the line" in problem and "`:param name:`" in problem
-
 
 def test_the_scan_reports_a_starred_spelling_of_a_parameter_it_would_otherwise_accept() -> None:
     """`*flags` is the signature's syntax; the field names the parameter, and N5 takes one."""
@@ -737,19 +700,16 @@ def test_the_scan_reports_a_starred_spelling_of_a_parameter_it_would_otherwise_a
     )
     assert "keeps the stars" in _one_problem(source)
 
-
 def test_the_scan_reports_a_return_line_missing_where_the_signature_hands_something_back() -> None:
     """A block that stops at the parameters leaves the value the caller is after undescribed."""
     assert "no `:return:` line" in _one_problem(
         _WORKED.replace("    :return: a tool ready to go on a role\n", "")
     )
 
-
 def test_the_scan_reports_a_return_line_on_a_callable_annotated_to_return_none() -> None:
     """There is no value, so the line describes nothing."""
     source = 'def act() -> None:\n    """Do it.\n\n    :return: nothing much\n    """\n'
     assert "returns `None`" in _one_problem(source)
-
 
 def test_the_scan_reports_a_return_line_on_a_callable_that_never_returns_at_all() -> None:
     """`RefusingParser.error` is the shape: it raises, so `:return:` would be a lie."""
@@ -763,7 +723,6 @@ def test_the_scan_reports_a_return_line_on_a_callable_that_never_returns_at_all(
     )
     assert "does not come back at all" in _one_problem(source)
 
-
 def test_the_scan_is_silent_on_a_never_returning_callable_that_writes_no_return_line() -> None:
     """The same signature done right, which is the half a one-sided rule would get wrong."""
     assert not field_block_problems(
@@ -774,7 +733,6 @@ def test_the_scan_is_silent_on_a_never_returning_callable_that_writes_no_return_
         '    """\n',
         documented=True,
     )
-
 
 def test_the_scan_reports_a_summary_that_runs_past_the_line_it_is_allowed() -> None:
     """A summary wrapping onto the second line, which is also how a missing blank line reads."""
@@ -788,7 +746,6 @@ def test_the_scan_reports_a_summary_that_runs_past_the_line_it_is_allowed() -> N
     )
     assert "runs past one line" in _one_problem(source)
 
-
 def test_the_scan_reports_a_field_this_format_does_not_have_and_names_the_three() -> None:
     """`:type:`, `:rtype:` and `:returns:` are the three near-misses, and all three are refused."""
     for written in (":type value: int", ":rtype: int", ":returns: a number"):
@@ -801,7 +758,6 @@ def test_the_scan_reports_a_field_this_format_does_not_have_and_names_the_three(
             '    """\n'
         )
         assert "not a field of this format" in _one_problem(source), written
-
 
 def test_the_scan_permits_a_raises_line_and_reports_one_that_names_no_exception() -> None:
     """`:raises:` is the third field: an annotation does not carry it and mypy does not check it."""
@@ -824,12 +780,10 @@ def test_the_scan_permits_a_raises_line_and_reports_one_that_names_no_exception(
     )
     assert "names no exception" in _one_problem(source)
 
-
 def test_the_scan_reports_a_field_line_carrying_an_anchor_and_no_description() -> None:
     """An empty description is structural rather than editorial, which is why it is read here."""
     assert "no description" in _one_problem(_WORKED.replace(":return: a tool ready to go on a role",
                                                             ":return:"))
-
 
 def test_the_scan_reports_a_docstring_written_above_the_def_instead_of_inside_it() -> None:
     """Python discards it, `__doc__` is None, and the tooltip the convention buys never renders.
@@ -853,7 +807,6 @@ def test_the_scan_reports_a_docstring_written_above_the_def_instead_of_inside_it
         '        return None\n'
     )
 
-
 def test_the_scan_is_silent_on_an_attribute_docstring_that_precedes_a_method() -> None:
     """C5's shape, which is the one string above a `def` that is exactly where it should be."""
     assert not field_block_problems(
@@ -872,12 +825,10 @@ def test_the_scan_is_silent_on_an_attribute_docstring_that_precedes_a_method() -
         documented=True,
     )
 
-
 def test_the_scan_is_silent_on_a_module_docstring_standing_above_a_definition() -> None:
     """The first statement of a body is the docstring, at module, class and function alike."""
     assert not field_block_problems('"""One line."""\n\n\ndef build() -> None:\n    pass\n',
                                     documented=False)
-
 
 def test_the_scan_reports_a_field_block_on_a_class_docstring_where_no_signature_is() -> None:
     """`:param:` describes a `def`'s parameters; on a class there is nothing to compare it to."""
@@ -889,7 +840,6 @@ def test_the_scan_reports_a_field_block_on_a_class_docstring_where_no_signature_
         '    """\n'
     )
     assert "not a callable" in _one_problem(source)
-
 
 def test_the_scan_drops_self_and_cls_and_keeps_what_a_static_method_is_passed() -> None:
     """Implicit by position and by name, which is what makes the rule wrong for a static one."""
@@ -922,7 +872,6 @@ def test_the_scan_drops_self_and_cls_and_keeps_what_a_static_method_is_passed() 
         documented=True,
     )
 
-
 def test_the_scan_reports_a_self_line_written_on_an_ordinary_method() -> None:
     """No caller passes it, so a line for it is an extra rather than a missing one."""
     source = (
@@ -936,7 +885,6 @@ def test_the_scan_reports_a_self_line_written_on_an_ordinary_method() -> None:
         '        return 1\n'
     )
     assert "named but not a parameter ['self']" in _one_problem(source)
-
 
 def test_the_scan_reads_positional_only_keyword_only_and_both_starred_forms_in_order() -> None:
     """`Terminal.show`'s shape: a positional-only view, a keyword-only priority, and `**params`."""
@@ -956,7 +904,6 @@ def test_the_scan_reads_positional_only_keyword_only_and_both_starred_forms_in_o
         documented=True,
     )
 
-
 def test_the_scan_is_silent_on_a_property_that_takes_nothing_and_hands_one_thing_back() -> None:
     """`Run.terminal` and `Terminal.pending`: summary and `:return:`, and no clause makes it so."""
     assert not field_block_problems(
@@ -970,7 +917,6 @@ def test_the_scan_is_silent_on_a_property_that_takes_nothing_and_hands_one_thing
         '        return None\n',
         documented=True,
     )
-
 
 def test_the_scan_is_silent_on_an_abstract_method_whose_body_is_an_ellipsis() -> None:
     """A port's contract, which is the one callable whose body says nothing at all."""
@@ -987,7 +933,6 @@ def test_the_scan_is_silent_on_an_abstract_method_whose_body_is_an_ellipsis() ->
         documented=True,
     )
 
-
 def test_the_scan_leaves_a_one_line_summary_alone_off_the_documented_surface() -> None:
     """C4's shape everywhere but `sdk/` and `ports/`, where a block is not asked for."""
     source = 'def build(value: int) -> int:\n    """Build one from a value."""\n    return value\n'
@@ -995,7 +940,6 @@ def test_the_scan_leaves_a_one_line_summary_alone_off_the_documented_surface() -
     problems = [finding.problem for finding in field_block_problems(source, documented=True)]
     assert any("missing ['value']" in problem for problem in problems)
     assert any("no `:return:` line" in problem for problem in problems)
-
 
 def test_the_surface_scan_reports_a_public_callable_that_carries_no_docstring() -> None:
     """The stronger half's input, on the shape it exists to catch: one added with nothing on it."""
@@ -1007,7 +951,6 @@ def test_the_surface_scan_reports_a_public_callable_that_carries_no_docstring() 
         'def build() -> None:\n'
         '    """Build it."""\n'
     ) == ["Store.read"]
-
 
 def test_the_surface_scan_skips_private_names_dunders_stubs_and_nested_definitions() -> None:
     """Four exclusions, each argued in this file's docstring, and all four asserted at once."""
@@ -1027,7 +970,6 @@ def test_the_surface_scan_skips_private_names_dunders_stubs_and_nested_definitio
         '        pass\n'
         '    return flag\n'
     )
-
 
 def test_the_surface_predicate_admits_the_two_packages_and_refuses_a_private_module() -> None:
     """`sdk/_engine/` is off the workflow author's surface by N3, and so is `_declarations`."""

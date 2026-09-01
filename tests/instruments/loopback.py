@@ -96,7 +96,6 @@ CREDENTIALS: Final = frozenset(
     {"authorization", "proxy-authorization", "x-api-key", "cookie", "set-cookie"}
 )
 
-
 def redacted(name: str, value: str) -> str:
     """`value`, or a description of it when `name` is one nothing may record.
 
@@ -109,7 +108,6 @@ def redacted(name: str, value: str) -> str:
         return f"<redacted {len(value)} chars starting {value[:8]!r}>"
     return value
 
-
 def wire_text(body: Mapping[str, Any]) -> str:
     """Everything in a recorded body, as one string, for asking whether some text left the machine.
 
@@ -119,7 +117,6 @@ def wire_text(body: Mapping[str, Any]) -> str:
     opinion about which of a vendor's fields counts as "what the model was told".
     """
     return json.dumps(body, ensure_ascii=False)
-
 
 @dataclass(frozen=True, slots=True)
 class Request:
@@ -159,7 +156,6 @@ class Request:
         if not self.to_messages:
             return "probe"
         return "titling" if self.titling else "turn"
-
 
 class Loopback:
     """A listener on `127.0.0.1`, serving canned turns and recording what it was asked.
@@ -337,7 +333,6 @@ class Loopback:
             f"event: {name}\ndata: {json.dumps(data)}\n\n".encode() for name, data in events
         )
 
-
 class _Server(ThreadingHTTPServer):
     """The listener, carrying a typed reference back to the `Loopback` its handlers report to."""
 
@@ -346,7 +341,6 @@ class _Server(ThreadingHTTPServer):
     def __init__(self, endpoint: Loopback) -> None:
         self.endpoint = endpoint
         super().__init__(("127.0.0.1", 0), _Handler)
-
 
 class _Handler(BaseHTTPRequestHandler):
     """One request: read it, record it redacted, answer it from canned data, forward it nowhere."""

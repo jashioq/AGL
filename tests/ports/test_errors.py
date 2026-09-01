@@ -7,9 +7,7 @@ be typed twice.
 """
 
 from typing import cast
-
 import pytest
-
 from agl.ports import errors
 from agl.ports.errors import (
     EXIT_CODES,
@@ -26,18 +24,14 @@ from agl.ports.errors import (
     exit_code_for,
 )
 
-
 class ReviewNotConverging(Stop):
     """A workflow's own reason to stop - the case a table keyed on the exact class fails."""
-
 
 class _StopSubSubclass(ReviewNotConverging):
     """Two levels down, to show resolution walks the MRO rather than checking one parent."""
 
-
 class _UnmappedBranch(AglError):
     """A new branch of the hierarchy that nobody remembered to add to the table."""
-
 
 def _error_classes() -> list[type[AglError]]:
     """Every class in the hierarchy that agl.ports.errors itself defines, `AglError` included.
@@ -59,7 +53,6 @@ def _error_classes() -> list[type[AglError]]:
         key=lambda cls: cls.__name__,
     )
 
-
 def test_every_error_class_in_the_module_has_a_mapped_ancestor() -> None:
     """Exhaustiveness: no branch can be added to the hierarchy without giving it a code.
 
@@ -77,7 +70,6 @@ def test_every_error_class_in_the_module_has_a_mapped_ancestor() -> None:
     )
     assert not unmapped, f"error classes with no exit code: {unmapped}"
 
-
 def test_the_published_exit_codes_are_the_ones_scripts_branch_on() -> None:
     """Pinned by hand, deliberately: these numbers are public API, not an implementation."""
     assert exit_code_for(InputError) == 2
@@ -90,7 +82,6 @@ def test_the_published_exit_codes_are_the_ones_scripts_branch_on() -> None:
     assert exit_code_for(Stop) == 7
     assert exit_code_for(InternalError) == 70
 
-
 def test_no_two_table_entries_share_an_exit_code() -> None:
     """One code, one meaning. Two branches landing on the same number is the accident here."""
     by_code: dict[int, list[str]] = {}
@@ -98,7 +89,6 @@ def test_no_two_table_entries_share_an_exit_code() -> None:
         by_code.setdefault(code, []).append(cls.__name__)
     shared = {code: sorted(names) for code, names in by_code.items() if len(names) > 1}
     assert not shared, f"exit codes claimed by more than one table entry: {shared}"
-
 
 def test_classes_that_resolve_to_one_code_are_one_family() -> None:
     """Inheritance is the only sanctioned way to share a code.
@@ -121,14 +111,12 @@ def test_classes_that_resolve_to_one_code_are_one_family() -> None:
             f"{strays} are not subclasses of {root.__name__}"
         )
 
-
 def test_the_upstream_pair_inherits_six_instead_of_repeating_it() -> None:
     """The one intended duplicate, and the shape that makes it intentional rather than luck."""
     assert EXIT_CODES[UpstreamError] == 6
     assert UpstreamUnavailable not in EXIT_CODES
     assert UpstreamUnexpected not in EXIT_CODES
     assert exit_code_for(UpstreamUnavailable) == exit_code_for(UpstreamUnexpected) == 6
-
 
 def test_a_workflow_subclass_of_stop_still_exits_seven() -> None:
     """The case the plain table gets wrong, which is the whole reason `exit_code_for` exists."""
@@ -138,12 +126,10 @@ def test_a_workflow_subclass_of_stop_still_exits_seven() -> None:
     with pytest.raises(KeyError):
         EXIT_CODES[ReviewNotConverging]
 
-
 def test_exit_code_for_takes_an_instance_or_a_class() -> None:
     """Callers hold instances (`except AglError as err`); tests and tables hold classes."""
     assert exit_code_for(NotFoundError("no run named 'x'")) == exit_code_for(NotFoundError)
     assert exit_code_for(Stop("done")) == exit_code_for(Stop)
-
 
 def test_an_unmapped_branch_resolves_to_the_internal_error_code() -> None:
     """The documented fallback: an unmapped branch means the table went stale, which is a bug.
@@ -153,7 +139,6 @@ def test_an_unmapped_branch_resolves_to_the_internal_error_code() -> None:
     """
     assert exit_code_for(_UnmappedBranch()) == EXIT_CODES[InternalError]
     assert exit_code_for(AglError("raised with no decided meaning")) == EXIT_CODES[InternalError]
-
 
 def test_every_error_class_is_exported() -> None:
     """`ports/errors.py`'s `__all__` names every error class it defines, and nothing it does not.
@@ -169,7 +154,6 @@ def test_every_error_class_is_exported() -> None:
     assert exported - defined == {"EXIT_CODES", "exit_code_for"}, (
         f"__all__ names something the module does not define: {exported - defined}"
     )
-
 
 def test_the_table_cannot_be_mutated_at_runtime() -> None:
     """It is data, and it stays one table - not one table plus whatever a caller bolted on."""

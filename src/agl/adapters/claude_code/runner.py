@@ -1,8 +1,6 @@
-
 import tempfile
 from pathlib import Path
 from typing import Final
-
 from claude_agent_sdk import (
     ClaudeAgentOptions,
     ClaudeSDKError,
@@ -11,7 +9,6 @@ from claude_agent_sdk import (
     query,
 )
 from claude_agent_sdk.types import SystemPromptPreset
-
 from agl.adapters.claude_code._session import Stderr, outcome_of
 from agl.adapters.claude_code._tools import ASKING_MECHANISMS_DENIED, Caller, servers
 from agl.adapters.claude_code.translate import Restraint, model_name, restraint, unready
@@ -49,9 +46,7 @@ _PLAN_ONLY: Final = (
 
 _CONTEXT_HEADING: Final = "AGL is running this task with the following standing context:"
 
-
 class ClaudeCodeRunner(AgentRunner):
-
     def __init__(self, cli_path: Path | None = None) -> None:
         self._cli_path = None if cli_path is None else Path(_inert(str(cli_path), "cli_path"))
 
@@ -105,7 +100,6 @@ class ClaudeCodeRunner(AgentRunner):
             stderr=stderr,
         )
 
-
 def _options(
     task: AgentTask,
     limits: Restraint,
@@ -133,7 +127,6 @@ def _options(
         stderr=stderr,
     )
 
-
 def _prompt(task: AgentTask, limits: Restraint) -> str:
     standing = [
         f"{_CONTEXT_HEADING}\n\n{task.context}" if task.context else "",
@@ -141,7 +134,6 @@ def _prompt(task: AgentTask, limits: Restraint) -> str:
         _PLAN_ONLY if task.plan_only else "",
     ]
     return "\n\n".join([*(part for part in standing if part), task.instructions])
-
 
 # The SDK appends most options as two tokens, so a value beginning with `-` reaches argv as a flag
 # of its own; it writes `--flag=value` for exactly four options, and these are not among them.
@@ -154,7 +146,6 @@ def _inert(value: str, what: str) -> str:
             f"regardless of where it came from"
         )
     return value
-
 
 def _rules(limits: Restraint, also: tuple[str, ...]) -> list[str]:
     rules = [*limits.denied_tools, *also]

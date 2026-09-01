@@ -38,10 +38,8 @@ and a suite that leant on one would be asserting a threshold nobody specified.
 
 from dataclasses import dataclass
 from typing import Final
-
 from agl.ports.integration import IntegrationOutcome, Integrator
 from agl.ports.workspace import Workspace, WorkspaceProvider
-
 from ._workspace_files import (
     ALPHA,
     BETA,
@@ -61,7 +59,6 @@ from ._workspace_files import (
 # and is what the gate and the conflict screen exist for.
 CHILD_WORK: Final = body("the child's own work")
 RIVAL_WORK: Final = body("the sibling's own work, sharing not one line with the child's")
-
 
 @dataclass(frozen=True, slots=True)
 class HeldTarget:
@@ -85,7 +82,6 @@ class HeldTarget:
     contents: str
     """What `TRACKED` held there - the first child's work, which the second one collided with."""
 
-
 async def open_a_target_and_two_children(
     provider: WorkspaceProvider, base: str
 ) -> tuple[Workspace, Workspace, Workspace]:
@@ -102,7 +98,6 @@ async def open_a_target_and_two_children(
     for workspace in (target, child, sibling):
         assert_absent(workspace, TRACKED, ALPHA, BETA)
     return target, child, sibling
-
 
 async def hold_a_target(
     integrator: Integrator, provider: WorkspaceProvider, base: str

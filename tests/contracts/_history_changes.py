@@ -48,10 +48,8 @@ one, and the `history`, `provider` and `base` fixtures these tests take are decl
 """
 
 import pytest
-
 from agl.ports.history import ChangeKind, FileChange, History
 from agl.ports.workspace import Workspace, WorkspaceProvider
-
 from ._workspace_files import (
     ALPHA,
     BETA,
@@ -68,7 +66,6 @@ from ._workspace_files import (
     rename,
     write,
 )
-
 
 async def two_states(workspace: Workspace) -> tuple[str, str]:
     """Two recorded states an addition, a modification and a deletion apart.
@@ -94,7 +91,6 @@ async def two_states(workspace: Workspace) -> tuple[str, str]:
     )
     return before, after
 
-
 async def a_rename(workspace: Workspace) -> tuple[str, str]:
     """Two recorded states one move apart, with the file's contents untouched between them.
 
@@ -115,7 +111,6 @@ async def a_rename(workspace: Workspace) -> tuple[str, str]:
     )
     assert before != after, "a move is a change, so the two states are two"
     return before, after
-
 
 def by_path(changes: tuple[FileChange, ...]) -> dict[str, ChangeKind]:
     """The answer as a mapping, having first checked the two things every answer owes.
@@ -149,7 +144,6 @@ def by_path(changes: tuple[FileChange, ...]) -> dict[str, ChangeKind]:
         )
         seen[change.path] = change.kind
     return seen
-
 
 class HistoryChangeContract:
     """`changed_files` and `diff`: the structured answer, the readable one, and their agreement.

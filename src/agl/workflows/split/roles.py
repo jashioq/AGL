@@ -1,9 +1,7 @@
-
 from agl.sdk import Capability, Claude, Restriction, Role, prompt_file, role
 from agl.workflows.split.chunks import Chunks, report_chunks
 
 __all__ = ["implementer", "planner"]
-
 
 @role(model=Claude.OPUS)
 def planner() -> Role[Chunks]:
@@ -14,7 +12,6 @@ def planner() -> Role[Chunks]:
         tools=[report_chunks],
         requires={Capability.SHELL, Capability.TOOL_CALLING},
     )
-
 
 @role(model=Claude.OPUS)
 def implementer() -> Role:

@@ -1,8 +1,6 @@
-
 import json
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Final, cast
-
 from agl.ports.agent import (
     ActivityReporter,
     AgentOutcome,
@@ -49,9 +47,7 @@ _STOPPING: Final = (
     "it was asked: {raised}. Nothing you do from here is kept."
 )
 
-
 class Conversation:
-
     def __init__(
         self,
         task: AgentTask,
@@ -92,9 +88,7 @@ class Conversation:
         if self._on_activity is not None:
             self._on_activity(line)
 
-
 type Script = Callable[[Conversation], Awaitable[AgentOutcome]]
-
 
 async def unscripted(conversation: Conversation) -> AgentOutcome:
     conversation.report(_OPENING)
@@ -114,9 +108,7 @@ async def unscripted(conversation: Conversation) -> AgentOutcome:
 
     return AgentOutcome(stop_reason=StopReason.COMPLETED, text=_said(called))
 
-
 class FakeAgentRunner(AgentRunner):
-
     def __init__(self, script: Script | None = None) -> None:
         self._script: Final = script if script is not None else unscripted
 
@@ -140,7 +132,6 @@ class FakeAgentRunner(AgentRunner):
             raise conversation.failure
         return outcome
 
-
 def _check_model(model: ModelId) -> None:
     if not isinstance(model, Claude):
         served = sorted(str(member) for member in Claude)
@@ -150,7 +141,6 @@ def _check_model(model: ModelId) -> None:
             f"the prompt because the choice was semantic, and substituting answers a different "
             f"question than the one the workflow asked"
         )
-
 
 def _as_json(payload: Mapping[str, JsonValue], tool: str) -> dict[str, JsonValue]:
     try:
@@ -162,7 +152,6 @@ def _as_json(payload: Mapping[str, JsonValue], tool: str) -> dict[str, JsonValue
             f"payload that cannot be one is a call no run could have made"
         ) from unwritable
 
-
 def _payload(schema: Mapping[str, JsonValue], said: str) -> dict[str, JsonValue]:
     properties = schema.get("properties")
     required = schema.get("required")
@@ -173,7 +162,6 @@ def _payload(schema: Mapping[str, JsonValue], said: str) -> dict[str, JsonValue]
         for name in required
         if isinstance(name, str) and name in properties
     }
-
 
 def _value(described: JsonValue, said: str) -> JsonValue:
     if not isinstance(described, dict):
@@ -195,7 +183,6 @@ def _value(described: JsonValue, said: str) -> JsonValue:
     if kind == "null":
         return None
     return said
-
 
 def _said(called: list[str]) -> str:
     parts = [_CLOSING]

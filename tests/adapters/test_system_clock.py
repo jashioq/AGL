@@ -43,9 +43,7 @@ files of one name under different directories would collide at import.
 import time
 from datetime import UTC, datetime, timedelta, timezone, tzinfo
 from typing import Final
-
 import pytest
-
 from agl.adapters.system_clock import ManualClock, SystemClock
 from agl.ports.clock import Clock
 from agl.ports.errors import InputError, InternalError
@@ -67,7 +65,6 @@ _WIRE_MOMENT: Final = "2026-08-18T09:14:02Z"
 _INDIA: Final = timezone(timedelta(hours=5, minutes=30))
 _ELSEWHERE: Final = datetime(2026, 8, 18, 14, 44, 2, 123456, tzinfo=_INDIA)
 
-
 class _Placeless(tzinfo):
     """A `tzinfo` that declines to say what the offset is - naive in every way that matters.
 
@@ -85,7 +82,6 @@ class _Placeless(tzinfo):
     def tzname(self, dt: datetime | None) -> str | None:
         return None
 
-
 def _record_at(moment: datetime) -> RunSpec:
     """A run record, stamped with `moment` - the one thing every reading ends up in."""
     return RunSpec(
@@ -99,14 +95,11 @@ def _record_at(moment: datetime) -> RunSpec:
         created_at=moment,
     )
 
-
 def _public(clock: type[Clock]) -> set[str]:
     """The members a class of clock offers a caller - its own, not the ABC's."""
     return {name for name in vars(clock) if not name.startswith("_")}
 
-
 # --- The port, asserted of both ----------------------------------------------------------------
-
 
 class TestTheSystemClock(ClockContract):
     """The real adapter against the `Clock` contract. One fixture, and nothing else touched."""
@@ -114,7 +107,6 @@ class TestTheSystemClock(ClockContract):
     @pytest.fixture
     def clock(self) -> Clock:
         return SystemClock()
-
 
 class TestTheManualClock(ClockContract):
     """The fake against the same two assertions, which is the whole reason the suite exists.
@@ -127,9 +119,7 @@ class TestTheManualClock(ClockContract):
     def clock(self) -> Clock:
         return ManualClock()
 
-
 # --- The real clock ---------------------------------------------------------------------------
-
 
 def test_a_system_clock_reading_is_aware_by_both_of_the_tests_that_decide_it() -> None:
     """`tzinfo is not None` is the cheap half; `utcoffset() is not None` is the one that decides.
@@ -142,7 +132,6 @@ def test_a_system_clock_reading_is_aware_by_both_of_the_tests_that_decide_it() -
 
     assert reading.tzinfo is not None
     assert reading.utcoffset() is not None, "a tzinfo with no offset is a naive value in disguise"
-
 
 @pytest.mark.skipif(not hasattr(time, "tzset"), reason="`TZ` and `time.tzset` are POSIX")
 def test_a_system_clock_reading_carries_nothing_of_the_machines_local_timezone(
@@ -173,7 +162,6 @@ def test_a_system_clock_reading_carries_nothing_of_the_machines_local_timezone(
         time.tzset()
     assert time.tzname == before, "this test left the process in another timezone"
 
-
 def test_a_system_clock_reading_is_a_moment_the_run_record_accepts_and_keeps() -> None:
     """The assertion the port's awareness clause is actually about.
 
@@ -189,9 +177,7 @@ def test_a_system_clock_reading_is_a_moment_the_run_record_accepts_and_keeps() -
     assert spec.to_json()["created_at"] == format(spec.created_at, "%Y-%m-%dT%H:%M:%SZ")
     assert spec.created_at == reading.astimezone(UTC).replace(microsecond=0)
 
-
 # --- The fake ---------------------------------------------------------------------------------
-
 
 def test_the_fake_is_frozen_and_a_hundred_readings_are_one_value() -> None:
     """The port's own clause - "they may be equal, and under a frozen clock they always are".
@@ -202,7 +188,6 @@ def test_the_fake_is_frozen_and_a_hundred_readings_are_one_value() -> None:
     clock = ManualClock(_MOMENT)
 
     assert [clock.now() for _ in range(100)] == [_MOMENT] * 100
-
 
 def test_the_fake_moves_by_exactly_what_it_was_told_and_never_by_being_read() -> None:
     """Reading it never moves it; `advance` moves it by the delta and by nothing else.
@@ -226,7 +211,6 @@ def test_the_fake_moves_by_exactly_what_it_was_told_and_never_by_being_read() ->
         "advancing by nothing is a request that moves nothing, not a refusal"
     )
 
-
 def test_the_fake_can_be_set_outright_including_to_a_moment_earlier_than_the_last() -> None:
     """The port refuses to promise that two readings increase, and this is the fake agreeing.
 
@@ -243,7 +227,6 @@ def test_the_fake_can_be_set_outright_including_to_a_moment_earlier_than_the_las
     clock.set_to(_ELSEWHERE)
     assert clock.now() == _ELSEWHERE
 
-
 def test_the_fake_hands_back_the_moment_it_was_given_neither_normalised_nor_truncated() -> None:
     """Converting the offset and dropping the microseconds are `run.py`'s, and only `run.py`'s.
 
@@ -256,7 +239,6 @@ def test_the_fake_hands_back_the_moment_it_was_given_neither_normalised_nor_trun
     assert clock.now() == _ELSEWHERE
     assert clock.now().utcoffset() == timedelta(hours=5, minutes=30)
     assert clock.now().microsecond == 123456
-
 
 def test_a_fake_reading_is_a_moment_the_run_record_accepts_too() -> None:
     """A fake usable anywhere the real clock is, or it is not a `Clock`.
@@ -274,7 +256,6 @@ def test_a_fake_reading_is_a_moment_the_run_record_accepts_too() -> None:
     elsewhere = _record_at(ManualClock(_ELSEWHERE).now())
     assert RunSpec.from_json(elsewhere.to_json()) == elsewhere
     assert elsewhere.to_json()["created_at"] == _WIRE_MOMENT
-
 
 def test_a_moment_that_is_not_aware_is_refused_at_construction_and_at_the_setter() -> None:
     """Both halves of the check, at both doors, and nothing moved by either refusal.
@@ -301,7 +282,6 @@ def test_a_moment_that_is_not_aware_is_refused_at_construction_and_at_the_setter
             clock.set_to(refused)
     assert clock.now() == _MOMENT, "a refused `set_to` moved the clock anyway"
 
-
 def test_advance_refuses_to_go_backwards_because_that_is_what_its_name_promises() -> None:
     """`set_to` is where earlier lives. This is about the member whose name says one direction."""
     clock = ManualClock(_MOMENT)
@@ -310,9 +290,7 @@ def test_advance_refuses_to_go_backwards_because_that_is_what_its_name_promises(
         clock.advance(-timedelta(seconds=1))
     assert clock.now() == _MOMENT, "a refused `advance` moved the clock anyway"
 
-
 # --- What both of them are, and what neither of them grew -------------------------------------
-
 
 def test_both_are_clocks_and_the_port_itself_cannot_be_constructed() -> None:
     """The ABC is one abstract method, and an ABC with an abstract method is not instantiable.
@@ -326,7 +304,6 @@ def test_both_are_clocks_and_the_port_itself_cannot_be_constructed() -> None:
 
     with pytest.raises(TypeError):
         Clock()  # type: ignore[abstract]
-
 
 def test_neither_clock_offers_a_member_the_port_refused_to_promise() -> None:
     """No monotonic reading, no elapsed-time helper, no ordering, no sleep, no schedule.

@@ -195,11 +195,8 @@ updating its board behind a question it is itself blocked on would otherwise dea
 """
 
 from collections.abc import Iterator
-
 import pytest
-
 from agl.ports.terminal import Terminal, Text
-
 from ._terminal_driver import (
     Asking,
     TerminalDriver,
@@ -227,7 +224,6 @@ from ._terminal_views import (
 )
 
 __all__ = ["HeadlessTerminalContract", "TerminalContract", "TerminalDriver"]
-
 
 class TerminalContract(
     TerminalSlotContract,
@@ -445,7 +441,6 @@ class TerminalContract(
 
             await answer(driver, APPROVE)
             await within(late, "the question that was queued behind it")
-
 
 class HeadlessTerminalContract(HeadlessRulesContract, TerminalLifecycleContract):
     """The suite for a terminal that **cannot take input**: it drops a dashboard and refuses a

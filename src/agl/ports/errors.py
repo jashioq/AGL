@@ -1,4 +1,3 @@
-
 from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Final
@@ -18,46 +17,35 @@ __all__ = [
     "exit_code_for",
 ]
 
-
 class AglError(Exception):
     ...
-
 
 class InputError(AglError):
     ...
 
-
 class NotFoundError(AglError):
     ...
-
 
 class ConflictError(AglError):
     ...
 
-
 class DeniedError(AglError):
     ...
-
 
 class UpstreamError(AglError):
     ...
 
-
 class UpstreamUnavailable(UpstreamError):
     ...
-
 
 class UpstreamUnexpected(UpstreamError):
     ...
 
-
 class Stop(AglError):
     ...
 
-
 class InternalError(AglError):
     ...
-
 
 EXIT_CODES: Final[Mapping[type[AglError], int]] = MappingProxyType(
     {
@@ -70,7 +58,6 @@ EXIT_CODES: Final[Mapping[type[AglError], int]] = MappingProxyType(
         InternalError: 70,
     }
 )
-
 
 def exit_code_for(error: AglError | type[AglError]) -> int:
     """The process exit code for an error, resolved through the class tree rather than by lookup.

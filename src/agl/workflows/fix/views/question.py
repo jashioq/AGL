@@ -1,13 +1,10 @@
-
 from typing import Final
-
 from agl.sdk import Choice, Response, Screen, TextInput
 from agl.workflows.fix.questions import Answer, Question
 
 __all__ = ["FREE_TEXT", "agent_question"]
 
 FREE_TEXT: Final = "Answer in your own words"
-
 
 def agent_question(question: Question) -> Screen[Answer]:
     responses: list[Response[Answer]] = [

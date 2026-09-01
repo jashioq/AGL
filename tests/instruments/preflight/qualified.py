@@ -19,14 +19,12 @@ that never asked about `OpenAI.TERRA` admitted a run that was always going to ne
 
 from agl.sdk import Run, workflow
 from instruments.preflight import NoParams, entered
-
 # The import this file exists to be about: a *module*, not a factory. `from .roles import
 # implementer` would bind a `RoleFactory` in this namespace and measure the case that already
 # worked.
 from . import roles
 
 __all__ = ["qualified"]
-
 
 @workflow(version="1.1")
 async def qualified(run: Run[NoParams]) -> None:

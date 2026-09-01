@@ -37,9 +37,7 @@ from dataclasses import fields, replace
 from pathlib import Path
 from types import MappingProxyType, TracebackType
 from typing import Final, Self, get_type_hints
-
 import pytest
-
 from agl.adapters.claude_code import fake as claude_fake
 from agl.adapters.filesystem.memory_store import MemoryStore
 from agl.adapters.openai import fake as openai_fake
@@ -112,7 +110,6 @@ so this side of the rendezvous waits alone and the test hangs instead of failing
 LABEL: Final = RunLabel("acceptance")
 CHILD: Final = Namespace("T-01")
 
-
 def _settings(tmp_path: Path, *, claude: bool = True, openai: bool = True) -> Settings:
     """An installation, with either connector switchable. No path below is created."""
     return Settings(
@@ -123,7 +120,6 @@ def _settings(tmp_path: Path, *, claude: bool = True, openai: bool = True) -> Se
         ),
     )
 
-
 def _project(tmp_path: Path) -> Project:
     """A registered project pointing at a repository that does not exist and never will."""
     return Project(
@@ -133,7 +129,6 @@ def _project(tmp_path: Path) -> Project:
         build="make check",
         build_timeout=600.0,
     )
-
 
 def _ports_are_filled(services: container.Services) -> None:
     """Every port field holds an instance of the port it is declared as, and the ninth is there.
@@ -146,7 +141,6 @@ def _ports_are_filled(services: container.Services) -> None:
     for name, port in _PORTS.items():
         assert isinstance(getattr(services, name), port), name
     assert services.build
-
 
 def test_every_field_of_the_bundle_is_declared_as_a_port_and_never_as_an_adapter() -> None:
     """The one static assertion in this file, and the reason `Services` is worth having.
@@ -161,7 +155,6 @@ def test_every_field_of_the_bundle_is_declared_as_a_port_and_never_as_an_adapter
     """
     assert get_type_hints(container.Services) == _PORTS | _CONFIGURED
 
-
 def test_the_real_bundle_builds_and_fills_every_port(tmp_path: Path) -> None:
     """The all-real bundle, on a machine where nothing it names exists yet.
 
@@ -173,12 +166,10 @@ def test_the_real_bundle_builds_and_fills_every_port(tmp_path: Path) -> None:
     _ports_are_filled(services)
     assert not (tmp_path / "repo").exists()
 
-
 def test_the_fakes_bundle_builds_and_fills_every_port(tmp_path: Path) -> None:
     """The all-fakes bundle - target #8's deployment - and its port-typed half."""
     harness = container.fakes(TreesRoot(tmp_path / "trees"))
     _ports_are_filled(harness.services)
-
 
 def test_the_fakes_bundle_needs_no_extra_installed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -193,7 +184,6 @@ def test_the_fakes_bundle_needs_no_extra_installed(
     harness = container.fakes(TreesRoot(tmp_path / "trees"))
     _ports_are_filled(harness.services)
 
-
 def test_the_real_bundle_carries_the_projects_configured_build_command(tmp_path: Path) -> None:
     """The route nothing else can close, closed at the one place both ends are in scope.
 
@@ -205,7 +195,6 @@ def test_the_real_bundle_carries_the_projects_configured_build_command(tmp_path:
     build nobody configured.
     """
     assert container.real(_settings(tmp_path), _project(tmp_path)).build == "make check"
-
 
 @pytest.mark.asyncio
 async def test_the_fakes_bundle_carries_a_build_command_the_gate_answers_to(
@@ -227,13 +216,11 @@ async def test_the_fakes_bundle_carries_a_build_command_the_gate_answers_to(
 
     assert (outcome.passed, outcome.status, outcome.output) == (False, 2, "2 failing")
 
-
 def test_the_fakes_bundle_takes_a_build_command_of_its_own(tmp_path: Path) -> None:
     """A test about a *particular* command reaching the gate has to choose it, so `fakes()` takes
     one - keyword-only, beside the scripts, for the reason those are keyword-only."""
     harness = container.fakes(TreesRoot(tmp_path / "trees"), build="./gradlew check")
     assert harness.services.build == "./gradlew check"
-
 
 def test_the_concrete_fakes_are_the_same_objects_as_the_ports_in_the_bundle(
     tmp_path: Path,
@@ -244,7 +231,6 @@ def test_the_concrete_fakes_are_the_same_objects_as_the_ports_in_the_bundle(
     assert harness.verifier is harness.services.verifier
     assert harness.terminal is harness.services.terminal
     assert harness.clock is harness.services.clock
-
 
 @pytest.mark.asyncio
 async def test_a_change_through_one_git_fake_is_visible_through_the_others(
@@ -281,7 +267,6 @@ async def test_a_change_through_one_git_fake_is_visible_through_the_others(
     # And the repository this bundle hands back is the one all three were built over.
     assert harness.repository.tip(run.branch) == outcome.head
 
-
 @pytest.mark.asyncio
 async def test_two_fakes_bundles_share_no_repository(tmp_path: Path) -> None:
     """One bundle is one repository, and the shared instance is shared no further than that.
@@ -297,7 +282,6 @@ async def test_two_fakes_bundles_share_no_repository(tmp_path: Path) -> None:
     run = await first.services.workspaces.open(LABEL, None, base)
     assert second.repository.tip(run.branch) is None
 
-
 @pytest.mark.asyncio
 async def test_the_routing_runner_holds_both_connectors_when_both_are_enabled(
     tmp_path: Path,
@@ -310,7 +294,6 @@ async def test_the_routing_runner_holds_both_connectors_when_both_are_enabled(
     services = container.real(_settings(tmp_path), _project(tmp_path))
     assert await services.agents.capabilities(Claude.OPUS)
     assert await services.agents.capabilities(OpenAI.SOL)
-
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
@@ -339,7 +322,6 @@ async def test_a_disabled_connector_is_absent_from_the_routing_runner(
         await services.agents.capabilities(absent)
     assert held in str(refused.value)
 
-
 def test_both_connectors_disabled_is_the_routing_runners_own_refusal(tmp_path: Path) -> None:
     """Not pre-empted here, and not duplicated: the message is the one written where the facts are.
 
@@ -350,7 +332,6 @@ def test_both_connectors_disabled_is_the_routing_runners_own_refusal(tmp_path: P
     with pytest.raises(InputError) as refused:
         container.real(_settings(tmp_path, claude=False, openai=False), _project(tmp_path))
     assert "no adapters at all" in str(refused.value)
-
 
 @pytest.mark.asyncio
 async def test_a_scripted_fake_agent_answers_through_the_bundles_agent_runner(
@@ -382,7 +363,6 @@ async def test_a_scripted_fake_agent_answers_through_the_bundles_agent_runner(
     assert (await agents.run(_task(tmp_path, Claude.OPUS))).text == "claude: implement it"
     assert (await agents.run(_task(tmp_path, OpenAI.SOL))).text == "openai: implement it"
 
-
 def _task(workspace: Path, model: ModelId) -> AgentTask:
     """One task, addressed to whichever provider's model is named. Nothing here runs it."""
     return AgentTask(
@@ -392,7 +372,6 @@ def _task(workspace: Path, model: ModelId) -> AgentTask:
         restrictions=frozenset(),
         tools=(),
     )
-
 
 def test_a_missing_claude_extra_refuses_and_names_the_pip_install(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -409,7 +388,6 @@ def test_a_missing_claude_extra_refuses_and_names_the_pip_install(
         container.real(_settings(tmp_path), _project(tmp_path))
     assert "agl[claude]" in str(refused.value)
 
-
 def test_a_disabled_claude_connector_never_imports_the_adapter_that_needs_the_extra(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -422,7 +400,6 @@ def test_a_disabled_claude_connector_never_imports_the_adapter_that_needs_the_ex
     monkeypatch.setitem(sys.modules, _CLAUDE_RUNNER, None)
     services = container.real(_settings(tmp_path, claude=False), _project(tmp_path))
     _ports_are_filled(services)
-
 
 def test_a_missing_terminal_extra_refuses_rather_than_falling_back_to_headless(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -439,9 +416,7 @@ def test_a_missing_terminal_extra_refuses_rather_than_falling_back_to_headless(
         container.real(_settings(tmp_path), _project(tmp_path))
     assert "agl[terminal]" in str(refused.value)
 
-
 # --- Substituting through the bundle, and compiling the workflow-facing vocabulary ---------------
-
 
 class _Recording(Terminal):
     """A `Terminal` that draws nothing and is not the headless one. Two lines is the whole of it.
@@ -471,7 +446,6 @@ class _Recording(Terminal):
     ) -> None:
         raise AssertionError("nothing in this file enters a terminal")
 
-
 class _Watching(FakeVerifier):
     """A gate that records the checkout it was pointed at, and otherwise is the fake it extends.
 
@@ -488,7 +462,6 @@ class _Watching(FakeVerifier):
     async def verify(self, command: str, workdir: Path) -> VerifierOutcome:
         self.asked.append(workdir)
         return await super().verify(command, workdir)
-
 
 def test_with_terminal_moves_both_views_of_the_bundle_at_once(tmp_path: Path) -> None:
     """The first of the two findings these verbs answer, as the regression test for it.
@@ -507,7 +480,6 @@ def test_with_terminal_moves_both_views_of_the_bundle_at_once(tmp_path: Path) ->
     assert substituted.services.terminal is recorder
     assert substituted.terminal is recorder
     assert substituted.terminal is substituted.services.terminal
-
 
 def test_with_store_moves_both_views_of_the_bundle_at_once(tmp_path: Path) -> None:
     """The same, one field over, and the one `agl/testing.py` is built on.
@@ -530,7 +502,6 @@ def test_with_store_moves_both_views_of_the_bundle_at_once(tmp_path: Path) -> No
 
     assert substituted.services.store is wrapper
     assert substituted.store is wrapper
-
 
 def test_with_verifier_moves_both_views_of_the_bundle_at_once(tmp_path: Path) -> None:
     """The third of these verbs, and the finding that bought it.
@@ -557,7 +528,6 @@ def test_with_verifier_moves_both_views_of_the_bundle_at_once(tmp_path: Path) ->
     assert substituted.verifier is instrumented
     assert substituted.verifier is substituted.services.verifier
 
-
 @pytest.mark.asyncio
 async def test_a_substituted_verifier_is_the_one_a_landing_asks(tmp_path: Path) -> None:
     """And the verb is not only two assignments: what the bundle runs on is the substitute.
@@ -579,7 +549,6 @@ async def test_a_substituted_verifier_is_the_one_a_landing_asks(tmp_path: Path) 
         "here does not have to invent a verdict of its own"
     )
 
-
 def test_a_substitution_carries_every_other_object_across_by_identity(tmp_path: Path) -> None:
     """A substituted bundle is still *this* bundle, and the git fakes are the sharpest case.
 
@@ -599,7 +568,6 @@ def test_a_substitution_carries_every_other_object_across_by_identity(tmp_path: 
     assert substituted.services.agents is harness.services.agents
     assert substituted.services.build == harness.services.build
 
-
 @pytest.mark.asyncio
 async def test_one_agent_serves_both_providers(tmp_path: Path) -> None:
     """One callable behind both fakes, and the reason `agent=` is one parameter and not two.
@@ -618,7 +586,6 @@ async def test_one_agent_serves_both_providers(tmp_path: Path) -> None:
 
     assert (await agents.run(_task(tmp_path, Claude.OPUS))).text == f"served {Claude.OPUS}"
     assert (await agents.run(_task(tmp_path, OpenAI.SOL))).text == f"served {OpenAI.SOL}"
-
 
 @pytest.mark.asyncio
 async def test_a_raw_script_replaces_the_compiled_agent_for_its_own_provider(
@@ -642,7 +609,6 @@ async def test_a_raw_script_replaces_the_compiled_agent_for_its_own_provider(
 
     assert (await agents.run(_task(tmp_path, Claude.OPUS))).text == "the raw script"
     assert (await agents.run(_task(tmp_path, OpenAI.SOL))).text == "the compiled agent"
-
 
 @pytest.mark.asyncio
 async def test_a_reply_is_performed_as_activity_then_calls(tmp_path: Path) -> None:
@@ -687,7 +653,6 @@ async def test_a_reply_is_performed_as_activity_then_calls(tmp_path: Path) -> No
     assert seen == ["first", "second", "called: the payload"]
     assert (outcome.text, outcome.stop_reason) == ("done", StopReason.LIMIT)
 
-
 @pytest.mark.asyncio
 async def test_an_async_agent_is_awaited_and_a_sync_one_is_not(tmp_path: Path) -> None:
     """`Agent` is `(AgentTask) -> Reply | Awaitable[Reply]`, and both arms work.
@@ -721,7 +686,6 @@ async def test_an_async_agent_is_awaited_and_a_sync_one_is_not(tmp_path: Path) -
     immediate = container.fakes(TreesRoot(tmp_path / "sync"), agent=lambda task: Reply(says="done"))
 
     assert (await immediate.services.agents.run(_task(tmp_path, Claude.OPUS))).text == "done"
-
 
 @pytest.mark.asyncio
 async def test_no_agent_and_no_script_is_still_each_providers_own_default(tmp_path: Path) -> None:

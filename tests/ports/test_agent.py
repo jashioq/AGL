@@ -20,9 +20,7 @@ from dataclasses import MISSING, FrozenInstanceError, fields
 from pathlib import Path
 from types import MappingProxyType
 from typing import Final
-
 import pytest
-
 from agl.ports.agent import (
     AgentOutcome,
     AgentTask,
@@ -39,11 +37,9 @@ from agl.ports.agent import (
 from agl.ports.errors import InputError, InternalError
 from agl.ports.run import JsonValue
 
-
 async def _reply(payload: Mapping[str, JsonValue]) -> ToolResult:
     """A handler nothing here calls: `Tool` requires one, and no test in this file runs an agent."""
     return ToolResult(text=str(payload))
-
 
 _TOOL: Final = Tool(
     name="report_tickets",
@@ -60,7 +56,6 @@ _TASK: Final = AgentTask(
     tools=(_TOOL,),
 )
 
-
 def _model_ids() -> list[ModelId]:
     """Every model id AGL ships, found by subclass rather than listed - see the module docstring.
 
@@ -74,9 +69,7 @@ def _model_ids() -> list[ModelId]:
         for member in enum
     ]
 
-
 # --- Models are routable ------------------------------------------------------------------------
-
 
 def test_every_model_id_names_a_provider_it_can_be_routed_to() -> None:
     """The property routing dispatches on, over every member: prefix, separator, and a model."""
@@ -86,7 +79,6 @@ def test_every_model_id_names_a_provider_it_can_be_routed_to() -> None:
         assert separator == ":", f"{model.value!r} has no provider prefix"
         assert model.provider == Provider(provider)
         assert name, f"{model.value!r} names a provider and then no model"
-
 
 def test_a_model_id_whose_prefix_names_no_provider_is_our_bug() -> None:
     """`InternalError` and not `InputError`: nobody types a model id, so this file wrote it wrong.
@@ -103,9 +95,7 @@ def test_a_model_id_whose_prefix_names_no_provider_is_our_bug() -> None:
         with pytest.raises(InternalError):
             _ = model.provider
 
-
 # --- The values that get written down -----------------------------------------------------------
-
 
 def test_the_enum_values_are_the_strings_a_fingerprint_holds() -> None:
     """Pinned by hand, because these are a stored format and not an implementation detail."""
@@ -137,7 +127,6 @@ def test_the_enum_values_are_the_strings_a_fingerprint_holds() -> None:
         "LUNA": "openai:luna",
     }
 
-
 def test_an_outcome_carries_two_fields_and_an_adapter_states_both() -> None:
     """The list this module is most likely to grow a vendor assumption into, pinned.
 
@@ -148,16 +137,13 @@ def test_an_outcome_carries_two_fields_and_an_adapter_states_both() -> None:
     assert all(field.default is MISSING for field in fields(AgentOutcome))
     assert AgentOutcome(stop_reason=None, text="") == AgentOutcome(stop_reason=None, text="")
 
-
 # --- Defaults, and what a task refuses -----------------------------------------------------------
-
 
 def test_a_task_defaults_to_no_context_and_to_changing_things() -> None:
     """The two optional fields, and the one on `ToolResult`. Planning has to be asked for."""
     assert _TASK.context is None
     assert _TASK.plan_only is False
     assert ToolResult(text="done").rejected is False
-
 
 @pytest.mark.parametrize(
     "task",
@@ -179,7 +165,6 @@ def test_a_task_that_could_not_be_run_is_refused(task: dict[str, object]) -> Non
     }
     with pytest.raises(InputError):
         AgentTask(**fields_)  # type: ignore[arg-type]
-
 
 @pytest.mark.parametrize("blank", ["name", "description"])
 def test_a_tool_the_model_could_not_choose_is_refused(blank: str) -> None:
@@ -210,7 +195,6 @@ def test_a_tool_the_model_could_not_choose_is_refused(blank: str) -> None:
     with pytest.raises(InputError):
         Tool(**declared)  # type: ignore[arg-type]
 
-
 def test_a_declared_schema_cannot_be_edited_afterwards() -> None:
     """It goes into a fingerprint, so a caller keeping the dict it passed must not be able to move
     what that fingerprint was taken over."""
@@ -219,7 +203,6 @@ def test_a_declared_schema_cannot_be_edited_afterwards() -> None:
     schema["type"] = "string"
     assert tool.payload_schema == {"type": "object"}
     assert isinstance(tool.payload_schema, MappingProxyType)
-
 
 def test_the_values_are_frozen() -> None:
     """Every type here is a value: checked once on the way in, and not editable afterwards."""

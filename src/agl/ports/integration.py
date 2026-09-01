@@ -1,16 +1,12 @@
-
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-
 from agl.ports.errors import InternalError
 from agl.ports.workspace import Workspace
 
 __all__ = ["Conflict", "IntegrationOutcome", "Integrator"]
 
-
 @dataclass(frozen=True, slots=True)
 class Conflict:
-
     paths: tuple[str, ...]
 
     summary: str
@@ -28,10 +24,8 @@ class Conflict:
                     f"implementation with no paths to report passes an empty tuple instead"
                 )
 
-
 @dataclass(frozen=True, slots=True)
 class IntegrationOutcome:
-
     head: str | None = None
 
     conflict: Conflict | None = None
@@ -58,9 +52,7 @@ class IntegrationOutcome:
         """
         return self.conflict is not None
 
-
 class Integrator(ABC):
-
     @abstractmethod
     async def land(self, source: Workspace, target: Workspace) -> IntegrationOutcome:
         """Put what `source` holds into `target`, and say whether it went in.

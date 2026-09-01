@@ -32,9 +32,7 @@ import shutil
 from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Final, cast
-
 import pytest
-
 from agl.adapters.filesystem.store import FilesystemStore
 from agl.ports.errors import DeniedError, InternalError, UpstreamUnavailable, UpstreamUnexpected
 from agl.ports.home_layout import AglHome, RunScope, run_record, scope_dir, step_entry
@@ -65,18 +63,15 @@ DOCUMENT: Final[dict[str, JsonValue]] = {
     "at": "2026-08-18T09:16:41Z",
 }
 
-
 @pytest.fixture
 def home(tmp_path: Path) -> AglHome:
     """An empty `AGL_HOME`. `tmp_path` is absolute, which is the one thing `AglHome` insists on."""
     return AglHome(tmp_path)
 
-
 @pytest.fixture
 def store(home: AglHome) -> Store:
     """The store the module-level tests drive. The contract suite has its own, on the class."""
     return FilesystemStore(home)
-
 
 class TestFilesystemStore(StoreContract):
     """The port, in full, against the real thing.
@@ -95,9 +90,7 @@ class TestFilesystemStore(StoreContract):
         """
         return FilesystemStore(AglHome(tmp_path))
 
-
 # --- The same-filesystem clause, which nothing else can catch ---------------------------------
-
 
 async def test_the_partial_file_is_created_in_the_destinations_own_directory(
     store: Store, monkeypatch: pytest.MonkeyPatch
@@ -128,7 +121,6 @@ async def test_the_partial_file_is_created_in_the_destinations_own_directory(
             f"destination's own directory and so is not guaranteed to be the same filesystem"
         )
 
-
 async def test_a_write_that_fails_leaves_no_partial_file_and_the_previous_value_intact(
     store: Store, home: AglHome, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -149,9 +141,7 @@ async def test_a_write_that_fails_leaves_no_partial_file_and_the_previous_value_
         "the partial file the failed write created is still in the entry's directory"
     )
 
-
 # --- The boundary: nothing that is not an AglError leaves the adapter -------------------------
-
 
 async def test_a_refusal_from_the_filesystem_surfaces_as_denied(
     store: Store, monkeypatch: pytest.MonkeyPatch
@@ -176,7 +166,6 @@ async def test_a_refusal_from_the_filesystem_surfaces_as_denied(
     with pytest.raises(DeniedError, match="auth"):
         await store.read_record(RUN)
 
-
 async def test_any_other_os_error_surfaces_as_upstream_unavailable(
     store: Store, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -195,7 +184,6 @@ async def test_any_other_os_error_surfaces_as_upstream_unavailable(
     monkeypatch.setattr(Path, "iterdir", broken_listing)
     with pytest.raises(UpstreamUnavailable):
         await store.namespaces(RUN)
-
 
 async def test_remove_translates_a_refusal_instead_of_asking_rmtree_to_ignore_it(
     store: Store, monkeypatch: pytest.MonkeyPatch
@@ -218,7 +206,6 @@ async def test_remove_translates_a_refusal_instead_of_asking_rmtree_to_ignore_it
         await store.remove(RUN)
 
     assert asked and not any(options.get("ignore_errors") for options in asked)
-
 
 async def test_a_file_this_store_cannot_read_back_surfaces_as_upstream_unexpected(
     store: Store, home: AglHome
@@ -244,7 +231,6 @@ async def test_a_file_this_store_cannot_read_back_surfaces_as_upstream_unexpecte
     record.write_text("[1, 2, 3]", encoding="utf-8")
     with pytest.raises(UpstreamUnexpected, match="JSON object"):
         await store.read_record(RUN)
-
 
 async def test_a_value_json_cannot_write_surfaces_as_internal_error_and_creates_nothing(
     store: Store, tmp_path: Path
@@ -277,7 +263,6 @@ async def test_a_value_json_cannot_write_surfaces_as_internal_error_and_creates_
     )
     assert list(tmp_path.rglob("*")) == [], "a write that could not encode still made something"
 
-
 async def test_a_digest_that_is_not_a_digest_is_refused_before_any_path_is_spent(
     store: Store, tmp_path: Path
 ) -> None:
@@ -291,9 +276,7 @@ async def test_a_digest_that_is_not_a_digest_is_refused_before_any_path_is_spent
         await store.write_entry(RUN, STEP, DIGEST.upper(), DOCUMENT)
     assert list(tmp_path.rglob("*")) == []
 
-
 # --- What the tree looks like -----------------------------------------------------------------
-
 
 async def test_a_read_that_misses_creates_nothing_under_the_home(
     store: Store, tmp_path: Path
@@ -308,7 +291,6 @@ async def test_a_read_that_misses_creates_nothing_under_the_home(
     assert await store.namespaces(RUN.inside(CHILD)) == ()
 
     assert list(tmp_path.rglob("*")) == [], "a read created something under AGL_HOME"
-
 
 async def test_namespaces_skips_what_agl_could_not_have_written(
     store: Store, home: AglHome
@@ -328,7 +310,6 @@ async def test_namespaces_skips_what_agl_could_not_have_written(
 
     assert await store.namespaces(RUN) == (CHILD,)
 
-
 async def test_namespaces_answers_sorted_by_name(store: Store) -> None:
     """The port asks for a stable order and declines to say sorted by what. This adapter sorts,
     which satisfies it and makes a `clear` traversal reproducible; the suite asserts the set and
@@ -337,7 +318,6 @@ async def test_namespaces_answers_sorted_by_name(store: Store) -> None:
         await store.write_entry(RUN.inside(Namespace(name)), STEP, DIGEST, DOCUMENT)
 
     assert await store.namespaces(RUN) == (Namespace("T-01"), Namespace("T-02"), Namespace("T-03"))
-
 
 async def test_an_entry_on_disk_is_indented_utf8_json_a_person_can_read(
     store: Store, home: AglHome

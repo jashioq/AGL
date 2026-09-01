@@ -99,12 +99,9 @@ again, and the paragraph they answer is the one after "`Mapping` on the way in".
 import asyncio
 from collections.abc import Iterator
 from copy import deepcopy
-
 import pytest
-
 from agl.ports.run import JsonValue
 from agl.ports.store import Store
-
 from ._store_concurrency import StoreConcurrencyContract
 from ._store_documents import (
     CHILD,
@@ -121,7 +118,6 @@ from ._store_documents import (
     record,
 )
 from ._store_scopes import StoreScopeContract
-
 
 class StoreContract(StoreScopeContract, StoreConcurrencyContract):
     """The suite. Everything a `Store` promises, and nothing an implementation gets to choose.

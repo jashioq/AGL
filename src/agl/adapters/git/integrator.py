@@ -1,7 +1,5 @@
-
 from pathlib import Path
 from typing import Final
-
 from agl.adapters.git._conflicts import already_holding, collided, unmerged, unresolved
 from agl.adapters.git._runner import GitRunner
 from agl.ports.errors import InternalError, UpstreamUnexpected
@@ -9,7 +7,6 @@ from agl.ports.integration import IntegrationOutcome, Integrator
 from agl.ports.workspace import Workspace
 
 __all__ = ["GitIntegrator"]
-
 
 _ASKING: Final = 30.0
 
@@ -41,9 +38,7 @@ _PENDING: Final = ("rev-parse", "--verify", "--quiet", "--end-of-options", "MERG
 
 _UNRESOLVED: Final = ("ls-files", "--unmerged", "--full-name", "-z")
 
-
 class GitIntegrator(Integrator):
-
     def __init__(self, repository: Path) -> None:
         self._git = GitRunner(repository)
 

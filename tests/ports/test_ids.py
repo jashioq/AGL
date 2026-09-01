@@ -39,9 +39,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 from typing import Final
-
 import pytest
-
 from agl.ports.errors import InputError
 from agl.ports.ids import Namespace, ProjectName, RunLabel, StepName
 
@@ -97,13 +95,11 @@ _BOUNDARY: Final = [
 
 _DEVICE_NAMES: Final = ["CON", "PRN", "AUX", "NUL", "COM1", "COM9", "LPT1", "LPT9"]
 
-
 def _fuzz(count: int) -> list[str]:
     """Pseudo-random names from a fixed seed, so a failure reproduces without a seed to copy."""
     rng = random.Random(_SEED)
     alphabet = [*"abzAZ09._-", *"/\\~^:?*[ @{}$;|&`", "\x00", "\t", "\xa0", "\xe9", "\U0001f34c"]
     return ["".join(rng.choices(alphabet, k=rng.randint(1, 12))) for _ in range(count)]
-
 
 def _permitted_fuzz(count: int) -> list[str]:
     """The other fuzz: drawn only from the allowlist, so most of these are accepted.
@@ -117,7 +113,6 @@ def _permitted_fuzz(count: int) -> list[str]:
     rng = random.Random(_SEED + 1)
     return ["".join(rng.choices([*"abzAZ09._-"], k=rng.randint(1, 12))) for _ in range(count)]
 
-
 def _structured() -> list[str]:
     """The stated-coverage half of the corpus: exhaustive, then systematic."""
     values = [chr(code) for code in range(0x80)] + _NON_ASCII
@@ -129,11 +124,9 @@ def _structured() -> list[str]:
         values += [f"{name}x", f"x{name}", f"{name}-1", f"{name}.a.b"]
     return values + ["COM0", "LPT0", "COM10", "CONS", "CONSOLE", "NULL", "banana", "T-01"]
 
-
 _STRUCTURED: Final = _structured()
 _FUZZ: Final = _fuzz(1500) + _permitted_fuzz(500)
 _CORPUS: Final = list(dict.fromkeys([*_STRUCTURED, *_FUZZ]))
-
 
 def _accepted(values: Sequence[str]) -> list[str]:
     """The subset `Namespace` takes. The four types differ only over the two reserved words."""
@@ -145,12 +138,9 @@ def _accepted(values: Sequence[str]) -> list[str]:
             pass
     return kept
 
-
 _ACCEPTED: Final = _accepted(_CORPUS)
 
-
 # --- The rules, one case each ---------------------------------------------------------------
-
 
 @pytest.mark.parametrize(
     ("value", "rule"),
@@ -185,7 +175,6 @@ def test_each_rule_rejects_with_a_message_naming_the_rule_and_the_value(
     assert repr(value) in message, f"message does not quote the offending value: {message}"
     assert "namespace" in message, f"message does not say which kind of name: {message}"
 
-
 @pytest.mark.parametrize(
     "value",
     [
@@ -198,7 +187,6 @@ def test_a_name_that_breaks_no_rule_is_taken_by_all_four_types(value: str) -> No
     for name_type in _TYPES:
         assert str(name_type(value)) == value
 
-
 def test_each_type_raises_input_error_and_says_its_own_kind() -> None:
     """`InputError` because it is the user's typo and not our bug; the kind so they know which."""
     kinds = ("run label", "namespace", "project name", "step name")
@@ -206,9 +194,7 @@ def test_each_type_raises_input_error_and_says_its_own_kind() -> None:
         with pytest.raises(InputError, match=kind):
             name_type("bad name")
 
-
 # --- The two reserved words, one per type ------------------------------------------------------
-
 
 @pytest.mark.parametrize("spelling", ["_base", "_BASE", "_Base", "_bAsE"])
 def test_no_namespace_may_be_called_base_in_any_spelling(spelling: str) -> None:
@@ -222,7 +208,6 @@ def test_no_namespace_may_be_called_base_in_any_spelling(spelling: str) -> None:
         Namespace(spelling)
     assert repr(spelling) in str(caught.value), "the message quotes what the caller passed"
 
-
 @pytest.mark.parametrize("spelling", ["_work", "_WORK", "_Work", "_wOrK"])
 def test_no_run_label_may_be_called_work_in_any_spelling(spelling: str) -> None:
     """`agl/_work` is a branch and the directory every child's branch lives in - never both.
@@ -234,7 +219,6 @@ def test_no_run_label_may_be_called_work_in_any_spelling(spelling: str) -> None:
     with pytest.raises(InputError, match="child branch") as caught:
         RunLabel(spelling)
     assert repr(spelling) in str(caught.value), "the message quotes what the caller passed"
-
 
 def test_the_two_reservations_do_not_cross_because_the_collisions_do_not_either() -> None:
     """`agl/_base` collides with nothing, and `agl/_work/<label>/_work` is a ref like any other.
@@ -249,7 +233,6 @@ def test_the_two_reservations_do_not_cross_because_the_collisions_do_not_either(
         assert str(name_type("_base")) == "_base"
         assert str(name_type("_work")) == "_work"
 
-
 @pytest.mark.parametrize(
     "spelling", ["base", "_bases", "__base", "_base-1", "work", "_works", "_work.1"]
 )
@@ -260,21 +243,17 @@ def test_only_the_reserved_words_themselves_are_refused_and_not_a_family_of_name
     for name_type in _TYPES:
         assert str(name_type(spelling)) == spelling
 
-
 # --- The three properties, over the corpus ---------------------------------------------------
-
 
 def test_the_corpus_is_big_enough_and_mixed_enough_to_mean_anything() -> None:
     """A corpus that accepted nothing, or rejected nothing, would pass every property below."""
     assert len(_CORPUS) > 1500, f"corpus collapsed to {len(_CORPUS)} values"
     assert 200 < len(_ACCEPTED) < len(_CORPUS) - 200, f"{len(_ACCEPTED)} of {len(_CORPUS)} accepted"
 
-
 def test_property_no_accepted_name_contains_a_path_separator() -> None:
     """(a) The one that would let a name become path depth. `worktree()` alone creates that."""
     carriers = [value for value in _ACCEPTED if "/" in value or "\\" in value]
     assert not carriers, f"accepted names carrying a separator: {carriers[:10]}"
-
 
 def test_property_no_accepted_name_carries_a_character_a_shell_would_read() -> None:
     """(a2) The allowlist restated as the thing it was adopted for, over the whole corpus.
@@ -288,7 +267,6 @@ def test_property_no_accepted_name_carries_a_character_a_shell_would_read() -> N
     carriers = [value for value in _ACCEPTED if metacharacters & set(value)]
     assert not carriers, f"accepted names a shell would read: {carriers[:10]}"
 
-
 def test_property_an_accepted_name_joined_onto_a_root_stays_under_it(tmp_path: Path) -> None:
     """(b) Escaping the parent is what `..`, `/` and an empty segment are all worth catching."""
     root = tmp_path.resolve()
@@ -297,7 +275,6 @@ def test_property_an_accepted_name_joined_onto_a_root_stays_under_it(tmp_path: P
         assert joined.is_relative_to(root), f"{value!r} resolves out of its parent: {joined}"
         assert joined.parent == root, f"{value!r} is more than one segment deep: {joined}"
         assert joined != root, f"{value!r} resolves to the parent itself"
-
 
 def _git_rejects(refnames: Sequence[str]) -> list[str]:
     """The refnames real git turns down. Parallel because each one costs a process."""
@@ -318,7 +295,6 @@ def _git_rejects(refnames: Sequence[str]) -> list[str]:
         verdicts = list(pool.map(rejected, refnames))
     return [name for name, bad in zip(refnames, verdicts, strict=True) if bad]
 
-
 @pytest.mark.skipif(
     shutil.which("git") is None,
     reason="git is not on PATH, so the git-ref-format property went UNVERIFIED",
@@ -338,7 +314,6 @@ def test_property_every_accepted_name_satisfies_real_git_check_ref_format() -> N
     rejected = _git_rejects(refnames)
     assert not rejected, f"git rejects {len(rejected)} of {len(refnames)}: {rejected[:10]}"
 
-
 def test_git_would_have_said_so_if_the_property_above_were_vacuous() -> None:
     """The control: the same helper, on names git must refuse. A stub would pass (c) silently."""
     if shutil.which("git") is None:
@@ -346,9 +321,7 @@ def test_git_would_have_said_so_if_the_property_above_were_vacuous() -> None:
     known_bad = ["a b", "a~b", "a..b", ".a", "a.lock", "@", "a@{1}", "a\\b"]
     assert sorted(_git_rejects(known_bad)) == sorted(known_bad)
 
-
 # --- Opacity, and the shape of the types -----------------------------------------------------
-
 
 def test_the_four_types_accept_exactly_the_same_language() -> None:
     """One validator, and no type with a vocabulary of its own - the two reserved words apart.
@@ -374,7 +347,6 @@ def test_the_four_types_accept_exactly_the_same_language() -> None:
     assert disagreed == reserved, f"the types disagree about more than two words: {disagreed[:10]}"
     assert len(reserved) > 4, "the corpus stopped spelling the reserved words: nothing was proved"
 
-
 def test_renaming_t01_to_banana_changes_nothing() -> None:
     """Opacity: no ticket, run or project vocabulary is baked into a name."""
     ticket, nonsense = Namespace("T-01"), Namespace("banana")
@@ -382,7 +354,6 @@ def test_renaming_t01_to_banana_changes_nothing() -> None:
     assert (str(nonsense), nonsense.collision_key) == ("banana", "banana")
     for word in ("ticket", "run", "project", "step", "workflow", "agl", "main", "HEAD"):
         assert str(Namespace(word)) == word
-
 
 def test_a_name_is_not_a_string_and_not_a_path() -> None:
     """A `str` subclass would pass silently where a `str` is expected; that is the whole hole."""
@@ -393,7 +364,6 @@ def test_a_name_is_not_a_string_and_not_a_path() -> None:
     assert not hasattr(label, "__fspath__"), "these are names, not paths"
     with pytest.raises(TypeError):
         os.fspath(label)  # type: ignore[call-overload]
-
 
 def test_a_validated_name_of_one_kind_is_not_a_name_of_another() -> None:
     """Distinct at runtime - and the ignores below are the same guarantee, stated statically.
@@ -410,13 +380,11 @@ def test_a_validated_name_of_one_kind_is_not_a_name_of_another() -> None:
     assert len({RunLabel("x"), Namespace("x"), ProjectName("x"), StepName("x")}) == 4
     assert Namespace("x") not in {RunLabel("x"): 1}  # type: ignore[comparison-overlap]
 
-
 def test_a_name_is_frozen_and_slotted_so_it_cannot_be_edited_past_its_validation() -> None:
     label = RunLabel("T-01")
     with pytest.raises(FrozenInstanceError):
         label.value = "../escape"  # type: ignore[misc]
     assert not hasattr(label, "__dict__")
-
 
 def test_collision_key_folds_the_case_a_filesystem_merges_and_would_fold_the_other() -> None:
     """Case on a case-insensitive volume. A key, not equality - and half of it now unreachable.

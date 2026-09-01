@@ -59,9 +59,7 @@ from collections.abc import Iterator
 from itertools import combinations
 from pathlib import Path
 from typing import Final
-
 import pytest
-
 from agl.adapters.openai.translate import (
     APPROVAL,
     Sandbox,
@@ -94,7 +92,6 @@ _SANDBOX_MODES: Final = frozenset({"read-only", "workspace-write", "danger-full-
 # configuration-load time, so emitting it would be a run that never starts.
 _REFUSED_APPROVAL: Final = "untrusted"
 
-
 def _subsets() -> Iterator[frozenset[Restriction]]:
     """Every one of the sixteen subsets of `Restriction`, built from the port's own members.
 
@@ -107,14 +104,11 @@ def _subsets() -> Iterator[frozenset[Restriction]]:
         for chosen in combinations(members, size):
             yield frozenset(chosen)
 
-
 def _ids(subset: frozenset[Restriction]) -> str:
     """A stable pytest id for a subset, since a `frozenset`'s own repr order is not stable."""
     return "+".join(member.value for member in Restriction if member in subset) or "none"
 
-
 _ALL_SUBSETS: Final = list(_subsets())
-
 
 class TestTheSetCollapsesOntoOneScalar:
     """(a) Sixteen subsets, one mode each, and a reader can see which."""
@@ -274,7 +268,6 @@ class TestTheSetCollapsesOntoOneScalar:
                 f"caller supplied is the shape that rule is about"
             )
 
-
 class TestEveryRestrictionAlsoReachesTheAgentInWords:
     """(a) The port's second honest move, produced for every member and never for none."""
 
@@ -348,7 +341,6 @@ class TestEveryRestrictionAlsoReachesTheAgentInWords:
         assert "sandbox" in rendered
         assert rendered.startswith("AGL")
 
-
 class TestModelSlugs:
     """(b) A pinned slug for a model this adapter serves, and a refusal for anything else."""
 
@@ -414,7 +406,6 @@ class TestModelSlugs:
         for served in OpenAI:
             assert str(served) in message
 
-
 class TestTheApprovalSettingIsAdapterLocalAndConstant:
     """The R2 checkpoint, in the shape the module gives it: a constant, not a translation."""
 
@@ -451,7 +442,6 @@ class TestTheApprovalSettingIsAdapterLocalAndConstant:
         assert APPROVAL[0] == "-c"
         assert "-a" not in APPROVAL
         assert not any(token.startswith("--") for token in APPROVAL)
-
 
 class TestFailuresBecomeAglErrors:
     """(c) Every way this backend can fail to answer, in `errors.py`'s vocabulary."""
@@ -588,7 +578,6 @@ class TestFailuresBecomeAglErrors:
         assert isinstance(translated, UpstreamUnexpected)
         assert reason in str(translated)
         assert len(str(translated)) < 600
-
 
 class TestActivityStrings:
     """(d) One line per frame kind, formatted from the field that kind is about."""
@@ -773,7 +762,6 @@ class TestActivityStrings:
         )
         assert rendered == "Running: ./gradlew build"
         assert not rendered.startswith("Bash")
-
 
 class TestTheSandboxValueIsAValueAndNotAFlag:
     """The shape of what `sandbox()` hands back, which is part of what (a) claims."""

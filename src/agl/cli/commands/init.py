@@ -1,8 +1,6 @@
-
 import argparse
 from pathlib import Path
 from typing import Final
-
 from agl import api
 from agl.api import Ask
 from agl.config.schema import Settings
@@ -18,7 +16,6 @@ _NOTHING_TO_REPORT: Final = 0
 # `Any`, which is the one thing `mypy --strict` is here to keep out of the seam.
 type _Commands = argparse._SubParsersAction[RefusingParser]
 
-
 def declare(commands: _Commands) -> RefusingParser:
     return commands.add_parser(
         NAME,
@@ -31,7 +28,6 @@ def declare(commands: _Commands) -> RefusingParser:
         ),
         allow_abbrev=False,
     )
-
 
 def execute(settings: Settings, cwd: Path, ask: Ask) -> int:
     written = api.init(settings, cwd, ask)

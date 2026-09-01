@@ -37,9 +37,7 @@ from dataclasses import dataclass
 from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Final
-
 import pytest
-
 from agl.cli import main
 from agl.cli.commands import workflows as workflows_command
 from agl.config import registry, sources
@@ -52,7 +50,6 @@ from agl.sdk.workflow import Run, workflow
 ELSEWHERE: Final = Path("/nowhere")
 SETTINGS: Final = sources.resolve_settings(sources.Overrides(), {"AGL_HOME": str(ELSEWHERE)})
 
-
 @dataclass(frozen=True)
 class Flagged:
     """The example params class, so the help printed below has something in it."""
@@ -60,26 +57,21 @@ class Flagged:
     request: str = arg("-r", "--request", help="what to build")
     concurrent: int = arg("-c", "--concurrent", default=3, help="how many at once")
 
-
 @dataclass(frozen=True)
 class NoParams:
     """A workflow that takes nothing: its help is a usage line and no options."""
-
 
 @workflow(version="1.0")
 async def tickets(run: Run[Flagged]) -> None:
     """Declared for its flags alone; nothing below runs it."""
 
-
 @workflow(version="1.0")
 async def probe(run: Run[NoParams]) -> None:
     """Declared so the listing has a second name in it, and one with no flags to print."""
 
-
 def _point(name: str, attribute: str) -> EntryPoint:
     """A registration line, pointed at this module: a name, a `module:attr`, and a group."""
     return EntryPoint(name=name, value=f"{__name__}:{attribute}", group=registry.GROUP)
-
 
 # A package that is not installed, registered under a name that is. `EntryPoint.load` raises
 # `ImportError`, which `registry.load` turns into `InputError` - and `registry.names` never loads.
@@ -89,11 +81,9 @@ BROKEN: Final = EntryPoint(
 
 POINTS: Final = (_point("tickets", "tickets"), _point("probe", "probe"), BROKEN)
 
-
 def _never() -> tuple[ProjectName, object]:
     """A `Registered` that fails the test if a command calls it: this command takes neither."""
     raise AssertionError("`agl workflows` composed a repository")
-
 
 def _main(*argv: str, points: tuple[EntryPoint, ...] = POINTS) -> int:
     """One `agl` invocation, with this module's entry points in place of what is installed."""
@@ -107,16 +97,13 @@ def _main(*argv: str, points: tuple[EntryPoint, ...] = POINTS) -> int:
         ),
     )
 
-
 def _workflows_parser() -> RefusingParser:
     """The `workflows` subparser alone, built the way `main.parser()` builds it, for inspection."""
     root = RefusingParser(prog="agl", allow_abbrev=False)
     commands = root.add_subparsers(dest="command", required=True, parser_class=RefusingParser)
     return workflows_command.declare(commands)
 
-
 # --- the listing, which imports nothing ----------------------------------------------------------
-
 
 def test_the_listing_is_the_registrys_sorted_names_one_per_line(
     capsys: pytest.CaptureFixture[str],
@@ -133,7 +120,6 @@ def test_the_listing_is_the_registrys_sorted_names_one_per_line(
     assert captured.out == "broken\nprobe\ntickets\n"
     assert captured.err == ""
 
-
 def test_a_workflow_that_cannot_be_imported_does_not_take_the_listing_down(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -146,7 +132,6 @@ def test_a_workflow_that_cannot_be_imported_does_not_take_the_listing_down(
     assert _main("workflows") == 0
 
     assert "broken" in capsys.readouterr().out
-
 
 def test_an_installation_with_nothing_registered_says_so_on_stderr(
     capsys: pytest.CaptureFixture[str],
@@ -164,9 +149,7 @@ def test_an_installation_with_nothing_registered_says_so_on_stderr(
     assert captured.out == ""
     assert "agl.workflows" in captured.err
 
-
 # --- the name, which imports exactly one ---------------------------------------------------------
-
 
 def test_naming_a_workflow_prints_the_flags_it_declares(
     capsys: pytest.CaptureFixture[str],
@@ -191,7 +174,6 @@ def test_naming_a_workflow_prints_the_flags_it_declares(
     assert "-h" not in captured.out
     assert captured.err == ""
 
-
 def test_naming_the_broken_workflow_fails_loudly_for_that_name_and_no_other(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -207,7 +189,6 @@ def test_naming_the_broken_workflow_fails_loudly_for_that_name_and_no_other(
     assert "agl.workflows.no_such_package:broken" in capsys.readouterr().err
     assert _main("workflows") == 0
 
-
 def test_a_name_nothing_registers_exits_three_and_lists_what_does(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -218,7 +199,6 @@ def test_a_name_nothing_registers_exits_three_and_lists_what_does(
     captured = capsys.readouterr().err
     assert "nosuch" in captured
     assert "tickets" in captured
-
 
 def test_a_workflow_with_no_flags_prints_a_usage_line_rather_than_nothing(
     capsys: pytest.CaptureFixture[str],
@@ -233,9 +213,7 @@ def test_a_workflow_with_no_flags_prints_a_usage_line_rather_than_nothing(
 
     assert capsys.readouterr().out.strip() == "usage: agl run probe"
 
-
 # --- what the command is, read off the module ----------------------------------------------------
-
 
 def test_the_workflows_parser_holds_one_optional_positional_and_no_flags() -> None:
     """The grammar, read off the object: `agl workflows [<workflow>]`.
@@ -251,7 +229,6 @@ def test_the_workflows_parser_holds_one_optional_positional_and_no_flags() -> No
     assert options == {"-h", "--help"}
     assert [action.dest for action in positionals] == ["workflow"]
     assert parser.parse_args([]).workflow is None
-
 
 def test_the_command_calls_api_and_nothing_else() -> None:
     """`ARCHITECTURE.md`'s "Commands stay dumb", made mechanical, on the command whose subject is
@@ -272,7 +249,6 @@ def test_the_command_calls_api_and_nothing_else() -> None:
 
     assert called == {"list_workflows", "workflow_help"}
 
-
 def test_the_command_starts_no_event_loop() -> None:
     """Both operations are sync, so this module has no `asyncio.run` and does not import `asyncio`.
 
@@ -291,7 +267,6 @@ def test_the_command_starts_no_event_loop() -> None:
 
     assert "asyncio" not in imported
 
-
 def test_neither_invocation_asks_for_a_registered_repository() -> None:
     """`list_workflows` takes neither - measured on both spellings of the command.
 
@@ -302,9 +277,7 @@ def test_neither_invocation_asks_for_a_registered_repository() -> None:
     assert _main("workflows") == 0
     assert _main("workflows", "tickets") == 0
 
-
 # --- the tail, which this command may not carry --------------------------------------------------
-
 
 def test_a_second_positional_is_refused_and_points_at_the_command_that_takes_flags(
     capsys: pytest.CaptureFixture[str],

@@ -1,7 +1,5 @@
-
 from collections.abc import Mapping
 from typing import Final
-
 from agl.ports.agent import (
     ActivityReporter,
     AgentOutcome,
@@ -15,9 +13,7 @@ from agl.ports.errors import InputError
 
 __all__ = ["RoutingAgentRunner"]
 
-
 class RoutingAgentRunner(AgentRunner):
-
     def __init__(self, runners: Mapping[Provider, AgentRunner]) -> None:
         if not runners:
             raise InputError(

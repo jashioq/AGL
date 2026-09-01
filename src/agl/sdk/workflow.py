@@ -1,9 +1,7 @@
-
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from inspect import iscoroutinefunction, signature
 from typing import cast, get_args, get_origin, get_type_hints
-
 from agl.ports.errors import InputError, Stop
 from agl.ports.home_layout import RunScope
 from agl.ports.ids import Namespace
@@ -22,10 +20,8 @@ from agl.sdk.roles import Role
 
 __all__ = ["Conflict", "Namespace", "Run", "Stop", "VerifierOutcome", "Workflow", "workflow"]
 
-
 @dataclass(frozen=True, slots=True)
 class Run[P = object]:
-
     params: P
 
     services: Services
@@ -123,14 +119,12 @@ class Run[P = object]:
             _parent=self,
         )
 
-
 def _starts_at(run: Run[object], base: Run[object] | str | None) -> str:
     if base is None:
         return run._steps.last_good
     if isinstance(base, str):
         return base
     return base._steps.last_good
-
 
 def _unaddressable(scope: RunScope) -> str:
     return (
@@ -142,18 +136,14 @@ def _unaddressable(scope: RunScope) -> str:
         f"there is no rule here that could be relaxed and no spelling that would name one"
     )
 
-
 type _Function[P] = Callable[[Run[P]], Awaitable[None]]
-
 
 @dataclass(frozen=True, slots=True)
 class _NoParams:
     ...
 
-
 @dataclass(frozen=True, slots=True)
 class Workflow[P = object]:
-
     version: str
 
     fn: _Function[P]
@@ -166,7 +156,6 @@ class Workflow[P = object]:
         :raises InputError: the annotation is missing, unresolvable, or names anything but a `Run`
         """
         return cast("type[P]", _declared(self.fn))
-
 
 def workflow[P](*, version: str) -> Callable[[_Function[P]], Workflow[P]]:
     """Declare an async function to be a workflow, stamping the version a resume compares.
@@ -188,7 +177,6 @@ def workflow[P](*, version: str) -> Callable[[_Function[P]], Workflow[P]]:
 
     return declare
 
-
 def _check_text(field: str, value: str) -> None:
     if not value.strip():
         raise InputError(
@@ -197,7 +185,6 @@ def _check_text(field: str, value: str) -> None:
             f"refuses an empty `workflow_version` - so a run declared this way could not be "
             f"recorded, let alone resumed"
         )
-
 
 def _declared(fn: Callable[..., object]) -> object:
     parameters, hints = _hints(fn)
@@ -225,7 +212,6 @@ def _declared(fn: Callable[..., object]) -> object:
         return arguments[0] if arguments else _NoParams
     raise InputError(_not_a_run(fn, first, annotation, subject))
 
-
 def _not_a_run(fn: Callable[..., object], first: str, annotation: object, subject: object) -> str:
     if isinstance(subject, type) and issubclass(subject, Run):
         return (
@@ -244,7 +230,6 @@ def _not_a_run(fn: Callable[..., object], first: str, annotation: object, subjec
         f"Run[YourParams]`, or `{first}: Run` for a workflow that never reads `run.params`"
     )
 
-
 def _hints(fn: Callable[..., object]) -> tuple[list[str], Mapping[str, object]]:
     try:
         # `signature` is inside this guard too: 3.14 evaluates no annotation until something asks,
@@ -258,7 +243,6 @@ def _hints(fn: Callable[..., object]) -> tuple[list[str], Mapping[str, object]]:
             f"has to name something importable where it is written - a class defined below the "
             f"function is fine, one that is never bound at all is not"
         ) from error
-
 
 def _written_at(fn: Callable[..., object]) -> str:
     code = fn.__code__

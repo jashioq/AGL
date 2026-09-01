@@ -1,11 +1,9 @@
-
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
 from typing import Final
-
 from agl.config import toml_file
 from agl.config.schema import AgentSettings, ClaudeSettings, OpenAiSettings, Project, Settings
 from agl.ports.errors import InputError
@@ -19,7 +17,6 @@ __all__ = [
     "resolve_project",
     "resolve_settings",
 ]
-
 
 _HOME: Final = "home"
 _REPO: Final = "repo"
@@ -43,10 +40,8 @@ _DEFAULT_ENABLED: Final = True
 
 DEFAULT_BUILD_TIMEOUT: Final = 600.0
 
-
 @dataclass(frozen=True, slots=True)
 class Overrides:
-
     home: Path | None = None
     build: str | None = None
     build_timeout: float | None = None
@@ -55,10 +50,8 @@ class Overrides:
     openai_enabled: bool | None = None
     openai_cli_path: Path | None = None
 
-
 @dataclass(frozen=True, slots=True)
 class Resolved:
-
     settings: Settings
     overrides: Overrides
     environ: Mapping[str, str]
@@ -66,11 +59,9 @@ class Resolved:
     def project(self, cwd: Path) -> Project:
         return resolve_project(self.settings, self.overrides, self.environ, cwd)
 
-
 def resolve(overrides: Overrides) -> Resolved:
     environ: Mapping[str, str] = MappingProxyType(dict(os.environ))
     return Resolved(resolve_settings(overrides, environ), overrides, environ)
-
 
 def resolve_settings(overrides: Overrides, environ: Mapping[str, str]) -> Settings:
     flagged = _first(overrides.home, _path(environ, _variable(_HOME)))
@@ -89,7 +80,6 @@ def resolve_settings(overrides: Overrides, environ: Mapping[str, str]) -> Settin
             openai=OpenAiSettings(enabled=openai[0], cli_path=openai[1]),
         ),
     )
-
 
 def resolve_project(
     settings: Settings, overrides: Overrides, environ: Mapping[str, str], cwd: Path
@@ -111,18 +101,15 @@ def resolve_project(
         ),
     )
 
-
 def _first[T](*layers: T | None) -> T | None:
     for value in layers:
         if value is not None:
             return value
     return None
 
-
 def _settled[T](*layers: T | None, default: T) -> T:
     answer = _first(*layers)
     return default if answer is None else answer
-
 
 def _required[T](answer: T | None, path: Path, key: str) -> T:
     if answer is None:
@@ -132,7 +119,6 @@ def _required[T](answer: T | None, path: Path, key: str) -> T:
             f"writes the file with all five of its keys; add {key} to it, or run init again"
         )
     return answer
-
 
 def _agent(
     section: str,
@@ -151,10 +137,8 @@ def _agent(
         _first(cli_path, _path(environ, _variable(_AGENT, section, _CLI_PATH)), said.cli_path),
     )
 
-
 def _variable(*path: str) -> str:
     return _PREFIX + "_".join(path).upper()
-
 
 def _default_home(environ: Mapping[str, str]) -> Path:
     said = environ.get(_USER_HOME, "").strip()
@@ -166,7 +150,6 @@ def _default_home(environ: Mapping[str, str]) -> Path:
         f"{_USER_HOME} is {said!r} rather than an absolute path. Set {_variable(_HOME)} to an "
         f"absolute directory"
     )
-
 
 def _text(environ: Mapping[str, str], variable: str) -> str | None:
     if variable not in environ:
@@ -180,7 +163,6 @@ def _text(environ: Mapping[str, str], variable: str) -> str | None:
         )
     return value
 
-
 def _flag(environ: Mapping[str, str], variable: str) -> bool | None:
     value = _text(environ, variable)
     if value is None:
@@ -188,7 +170,6 @@ def _flag(environ: Mapping[str, str], variable: str) -> bool | None:
     if value.lower() in (_TRUE, _FALSE):
         return value.lower() == _TRUE
     raise _wrong(variable, value, f"{_TRUE} or {_FALSE}")
-
 
 def _seconds(environ: Mapping[str, str], variable: str) -> float | None:
     value = _text(environ, variable)
@@ -198,7 +179,6 @@ def _seconds(environ: Mapping[str, str], variable: str) -> float | None:
         return float(value)
     except ValueError as error:
         raise _wrong(variable, value, "a number of seconds") from error
-
 
 def _path(environ: Mapping[str, str], variable: str) -> Path | None:
     value = _text(environ, variable)
@@ -213,7 +193,6 @@ def _path(environ: Mapping[str, str], variable: str) -> Path | None:
             f"expands it, and a variable set without one arrives here unexpanded"
         )
     return path
-
 
 def _wrong(variable: str, value: str, expected: str) -> InputError:
     return InputError(

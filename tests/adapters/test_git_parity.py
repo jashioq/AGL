@@ -95,9 +95,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Final
-
 import pytest
-
 from agl.adapters.git.fake import (
     FakeHistory,
     FakeIntegrator,
@@ -169,11 +167,9 @@ _LINES: Final = 24
 ABSENT_REF: Final = "agl-parity-names-no-such-thing"
 ABSENT_ID: Final = "dead" * 10
 
-
 def _body(marker: str) -> bytes:
     """A file's contents, derived from `marker` so that two files differ on every line."""
     return "".join(f"{marker}: line {index} of {_LINES}.\n" for index in range(_LINES)).encode()
-
 
 def _edited(marker: str, at: int, replacement: str) -> bytes:
     """`_body(marker)` with one line replaced - one small change in a long file."""
@@ -181,13 +177,11 @@ def _edited(marker: str, at: int, replacement: str) -> bytes:
     lines[at] = replacement
     return ("\n".join(lines) + "\n").encode()
 
-
 # What both repositories start holding, so that every scenario below begins from one state.
 SEED: Final[Mapping[str, bytes]] = {
     SOURCE: _body("the state a run is cut from"),
     IGNORE_FILE: f"{IGNORED_DIR}/\n".encode(),
 }
-
 
 @dataclass(frozen=True, slots=True)
 class _Bundle:
@@ -202,7 +196,6 @@ class _Bundle:
     integrator: Integrator
     base: str
 
-
 def _git(repository: Path, *argv: str) -> str:
     """Run git for the fixtures and for the two assertions only git can settle.
 
@@ -214,7 +207,6 @@ def _git(repository: Path, *argv: str) -> str:
         ["git", *argv], cwd=repository, capture_output=True, text=True, check=True
     )
     return done.stdout
-
 
 @pytest.fixture
 def pair(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Mapping[str, _Bundle]:
@@ -265,7 +257,6 @@ def pair(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Mapping[str, _Bundl
         ),
     }
 
-
 async def _alike[T](
     pair: Mapping[str, _Bundle], ask: Callable[[_Bundle], Awaitable[T]]
 ) -> dict[str, T]:
@@ -283,7 +274,6 @@ async def _alike[T](
             f"two implementations of these ports have drifted apart somewhere the ports are silent"
         )
     return answers
-
 
 async def _refused[T](
     pair: Mapping[str, _Bundle], ask: Callable[[_Bundle], Awaitable[T]]
@@ -311,7 +301,6 @@ async def _refused[T](
     assert refusal is not None, "both implementations accepted a call this test expected refused"
     return refusal
 
-
 def _put(workspace: Workspace, name: str, content: bytes) -> None:
     """Put `content` at a repository-relative, forward-slash separated `name` in a checkout.
 
@@ -322,17 +311,14 @@ def _put(workspace: Workspace, name: str, content: bytes) -> None:
     at.parent.mkdir(parents=True, exist_ok=True)
     at.write_bytes(content)
 
-
 def _get(workspace: Workspace, name: str) -> bytes | None:
     """What is at `name`, or `None` if nothing is - which is what "it was removed" looks like."""
     at = workspace.path.joinpath(*name.split("/"))
     return at.read_bytes() if at.is_file() else None
 
-
 def _drop(workspace: Workspace, name: str) -> None:
     """Take `name` away, which is how a `DELETED` change gets made."""
     workspace.path.joinpath(*name.split("/")).unlink()
-
 
 async def _three(bundle: _Bundle) -> tuple[Workspace, Workspace, Workspace]:
     """A merge train: a run's own workspace, and two children of it cut from one base."""
@@ -341,7 +327,6 @@ async def _three(bundle: _Bundle) -> tuple[Workspace, Workspace, Workspace]:
         await bundle.provider.open(LABEL, CHILD, bundle.base),
         await bundle.provider.open(LABEL, SIBLING, bundle.base),
     )
-
 
 def _reported(changes: tuple[FileChange, ...]) -> tuple[tuple[str, str, str | None], ...]:
     """`changed_files`' answer as something two implementations can be compared on.
@@ -353,9 +338,7 @@ def _reported(changes: tuple[FileChange, ...]) -> tuple[tuple[str, str, str | No
         sorted((change.path, str(change.kind), change.previous_path) for change in changes)
     )
 
-
 # --- Conflict detection: the three situations that have to be told apart ------------------------
-
 
 async def test_two_children_that_changed_different_files_combine_on_both(
     pair: Mapping[str, _Bundle],
@@ -386,7 +369,6 @@ async def test_two_children_that_changed_different_files_combine_on_both(
             _body("the child's own work"),
             _body("the sibling's own work"),
         ), "two children that touched different files did not both land, with both files in"
-
 
 async def test_two_children_that_edited_opposite_ends_of_one_file_combine_on_both(
     pair: Mapping[str, _Bundle],
@@ -420,7 +402,6 @@ async def test_two_children_that_edited_opposite_ends_of_one_file_combine_on_bot
         assert answer == (False, ("\n".join(both) + "\n").encode()), (
             "two edits twenty lines apart in one file did not combine into one file holding both"
         )
-
 
 async def test_two_children_that_wrote_incompatible_content_to_one_file_collide_on_both(
     pair: Mapping[str, _Bundle],
@@ -457,7 +438,6 @@ async def test_two_children_that_wrote_incompatible_content_to_one_file_collide_
             "exactly that file and leave the first child's work standing after the release"
         )
 
-
 async def test_two_children_that_edited_neighbouring_lines_of_one_file_collide_on_both(
     pair: Mapping[str, _Bundle],
 ) -> None:
@@ -490,9 +470,7 @@ async def test_two_children_that_edited_neighbouring_lines_of_one_file_collide_o
             "throw away - which is the guess a conflict may never be resolved by"
         )
 
-
 # --- What both answer alike ----------------------------------------------------------------------
-
 
 async def test_changed_files_reports_the_same_kinds_for_the_same_edits(
     pair: Mapping[str, _Bundle],
@@ -535,7 +513,6 @@ async def test_changed_files_reports_the_same_kinds_for_the_same_edits(
             ),
         )
 
-
 async def test_a_move_is_a_rename_from_both_and_a_rewritten_move_is_a_pair_from_both(
     pair: Mapping[str, _Bundle],
 ) -> None:
@@ -574,7 +551,6 @@ async def test_a_move_is_a_rename_from_both_and_a_rewritten_move_is_a_pair_from_
             ((ALPHA, ChangeKind.DELETED, None), (MOVED_TO, ChangeKind.ADDED, None)),
         ), "the two ends of the rename band are not the same answer from both implementations"
 
-
 async def test_contains_agrees_including_the_reflexive_case(
     pair: Mapping[str, _Bundle],
 ) -> None:
@@ -610,7 +586,6 @@ async def test_contains_agrees_including_the_reflexive_case(
     for answer in (await _alike(pair, scenario)).values():
         assert answer == (True, False, False, False, True, True)
 
-
 async def test_restore_removes_untracked_leavings_on_both(
     pair: Mapping[str, _Bundle],
 ) -> None:
@@ -640,7 +615,6 @@ async def test_restore_removes_untracked_leavings_on_both(
 
     for answer in (await _alike(pair, scenario)).values():
         assert answer == (_body("as recorded"), None, False, True)
-
 
 async def test_reopening_carries_uncommitted_work_on_both(
     pair: Mapping[str, _Bundle],
@@ -683,7 +657,6 @@ async def test_reopening_carries_uncommitted_work_on_both(
             True,
         )
 
-
 async def test_default_ref_and_the_shape_of_a_resolved_id_agree(
     pair: Mapping[str, _Bundle],
 ) -> None:
@@ -707,7 +680,6 @@ async def test_default_ref_and_the_shape_of_a_resolved_id_agree(
         assert len(resolved) in {40, 64}, f"the {name} implementation answered {resolved!r}"
         assert set(resolved) <= set("0123456789abcdef"), f"{name} answered {resolved!r}"
         assert resolved == bundle.base, f"{name} resolved its default to something else"
-
 
 @dataclass(frozen=True, slots=True)
 class _Offered:
@@ -760,7 +732,6 @@ class _Offered:
 
     holds_after_the_release: bytes | None
     """And what the contested file holds then - the first child's work, nobody else's."""
-
 
 async def test_landing_over_a_hold_nobody_released_is_the_same_conflict_from_both(
     pair: Mapping[str, _Bundle],
@@ -852,9 +823,7 @@ async def test_landing_over_a_hold_nobody_released_is_the_same_conflict_from_bot
             "landing left it, the offered work outside it, and `abort` still able to release it"
         )
 
-
 # --- What both refuse, and with which class -------------------------------------------------------
-
 
 async def test_a_ref_or_an_id_neither_repository_holds_is_refused_alike(
     pair: Mapping[str, _Bundle],
@@ -885,7 +854,6 @@ async def test_a_ref_or_an_id_neither_repository_holds_is_refused_alike(
 
     assert await _refused(pair, compared) is NotFoundError
     assert await _refused(pair, read) is NotFoundError
-
 
 async def test_the_same_bad_provisioning_is_refused_with_the_same_class_by_both(
     pair: Mapping[str, _Bundle],
@@ -920,7 +888,6 @@ async def test_the_same_bad_provisioning_is_refused_with_the_same_class_by_both(
     assert await _refused(pair, over_a_crash) is ConflictError
     assert await _refused(pair, while_open) is ConflictError
 
-
 async def test_retrying_with_nothing_pending_is_the_same_error_from_both(
     pair: Mapping[str, _Bundle],
 ) -> None:
@@ -937,7 +904,6 @@ async def test_retrying_with_nothing_pending_is_the_same_error_from_both(
         return await bundle.integrator.retry(target)
 
     assert await _refused(pair, nothing_pending) is InternalError
-
 
 async def test_landing_over_unrecorded_work_in_the_target_is_refused_by_both(
     pair: Mapping[str, _Bundle],
@@ -959,7 +925,6 @@ async def test_landing_over_unrecorded_work_in_the_target_is_refused_by_both(
         return await bundle.integrator.land(child, target)
 
     assert await _refused(pair, over_unrecorded_work) is UpstreamUnexpected
-
 
 async def test_a_commit_message_git_cleans_away_to_nothing_is_refused_by_both(
     pair: Mapping[str, _Bundle],
@@ -1027,9 +992,7 @@ async def test_a_commit_message_git_cleans_away_to_nothing_is_refused_by_both(
                 f"backwards"
             )
 
-
 # --- Where the two deliberately disagree ----------------------------------------------------------
-
 
 async def test_what_gitignore_covers_is_recorded_by_the_fake_and_not_by_git(
     pair: Mapping[str, _Bundle],
@@ -1062,7 +1025,6 @@ async def test_what_gitignore_covers_is_recorded_by_the_fake_and_not_by_git(
         "one program's file format is being parsed inside the package that has none of it"
     )
 
-
 async def test_a_move_that_also_edits_is_a_rename_to_git_and_a_pair_to_the_fake(
     pair: Mapping[str, _Bundle],
 ) -> None:
@@ -1092,7 +1054,6 @@ async def test_a_move_that_also_edits_is_a_rename_to_git_and_a_pair_to_the_fake(
         (ALPHA, ChangeKind.DELETED, None),
         (MOVED_TO, ChangeKind.ADDED, None),
     )
-
 
 async def test_an_edited_but_unstaged_resolution_lands_on_the_fake_and_not_on_git(
     pair: Mapping[str, _Bundle],
@@ -1130,7 +1091,6 @@ async def test_an_edited_but_unstaged_resolution_lands_on_the_fake_and_not_on_gi
         "else here for a person's resolution to reach it through"
     )
 
-
 async def test_a_file_one_side_moved_and_the_other_edited_combines_on_git_and_collides_on_the_fake(
     pair: Mapping[str, _Bundle],
 ) -> None:
@@ -1160,7 +1120,6 @@ async def test_a_file_one_side_moved_and_the_other_edited_combines_on_git_and_co
 
     assert answers[_GIT] is False, "git stopped detecting renames while merging"
     assert answers[_FAKE] is True
-
 
 async def test_one_state_has_one_identity_on_the_fake_and_one_per_recording_on_git(
     pair: Mapping[str, _Bundle], monkeypatch: pytest.MonkeyPatch
@@ -1200,7 +1159,6 @@ async def test_one_state_has_one_identity_on_the_fake_and_one_per_recording_on_g
         "the fake gave two identities to one state, so it is no longer addressing by content - "
         "which is what `HistoryContract` says buys `resolve`'s shape without a rule of its own"
     )
-
 
 async def test_the_executable_bit_and_a_symlink_are_recorded_by_git_and_not_by_the_fake(
     pair: Mapping[str, _Bundle],

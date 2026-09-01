@@ -99,9 +99,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Final
-
 import pytest
-
 from agl.ports.ids import Namespace, RunLabel
 from agl.ports.tree_layout import TreesRoot, base_worktree, run_branch, worktree_branch
 from instruments.replay import PROGRAMMES, SIBLINGS, Config, driver_path
@@ -155,9 +153,7 @@ SIBLING_KILL_POINTS: Final = tuple(range(len(PROGRAMMES["siblings"].labels) + 1)
 # What a process that was allowed to finish leaves behind, and what a killed one does not.
 FINISHED: Final = frozenset({"finally", "atexit"})
 
-
 # --- a world: one repository, one AGL_HOME, one trees root, one log ------------------------------
-
 
 @dataclass(frozen=True, slots=True)
 class _World:
@@ -186,7 +182,6 @@ class _World:
     def log(self) -> Path:
         return self.root / "workers.jsonl"
 
-
 def _git_settings(world: _World) -> dict[str, str]:
     """The git environment every process in this file runs under - the parent and its children.
 
@@ -212,7 +207,6 @@ def _git_settings(world: _World) -> dict[str, str]:
         "GIT_COMMITTER_DATE": MOMENT,
     }
 
-
 def _environment(world: _World, seed: str) -> dict[str, str]:
     """A child's environment: this process's, plus reproducible git, plus one hash seed.
 
@@ -220,7 +214,6 @@ def _environment(world: _World, seed: str) -> dict[str, str]:
     untouched - a child of this suite is pointed at `instruments.loopback` exactly as its parent is.
     """
     return {**os.environ, **_git_settings(world), "PYTHONHASHSEED": seed}
-
 
 def _git(world: _World, cwd: Path, *argv: str) -> str:
     """Run git for the fixtures and the assertions.
@@ -239,7 +232,6 @@ def _git(world: _World, cwd: Path, *argv: str) -> str:
     )
     return done.stdout
 
-
 def _new_world(root: Path) -> _World:
     """A world with one commit in it, and nothing of this machine's configuration anywhere."""
     world = _World(root)
@@ -253,14 +245,11 @@ def _new_world(root: Path) -> _World:
     _git(world, world.repo, "commit", "-q", "--no-gpg-sign", "-m", SEED_MESSAGE)
     return world
 
-
 def _base(world: _World) -> str:
     """The resolved commit a run is cut from - the pinned `RunSpec.base_sha` shape of a base."""
     return _git(world, world.repo, "rev-parse", "HEAD").strip()
 
-
 # --- running one child process -------------------------------------------------------------------
-
 
 def _spawn(
     world: _World,
@@ -305,9 +294,7 @@ def _spawn(
         f"--- stderr ---\n{finished.stderr}"
     )
 
-
 # --- what a world looks like afterwards ----------------------------------------------------------
-
 
 @dataclass(frozen=True, slots=True)
 class _Entry:
@@ -322,7 +309,6 @@ class _Entry:
     value: str
     head: str
     at: str
-
 
 @dataclass(frozen=True, slots=True)
 class _Snapshot:
@@ -363,7 +349,6 @@ class _Snapshot:
             counts[directory] = counts.get(directory, 0) + 1
         return counts
 
-
 def _snapshot(world: _World) -> _Snapshot:
     """Read the ledger and the repository back. Opens nothing that AGL owns."""
     entries: dict[str, _Entry] = {}
@@ -386,12 +371,10 @@ def _snapshot(world: _World) -> _Snapshot:
         branches[name] = sha
     return _Snapshot(entries, branches, _git(world, world.repo, "rev-parse", "HEAD").strip())
 
-
 def _string(data: Mapping[str, object], key: str, path: Path) -> str:
     value = data[key]
     assert isinstance(value, str), f"{path} holds a {type(value).__name__} at {key!r}"
     return value
-
 
 def _records(world: _World) -> list[Mapping[str, object]]:
     """Every line every process in this world wrote, in the order they were written."""
@@ -403,7 +386,6 @@ def _records(world: _World) -> list[Mapping[str, object]]:
         assert isinstance(parsed, dict), f"the log holds a line that is not an object: {line!r}"
         found.append(parsed)
     return found
-
 
 def _workers(records: Sequence[Mapping[str, object]], tag: str | None = None) -> list[str]:
     """The labels of every worker invocation, optionally only one process's.
@@ -418,7 +400,6 @@ def _workers(records: Sequence[Mapping[str, object]], tag: str | None = None) ->
         if "worker" in record and (tag is None or record.get("tag") == tag)
     ]
 
-
 def _reached(records: Sequence[Mapping[str, object]], tag: str) -> set[str]:
     """The steps one process got *in flight* - counter taken, entry looked up, worktree restored.
 
@@ -432,7 +413,6 @@ def _reached(records: Sequence[Mapping[str, object]], tag: str) -> set[str]:
         if "reached" in record and record.get("tag") == tag
     }
 
-
 def _markers(records: Sequence[Mapping[str, object]], tag: str) -> set[str]:
     """Which end-of-process markers one process left: `finally`, `atexit`, both, or neither."""
     return {
@@ -441,9 +421,7 @@ def _markers(records: Sequence[Mapping[str, object]], tag: str) -> set[str]:
         if "marker" in record and record.get("tag") == tag
     }
 
-
 # --- the reference: one uninterrupted run per programme, computed once --------------------------
-
 
 class _References:
     """The straight run each sweep is compared against, memoised for the session.
@@ -472,21 +450,17 @@ class _References:
             self._known[programme] = _snapshot(world)
         return self._known[programme]
 
-
 @pytest.fixture(scope="session")
 def references(tmp_path_factory: pytest.TempPathFactory) -> _References:
     """One straight run of each programme, shared by every kill point that compares against it."""
     return _References(tmp_path_factory)
-
 
 @pytest.fixture
 def world(tmp_path: Path) -> _World:
     """A fresh repository, AGL_HOME, trees root and log for one scenario."""
     return _new_world(tmp_path)
 
-
 # --- the headline property ------------------------------------------------------------------------
-
 
 def _assert_identical(actual: _Snapshot, reference: _Snapshot) -> None:
     """Everything except `at`, against the run that was never interrupted."""
@@ -508,7 +482,6 @@ def _assert_identical(actual: _Snapshot, reference: _Snapshot) -> None:
         "through a workspace"
     )
 
-
 def _assert_well_formed_at(snapshot: _Snapshot) -> None:
     """Every `at` is a timestamp, in the format the ledger stores, from inside this session.
 
@@ -524,7 +497,6 @@ def _assert_well_formed_at(snapshot: _Snapshot) -> None:
             f"{path} carries an 'at' of {entry.at}, which is outside this test session "
             f"({lower:{WIRE_TIME}} to {upper:{WIRE_TIME}}) - so it was not written by this run"
         )
-
 
 def _sweep(
     world: _World,
@@ -587,7 +559,6 @@ def _sweep(
     _assert_identical(snapshot, references.of(programme))
     _assert_well_formed_at(snapshot)
 
-
 @pytest.mark.parametrize("kill_after", CORE_KILL_POINTS)
 def test_the_core_programme_is_identical_however_far_it_got_before_it_was_killed(
     kill_after: int, world: _World, references: _References
@@ -600,7 +571,6 @@ def test_the_core_programme_is_identical_however_far_it_got_before_it_was_killed
     `k = 5` is the run that finished everything and died before it could say so.
     """
     _sweep(world, references, "core", kill_after=kill_after)
-
 
 @pytest.mark.parametrize("kill_after", RETRY_KILL_POINTS)
 def test_a_retry_loop_of_three_identical_calls_replays_all_three_in_order(
@@ -620,7 +590,6 @@ def test_a_retry_loop_of_three_identical_calls_replays_all_three_in_order(
         "three identical calls did not leave three entries, so either the counter collapsed them "
         "onto one address or the resume wrote a fourth"
     )
-
 
 @pytest.mark.parametrize("kill_after", SIBLING_KILL_POINTS)
 def test_concurrent_siblings_replay_when_the_resume_completes_them_the_other_way_round(
@@ -655,9 +624,7 @@ def test_concurrent_siblings_replay_when_the_resume_completes_them_the_other_way
             "overlapped and this is not the `T-01`/`T-02` shape the counter is scoped for"
         )
 
-
 # --- the six tests that are a second run rather than a kill --------------------------------------
-
 
 def test_a_changed_prompt_re_runs_that_step_and_everything_that_took_its_value(
     world: _World,
@@ -704,7 +671,6 @@ def test_a_changed_prompt_re_runs_that_step_and_everything_that_took_its_value(
         f"re-ran for a reason this test cannot see"
     )
 
-
 def test_a_base_that_advanced_behind_the_journals_back_does_not_invalidate_earlier_steps(
     world: _World,
 ) -> None:
@@ -745,7 +711,6 @@ def test_a_base_that_advanced_behind_the_journals_back_does_not_invalidate_earli
         "work rather than costing a re-run"
     )
 
-
 def test_changing_only_the_commit_wording_replays_every_step_and_runs_no_worker(
     world: _World,
 ) -> None:
@@ -783,7 +748,6 @@ def test_changing_only_the_commit_wording_replays_every_step_and_runs_no_worker(
             f"commit - the replayed step is supposed to keep the one it already made"
         )
 
-
 def _swapped_types(world: _World, variant: str, what: str) -> None:
     """Run `core` plain, then again with `spec`'s dataclass inputs under other types.
 
@@ -816,7 +780,6 @@ def _swapped_types(world: _World, variant: str, what: str) -> None:
         )
     assert set(before.entries) < set(after.entries), "the second run recorded nothing at all"
 
-
 def test_an_input_dataclass_of_another_type_re_runs_the_step_rather_than_replaying_it(
     world: _World,
 ) -> None:
@@ -830,7 +793,6 @@ def test_an_input_dataclass_of_another_type_re_runs_the_step_rather_than_replayi
     """
     _swapped_types(world, "retyped", "a `Requirement` where the first run passed a `Constraint`")
 
-
 def test_a_nested_input_dataclass_of_another_type_re_runs_the_step_too(world: _World) -> None:
     """The nested half of the qualified type name, where the obvious implementation fails.
 
@@ -842,7 +804,6 @@ def test_a_nested_input_dataclass_of_another_type_re_runs_the_step_too(world: _W
     above and fails this one, which is why they are two tests and not one.
     """
     _swapped_types(world, "renested", "a `Ceiling` nested where the first run nested a `Budget`")
-
 
 def test_a_step_that_raised_and_was_retried_in_one_run_replays_where_a_resume_looks(
     world: _World,
@@ -892,9 +853,7 @@ def test_a_step_that_raised_and_was_retried_in_one_run_replays_where_a_resume_lo
     )
     _assert_well_formed_at(after)
 
-
 # --- the kill, and the seeds, both asked directly -------------------------------------------------
-
 
 def test_the_kill_runs_no_finally_and_no_atexit_where_a_clean_finish_runs_both(
     world: _World,
@@ -918,7 +877,6 @@ def test_the_kill_runs_no_finally_and_no_atexit_where_a_clean_finish_runs_both(
         "counting what it says it counts and every sweep above is killing somewhere else"
     )
 
-
 # Two probes, run under the file's own seeds, asking whether those seeds still vary the two things
 # the cross-process assertions rest on. `test_journal.py` makes the same move for the same reason:
 # without this, a day when the seeds stop differing is a day the sweeps hold for free.
@@ -930,7 +888,6 @@ from instruments.replay import CONSTRAINTS
 print(json.dumps([str(restriction) for restriction in frozenset(Restriction)]))
 print(repr(CONSTRAINTS[0]))
 """
-
 
 def test_the_seeds_still_vary_what_the_cross_process_half_rests_on() -> None:
     """The non-vacuous half: these three seeds really do produce three different orders.

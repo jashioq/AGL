@@ -45,9 +45,7 @@ from dataclasses import dataclass
 from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Final
-
 import pytest
-
 from agl.adapters.claude_code.fake import Conversation, Script
 from agl.cli import main
 from agl.cli.commands import clear as clear_command
@@ -76,11 +74,9 @@ BRANCH: Final = run_branch(LABEL)
 SEEDED: Final = "src/a.txt"
 WRITTEN: Final = "src/feature.py"
 
-
 @dataclass(frozen=True)
 class NoParams:
     """A workflow that takes nothing, so every line below is AGL's own vocabulary."""
-
 
 @role(model=Claude.SONNET)
 def writing() -> Role:
@@ -88,27 +84,22 @@ def writing() -> Role:
     the `commit=` then records - which is what puts `agl/auth` ahead of the base ref."""
     return Role(name="write", instructions="leave some work behind")
 
-
 @workflow(version="1.0")
 async def working(run: Run[NoParams]) -> None:
     """One step that commits, so this run's branch is not contained in the ref it started from."""
     await run.step(writing(), commit="the work this run produced")
 
-
 def _point(name: str) -> EntryPoint:
     """A registration line, pointed at this module: a name, a `module:attr`, and a group."""
     return EntryPoint(name=name, value=f"{__name__}:{name}", group=registry.GROUP)
 
-
 POINTS: Final = (_point("working"),)
-
 
 def _writing(conversation: Conversation) -> None:
     """Write one file into the checkout the task names. The script's own code, not the adapter's."""
     target = conversation.task.workspace / WRITTEN
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(b"work an agent left behind\n")
-
 
 def _agent() -> Script:
     """An agent that leaves a file behind and reports nothing."""
@@ -119,13 +110,11 @@ def _agent() -> Script:
 
     return _script
 
-
 def _fakes(tmp_path: Path) -> container.FakeServices:
     """Target #8's deployment, seeded so `History` has a default ref and a commit to resolve."""
     return container.fakes(
         TreesRoot(tmp_path / "trees"), files={SEEDED: b"one\n"}, claude=_agent()
     )
-
 
 def _main(harness: container.FakeServices, *argv: str) -> int:
     """One `agl` invocation, with this module's workflows in place of what is installed."""
@@ -139,13 +128,11 @@ def _main(harness: container.FakeServices, *argv: str) -> int:
         ),
     )
 
-
 def _clear_parser() -> RefusingParser:
     """The `clear` subparser alone, built the way `main.parser()` builds it, for inspection."""
     root = RefusingParser(prog="agl", allow_abbrev=False)
     commands = root.add_subparsers(dest="command", required=True, parser_class=RefusingParser)
     return clear_command.declare(commands)
-
 
 def _merged(harness: container.FakeServices) -> None:
     """Move the base ref up to the run's branch: the world in which the work has landed."""
@@ -153,9 +140,7 @@ def _merged(harness: container.FakeServices) -> None:
     assert tip is not None, "the run left no branch, so there is nothing to move the base ref to"
     harness.repository.move("main", tip)
 
-
 # --- the grammar, read off the parser -------------------------------------------------------------
-
 
 def test_the_clear_parser_holds_one_positional_and_the_force_flag() -> None:
     """The line for this verb, read off the object: `agl clear <label> [-f]`.
@@ -172,7 +157,6 @@ def test_the_clear_parser_holds_one_positional_and_the_force_flag() -> None:
     assert options == {"-h", "--help", "-f", "--force"}
     assert positionals == ["label"]
 
-
 def test_the_force_flag_defaults_to_off() -> None:
     """The asymmetry runs one way: a retained branch costs a stale ref, a deleted one costs the
     entire run. A destructive default is that asymmetry ignored, and `store_true` is what makes the
@@ -180,7 +164,6 @@ def test_the_force_flag_defaults_to_off() -> None:
     parsed = _clear_parser().parse_args(["auth"])
 
     assert parsed.force is False
-
 
 def test_abbreviation_is_off_on_the_clear_subparser(tmp_path: Path) -> None:
     """A subparser does not inherit `allow_abbrev` - `add_parser` builds a fresh `ArgumentParser`
@@ -201,7 +184,6 @@ def test_abbreviation_is_off_on_the_clear_subparser(tmp_path: Path) -> None:
         "`--for` was read as `--force` and deleted an unmerged branch"
     )
 
-
 def test_the_command_calls_exactly_one_api_function() -> None:
     """`ARCHITECTURE.md`'s "Commands stay dumb", made mechanical - and this is the command the rule
     is about.
@@ -221,9 +203,7 @@ def test_the_command_calls_exactly_one_api_function() -> None:
 
     assert called == {"clear"}
 
-
 # --- end to end through argv ----------------------------------------------------------------------
-
 
 def test_a_clear_takes_the_run_away_and_names_it_the_way_the_others_do(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -248,7 +228,6 @@ def test_a_clear_takes_the_run_away_and_names_it_the_way_the_others_do(
     assert captured.err == ""
     assert asyncio.run(harness.services.store.read_record(SCOPE)) is None
     assert harness.repository.tip(BRANCH) is None
-
 
 def test_an_unmerged_branch_is_kept_and_said_on_stderr_at_a_zero_exit(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -277,7 +256,6 @@ def test_an_unmerged_branch_is_kept_and_said_on_stderr_at_a_zero_exit(
         "the run's records survived a clear that was only supposed to keep its branch"
     )
 
-
 @pytest.mark.parametrize("flag", ["-f", "--force"])
 def test_the_force_flag_reaches_api_clear(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], flag: str
@@ -305,7 +283,6 @@ def test_the_force_flag_reaches_api_clear(
         f"`api.clear`"
     )
 
-
 def test_clearing_a_label_with_no_record_exits_three(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -324,7 +301,6 @@ def test_clearing_a_label_with_no_record_exits_three(
     assert captured.err == "agl: run 'auth' does not exist - there is nothing to clear.\n"
     assert captured.out == ""
 
-
 def test_a_label_the_filesystem_would_not_take_exits_two(tmp_path: Path) -> None:
     """`RunLabel` validates on the way in and its `InputError` is the same 2 `agl run` answers with.
 
@@ -336,7 +312,6 @@ def test_a_label_the_filesystem_would_not_take_exits_two(tmp_path: Path) -> None
 
     assert _main(harness, "clear", "my/label") == 2
 
-
 def test_no_label_at_all_exits_two(tmp_path: Path) -> None:
     """The positional is required: a bare `agl clear` is a usage error and not a default label.
 
@@ -347,9 +322,7 @@ def test_no_label_at_all_exits_two(tmp_path: Path) -> None:
 
     assert _main(harness, "clear") == 2
 
-
 # --- the tail, which this command may not carry ---------------------------------------------------
-
 
 def test_a_workflow_flag_on_a_clear_line_is_refused_and_says_where_flags_went(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -382,7 +355,6 @@ def test_a_workflow_flag_on_a_clear_line_is_refused_and_says_where_flags_went(
         "a refused clear took the run away anyway"
     )
     assert harness.repository.tip(BRANCH) is not None
-
 
 def test_a_second_positional_is_refused_the_same_way(tmp_path: Path) -> None:
     """The other shape of a tail: one label is the grammar, and two words are not one label.

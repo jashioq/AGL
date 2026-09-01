@@ -52,9 +52,7 @@ enough to reach it, so the builtin arrives the way the branch reads it.
 import shutil
 from pathlib import Path
 from typing import Final
-
 import pytest
-
 from agl.adapters.git.fake import FakeRepository, FakeWorkspaceProvider
 from agl.ports.errors import DeniedError, UpstreamUnavailable
 from agl.ports.ids import RunLabel
@@ -76,18 +74,15 @@ BODY: Final = b"the state a run is cut from\n"
 REFUSED: Final = (13, "Permission denied")
 BROKEN: Final = (5, "Input/output error")
 
-
 @pytest.fixture
 def repository() -> FakeRepository:
     """A fresh in-memory repository, seeded with one file and on its default branch."""
     return FakeRepository({SOURCE: BODY})
 
-
 @pytest.fixture
 def provider(repository: FakeRepository, tmp_path: Path) -> WorkspaceProvider:
     """A fake provider over that repository and an empty trees root."""
     return FakeWorkspaceProvider(repository, TreesRoot(tmp_path / "trees"))
-
 
 async def test_a_permission_is_denied_and_every_other_os_error_is_an_outage(
     repository: FakeRepository, provider: WorkspaceProvider, monkeypatch: pytest.MonkeyPatch

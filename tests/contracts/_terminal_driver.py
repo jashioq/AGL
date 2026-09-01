@@ -79,9 +79,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from types import TracebackType
 from typing import Final, Self
-
 from agl.ports.terminal import Component, Screen, Terminal, Text
-
 from ._terminal_views import Approval
 
 DEADLINE: Final = 10.0
@@ -94,7 +92,6 @@ loop, large enough that a test is not spinning the event loop flat out."""
 SETTLE: Final = 0.5
 """How long a test lets frames go by before asserting that nothing moved. See the module
 docstring: this is not a frame rate, and being too short costs sensitivity rather than honesty."""
-
 
 class TerminalDriver(ABC):
     """The person, played by the suite: what is on screen, and answering it.
@@ -132,7 +129,6 @@ class TerminalDriver(ABC):
         response occupies.
         """
 
-
 async def within[T](work: Awaitable[T], what: str) -> T:
     """Await something that ought to finish, and fail with a sentence if it does not.
 
@@ -149,7 +145,6 @@ async def within[T](work: Awaitable[T], what: str) -> T:
             f"waited indefinitely here would be the bug rather than the test for it"
         ) from expired
 
-
 async def came_back(work: Awaitable[object], what: str) -> object:
     """`within`, widened, for the tests that look at what a *passive* `show` answered with.
 
@@ -159,7 +154,6 @@ async def came_back(work: Awaitable[object], what: str) -> object:
     hand back anything at all behind a `cast`, and this is the one thing that would notice.
     """
     return await within(work, what)
-
 
 async def until(
     driver: TerminalDriver, ready: Callable[[Screen[object]], bool], what: str
@@ -183,7 +177,6 @@ async def until(
         f"is dismissed the terminal falls back to the next queued question and finally to the slot"
     )
 
-
 async def shown(driver: TerminalDriver, want: str | Component) -> Screen[object]:
     """Wait until the displayed screen's body is `want`, and hand that screen back.
 
@@ -194,16 +187,13 @@ async def shown(driver: TerminalDriver, want: str | Component) -> Screen[object]
     body = Text(want) if isinstance(want, str) else want
     return await until(driver, lambda screen: screen.body == body, f"a screen whose body is {body}")
 
-
 async def answer(driver: TerminalDriver, response: int, typed: str = "") -> None:
     """`respond`, under a deadline, because an implementation may await anything it likes here."""
     await within(driver.respond(response, typed), f"answering the displayed screen with {response}")
 
-
 async def let_frames_pass() -> None:
     """Give the redraw loop time to run, for the assertions that say nothing happened."""
     await asyncio.sleep(SETTLE)
-
 
 class Asking:
     """Interactive `show` calls, started as tasks, and cleaned up if a test leaves one unanswered.

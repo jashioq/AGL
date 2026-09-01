@@ -20,10 +20,8 @@ it is not one, and a suite that quietly relied on it would be teaching the next 
 """
 
 import pytest
-
 from agl.ports.agent import AgentRunner, Capability, ModelId
 from agl.ports.errors import UpstreamUnavailable
-
 
 class AgentPreflightContract:
     """What `capabilities` and `check_ready` answer, and the difference the port draws between them.

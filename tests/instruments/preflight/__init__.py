@@ -42,7 +42,6 @@ One list rather than one per module, because every test that asserts on it is as
 question - did this run reach its workflow, or was it refused first - and a refusal at preflight
 must leave it empty whichever module the workflow was written in."""
 
-
 @dataclass(frozen=True)
 class NoParams:
     """A workflow that takes nothing, and still has a params class to derive no flags from.

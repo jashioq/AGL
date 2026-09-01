@@ -129,11 +129,8 @@ exception from out here.
 
 from collections.abc import Iterator, Mapping
 from pathlib import Path
-
 import pytest
-
 from agl.ports.agent import AgentRunner, Capability, ModelId, StopReason
-
 from ._agent_hermeticity import AgentHermeticityContract
 from ._agent_preflight import AgentPreflightContract
 from ._agent_tasks import (
@@ -148,7 +145,6 @@ from ._agent_tasks import (
     task,
     workspace,
 )
-
 
 class AgentContract(AgentPreflightContract, AgentHermeticityContract):
     """The suite. Everything an `AgentRunner` promises, and nothing an implementation gets to pick.

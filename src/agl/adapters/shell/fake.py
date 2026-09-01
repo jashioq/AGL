@@ -1,7 +1,5 @@
-
 from pathlib import Path
 from typing import Final
-
 from agl.ports.verifier import Verifier, VerifierOutcome
 
 __all__ = ["FakeVerifier"]
@@ -12,9 +10,7 @@ _AGREES_FAILED: Final = 1
 _UNSCRIPTED_PASS: Final = VerifierOutcome(passed=True, status=_AGREES_PASSED, output="")
 _UNSCRIPTED_FAIL: Final = VerifierOutcome(passed=False, status=_AGREES_FAILED, output="")
 
-
 class FakeVerifier(Verifier):
-
     def __init__(self, *, unscripted_passes: bool = True) -> None:
         self._scripted: dict[str, VerifierOutcome] = {}
         self._unscripted = _UNSCRIPTED_PASS if unscripted_passes else _UNSCRIPTED_FAIL

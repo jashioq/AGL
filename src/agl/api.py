@@ -1,9 +1,7 @@
-
 from collections.abc import Callable, Iterable, Sequence
 from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Final
-
 from agl.config import registry, sources, toml_file
 from agl.config.schema import Settings
 from agl.ports.errors import ConflictError, InputError, NotFoundError
@@ -29,9 +27,7 @@ _BUILD_PROMPT: Final = (
     "build command: "
 )
 
-
 type Ask = Callable[[str], str]
-
 
 async def run(
     services: Services,
@@ -86,7 +82,6 @@ async def run(
         await services.store.write_record(scope, spec.to_json())
         await _walk(services, wf, scope, spec, given)
 
-
 async def resume(
     services: Services,
     project: ProjectName,
@@ -121,7 +116,6 @@ async def resume(
     async with services.workspaces.hold(label):
         await _walk(services, wf, scope, spec, given)
 
-
 async def clear(
     services: Services, project: ProjectName, label: RunLabel, *, force: bool = False
 ) -> str | None:
@@ -149,7 +143,6 @@ async def clear(
         await services.store.remove(scope)
         return kept
 
-
 def init(settings: Settings, cwd: Path, ask: Ask) -> Path:
     root = toml_file.git_root(cwd)
     name = ProjectName(root.name)
@@ -172,15 +165,12 @@ def init(settings: Settings, cwd: Path, ask: Ask) -> Path:
         settings.home, name, root, trees, build, sources.DEFAULT_BUILD_TIMEOUT
     )
 
-
 def list_workflows(*, points: Iterable[EntryPoint] | None = None) -> tuple[str, ...]:
     return registry.names(_points(points))
-
 
 def workflow_help(name: str, *, points: Iterable[EntryPoint] | None = None) -> str:
     wf: Workflow[object] = registry.load(_points(points), name, Workflow)
     return params.parser_for(wf.params, prog=f"agl run {name}").format_help()
-
 
 async def _walk(
     services: Services, wf: Workflow[object], scope: RunScope, spec: RunSpec, given: object
@@ -201,14 +191,12 @@ async def _walk(
     finally:
         leases.release_all()
 
-
 async def _under(store: Store, scope: RunScope) -> tuple[Namespace, ...]:
     found: list[Namespace] = []
     for namespace in await store.namespaces(scope):
         found.append(namespace)
         found.extend(await _under(store, scope.inside(namespace)))
     return tuple(found)
-
 
 async def _kept(history: History, label: RunLabel, branch: str, base_ref: str) -> str | None:
     if await history.contains(branch, base_ref):
@@ -220,7 +208,6 @@ async def _kept(history: History, label: RunLabel, branch: str, base_ref: str) -
         f"{branch}` is what is still there, and `git branch -D {branch}` is what frees the label "
         f"now. `agl clear {label} -f` is what would have deleted it in this call."
     )
-
 
 def _points(points: Iterable[EntryPoint] | None) -> Iterable[EntryPoint]:
     return registry.installed() if points is None else points

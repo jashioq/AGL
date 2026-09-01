@@ -1,9 +1,7 @@
-
 import sys
 from collections.abc import Callable
 from types import ModuleType
 from typing import Any, Final
-
 from agl.ports.agent import AgentRunner, Capability, ModelId
 from agl.ports.errors import DeniedError, InternalError, UpstreamUnavailable
 from agl.sdk.roles import Role, RoleFactory
@@ -19,9 +17,7 @@ _FROM_TOOLS: Final = (
     f"- and a role with no tools is an effect step, whose result is `null`"
 )
 
-
 class Capabilities:
-
     def __init__(self) -> None:
         self._known: dict[ModelId, frozenset[Capability]] = {}
 
@@ -34,7 +30,6 @@ class Capabilities:
         if missing:
             raise DeniedError(_unmet(step, role, missing, held))
 
-
 async def check(runner: AgentRunner, declared_by: _Declaration) -> None:
     for factory in _demanded(_declared_beside(declared_by)):
         try:
@@ -43,7 +38,6 @@ async def check(runner: AgentRunner, declared_by: _Declaration) -> None:
             raise UpstreamUnavailable(
                 _not_ready(unavailable, factory, declared_by.__module__)
             ) from unavailable
-
 
 def _declared_beside(declared_by: _Declaration) -> tuple[RoleFactory[..., Any], ...]:
     written_in = sys.modules.get(declared_by.__module__)
@@ -65,13 +59,11 @@ def _declared_beside(declared_by: _Declaration) -> tuple[RoleFactory[..., Any], 
         if isinstance(inside, RoleFactory)
     )
 
-
 def _demanded(factories: tuple[RoleFactory[..., Any], ...]) -> tuple[RoleFactory[..., Any], ...]:
     first: dict[ModelId, RoleFactory[..., Any]] = {}
     for factory in factories:
         first.setdefault(factory.model, factory)
     return tuple(first.values())
-
 
 def _not_ready(
     refusal: UpstreamUnavailable, factory: RoleFactory[..., Any], workflow_module: str
@@ -90,7 +82,6 @@ def _not_ready(
         f"itself, or of a module that binds it - so dropping that import drops this demand; "
         f"otherwise the harness above is the thing to fix"
     )
-
 
 def _unmet(
     step: str, role: Role[object], missing: frozenset[Capability], held: frozenset[Capability]

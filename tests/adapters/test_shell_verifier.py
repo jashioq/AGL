@@ -49,9 +49,7 @@ import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Final
-
 import pytest
-
 from agl.adapters.shell import verifier as verifier_module
 from agl.adapters.shell.fake import FakeVerifier
 from agl.adapters.shell.verifier import ShellVerifier
@@ -82,13 +80,11 @@ FAKE_PASSING: Final = "npm run build"
 FAKE_FAILING: Final = "npm test"
 FAKE_FAILING_OUTPUT: Final = f"2 failing\n{ANNOUNCEMENT}\n"
 
-
 def hostile_directory(tmp_path: Path, name: str = HOSTILE_NAME) -> Path:
     """A real directory under `tmp_path` whose name would misbehave if it were ever executed."""
     hostile = tmp_path / name
     hostile.mkdir()
     return hostile
-
 
 class TestShellVerifier(VerifierContract):
     """The port in full, against a real shell and real processes.
@@ -132,7 +128,6 @@ class TestShellVerifier(VerifierContract):
         """
         return SHELL_FAILING
 
-
 class TestFakeVerifier(VerifierContract):
     """The same suite, against the fake - which is the mechanism that stops it drifting.
 
@@ -165,7 +160,6 @@ class TestFakeVerifier(VerifierContract):
         """The command scripted to fail, carrying the announcement it was scripted with."""
         return FAKE_FAILING
 
-
 # --- Gap 1: the workspace path is a directory and never program text ----------------------------
 
 # A filename with no shell metacharacters in it, so that its appearance can only mean one thing:
@@ -176,7 +170,6 @@ MARKER: Final = "AGL-A-SHELL-EVALUATED-THE-PATH"
 # is what makes this expressible as one path component: wherever the shell that evaluated it was
 # standing, a file appears.
 LOADED_NAME: Final = f"agl $(touch {MARKER}) tree"
-
 
 @pytest.mark.asyncio
 async def test_a_workdir_whose_name_would_run_a_command_never_runs_it(
@@ -224,7 +217,6 @@ async def test_a_workdir_whose_name_would_run_a_command_never_runs_it(
         f"its working directory was named {LOADED_NAME!r}, so the path decided the verdict"
     )
 
-
 @pytest.mark.asyncio
 async def test_the_build_really_ran_inside_the_directory_it_was_given(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -261,14 +253,12 @@ async def test_the_build_really_ran_inside_the_directory_it_was_given(
         "build was given, so the workspace was not this process's working directory for it"
     )
 
-
 # A directory name whose fragments are a command that leaves a file behind and a command that
 # prints a word, so that either one running is visible from outside.
 EXTRA: Final = "AGL-AN-EXTRA-COMMAND-RAN"
 LEAK: Final = "AGL-LEAKED-FROM-THE-PATH"
 CHAINED_NAME: Final = f"agl; touch {EXTRA}; echo {LEAK} | cat"
 TOKEN: Final = "AGL-THE-BUILD-ITSELF-PRINTED-THIS"
-
 
 @pytest.mark.asyncio
 async def test_a_workdir_holding_a_semicolon_and_a_pipe_decides_nothing_about_the_build(
@@ -306,7 +296,6 @@ async def test_a_workdir_holding_a_semicolon_and_a_pipe_decides_nothing_about_th
         f"a file named {EXTRA!r} exists, and the only place that name appears is inside the "
         f"working directory's own name after a `;`. A second command ran"
     )
-
 
 def test_the_adapter_never_builds_a_command_out_of_the_workspace_path() -> None:
     """The structural half: `verifier.py`'s own source, parsed, with both names looked for.
@@ -370,7 +359,6 @@ def test_the_adapter_never_builds_a_command_out_of_the_workspace_path() -> None:
         "fix - the path is not part of the command at all"
     )
 
-
 def _interpolations(tree: ast.AST) -> Iterator[ast.expr]:
     """Every expression in `tree` that builds one value out of others."""
     for node in ast.walk(tree):
@@ -385,11 +373,9 @@ def _interpolations(tree: ast.AST) -> Iterator[ast.expr]:
         ):
             yield node
 
-
 def _names(node: ast.AST) -> set[str]:
     """Every bare name reachable inside `node`."""
     return {found.id for found in ast.walk(node) if isinstance(found, ast.Name)}
-
 
 def _imported(tree: ast.AST) -> set[str]:
     """Every module the source imports, by top-level name. Prose in a docstring is not an import."""
@@ -401,7 +387,6 @@ def _imported(tree: ast.AST) -> set[str]:
             found.add(node.module.split(".")[0])
     return found
 
-
 def _spawn_of(node: ast.AST) -> str | None:
     """The name of the process-starting function `node` calls, if it is a call to one."""
     if not isinstance(node, ast.Call):
@@ -411,14 +396,12 @@ def _spawn_of(node: ast.AST) -> str | None:
         called = node.func.id
     return called if called in {"create_subprocess_shell", "create_subprocess_exec"} else None
 
-
 # --- Gap 6: an expired deadline, and what it leaves behind ---------------------------------------
 
 # Short enough to cost nothing, long enough that a shell has started and printed. The sleep is two
 # orders of magnitude longer, so no assertion below can be satisfied by the build simply finishing.
 DEADLINE: Final = 0.5
 SLEEP: Final = 60.0
-
 
 @pytest.mark.asyncio
 async def test_a_deadline_that_expires_is_a_failed_build_and_never_an_exception(
@@ -447,7 +430,6 @@ async def test_a_deadline_that_expires_is_a_failed_build_and_never_an_exception(
         f"that sleeps {SLEEP:g}s. The deadline is what makes a hung build a rejected landing "
         f"rather than a stopped run"
     )
-
 
 @pytest.mark.asyncio
 async def test_an_expired_deadline_stops_the_children_the_shell_started(
@@ -486,14 +468,12 @@ async def test_an_expired_deadline_stops_the_children_the_shell_started(
         f"stopped build rather than an orphaned one"
     )
 
-
 async def _alive_after(pid: int, seconds: float) -> bool:
     """Is `pid` still running after up to `seconds`? Polls, and answers as soon as it knows."""
     deadline = time.monotonic() + seconds
     while _alive(pid) and time.monotonic() < deadline:
         await asyncio.sleep(0.05)
     return _alive(pid)
-
 
 def _alive(pid: int) -> bool:
     """Signal 0: the ordinary way to ask whether a process exists without disturbing it."""
@@ -504,7 +484,6 @@ def _alive(pid: int) -> bool:
     except PermissionError:
         return True
     return True
-
 
 # --- The two clauses inside `_signal` that no outcome can witness --------------------------------
 
@@ -523,7 +502,6 @@ def _alive(pid: int) -> bool:
 # How long a signalled child is given to die. The same five seconds `_alive_after` above allows, and
 # for the same reason: delivery is prompt and reaping is when the system gets to it.
 FALLBACK_WAIT: Final = 5.0
-
 
 @pytest.mark.asyncio
 async def test_a_child_that_has_already_been_reaped_is_never_signalled(
@@ -571,7 +549,6 @@ async def test_a_child_that_has_already_been_reaped_is_never_signalled(
         f"build machine is whatever started next. Nothing in the outcome would ever show it"
     )
 
-
 @pytest.mark.asyncio
 async def test_a_group_signal_that_is_denied_falls_back_to_the_child_itself(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -618,9 +595,7 @@ async def test_a_group_signal_that_is_denied_falls_back_to_the_child_itself(
         f"finish"
     )
 
-
 # --- Gaps 3, 5 and 7: the errors, the silence, and the two streams -------------------------------
-
 
 @pytest.mark.asyncio
 async def test_a_build_that_cannot_be_started_at_all_is_upstream_unavailable(
@@ -637,7 +612,6 @@ async def test_a_build_that_cannot_be_started_at_all_is_upstream_unavailable(
     with pytest.raises(UpstreamUnavailable):
         await ShellVerifier().verify(SHELL_PASSING, tmp_path / "no-such-workspace")
 
-
 @pytest.mark.asyncio
 async def test_a_passing_build_that_printed_nothing_is_an_ordinary_pass(tmp_path: Path) -> None:
     """Empty output is legal, and the contract suite can only honour that by never demanding text.
@@ -653,7 +627,6 @@ async def test_a_passing_build_that_printed_nothing_is_an_ordinary_pass(tmp_path
         f"a build that printed nothing came back with output {outcome.output!r}. Empty is legal "
         f"and passing builds routinely produce it, so nothing may be invented to fill it"
     )
-
 
 @pytest.mark.asyncio
 async def test_both_streams_arrive_in_the_one_field_the_port_has(tmp_path: Path) -> None:
@@ -673,9 +646,7 @@ async def test_both_streams_arrive_in_the_one_field_the_port_has(tmp_path: Path)
         "port has one, deliberately - and stderr is where a failing build says why"
     )
 
-
 # --- The fake's own default, which is the thing no contract suite can be told about --------------
-
 
 @pytest.mark.asyncio
 async def test_the_fake_answers_a_command_nobody_scripted(tmp_path: Path) -> None:

@@ -1,11 +1,9 @@
-
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
 from typing import Final
-
 from agl.ports.agent import ModelId, OpenAI, Restriction
 from agl.ports.errors import AglError, InputError, UpstreamUnavailable, UpstreamUnexpected
 from agl.ports.run import JsonValue
@@ -23,29 +21,24 @@ __all__ = [
     "unready",
 ]
 
-
 _READ_ONLY: Final = "read-only"
 # Under `workspace-write` the harness's own default already leaves `.git`, `.codex` and `.agents`
 # read-only inside the working root, which is `NO_VCS_WRITES` enforced by adding nothing.
 _WORKSPACE_WRITE: Final = "workspace-write"
-
 
 # A `-c` override and not a flag: `codex exec` on 0.149.0 has no `-a/--ask-for-approval`, measured
 # against its own parser. `never` rather than `on-request`, which replaces the sentence telling the
 # model not to escalate with a section teaching it to - into a mode that refuses every escalation.
 APPROVAL: Final[tuple[str, ...]] = ("-c", 'approval_policy="never"')
 
-
 # Emitted for `false` as well as `true`, and only under `workspace-write`: `read-only` takes the
 # network with it unasked, and an override there is accepted and changes nothing at all.
 _NETWORK: Final = "sandbox_workspace_write.network_access"
-
 
 # Both `stable` and both on by default. Two rather than one because a harness whose working model is
 # running commands plausibly has a second route - and nothing establishes that a feature switched
 # off in the registry removes the tool from what the model is offered, which is why words go.
 _SHELL_FEATURES: Final = ("features.shell_tool", "features.unified_exec")
-
 
 _IN_WORDS: Final[Mapping[Restriction, str]] = MappingProxyType(
     {
@@ -73,19 +66,15 @@ _IN_WORDS: Final[Mapping[Restriction, str]] = MappingProxyType(
     }
 )
 
-
 _PREAMBLE: Final = (
     "AGL places the following limits on this task. They hold whatever the sandbox you are running "
     "under appears to allow, they are not open to negotiation, and finding a way around one is a "
     "failed task rather than a solved one:"
 )
 
-
 _ARGV_REJECTED: Final = 2
 
-
 _ACTIVITY_LIMIT: Final = 120
-
 
 _LABELS: Final[Mapping[str, str]] = MappingProxyType(
     {
@@ -96,7 +85,6 @@ _LABELS: Final[Mapping[str, str]] = MappingProxyType(
     }
 )
 
-
 _MODEL_SLUGS: Final[Mapping[ModelId, str]] = MappingProxyType(
     {
         OpenAI.SOL: "gpt-5.6-sol",
@@ -105,16 +93,13 @@ _MODEL_SLUGS: Final[Mapping[ModelId, str]] = MappingProxyType(
     }
 )
 
-
 @dataclass(frozen=True, slots=True)
 class Sandbox:
-
     mode: str
 
     options: tuple[str, ...]
 
     in_words: str
-
 
 def sandbox(restrictions: frozenset[Restriction]) -> Sandbox:
     options: list[str] = []
@@ -136,7 +121,6 @@ def sandbox(restrictions: frozenset[Restriction]) -> Sandbox:
         in_words="\n".join([_PREAMBLE, *spoken]) if spoken else "",
     )
 
-
 def model_slug(model: ModelId) -> str:
     slug = _MODEL_SLUGS.get(model)
     if slug is None:
@@ -148,7 +132,6 @@ def model_slug(model: ModelId) -> str:
             f"question than the one the workflow asked"
         )
     return slug
-
 
 def launch_failure(error: OSError) -> UpstreamUnavailable:
     if isinstance(error, FileNotFoundError):
@@ -167,7 +150,6 @@ def launch_failure(error: OSError) -> UpstreamUnavailable:
         f"call may well succeed once whatever stopped the process from starting is fixed"
     )
 
-
 def unready(exit_code: int, output: str) -> UpstreamUnavailable:
     return UpstreamUnavailable(
         f"the Codex CLI is installed and is not ready to run: {_said(output)}. A session that was "
@@ -175,7 +157,6 @@ def unready(exit_code: int, output: str) -> UpstreamUnavailable:
         f"refuses to load all arrive this way, so the message above is the part to act on - "
         f"{_status(exit_code)}"
     )
-
 
 def unanswered(seconds: float) -> UpstreamUnavailable:
     return UpstreamUnavailable(
@@ -186,7 +167,6 @@ def unanswered(seconds: float) -> UpstreamUnavailable:
         f"Nothing reached a model and nothing was spent, so the same call may well succeed once "
         f"whatever the probe was waiting on is unblocked"
     )
-
 
 def failure(*, reported: str | None, exit_code: int, stderr: str) -> AglError:
     said = (reported or "").strip()
@@ -210,7 +190,6 @@ def failure(*, reported: str | None, exit_code: int, stderr: str) -> AglError:
         f"stopped it is fixed - {_status(exit_code)}"
     )
 
-
 def unreadable(line: str, reason: str) -> UpstreamUnexpected:
     return UpstreamUnexpected(
         f"the Codex CLI printed a line on its event stream that AGL cannot read: {reason}. The "
@@ -218,7 +197,6 @@ def unreadable(line: str, reason: str) -> UpstreamUnexpected:
         f"not, so the same call will answer the same way - this is a version mismatch or an AGL "
         f"bug, not a busy backend"
     )
-
 
 def activity(item: Mapping[str, JsonValue], workspace: Path) -> str | None:
     kind = item.get("type")
@@ -230,7 +208,6 @@ def activity(item: Mapping[str, JsonValue], workspace: Path) -> str | None:
     shown = _shortened(_subject(kind, item, workspace).strip())
     return f"{label}: {shown}" if shown else label
 
-
 def _subject(kind: str, item: Mapping[str, JsonValue], workspace: Path) -> str:
     if kind == "command_execution":
         return _relative(_text(item.get("command")), workspace)
@@ -241,22 +218,18 @@ def _subject(kind: str, item: Mapping[str, JsonValue], workspace: Path) -> str:
         return "/".join(part for part in named if part)
     return _relative(_text(item.get("query")), workspace)
 
-
 def _paths(changes: JsonValue) -> list[str]:
     if not isinstance(changes, list):
         return []
     found = (_text(change.get("path")) for change in changes if isinstance(change, dict))
     return [path for path in found if path]
 
-
 def _text(value: JsonValue) -> str:
     return value if isinstance(value, str) else ""
-
 
 def _relative(text: str, workspace: Path) -> str:
     prefix = f"{workspace}{os.sep}"
     return text[len(prefix) :] if text.startswith(prefix) and len(text) > len(prefix) else text
-
 
 def _shortened(text: str) -> str:
     first, newline, _ = text.partition("\n")
@@ -266,11 +239,9 @@ def _shortened(text: str) -> str:
         line, cut = line[:_ACTIVITY_LIMIT].rstrip(), True
     return f"{line}..." if cut else line
 
-
 def _said(reported: object) -> str:
     said = str(reported).strip()
     return said or "it said nothing on either output stream"
-
 
 def _status(exit_code: int) -> str:
     return f"it exited {exit_code}, a status this backend documents no meaning for"

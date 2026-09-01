@@ -38,9 +38,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Final
-
 import pytest
-
 from agl.adapters.git.workspace import GitWorkspaceProvider
 from agl.ports.errors import ConflictError
 from agl.ports.ids import Namespace, RunLabel
@@ -93,7 +91,6 @@ os.close(handle)
 HELD: Final = 0.6
 WAITED: Final = 0.3
 
-
 def _git(repository: Path, *argv: str) -> str:
     """Run git for the fixtures and the assertions. Synchronous on purpose: this is arrangement
     and observation, not the thing under test, and a test that built its repository through the
@@ -102,7 +99,6 @@ def _git(repository: Path, *argv: str) -> str:
         ["git", *argv], cwd=repository, capture_output=True, text=True, check=True
     )
     return done.stdout
-
 
 def _taken(lock: Path) -> bool:
     """Whether another process can take the lock right now - asked by actually being one.
@@ -116,7 +112,6 @@ def _taken(lock: Path) -> bool:
         "fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)"
     )
     return subprocess.run([sys.executable, "-c", taking, str(lock)]).returncode == 0
-
 
 @pytest.fixture
 def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -148,24 +143,20 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     _git(work, "commit", "-q", "-m", "the state a run is cut from")
     return work
 
-
 @pytest.fixture
 def trees(tmp_path: Path) -> TreesRoot:
     """The trees root, beside the repository and empty. Absolute, which is all `TreesRoot` asks."""
     return TreesRoot(tmp_path / "trees")
-
 
 @pytest.fixture
 def provider(repository: Path, trees: TreesRoot) -> WorkspaceProvider:
     """The provider the module-level tests drive. The contract suite has its own, on the class."""
     return GitWorkspaceProvider(repository, trees)
 
-
 @pytest.fixture
 def base(repository: Path) -> str:
     """The commit a run is cut from, resolved - the pinned `RunSpec.base_sha` shape of a base."""
     return _git(repository, "rev-parse", "HEAD").strip()
-
 
 class TestGitWorkspace(WorkspaceContract):
     """Both ports, in full, against real git.
@@ -191,9 +182,7 @@ class TestGitWorkspace(WorkspaceContract):
         """A resolved commit id, which is one of the two forms the port takes."""
         return _git(repository, "rev-parse", "HEAD").strip()
 
-
 # --- The branch scheme, which the suite treats as an opaque string ------------------------------
-
 
 async def test_the_run_branch_and_a_child_branch_coexist_as_refs_in_either_creation_order(
     provider: WorkspaceProvider, repository: Path, base: str
@@ -231,9 +220,7 @@ async def test_the_run_branch_and_a_child_branch_coexist_as_refs_in_either_creat
             f"nothing can push, log or merge"
         )
 
-
 # --- The user's own checkout, which the suite has no handle on ----------------------------------
-
 
 async def test_the_users_own_checkout_is_untouched_and_stays_clean_while_a_run_works(
     provider: WorkspaceProvider, repository: Path, base: str
@@ -264,9 +251,7 @@ async def test_the_users_own_checkout_is_untouched_and_stays_clean_while_a_run_w
     assert _git(repository, "rev-parse", "HEAD").strip() == before
     assert not (repository / WORK).exists(), "a workspace's work landed in the user's own checkout"
 
-
 # --- The lock, which the suite cannot start a second process to see -----------------------------
-
 
 async def test_the_registry_lock_is_a_file_in_the_trees_root_and_is_let_go_of_afterwards(
     provider: WorkspaceProvider, trees: TreesRoot, base: str
@@ -289,7 +274,6 @@ async def test_the_registry_lock_is_a_file_in_the_trees_root_and_is_let_go_of_af
         "and `worktree prune` and nothing else - milliseconds, never across a merge or a human "
         "decision"
     )
-
 
 async def test_a_second_process_holding_the_registry_lock_makes_provisioning_wait_for_it(
     provider: WorkspaceProvider, trees: TreesRoot, base: str
@@ -332,9 +316,7 @@ async def test_a_second_process_holding_the_registry_lock_makes_provisioning_wai
     )
     assert workspace.path.is_dir(), "and it did provision once the lock came free"
 
-
 # --- Worktree edge cases the port describes only in its own vocabulary --------------------------
-
 
 async def test_a_registration_left_standing_by_a_crash_does_not_block_reprovisioning(
     provider: WorkspaceProvider, repository: Path, base: str
@@ -360,7 +342,6 @@ async def test_a_registration_left_standing_by_a_crash_does_not_block_reprovisio
 
     assert again.path.is_dir(), "provisioning did not recover from a registration nothing backs"
     assert (again.path / WORK).read_text(encoding="utf-8") == "committed before the crash\n"
-
 
 async def test_open_refuses_a_place_or_a_name_another_line_of_work_already_holds(
     provider: WorkspaceProvider, repository: Path, trees: TreesRoot, base: str
@@ -396,9 +377,7 @@ async def test_open_refuses_a_place_or_a_name_another_line_of_work_already_holds
     with pytest.raises(ConflictError):
         await provider.open(LABEL, CHILD, base)
 
-
 # --- What a restore takes away, and the one thing it deliberately leaves ------------------------
-
 
 async def test_restore_takes_away_a_nested_repository_and_leaves_what_gitignore_covers(
     provider: WorkspaceProvider, base: str
@@ -439,9 +418,7 @@ async def test_restore_takes_away_a_nested_repository_and_leaves_what_gitignore_
     )
     assert await workspace.head() == head
 
-
 # --- The lock file is a file, and the tests above have been holding it --------------------------
-
 
 async def test_the_lock_survives_being_taken_and_released_many_times_over(
     provider: WorkspaceProvider, trees: TreesRoot, base: str

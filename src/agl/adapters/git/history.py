@@ -1,14 +1,11 @@
-
 from pathlib import Path
 from typing import Final
-
 from agl.adapters.git._changes import changes
 from agl.adapters.git._runner import GitRunner, unreadable
 from agl.ports.errors import NotFoundError
 from agl.ports.history import FileChange, History
 
 __all__ = ["GitHistory"]
-
 
 _ASKING: Final = 30.0
 
@@ -20,9 +17,7 @@ _PEELED: Final = "^{commit}"
 # and rewritten past that point is reported as the deletion and the addition it has become.
 _COMPARING: Final = ("diff-tree", "-r", "--find-renames")
 
-
 class GitHistory(History):
-
     def __init__(self, repository: Path) -> None:
         self._git = GitRunner(repository)
 
@@ -113,7 +108,6 @@ class GitHistory(History):
                 timeout=_ASKING,
             )
         ).rstrip()
-
 
 def _one(answer: str, what: str) -> str:
     stripped = answer.strip()

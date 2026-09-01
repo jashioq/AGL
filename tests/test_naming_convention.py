@@ -218,14 +218,12 @@ CONSTANTS_TODAY: Final = 200
 TYPE_ALIASES_TODAY: Final = 15
 CHECK_FAMILY_TODAY: Final = 5
 
-
 @dataclass(frozen=True)
 class Finding:
     """One name a scan objects to, with the line it is written on."""
 
     line: int
     name: str
-
 
 @dataclass(frozen=True)
 class CheckFunction:
@@ -240,9 +238,7 @@ class CheckFunction:
     promises_a_value: bool
     returns_a_value: bool
 
-
 # --- The scans, every one of them a pure function over source text -------------------------------
-
 
 def past_participles_naming_a_procedure(source: str) -> list[Finding]:
     """Every function in `source` whose annotated return is `None` under a participle's name."""
@@ -251,7 +247,6 @@ def past_participles_naming_a_procedure(source: str) -> list[Finding]:
         for node in _functions(source)
         if _returns_none(node) and is_past_participle(_head(node.name))
     ]
-
 
 def is_past_participle(word: str) -> bool:
     """Whether one word names a state rather than an action, by the two sets above.
@@ -264,7 +259,6 @@ def is_past_participle(word: str) -> bool:
     if not bare or bare in SAME_AS_BASE or bare in NOT_PARTICIPLES:
         return False
     return bare in IRREGULAR_PARTICIPLES or bare.endswith("ed")
-
 
 def private_check_functions(source: str) -> list[CheckFunction]:
     """Every private `_check…` and `_checked…` in `source`, with what its name and signature say.
@@ -283,7 +277,6 @@ def private_check_functions(source: str) -> list[CheckFunction]:
             )
     return found
 
-
 def private_module_leaks(source: str, *, package: str, private: frozenset[str]) -> list[Finding]:
     """Every import in `source` naming a module in `private` that `package` is not inside.
 
@@ -298,7 +291,6 @@ def private_module_leaks(source: str, *, package: str, private: frozenset[str]) 
         and package != held.rsplit(".", 1)[0]
     ]
 
-
 def module_level_type_names(source: str) -> list[Finding]:
     """Every class and `type` alias defined at `source`'s module level, in the order written."""
     found: list[Finding] = []
@@ -309,7 +301,6 @@ def module_level_type_names(source: str) -> list[Finding]:
             found.append(Finding(node.lineno, node.name.id))
     return found
 
-
 def short_test_names(source: str) -> list[Finding]:
     """Every `test_*` function in `source` whose name is fewer than `WORD_FLOOR` words long."""
     return [
@@ -317,7 +308,6 @@ def short_test_names(source: str) -> list[Finding]:
         for node in _functions(source)
         if node.name.startswith("test_") and len(_words_after_the_prefix(node.name)) < WORD_FLOOR
     ]
-
 
 def module_constants(source: str) -> list[tuple[Finding, bool]]:
     """Every module-level binding in `source` that is not a protocol dunder, and whether it is
@@ -341,7 +331,6 @@ def module_constants(source: str) -> list[tuple[Finding, bool]]:
                 found.append((Finding(node.lineno, node.target.id), final))
     return found
 
-
 def module_type_aliases(source: str) -> list[Finding]:
     """Every `type X = ...` written at `source`'s module level."""
     return [
@@ -350,28 +339,23 @@ def module_type_aliases(source: str) -> list[Finding]:
         if isinstance(node, ast.TypeAlias) and isinstance(node.name, ast.Name)
     ]
 
-
 def is_screaming_snake(name: str) -> bool:
     """`AGL_HOME` and `_AGL_HOME` yes, `report_findings` and `AglHome` no."""
     bare = name.lstrip("_")
     return bool(bare) and bare[0].isalpha() and bare.upper() == bare
-
 
 def is_camel_case(name: str) -> bool:
     """`JsonValue` and `_Commands` yes, `json_value` and `JSON_VALUE` no."""
     bare = name.lstrip("_")
     return bool(bare) and bare[0].isupper() and "_" not in bare
 
-
 # --- The plumbing under them ---------------------------------------------------------------------
-
 
 def _functions(source: str) -> Iterator[ast.FunctionDef | ast.AsyncFunctionDef]:
     """Every `def` and `async def` in `source`, methods and nested ones included."""
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
             yield node
-
 
 def _returns_none(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
     """Whether the annotated return is `None` itself, rather than something that can be one.
@@ -384,16 +368,13 @@ def _returns_none(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
         return written.value is None
     return isinstance(written, ast.Name) and written.id == "None"
 
-
 def _head(name: str) -> str:
     """A name's grammatical head: `made` for `made`, `check` for `_check_payload`."""
     return name.strip("_").split("_")[0]
 
-
 def _words_after_the_prefix(name: str) -> list[str]:
     """`["a", "role", "is", "frozen"]` for `test_a_role_is_frozen`."""
     return [word for word in name[len("test_") :].split("_") if word]
-
 
 def _imports(source: str, *, package: str) -> Iterator[tuple[int, str]]:
     """Every module `source` imports, with relative imports resolved against `package`."""
@@ -403,7 +384,6 @@ def _imports(source: str, *, package: str) -> Iterator[tuple[int, str]]:
                 yield node.lineno, alias.name
         elif isinstance(node, ast.ImportFrom):
             yield node.lineno, _resolve(node, package)
-
 
 def _resolve(node: ast.ImportFrom, package: str) -> str:
     """The dotted module `node` names. `test_ports_stdlib_only.py`'s `_resolve`, in its words."""
@@ -415,7 +395,6 @@ def _resolve(node: ast.ImportFrom, package: str) -> str:
     base = ".".join(parts[: len(parts) - node.level + 1])
     return f"{base}.{node.module}" if node.module else base
 
-
 def _spelled(node: ast.expr) -> str:
     """The name an annotation spells by its own last segment: `Final` for `Final` and `Final[X]`."""
     if isinstance(node, ast.Name):
@@ -426,27 +405,21 @@ def _spelled(node: ast.expr) -> str:
         return _spelled(node.value)
     return ""
 
-
 def _package_of(path: Path) -> str:
     """The dotted package a source file lives in - `agl.ports` for `src/agl/ports/clock.py`."""
     return ".".join(path.relative_to(SOURCE_ROOT).parts[:-1])
-
 
 def _dotted(path: Path) -> str:
     """The dotted module a source file is - `agl.ports.clock` for `src/agl/ports/clock.py`."""
     return ".".join(path.relative_to(SOURCE_ROOT).with_suffix("").parts)
 
-
 def _sources(root: Path) -> list[Path]:
     return sorted(root.rglob("*.py"))
-
 
 def _shown(path: Path) -> str:
     return str(path.relative_to(REPO_ROOT))
 
-
 # --- The real comparisons ------------------------------------------------------------------------
-
 
 def test_no_past_participle_names_a_function_that_returns_nothing() -> None:
     """`src/`, parsed, against N1. `adapters/git/_trees.py`'s `made` is what this is for.
@@ -474,7 +447,6 @@ def test_no_past_participle_names_a_function_that_returns_nothing() -> None:
     ]
     assert not problems, "\n\n".join(problems)
     assert len(walked) >= SOURCE_MODULES_TODAY, _found_nothing(walked, SOURCE_ROOT)
-
 
 def test_a_check_raises_and_a_checked_returns_the_value_it_validated() -> None:
     """`src/`, parsed, against N2, in both directions and with both families asserted non-empty.
@@ -517,7 +489,6 @@ def test_a_check_raises_and_a_checked_returns_the_value_it_validated() -> None:
         f"there were 7 when this was written. Same reason as the assertion above it"
     )
 
-
 def test_no_module_outside_an_adapter_package_imports_that_packages_private_modules() -> None:
     """`src/`, parsed, against N3's mechanical half.
 
@@ -556,7 +527,6 @@ def test_no_module_outside_an_adapter_package_imports_that_packages_private_modu
     ]
     assert not problems, "\n\n".join(problems)
 
-
 def test_no_type_defined_in_ports_is_defined_again_anywhere_else_under_src() -> None:
     """`ports/` against the rest of `src/agl/`, on N5's one name per concept.
 
@@ -587,7 +557,6 @@ def test_no_type_defined_in_ports_is_defined_again_anywhere_else_under_src() -> 
         if finding.name in ports
     ]
     assert not problems, "\n\n".join(problems)
-
 
 def test_every_test_name_is_long_enough_to_be_a_sentence() -> None:
     """`tests/`, parsed, against N8's floor - and against N8's floor only.
@@ -623,7 +592,6 @@ def test_every_test_name_is_long_enough_to_be_a_sentence() -> None:
         f"this was written. Every assertion above is silent about a name that is long enough, so "
         f"a walk that found none of them would be green and checking nothing"
     )
-
 
 def test_every_module_level_constant_under_src_is_final_and_screaming_snake() -> None:
     """`src/`, parsed, against N9 - and the `Final` half is the one that carries the weight.
@@ -684,7 +652,6 @@ def test_every_module_level_constant_under_src_is_final_and_screaming_snake() ->
         f"22 when this was written. Same reason as the assertion above it"
     )
 
-
 def _found_nothing(walked: list[Path], root: Path) -> str:
     return (
         f"only {len(walked)} module(s) were found under {root}. Every assertion in this test is "
@@ -692,13 +659,11 @@ def _found_nothing(walked: list[Path], root: Path) -> str:
         f"would be green and checking nothing"
     )
 
-
 # ---------------------------------------------------------------------------------------------
 # Non-vacuity: every scan above on fabricated source, one case per rule for the edit it exists to
 # catch, so that a rewrite which broke it into always answering "nothing here" fails below instead
 # of passing over the whole tree.
 # ---------------------------------------------------------------------------------------------
-
 
 def test_the_participle_scan_reports_the_irregular_that_actually_rotted() -> None:
     """`made` in both spellings, which is the exception list that held only `_made`."""
@@ -709,13 +674,11 @@ def test_the_participle_scan_reports_the_irregular_that_actually_rotted() -> Non
         "from pathlib import Path\ndef _made(directory: Path) -> None:\n    directory.mkdir()\n"
     ) == [Finding(2, "_made")]
 
-
 def test_the_participle_scan_reports_a_regular_ed_head_and_reaches_a_method() -> None:
     """`-ed` is the common case, and a method is a function - `ast.walk` sees both."""
     assert past_participles_naming_a_procedure(
         "class K:\n    async def _cleaned_away(self, message: str) -> None:\n        return None\n"
     ) == [Finding(2, "_cleaned_away")]
-
 
 def test_the_participle_scan_is_silent_on_the_two_exclusion_sets() -> None:
     """`run` and `split` are imperatives nothing can tell from participles; `feed` is neither."""
@@ -725,7 +688,6 @@ def test_the_participle_scan_is_silent_on_the_two_exclusion_sets() -> None:
         "def _feed(line: str) -> None:\n    return None\n"
     )
 
-
 def test_the_participle_scan_is_silent_where_the_participle_is_the_answer() -> None:
     """`_translated(error) -> X` is N1 working: a participle names the value it built."""
     assert not past_participles_naming_a_procedure(
@@ -734,19 +696,16 @@ def test_the_participle_scan_is_silent_where_the_participle_is_the_answer() -> N
         "def _made_lock() -> object:\n    return object()\n"
     )
 
-
 def test_the_check_scan_reports_a_checked_that_returns_nothing() -> None:
     """The half `ports/agent.py`'s `check_tool_declaration` was on the wrong side of under its
     older spelling."""
     found = private_check_functions("def _checked_name(name: str) -> None:\n    return None\n")
     assert found == [CheckFunction(1, "_checked_name", True, False)]
 
-
 def test_the_check_scan_reports_a_check_that_returns_a_value() -> None:
     """The other half: a name that says it raises, handing something back."""
     found = private_check_functions("def _check_name(name: str) -> str:\n    return name\n")
     assert found == [CheckFunction(1, "_check_name", False, True)]
-
 
 def test_the_check_scan_reads_the_head_word_whole_and_skips_public_names() -> None:
     """`checkout_of` is a git noun, and `check_ready` is a port's vocabulary rather than N2's."""
@@ -755,7 +714,6 @@ def test_the_check_scan_reads_the_head_word_whole_and_skips_public_names() -> No
         "def _checkout_of(branch: str) -> Path | None:\n    return None\n"
         "def check_unregistered(name: str) -> Path:\n    return Path(name)\n"
     )
-
 
 def test_the_private_module_scan_reports_a_reach_into_another_adapters_internals() -> None:
     """Both syntaxes, because they are two spellings of one dependency."""
@@ -769,7 +727,6 @@ def test_the_private_module_scan_reports_a_reach_into_another_adapters_internals
         "import agl.adapters.git._runner\n", package="agl.config", private=private
     ) == [Finding(1, "agl.adapters.git._runner")]
 
-
 def test_the_private_module_scan_resolves_a_relative_import_rather_than_skipping_it() -> None:
     """There are none under `src/` today, which is exactly why the scan must not assume it."""
     assert private_module_leaks(
@@ -778,7 +735,6 @@ def test_the_private_module_scan_resolves_a_relative_import_rather_than_skipping
         private=frozenset({"agl.adapters._runner"}),
     ) == [Finding(1, "agl.adapters._runner")]
 
-
 def test_the_private_module_scan_is_silent_inside_the_package_that_owns_the_module() -> None:
     """`git/fake.py` imports `git/_trees.py`, which is what a package-private module is for."""
     assert not private_module_leaks(
@@ -786,7 +742,6 @@ def test_the_private_module_scan_is_silent_inside_the_package_that_owns_the_modu
         package="agl.adapters.git",
         private=frozenset({"agl.adapters.git._trees"}),
     )
-
 
 def test_the_type_name_scan_reads_classes_and_aliases_and_not_what_is_nested() -> None:
     """N5 is about a name a module defines, and a class inside a function defines nothing anybody
@@ -797,7 +752,6 @@ def test_the_type_name_scan_reads_classes_and_aliases_and_not_what_is_nested() -
         "def build() -> None:\n    class Entry:\n        pass\n"
     ) == [Finding(1, "Entry"), Finding(3, "JsonValue")]
 
-
 def test_the_test_name_scan_reports_a_three_word_name_and_spares_a_four_word_one() -> None:
     """Four is where ten names already sit, so the gate fires on the next one written short."""
     assert short_test_names("def test_it_just_works() -> None:\n    pass\n") == [
@@ -805,12 +759,10 @@ def test_the_test_name_scan_reports_a_three_word_name_and_spares_a_four_word_one
     ]
     assert not short_test_names("def test_a_role_is_frozen() -> None:\n    pass\n")
 
-
 def test_the_constant_scan_reports_a_module_binding_with_no_final() -> None:
     """The half nothing else in the build can see: `X = 80` type checks and lints clean."""
     assert module_constants("_SHOWN = 80\n") == [(Finding(1, "_SHOWN"), False)]
     assert module_constants("_SHOWN: int = 80\n") == [(Finding(1, "_SHOWN"), False)]
-
 
 def test_the_constant_scan_accepts_both_spellings_of_final_and_skips_dunders() -> None:
     """`Final` and `Final[T]` are one annotation, and `__all__` is a protocol rather than a name
@@ -820,7 +772,6 @@ def test_the_constant_scan_accepts_both_spellings_of_final_and_skips_dunders() -
         (Finding(1, "_NOTHING"), True)
     ]
     assert not module_constants('__all__ = ["Display"]\n')
-
 
 def test_the_case_predicates_answer_about_the_names_this_repository_actually_holds() -> None:
     """Both directions of both halves, since a predicate that answered `True` to everything would
@@ -833,7 +784,6 @@ def test_the_case_predicates_answer_about_the_names_this_repository_actually_hol
     assert is_camel_case("_Commands")
     assert not is_camel_case("json_value")
     assert not is_camel_case("JSON_VALUE")
-
 
 def test_the_alias_scan_reads_the_type_statement_and_nothing_that_looks_like_one() -> None:
     """`type X = ...` is its own node; an assignment holding a type expression is a constant."""

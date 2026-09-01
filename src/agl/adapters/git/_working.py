@@ -1,24 +1,19 @@
-
 import shutil
 from collections.abc import Iterable, Mapping
 from pathlib import Path
-
 from agl.adapters.git._trees import _translated
 
 __all__ = ["apply", "restore", "snapshot"]
-
 
 def snapshot(directory: Path) -> dict[str, bytes]:
     found: dict[str, bytes] = {}
     _gather(directory, "", found)
     return found
 
-
 def restore(directory: Path, tree: Mapping[str, bytes]) -> None:
     _empty(directory)
     for path, content in tree.items():
         _write(directory, path, content)
-
 
 def apply(directory: Path, tree: Mapping[str, bytes], paths: Iterable[str]) -> None:
     for path in paths:
@@ -27,7 +22,6 @@ def apply(directory: Path, tree: Mapping[str, bytes], paths: Iterable[str]) -> N
             _remove(directory, path)
         else:
             _write(directory, path, content)
-
 
 def _gather(at: Path, under: str, found: dict[str, bytes]) -> None:
     try:
@@ -46,7 +40,6 @@ def _gather(at: Path, under: str, found: dict[str, bytes]) -> None:
             except OSError as error:
                 raise _translated(error, f"the file at {entry}") from error
 
-
 def _empty(directory: Path) -> None:
     try:
         entries = list(directory.iterdir())
@@ -63,7 +56,6 @@ def _empty(directory: Path) -> None:
         except OSError as error:
             raise _translated(error, f"the leaving at {entry}") from error
 
-
 def _write(directory: Path, path: str, content: bytes) -> None:
     at = _at(directory, path)
     try:
@@ -71,7 +63,6 @@ def _write(directory: Path, path: str, content: bytes) -> None:
         at.write_bytes(content)
     except OSError as error:
         raise _translated(error, f"the file at {at}") from error
-
 
 def _remove(directory: Path, path: str) -> None:
     at = _at(directory, path)
@@ -86,7 +77,6 @@ def _remove(directory: Path, path: str) -> None:
             parent.rmdir()
         except OSError:
             return
-
 
 def _at(directory: Path, path: str) -> Path:
     return directory.joinpath(*path.split("/"))

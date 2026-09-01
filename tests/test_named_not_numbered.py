@@ -174,7 +174,6 @@ _CITATION: Final = re.compile(
 # A second and third number on one opener: `rules N and M`, `contracts N and M`, `targets #N, #M`.
 _ALSO: Final = re.compile(r"[ \t]*(?:,|and)[ \t]*#?[ \t]*(\d+)")
 
-
 @dataclass(frozen=True)
 class Citation:
     """One numbered cross-reference: the line it is written on, the kind of thing, and the number.
@@ -186,7 +185,6 @@ class Citation:
     line: int
     kind: str
     number: int
-
 
 def numbered_citations(source: str, *, live: Mapping[str, AbstractSet[int]]) -> list[Citation]:
     """Every numbered cross-reference in `source` whose number is not a live key of its kind.
@@ -206,7 +204,6 @@ def numbered_citations(source: str, *, live: Mapping[str, AbstractSet[int]]) -> 
     }
     return sorted(found, key=lambda citation: (citation.line, citation.kind, citation.number))
 
-
 def _in_one_line(number: int, line: str) -> Iterator[Citation]:
     """Every citation written on one line, a list of numbers on one opener counting as several."""
     for match in _CITATION.finditer(line):
@@ -221,11 +218,9 @@ def _in_one_line(number: int, line: str) -> Iterator[Citation]:
             yield Citation(number, kind, int(more.group(1)))
             position = more.end()
 
-
 def _live_numbers() -> Mapping[str, frozenset[int]]:
     """The two kinds whose numbers are identifiers, read out of the files that make them so."""
     return {"contract": _contract_numbers(), "target": _target_numbers()}
-
 
 def _contract_numbers() -> frozenset[int]:
     """Every `[importlinter:contract:N]` section id in the real `.importlinter`.
@@ -240,7 +235,6 @@ def _contract_numbers() -> frozenset[int]:
         for section in config.sections()
         if section.startswith(f"{CONTRACT_PREFIX}:") and section.rpartition(":")[2].isdigit()
     )
-
 
 def _target_numbers() -> frozenset[int]:
     """Every key of `SETTLED` in `tests/test_measurable_targets.py`, parsed out of the file.
@@ -266,12 +260,10 @@ def _target_numbers() -> frozenset[int]:
         f"See this file's docstring, and test_all_twelve_targets_are_accounted_for."
     )
 
-
 def _bound(node: ast.AnnAssign | ast.Assign) -> frozenset[str]:
     """The plain names an assignment binds, ignoring anything that is not a bare name."""
     written = node.targets if isinstance(node, ast.Assign) else [node.target]
     return frozenset(target.id for target in written if isinstance(target, ast.Name))
-
 
 def _points_at_something_deletable(shown: str, citation: Citation) -> str:
     return (
@@ -296,9 +288,7 @@ def _points_at_something_deletable(shown: str, citation: Citation) -> str:
         f"meant to be an identifier, the file that pins it is what changes first."
     )
 
-
 # --- The real comparison -------------------------------------------------------------------------
-
 
 def test_no_module_in_src_or_tests_cites_a_number_that_can_be_deleted_quietly() -> None:
     """`src/` and `tests/`, line by line, against C8 and the two anchored exemptions.
@@ -327,7 +317,6 @@ def test_no_module_in_src_or_tests_cites_a_number_that_can_be_deleted_quietly() 
         f"citation, so a walk that found none of them would be green and checking nothing"
     )
 
-
 def test_the_contract_numbers_this_file_exempts_are_section_ids_import_linter_reads() -> None:
     """The first exemption's anchor, asserted rather than described.
 
@@ -347,7 +336,6 @@ def test_the_contract_numbers_this_file_exempts_are_section_ids_import_linter_re
         f"of the missing number now reads as a live identifier to everything except this test"
     )
 
-
 def test_the_target_numbers_this_file_exempts_are_keys_of_the_mapping_that_pins_them() -> None:
     """The second exemption's anchor. `SETTLED`'s keys, parsed out of the file that pins them."""
     numbers = _target_numbers()
@@ -356,7 +344,6 @@ def test_the_target_numbers_this_file_exempts_are_keys_of_the_mapping_that_pins_
         f"one. test_all_twelve_targets_are_accounted_for is what normally says so; if it has been "
         f"relaxed, the exemption here is exempting a number nothing pins any more"
     )
-
 
 def test_every_name_the_journal_suite_is_cited_by_is_still_a_heading_inside_it() -> None:
     """The six names that replaced numbered rule headings, against `tests/sdk/test_journal.py`.
@@ -376,7 +363,6 @@ def test_every_name_the_journal_suite_is_cited_by_is_still_a_heading_inside_it()
         f"rename in every module that cites one, and in JOURNAL_HEADINGS above"
     )
 
-
 # ---------------------------------------------------------------------------------------------
 # Non-vacuity: the scan on fabricated source, one case per gated form and one per exemption, so
 # that a rewrite which broke it into always answering "nothing here" fails below instead of
@@ -386,13 +372,11 @@ def test_every_name_the_journal_suite_is_cited_by_is_still_a_heading_inside_it()
 
 _NOTHING: Final[Mapping[str, AbstractSet[int]]] = {}
 
-
 def test_the_scan_reports_a_numbered_rule_which_is_the_shape_this_gate_exists_for() -> None:
     """The defect that bought this file: a comment heading cited by its number from elsewhere."""
     assert numbered_citations("# " + "rule " + "7" + "\n", live=_NOTHING) == [
         Citation(1, "rule", 7)
     ]
-
 
 def test_the_scan_reports_every_other_word_on_the_cited_list_as_well() -> None:
     """One line per gated form, so a word quietly dropped from `CITED` fails here and not in prose.
@@ -404,20 +388,17 @@ def test_the_scan_reports_every_other_word_on_the_cited_list_as_well() -> None:
         line = "# see " + word + " " + "3"
         assert numbered_citations(line, live=_NOTHING) == [Citation(1, word, 3)], word
 
-
 def test_the_scan_reports_the_section_mark_which_is_the_form_no_word_introduces() -> None:
     """`U+00A7` is a citation on its own and needs no word in front of it."""
     assert numbered_citations("# " + SECTION_MARK + "4" + "\n", live=_NOTHING) == [
         Citation(1, SECTION_MARK, 4)
     ]
 
-
 def test_the_scan_reports_a_citation_spelled_with_a_hash_a_hyphen_or_neither() -> None:
     """`target #N`, `UF-N` and `UFN` are one form written three ways, and all three are read."""
     assert numbered_citations("# " + "target #" + "8", live=_NOTHING) == [Citation(1, "target", 8)]
     assert numbered_citations("# " + "UF-" + "3", live=_NOTHING) == [Citation(1, "uf", 3)]
     assert numbered_citations("# " + "UF" + "3", live=_NOTHING) == [Citation(1, "uf", 3)]
-
 
 def test_the_scan_reports_both_numbers_when_one_opener_carries_a_list_of_them() -> None:
     """`rules N and M` is two citations, and a scan reading the first alone would pass on a line
@@ -426,7 +407,6 @@ def test_the_scan_reports_both_numbers_when_one_opener_carries_a_list_of_them() 
         Citation(1, "rule", 2),
         Citation(1, "rule", 3),
     ]
-
 
 def test_the_scan_reads_a_citation_wherever_prose_lives_and_not_only_in_a_comment() -> None:
     """A docstring and an assertion message are prose and are read; `ast` would see neither."""
@@ -437,13 +417,11 @@ def test_the_scan_reads_a_citation_wherever_prose_lives_and_not_only_in_a_commen
         Citation(1, "part", 5)
     ]
 
-
 def test_the_scan_is_silent_on_a_contract_number_the_import_config_actually_declares() -> None:
     """The first exemption doing its job, against a number read out of the real `.importlinter`."""
     live = _live_numbers()
     declared = min(live["contract"])
     assert not numbered_citations("# " + "contract " + str(declared), live=live)
-
 
 def test_the_scan_reports_a_contract_number_the_import_config_does_not_declare() -> None:
     """And the same word one number higher, which is the exemption being keyed on the anchor."""
@@ -453,13 +431,11 @@ def test_the_scan_reports_a_contract_number_the_import_config_does_not_declare()
         Citation(1, "contract", absent)
     ]
 
-
 def test_the_scan_is_silent_on_a_target_number_the_settled_mapping_actually_keys() -> None:
     """The second exemption doing its job, against a key read out of the real mapping."""
     live = _live_numbers()
     settled = min(live["target"])
     assert not numbered_citations("# " + "target #" + str(settled), live=live)
-
 
 def test_the_scan_reports_a_target_number_the_settled_mapping_does_not_key() -> None:
     """A thirteenth target is prose about a target nothing settles, and is reported as one."""
@@ -469,13 +445,11 @@ def test_the_scan_reports_a_target_number_the_settled_mapping_does_not_key() -> 
         Citation(1, "target", absent)
     ]
 
-
 def test_the_scan_is_silent_on_a_cited_word_with_no_number_behind_it() -> None:
     """"the contract suite" and "a later stage" are prose about a thing, not pointers at one."""
     assert not numbered_citations(
         "# the contract suite, at a later stage, names the rule and the target\n", live=_NOTHING
     )
-
 
 def test_the_scan_is_silent_on_a_number_no_word_from_the_list_introduces() -> None:
     """The step labels and attempt counters this suite is full of, which are data and not prose."""
@@ -483,17 +457,14 @@ def test_the_scan_is_silent_on_a_number_no_word_from_the_list_introduces() -> No
         'assert first == Summary("review #0")\nPYTHONHASHSEED = "31337"\n', live=_NOTHING
     )
 
-
 def test_the_scan_is_silent_on_a_unicode_escape_whose_tail_spells_a_cited_word() -> None:
     """A `\\uf0a1` escape ends `uf` and a digit, and the backslash in front of it is the tell."""
     assert not numbered_citations('X = "\\uf0a1"\n', live=_NOTHING)
     assert numbered_citations("# " + "uf" + "0a1", live=_NOTHING) == [Citation(1, "uf", 0)]
 
-
 def test_the_scan_is_silent_on_a_cited_word_inside_a_longer_one() -> None:
     """`subcontract 4` names something else, and `parts[3]` is a slice rather than a citation."""
     assert not numbered_citations("# a subcontract 4 and parts[3]\n", live=_NOTHING)
-
 
 def test_the_scan_reports_the_line_a_citation_is_written_on_and_not_the_first() -> None:
     """A finding is read by opening the file at the line, so the line is half of what it says."""

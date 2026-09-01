@@ -37,9 +37,7 @@ from dataclasses import dataclass, replace
 from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Final
-
 import pytest
-
 from agl import api
 from agl.adapters.claude_code.fake import Conversation, Script
 from agl.adapters.git.history import GitHistory
@@ -69,7 +67,6 @@ WIRE_KEYS: Final = frozenset(
      "created_at"}
 )
 
-
 @dataclass(frozen=True)
 class ProbeParams:
     """The example params shape, which `agl run probe -r "add oauth" -c 4` fills in."""
@@ -77,15 +74,12 @@ class ProbeParams:
     request: str = arg("-r", "--request", help="what to build")
     concurrent: int = arg("-c", "--concurrent", default=3)
 
-
 @dataclass(frozen=True)
 class NoParams:
     """A workflow that takes nothing, and still has a params class to derive no flags from."""
 
-
 class ReviewNotConverging(Stop):
     """A workflow's own reason to stop, spelled against the SDK's `Stop`."""
-
 
 # The file the real repository below is seeded with, matching what `_fakes` seeds its own with, and
 # the one a commit landing mid-`api.run` adds.
@@ -101,18 +95,15 @@ def looking() -> Role:
     nothing below depends on which."""
     return Role(name="look", instructions="look at what is already here")
 
-
 # What each workflow was handed and what one of them raised, at module level because the workflows
 # have to be: `EntryPoint.load` imports a module and reads an attribute in it, and sees no local.
 handed: Final[list[Run[ProbeParams]]] = []
 raised: Final[list[Stop]] = []
 
-
 @workflow(version="1.1")
 async def probe(run: Run[ProbeParams]) -> None:
     """Returns. The wiring probe, with params it can be asserted on."""
     handed.append(run)
-
 
 @workflow(version="0.1")
 async def halting(run: Run[NoParams]) -> None:
@@ -120,7 +111,6 @@ async def halting(run: Run[NoParams]) -> None:
     stop = ReviewNotConverging("two rounds and no convergence")
     raised.append(stop)
     raise stop
-
 
 @workflow(version="0.1")
 async def stepping(run: Run[NoParams]) -> None:
@@ -132,11 +122,9 @@ async def stepping(run: Run[NoParams]) -> None:
     """
     await run.step(looking())
 
-
 def _point(name: str, attribute: str) -> EntryPoint:
     """A `probe = "agl.workflows.probe:probe"` line, pointed at this module instead."""
     return EntryPoint(name=name, value=f"{__name__}:{attribute}", group=registry.GROUP)
-
 
 POINTS: Final = (_point("probe", "probe"), _point("halting", "halting"))
 
@@ -145,18 +133,15 @@ POINTS: Final = (_point("probe", "probe"), _point("halting", "halting"))
 # assertion about something else entirely; the two tests that need it pass both.
 STEPPING: Final = (_point("stepping", "stepping"),)
 
-
 def _fakes(tmp_path: Path) -> container.FakeServices:
     """Target #8's deployment: one repository seeded with a file, one store, one frozen clock."""
     return container.fakes(TreesRoot(tmp_path / "trees"), files={"src/a.txt": b"one\n"})
-
 
 async def _record(harness: container.FakeServices) -> dict[str, JsonValue]:
     """The run's record, asserted present - every caller below is testing what is in it."""
     record = await harness.services.store.read_record(SCOPE)
     assert record is not None, "no run.json was written for this run"
     return record
-
 
 async def _run(
     harness: container.FakeServices, name: str = "probe",
@@ -166,9 +151,7 @@ async def _run(
     """One invocation, with this module's entry points supplied instead of what is installed."""
     await api.run(harness.services, PROJECT, name, LABEL, argv, base_ref=base_ref, points=points)
 
-
 # --- a run that completes ------------------------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_a_workflow_that_returns_runs_to_completion(tmp_path: Path) -> None:
@@ -180,7 +163,6 @@ async def test_a_workflow_that_returns_runs_to_completion(tmp_path: Path) -> Non
 
     assert len(handed) == 1
     assert handed[0].services is harness.services
-
 
 @pytest.mark.asyncio
 async def test_the_record_holds_exactly_the_published_fields(tmp_path: Path) -> None:
@@ -201,7 +183,6 @@ async def test_the_record_holds_exactly_the_published_fields(tmp_path: Path) -> 
     # Written by AGL and read back by AGL: the record survives the round trip it exists for.
     assert RunSpec.from_json(record).label == LABEL
 
-
 @pytest.mark.asyncio
 async def test_the_base_sha_is_the_resolved_commit_and_not_the_ref_name(tmp_path: Path) -> None:
     """The pin. An abbreviation is refused by `RunSpec`; a ref name would pin nothing."""
@@ -219,7 +200,6 @@ async def test_the_base_sha_is_the_resolved_commit_and_not_the_ref_name(tmp_path
     assert isinstance(record["base_sha"], str)
     assert len(record["base_sha"]) in {40, 64}
 
-
 @pytest.mark.asyncio
 async def test_from_names_the_base_ref_and_the_default_is_the_repositorys(tmp_path: Path) -> None:
     """`--from <ref>`. What the user said is kept; what it meant is resolved beside it."""
@@ -230,7 +210,6 @@ async def test_from_names_the_base_ref_and_the_default_is_the_repositorys(tmp_pa
 
     assert record["base_ref"] == "main"
     assert record["base_sha"] == await harness.services.history.resolve("main")
-
 
 @pytest.mark.asyncio
 async def test_a_workflow_that_takes_no_step_still_leaves_base_provisioned(tmp_path: Path) -> None:
@@ -252,7 +231,6 @@ async def test_a_workflow_that_takes_no_step_still_leaves_base_provisioned(tmp_p
 
     assert base_worktree(TreesRoot(tmp_path / "trees"), LABEL).is_dir()
     assert harness.repository.tip(run_branch(LABEL)) == (await _record(harness))["base_sha"]
-
 
 class _Refusing(WorkspaceProvider):
     """A provider that provisions nothing, which is the one failure `container.fakes()` cannot
@@ -281,13 +259,11 @@ class _Refusing(WorkspaceProvider):
     def hold(self, label: RunLabel) -> AbstractAsyncContextManager[None]:
         return _granted()
 
-
 @asynccontextmanager
 async def _granted() -> AsyncIterator[None]:
     """A run claim nothing contends for: what `WorkspaceProvider.hold` is when the test is about
     something else entirely."""
     yield
-
 
 @pytest.mark.asyncio
 async def test_a_provisioning_that_fails_leaves_the_record_where_clear_can_find_it(
@@ -311,9 +287,7 @@ async def test_a_provisioning_that_fails_leaves_the_record_where_clear_can_find_
     assert (await _record(harness))["branch"] == run_branch(LABEL)
     assert handed == [], "the workflow ran although its workspace was never provisioned"
 
-
 # --- params, and the two refusals -----------------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_the_workflow_gets_its_dataclass_and_the_record_its_values(tmp_path: Path) -> None:
@@ -328,7 +302,6 @@ async def test_the_workflow_gets_its_dataclass_and_the_record_its_values(tmp_pat
     record = await _record(harness)
     assert record["params"] == {"request": "add oauth", "concurrent": 4}
 
-
 @pytest.mark.asyncio
 async def test_flags_the_workflow_refuses_stop_it_before_anything_runs(tmp_path: Path) -> None:
     """Validation failure is `InputError` -> exit 2, *before anything runs* - so no record."""
@@ -341,7 +314,6 @@ async def test_flags_the_workflow_refuses_stop_it_before_anything_runs(tmp_path:
     assert exit_code_for(caught.value) == 2
     assert handed == []
     assert await harness.services.store.read_record(SCOPE) is None
-
 
 @pytest.mark.asyncio
 async def test_the_same_label_twice_is_refused_in_the_refusals_own_words(tmp_path: Path) -> None:
@@ -360,7 +332,6 @@ async def test_the_same_label_twice_is_refused_in_the_refusals_own_words(tmp_pat
     )
     assert exit_code_for(caught.value) == 4
     assert len(handed) == 1, "the refused run invoked the workflow anyway"
-
 
 @pytest.mark.asyncio
 async def test_a_deliverable_branch_that_already_exists_refuses_the_run(tmp_path: Path) -> None:
@@ -401,7 +372,6 @@ async def test_a_deliverable_branch_that_already_exists_refuses_the_run(tmp_path
     )
     assert handed == [], "the refused run invoked the workflow anyway"
 
-
 @pytest.mark.asyncio
 async def test_an_unknown_workflow_name_is_a_not_found_and_records_nothing(tmp_path: Path) -> None:
     """The third: exit 3, from `config/registry.py`, before the store is touched at all."""
@@ -414,9 +384,7 @@ async def test_an_unknown_workflow_name_is_a_not_found_and_records_nothing(tmp_p
     assert "nosuch" in str(caught.value)
     assert await harness.services.store.read_record(SCOPE) is None
 
-
 # --- the ordering hazard -------------------------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_a_stop_subclass_leaves_api_run_unwrapped_and_exits_seven(tmp_path: Path) -> None:
@@ -434,9 +402,7 @@ async def test_a_stop_subclass_leaves_api_run_unwrapped_and_exits_seven(tmp_path
     assert exit_code_for(caught.value) == 7
     assert (await _record(harness))["workflow"] == "halting"
 
-
 # --- against a real repository --------------------------------------------------------------------
-
 
 def _git(where: Path, *argv: str) -> str:
     """One git command, for arranging and observing. Never for the thing under test.
@@ -446,7 +412,6 @@ def _git(where: Path, *argv: str) -> str:
     """
     done = subprocess.run(["git", *argv], cwd=where, capture_output=True, text=True, check=True)
     return done.stdout
-
 
 @pytest.fixture
 def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -475,7 +440,6 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     _git(work, "commit", "-q", "-m", "the state a run is cut from")
     return work
 
-
 class _MovingHistory(GitHistory):
     """`GitHistory`, except that a commit lands on the ref the instant it has been resolved.
 
@@ -503,7 +467,6 @@ class _MovingHistory(GitHistory):
         _git(self._at, "commit", "-q", "-m", "a commit landing between the resolve and the open")
         return pinned
 
-
 def _over(
     repository: Path, tmp_path: Path, *, moving: bool = False, claude: Script | None = None
 ) -> container.FakeServices:
@@ -527,7 +490,6 @@ def _over(
         ),
     )
 
-
 def _worktrees(repository: Path) -> tuple[Path, ...]:
     """Every checkout git has registered against this repository, resolved, in git's own order.
 
@@ -539,7 +501,6 @@ def _worktrees(repository: Path) -> tuple[Path, ...]:
     return tuple(
         Path(line[len(at) :]).resolve() for line in listing.splitlines() if line.startswith(at)
     )
-
 
 def _looking(seen: list[Path]) -> Script:
     """An agent that writes nothing, reports nothing, and records where it was pointed.
@@ -554,7 +515,6 @@ def _looking(seen: list[Path]) -> Script:
         return AgentOutcome(stop_reason=StopReason.COMPLETED, text="")
 
     return _script
-
 
 @pytest.mark.asyncio
 async def test_the_checkout_is_cut_from_the_pin_and_not_from_the_ref(
@@ -583,7 +543,6 @@ async def test_the_checkout_is_cut_from_the_pin_and_not_from_the_ref(
     assert _git(place, "rev-parse", "HEAD").strip() == pinned
     assert not (place / LANDED).exists(), "the checkout carries a commit made after the pin"
 
-
 @pytest.mark.asyncio
 async def test_a_step_reopens_that_checkout_rather_than_cutting_a_second(
     repository: Path, tmp_path: Path
@@ -607,7 +566,6 @@ async def test_a_step_reopens_that_checkout_rather_than_cutting_a_second(
     assert _worktrees(repository) == (repository.resolve(), place.resolve())
     assert _git(place, "rev-parse", "--abbrev-ref", "HEAD").strip() == run_branch(LABEL)
 
-
 # --- `--from` reaches git before the record that checks it ----------------------------------------
 
 # The one value that cannot be handed to a child process, written the long way round: a
@@ -615,7 +573,6 @@ async def test_a_step_reopens_that_checkout_rather_than_cutting_a_second(
 # which `tests/test_no_literal_surrogates.py` is the fence around and this is one of the shapes
 # that fence permits.
 LONE_SURROGATE: Final = chr(0xD800)
-
 
 class _RecordingHistory(GitHistory):
     """`GitHistory`, plus a note of every ref it was asked to resolve.
@@ -634,7 +591,6 @@ class _RecordingHistory(GitHistory):
         """What `GitHistory` answers, with the question kept."""
         self.asked.append(ref)
         return await super().resolve(ref)
-
 
 @pytest.mark.asyncio
 async def test_a_base_ref_that_cannot_be_encoded_is_refused_before_git_is_asked_about_it(
@@ -696,7 +652,6 @@ async def test_a_base_ref_that_cannot_be_encoded_is_refused_before_git_is_asked_
         "a run record was written for a run that was refused before it started"
     )
 
-
 @pytest.mark.asyncio
 async def test_the_same_ref_reaching_git_anyway_is_still_one_of_agls_own_errors(
     repository: Path, tmp_path: Path
@@ -723,16 +678,13 @@ async def test_the_same_ref_reaching_git_anyway_is_still_one_of_agls_own_errors(
         "anything, and a message that reads as a refusal sends a person to the repository"
     )
 
-
 # --- the rest of the surface ---------------------------------------------------------------------
-
 
 def test_list_workflows_is_the_registrys_sorted_names() -> None:
     """`agl workflows`, complete: the command prints this and does nothing more.
     Sorted, so a listing is stable across environments rather than ordered by whatever sequence a
     metadata scan produced, and nothing is imported to answer it."""
     assert api.list_workflows(points=POINTS) == ("halting", "probe")
-
 
 def test_list_workflows_needs_no_bundle_and_no_registered_repository(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -749,7 +701,6 @@ def test_list_workflows_needs_no_bundle_and_no_registered_repository(
     monkeypatch.chdir(tmp_path)
 
     assert api.list_workflows(points=POINTS) == ("halting", "probe")
-
 
 def test_init_needs_neither_a_bundle_nor_a_registered_repository(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -778,7 +729,6 @@ def test_init_needs_neither_a_bundle_nor_a_registered_repository(
 
     assert written == home / "projects" / "myapp.toml"
     assert written.read_text(encoding="utf-8").splitlines()[0] == 'name = "myapp"'
-
 
 def test_every_operation_the_module_declares_is_built() -> None:
     """One list, and nothing on it refuses for being unfinished.

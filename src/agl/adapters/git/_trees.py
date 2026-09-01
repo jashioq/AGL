@@ -1,4 +1,3 @@
-
 import asyncio
 import fcntl
 import os
@@ -9,7 +8,6 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
-
 from agl.ports.errors import AglError, ConflictError, DeniedError, UpstreamUnavailable
 from agl.ports.ids import Namespace, RunLabel
 from agl.ports.tree_layout import (
@@ -22,7 +20,6 @@ from agl.ports.tree_layout import (
 
 __all__ = ["delete", "make", "registry_lock", "run_lock", "tidy"]
 
-
 # Never unlinked. A lock file deleted on release is one a second process can still hold by inode
 # while a third creates a new file at the same path and takes that - two holders of one mutex.
 _LOCK_FILENAME: Final = "worktrees.lock"
@@ -32,7 +29,6 @@ _LOCK_TIMEOUT: Final = 600.0
 _LOCK_POLL: Final = 0.05
 
 _LOCK_MODE: Final = 0o644
-
 
 @asynccontextmanager
 async def registry_lock(trees: TreesRoot) -> AsyncIterator[None]:
@@ -47,7 +43,6 @@ async def registry_lock(trees: TreesRoot) -> AsyncIterator[None]:
     finally:
         os.close(handle)
 
-
 @asynccontextmanager
 async def run_lock(directory: Path, label: str) -> AsyncIterator[None]:
     make(directory)
@@ -61,13 +56,11 @@ async def run_lock(directory: Path, label: str) -> AsyncIterator[None]:
     finally:
         os.close(handle)
 
-
 def make(directory: Path) -> None:
     try:
         directory.mkdir(parents=True, exist_ok=True)
     except OSError as error:
         raise _translated(error, f"the run directory at {directory}") from error
-
 
 def delete(checkout: Path) -> None:
     try:
@@ -77,26 +70,21 @@ def delete(checkout: Path) -> None:
     except OSError as error:
         raise _translated(error, f"the checkout at {checkout}") from error
 
-
 def tidy(directory: Path) -> None:
     try:
         directory.rmdir()
     except OSError:
         return
 
-
 @dataclass(frozen=True, slots=True)
 class _Place:
-
     path: Path
     branch: str
-
 
 def _place(trees: TreesRoot, label: RunLabel, namespace: Namespace | None) -> _Place:
     if namespace is None:
         return _Place(base_worktree(trees, label), run_branch(label))
     return _Place(worktree_dir(trees, label, namespace), worktree_branch(label, namespace))
-
 
 def _opened(lock: Path) -> int:
     try:
@@ -104,7 +92,6 @@ def _opened(lock: Path) -> int:
         return os.open(lock, os.O_CREAT | os.O_RDWR, _LOCK_MODE)
     except OSError as error:
         raise _translated(error, f"the worktree lock at {lock}") from error
-
 
 def _opened_run(directory: Path) -> int:
     try:
@@ -114,7 +101,6 @@ def _opened_run(directory: Path) -> int:
         return os.open(directory, os.O_RDONLY)
     except OSError as error:
         raise _translated(error, f"the run directory at {directory}") from error
-
 
 def _claim(handle: int, directory: Path, label: str) -> None:
     try:
@@ -128,7 +114,6 @@ def _claim(handle: int, directory: Path, label: str) -> None:
         ) from None
     except OSError as error:
         raise _translated(error, f"the run directory at {directory}") from error
-
 
 async def _hold(handle: int, lock: Path) -> None:
     deadline = time.monotonic() + _LOCK_TIMEOUT
@@ -147,7 +132,6 @@ async def _hold(handle: int, lock: Path) -> None:
         except OSError as error:
             raise _translated(error, f"the worktree lock at {lock}") from error
         await asyncio.sleep(_LOCK_POLL)
-
 
 def _translated(error: OSError, what: str) -> AglError:
     if isinstance(error, PermissionError):

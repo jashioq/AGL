@@ -118,7 +118,6 @@ FILES_TODAY: Final = 150
 # is written to the cache, and whether a tuple around a literal there preserves it.
 type Position = tuple[str, ast.expr, bool]
 
-
 @dataclass(frozen=True)
 class Finding:
     """One lone surrogate written where `mypy` will keep it as a `Literal` and then cache it.
@@ -131,7 +130,6 @@ class Finding:
     line: int
     position: str
     codepoint: int
-
 
 def literal_surrogates(source: str) -> list[Finding]:
     """Every lone surrogate in `source` sitting in a position that survives into mypy's cache.
@@ -146,7 +144,6 @@ def literal_surrogates(source: str) -> list[Finding]:
         for line, codepoint in _surrogates_in(value, through_tuples=through_tuples)
     }
     return sorted(found, key=lambda finding: (finding.line, finding.position, finding.codepoint))
-
 
 def _cacheable(node: ast.AST, *, in_enum: bool) -> Iterator[Position]:
     """Every expression under `node` whose literal type is written to the cache, and how far in.
@@ -188,7 +185,6 @@ def _cacheable(node: ast.AST, *, in_enum: bool) -> Iterator[Position]:
             continue
         yield from _cacheable(child, in_enum=in_enum)
 
-
 def _in_signature(function: ast.FunctionDef | ast.AsyncFunctionDef) -> Iterator[Position]:
     """The annotations on a function, read while its body is not.
 
@@ -199,7 +195,6 @@ def _in_signature(function: ast.FunctionDef | ast.AsyncFunctionDef) -> Iterator[
     for annotation in [*written, function.returns]:
         if annotation is not None:
             yield from _cacheable(ast.Expression(body=annotation), in_enum=False)
-
 
 def _surrogates_in(value: ast.expr, *, through_tuples: bool) -> Iterator[tuple[int, int]]:
     """Each surrogate codepoint in `value`, with the line it is written on.
@@ -216,7 +211,6 @@ def _surrogates_in(value: ast.expr, *, through_tuples: bool) -> Iterator[tuple[i
         for element in value.elts:
             yield from _surrogates_in(element, through_tuples=True)
 
-
 def _spelled(node: ast.expr) -> str:
     """The name a node spells, by its own last segment: `Final` for `Final` and for `typing.Final`.
 
@@ -230,11 +224,9 @@ def _spelled(node: ast.expr) -> str:
         return node.attr
     return ""
 
-
 def _is_enum(node: ast.ClassDef) -> bool:
     """Whether a class body's plain assignments are enum members."""
     return any(_spelled(base) in ENUM_BASES for base in node.bases)
-
 
 def _crashes_the_types_gate(shown: str, finding: Finding) -> str:
     return (
@@ -259,9 +251,7 @@ def _crashes_the_types_gate(shown: str, finding: Finding) -> str:
         f"together and to say which release made it safe. Do not exempt one line."
     )
 
-
 # --- The real comparison -------------------------------------------------------------------------
-
 
 def test_no_lone_surrogate_is_written_where_mypy_would_cache_it_as_a_literal() -> None:
     """`src/` and `tests/`, parsed, against the positions measured in this file's docstring.
@@ -290,7 +280,6 @@ def test_no_lone_surrogate_is_written_where_mypy_would_cache_it_as_a_literal() -
         f"surrogate, so a walk that found none of them would be green and checking nothing"
     )
 
-
 def test_the_scan_reaches_the_constant_this_rule_was_written_for() -> None:
     """`tests/sdk/test_journal.py` is in the walk, and its constant is the `chr` spelling.
 
@@ -307,7 +296,6 @@ def test_the_scan_reaches_the_constant_this_rule_was_written_for() -> None:
     )
     assert not literal_surrogates(source)
 
-
 # ---------------------------------------------------------------------------------------------
 # Non-vacuity: the scan on fabricated source, one case per row of the measured table, so that a
 # rewrite which broke it into always answering "nothing here" fails below instead of passing over
@@ -316,24 +304,20 @@ def test_the_scan_reaches_the_constant_this_rule_was_written_for() -> None:
 # of its own and cannot be the thing it forbids.
 # ---------------------------------------------------------------------------------------------
 
-
 def test_the_scan_reports_a_bare_final_holding_a_surrogate_literal() -> None:
     """The measured crash this whole file is about, in the shape somebody would tidy it into."""
     findings = literal_surrogates('from typing import Final\nX: Final = "\\ud800"\n')
     assert findings == [Finding(2, "a bare `Final` binding", 0xD800)]
-
 
 def test_the_scan_reports_a_final_with_a_declared_scalar_type() -> None:
     """`Final[str]` does not help - the value is still tracked - and the comment says so."""
     findings = literal_surrogates('from typing import Final\nX: Final[str] = "\\ud800"\n')
     assert findings == [Finding(2, "a `Final[...]` binding", 0xD800)]
 
-
 def test_the_scan_reports_a_final_tuple_which_is_the_trap_the_comment_does_not_name() -> None:
     """A tuple is typed element by element, so every element keeps its own `Literal`."""
     findings = literal_surrogates('from typing import Final\nX: Final = ("a", "\\ud800")\n')
     assert findings == [Finding(2, "a bare `Final` binding", 0xD800)]
-
 
 def test_the_scan_reports_a_class_level_final() -> None:
     """A class attribute is cached exactly as a module one is."""
@@ -342,7 +326,6 @@ def test_the_scan_reports_a_class_level_final() -> None:
     )
     assert findings == [Finding(3, "a bare `Final` binding", 0xD800)]
 
-
 def test_the_scan_reports_an_enum_member() -> None:
     """No `Final` and no annotation: an enum member's value is a stored format either way."""
     findings = literal_surrogates(
@@ -350,14 +333,12 @@ def test_the_scan_reports_an_enum_member() -> None:
     )
     assert findings == [Finding(3, "an enum member", 0xD800)]
 
-
 def test_the_scan_reports_a_literal_annotation_in_a_signature() -> None:
     """The body is skipped and the annotation is not, because the annotation is the type."""
     findings = literal_surrogates(
         'from typing import Literal\ndef f(x: Literal["\\ud800"]) -> None:\n    return None\n'
     )
     assert findings == [Finding(2, "a `Literal[...]` annotation", 0xD800)]
-
 
 def test_the_scan_reports_both_halves_of_a_surrogate_pair_written_as_escapes() -> None:
     """`"\\ud83d\\ude00"` is two lone surrogates in Python and crashes exactly as one does."""
@@ -367,13 +348,11 @@ def test_the_scan_reports_both_halves_of_a_surrogate_pair_written_as_escapes() -
         Finding(2, "a bare `Final` binding", 0xDE00),
     ]
 
-
 def test_the_scan_is_silent_on_a_final_list_which_is_why_two_files_here_are_green() -> None:
     """`tests/ports/test_ids.py`'s and `tests/ports/_corpus.py`'s `_NON_ASCII`, in miniature."""
     assert not literal_surrogates(
         'from typing import Final\nX: Final = ["\\x85", "\\ud800", "\\ue000"]\n'
     )
-
 
 def test_the_scan_is_silent_on_a_final_dict_and_a_final_set() -> None:
     """Both join their members to `str` on the way in, which is the same erasure a list makes."""
@@ -382,13 +361,11 @@ def test_the_scan_is_silent_on_a_final_dict_and_a_final_set() -> None:
         'from typing import Final\nX: Final = frozenset({"\\ud800"})\n'
     )
 
-
 def test_the_scan_is_silent_on_a_tuple_with_a_declared_type() -> None:
     """A declared type is what mypy stores, and it holds no literal to encode."""
     assert not literal_surrogates(
         'from typing import Final\nX: Final[tuple[str, ...]] = ("\\ud800",)\n'
     )
-
 
 def test_the_scan_is_silent_on_a_surrogate_inside_a_function_body() -> None:
     """A local is checked and thrown away. Half the surrogates in this suite are one of these."""
@@ -399,16 +376,13 @@ def test_the_scan_is_silent_on_a_surrogate_inside_a_function_body() -> None:
         'def f() -> bool:\n    return all(c != "\\ud800" for c in "ab")\n'
     )
 
-
 def test_the_scan_is_silent_on_a_module_binding_with_no_final() -> None:
     """Without `Final` the inferred type is `str`, and there is no literal to write."""
     assert not literal_surrogates('X = "\\ud800"\nY: str = "\\ud800"\n')
 
-
 def test_the_scan_is_silent_on_the_chr_spelling_that_is_the_fix() -> None:
     """A call is not a literal, which is the entire reason the workaround works."""
     assert not literal_surrogates("from typing import Final\nX: Final = chr(0xD800)\n")
-
 
 def test_the_scan_is_silent_on_prose_and_on_ordinary_non_ascii() -> None:
     """A docstring naming the escape is not a literal in a caching position, and neither is 😀.

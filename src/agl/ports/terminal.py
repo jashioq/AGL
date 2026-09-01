@@ -1,4 +1,3 @@
-
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -17,56 +16,42 @@ __all__ = [
     "TextInput",
 ]
 
-
 @dataclass(frozen=True, slots=True)
 class Text:
-
     value: str
-
 
 @dataclass(frozen=True, slots=True, init=False)
 class Row:
-
     cells: tuple[Text, ...]
 
     def __init__(self, *cells: str | Text) -> None:
         object.__setattr__(self, "cells", tuple(_coerced(cell) for cell in cells))
 
-
 @dataclass(frozen=True, slots=True, init=False)
 class Rows:
-
     rows: tuple[Row, ...]
 
     def __init__(self, rows: Sequence[Row]) -> None:
         object.__setattr__(self, "rows", tuple(rows))
 
-
 type Component = Text | Row | Rows
-
 
 @dataclass(frozen=True, slots=True)
 class Choice[T]:
-
     label: str
 
     value: T
 
-
 @dataclass(frozen=True, slots=True)
 class TextInput[T]:
-
     label: str
 
     maps: Callable[[str], T] = field(compare=False, repr=False)
 
-
 type Response[T] = Choice[T] | TextInput[T]
-
 
 @dataclass(frozen=True, slots=True, init=False)
 class Screen[T = None]:
-
     body: Component
 
     responses: tuple[Response[T], ...]
@@ -75,13 +60,10 @@ class Screen[T = None]:
         object.__setattr__(self, "body", _coerced(body))
         object.__setattr__(self, "responses", tuple(responses))
 
-
 def _coerced[C: Component](value: str | C) -> Text | C:
     return Text(value) if isinstance(value, str) else value
 
-
 class Terminal(ABC):
-
     @abstractmethod
     async def show[T](
         self,

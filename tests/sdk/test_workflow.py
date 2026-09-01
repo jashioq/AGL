@@ -46,9 +46,7 @@ from dataclasses import dataclass, fields, is_dataclass
 from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Final, assert_type, cast
-
 import pytest
-
 from agl.config import container, registry
 from agl.ports import errors
 from agl.ports.agent import Claude, OpenAI
@@ -71,7 +69,6 @@ BASE: Final = "4a91c07f2b3e8d15c6a0f31d8e2b47c9a6013f5e"
 # `asyncio_mode = "strict"` turns a missing marker into a test pytest silently skips, so every
 # async test below carries `@pytest.mark.asyncio` of its own.
 
-
 @dataclass(frozen=True)
 class TicketsParams:
     """The worked example, written out rather than adapted - the one `test_params.py` parses."""
@@ -79,17 +76,14 @@ class TicketsParams:
     request: str = arg("-r", "--request", help="what to build")
     concurrent: int = arg("-c", "--concurrent", default=3)
 
-
 @dataclass(frozen=True)
 class NoParams:
     """A workflow that takes nothing - `noop`'s shape, and the params class it still needs."""
-
 
 # What `tickets` was handed, so that a test can assert about the `Run` the framework passed rather
 # than about one it built itself. A list at module level because the workflow has to be one too:
 # `EntryPoint.load` imports a module and reads an attribute in it, and cannot see a local.
 _handed: Final[list[Run[TicketsParams]]] = []
-
 
 @workflow(version="1.1")
 async def tickets(run: Run[TicketsParams]) -> None:
@@ -99,7 +93,6 @@ async def tickets(run: Run[TicketsParams]) -> None:
     assert_type(run.params, TicketsParams)
     assert_type(run.params.concurrent, int)
     _handed.append(run)
-
 
 @workflow(version="1.1")
 async def fix(run: Run) -> None:
@@ -112,7 +105,6 @@ async def fix(run: Run) -> None:
     beside a bare `Run` and was the one declaration site in the whole repository where the decorator
     and the annotation said different things - legally, `Run` being covariant."""
     assert_type(run.params, object)
-
 
 @workflow(version="1.1")
 async def deferred(run: Run[DeferredParams]) -> None:
@@ -130,13 +122,11 @@ async def deferred(run: Run[DeferredParams]) -> None:
     trying."""
     assert_type(run.params, DeferredParams)
 
-
 @dataclass(frozen=True)
 class DeferredParams:
     """Declared under its own workflow on purpose. See `deferred` above."""
 
     request: str = arg("-r", "--request", help="what to build")
-
 
 @dataclass(frozen=True)
 class Findings:
@@ -145,19 +135,16 @@ class Findings:
 
     high: int
 
-
 # The motivating pair: one model per provider, in one workflow. Two `@role(model=…)` factories,
 # which is what a role declaration is - the model is on the decorator, where preflight can read it
 # without calling anything, and the `Role` is what the call below produces. These two names being
 # bound *in this module* is the whole of what makes them the workflow below's roles: there is no
 # list on the decorator, and the namespace is the registry.
 
-
 @role(model=Claude.OPUS)
 def implementer() -> Role:
     """An effect role, so that the pair below is one `Role[None]` and one `Role[Findings]`."""
     return Role(name="implement", instructions="implement it")
-
 
 @role(model=OpenAI.SOL)
 def reviewer() -> Role[Findings]:
@@ -168,7 +155,6 @@ def reviewer() -> Role[Findings]:
         tools=[reporting_tool("report_findings", "report what you found", Findings)],
     )
 
-
 @workflow(version="1.1")
 async def staffed(run: Run[NoParams]) -> None:
     """A workflow written beside two role factories and declaring neither, because there is
@@ -176,17 +162,14 @@ async def staffed(run: Run[NoParams]) -> None:
     preflight reads. Nothing runs it here - `tests/sdk/test_preflight.py` is where the namespace
     is spent."""
 
-
 # The load that succeeds into the wrong type. `test_registry.py` uses a string for this too.
 _not_a_workflow = "a workflow name is not a workflow"
-
 
 def _returns_an_awaitable(run: Run[NoParams]) -> Awaitable[None]:
     """A plain function satisfying `Callable[[Run[P]], Awaitable[None]]` and never yielding to the
     event loop. It type-checks as a workflow's function exactly, which is why the check that
     refuses it has to be at runtime."""
     raise AssertionError("`@workflow` refuses this before anything can call it")
-
 
 # --- the five ways a first parameter declares no params, none of which is read as "no params" ----
 #
@@ -196,33 +179,26 @@ def _returns_an_awaitable(run: Run[NoParams]) -> Awaitable[None]:
 # are declared undecorated here and decorated inside `_params_of` below, so that the one `cast` this
 # file needs sits in one place with the argument for it.
 
-
 async def _takes_nothing() -> None:
     """A workflow function with no parameters at all - not even the `Run` it is handed."""
-
 
 async def _unannotated(run) -> None:  # type: ignore[no-untyped-def]
     """The one that matters most. A reader sees `run` and reads "a `Run`"; the resolver sees an
     annotation that was never written, and the two must not be treated as the same statement."""
 
-
 async def _not_a_run(run: int) -> None:
     """An annotation that resolves perfectly and is not a `Run`."""
 
-
 class _MyRun[P = object](Run[P]):
     """A subclass of `Run`, which nothing in AGL builds and `_declared` therefore refuses."""
-
 
 async def _a_run_subclass(run: _MyRun[NoParams]) -> None:
     """`_MyRun` names a params class and is still refused: the framework hands a workflow the `Run`
     it built, so the annotation would be describing an object this run cannot produce."""
 
-
 async def _unresolvable(run: Run[Undeclared]) -> None:  # type: ignore[name-defined] # noqa: F821
     """An annotation naming something nothing binds. Python 3.14 evaluates no annotation at the
     `def`, so this file imports; `get_type_hints` is where the `NameError` arrives."""
-
 
 def _params_of(fn: Callable[..., Awaitable[None]]) -> type[object]:
     """`@workflow` applied to `fn`, and `wf.params` then read - the two moments, separated.
@@ -242,13 +218,11 @@ def _params_of(fn: Callable[..., Awaitable[None]]) -> type[object]:
     wf: Workflow[object] = workflow(version="1.1")(declared)
     return wf.params
 
-
 def _services(tmp_path: Path) -> Services:
     """A bundle from the composition root, on fakes alone, and the only honest way to fill
     eight fields typed as port ABCs. `run.step` is what reads it, and reads it lazily: no port
     below is touched by building a `Run` or by any test in this file."""
     return container.fakes(TreesRoot(tmp_path / "trees")).services
-
 
 def _run[P](params: P, tmp_path: Path, *, fingerprints: Fingerprints | None = None) -> Run[P]:
     """A `Run` over a fakes bundle at a fixed scope and base.
@@ -264,14 +238,11 @@ def _run[P](params: P, tmp_path: Path, *, fingerprints: Fingerprints | None = No
         fingerprints=Fingerprints() if fingerprints is None else fingerprints,
     )
 
-
 def _point(name: str, attribute: str) -> EntryPoint:
     """The `tickets = "agl.workflows.tickets:tickets"` entry point, pointed at this module."""
     return EntryPoint(name=name, value=f"{__name__}:{attribute}", group=registry.GROUP)
 
-
 # --- what the decorator produces ---------------------------------------------------------------
-
 
 def test_a_decorated_async_function_is_a_workflow_object() -> None:
     """The decorated name *is* the entry point's target, so it has to be the `Workflow` itself."""
@@ -279,14 +250,11 @@ def test_a_decorated_async_function_is_a_workflow_object() -> None:
     assert_type(tickets, Workflow[TicketsParams])
     assert (tickets.version, tickets.params) == ("1.1", TicketsParams)
 
-
 def test_the_decorator_holds_the_function_unwrapped() -> None:
     """`api.py` awaits this. Nothing is wrapped around it, so a traceback names the workflow."""
     assert tickets.fn.__qualname__ == "tickets"
 
-
 # --- what the decorator no longer takes, and where preflight looks instead -----------------------
-
 
 def test_a_workflow_holds_a_version_and_a_function_and_derives_the_rest() -> None:
     """The whole content of three removals, read off the class rather than off their prose.
@@ -313,7 +281,6 @@ def test_a_workflow_holds_a_version_and_a_function_and_derives_the_rest() -> Non
     assert [held.name for held in fields(Workflow)] == ["version", "fn"]
     assert isinstance(vars(Workflow)["params"], property)
 
-
 def test_the_registry_preflight_reads_is_the_module_the_function_was_written_in() -> None:
     """What replaced the declaration, asserted as a namespace rather than argued as prose.
 
@@ -332,15 +299,12 @@ def test_the_registry_preflight_reads_is_the_module_the_function_was_written_in(
     }
     assert bound == {"implementer": Claude.OPUS, "reviewer": OpenAI.SOL}
 
-
 # --- the narrowing `registry.load` performs ----------------------------------------------------
-
 
 def test_the_registry_narrows_a_loaded_entry_point_to_this_class() -> None:
     """The exact `isinstance` `config/registry.py` defers to this deliverable, driven for real."""
     loaded: Workflow[object] = registry.load([_point("tickets", "tickets")], "tickets", Workflow)
     assert loaded is tickets
-
 
 def test_something_that_is_not_a_workflow_is_refused_with_the_registrys_input_error() -> None:
     """The hole `Workflow` exists to close: an entry point that loads and is the wrong thing.
@@ -350,7 +314,6 @@ def test_something_that_is_not_a_workflow_is_refused_with_the_registrys_input_er
     """
     with pytest.raises(InputError, match=r"agl\.sdk\.workflow\.Workflow"):
         registry.load([_point("tickets", "_not_a_workflow")], "tickets", Workflow)
-
 
 @pytest.mark.asyncio
 async def test_the_chain_api_py_will_write_carries_no_any(tmp_path: Path) -> None:
@@ -375,9 +338,7 @@ async def test_the_chain_api_py_will_write_carries_no_any(tmp_path: Path) -> Non
     await wf.fn(run)
     assert run.params == parse(wf.params, [])
 
-
 # --- `run.params`, and the bundle beside it ----------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_the_run_carries_the_params_instance_the_workflow_declared(tmp_path: Path) -> None:
@@ -390,13 +351,11 @@ async def test_the_run_carries_the_params_instance_the_workflow_declared(tmp_pat
     assert _handed == [run]
     assert _handed[0].params == TicketsParams(request="add oauth", concurrent=4)
 
-
 def test_the_run_carries_the_bundle_the_container_built(tmp_path: Path) -> None:
     """The same object, not a copy: `run.step` reaches every port through this, so a `Run` holding
     a bundle assembled elsewhere would be a workflow writing to a second ledger."""
     services = _services(tmp_path)
     assert Run(params=NoParams(), services=services, scope=SCOPE, base=BASE).services is services
-
 
 def test_the_run_carries_the_address_and_the_base_api_py_already_computed(tmp_path: Path) -> None:
     """`scope` and `base` are `api.run`'s two locals, handed over rather than re-derived. Both are
@@ -404,7 +363,6 @@ def test_the_run_carries_the_address_and_the_base_api_py_already_computed(tmp_pa
     at - and neither is reachable from anything else a `Run` holds."""
     run = _run(NoParams(), tmp_path)
     assert (run.scope, run.base) == (SCOPE, BASE)
-
 
 def test_a_run_can_be_handed_the_counter_a_parent_is_already_using(tmp_path: Path) -> None:
     """The seam, still pinned here where it is cheapest to.
@@ -418,7 +376,6 @@ def test_a_run_can_be_handed_the_counter_a_parent_is_already_using(tmp_path: Pat
     """
     counter = Fingerprints()
     assert _run(NoParams(), tmp_path, fingerprints=counter).fingerprints is counter
-
 
 def test_a_run_holds_nothing_it_did_not_declare(tmp_path: Path) -> None:
     """Slotted, so the surface is the fields below, and an attribute a caller attached to a `Run`
@@ -476,23 +433,18 @@ def test_a_run_holds_nothing_it_did_not_declare(tmp_path: Path) -> None:
             _steps=None,  # type: ignore[call-arg]
         )
 
-
 # --- `Stop`, and the ordering hazard it comes with ---------------------------------------------
-
 
 class ReviewNotConverging(Stop):
     """The standing example of a workflow's reason, declared against the SDK's import of `Stop`."""
-
 
 def test_stop_imported_from_the_sdk_is_the_ports_class_itself() -> None:
     """The same class object, not a compatible copy - see this module's docstring for the cost."""
     assert Stop is errors.Stop
 
-
 def test_a_workflows_own_stop_subclass_resolves_to_seven() -> None:
     """`exit_code_for` walks the MRO, so a reason the framework never heard of exits 7 anyway."""
     assert exit_code_for(ReviewNotConverging("the reviewer keeps finding the same thing")) == 7
-
 
 def test_a_broad_except_aglerror_catches_stop_which_is_why_ordering_matters() -> None:
     """The trap, pinned rather than described. A workflow's retry loop written `except AglError`
@@ -506,9 +458,7 @@ def test_a_broad_except_aglerror_catches_stop_which_is_why_ordering_matters() ->
             assert exit_code_for(caught) == 7
             raise
 
-
 # --- the params, read off the annotation the author already wrote ------------------------------
-
 
 def test_a_subscripted_run_declares_the_class_it_names() -> None:
     """`run: Run[TicketsParams]` and `wf.params is TicketsParams`, which is the whole mechanism.
@@ -519,7 +469,6 @@ def test_a_subscripted_run_declares_the_class_it_names() -> None:
     copy that used to sit on the decorator beside it."""
     assert tickets.params is TicketsParams
     assert_type(tickets.params, type[TicketsParams])
-
 
 def test_a_bare_run_means_no_params_and_not_the_absence_of_a_declaration() -> None:
     """A workflow that never reads its params writes `async def fix(run: Run) -> None`, and
@@ -532,7 +481,6 @@ def test_a_bare_run_means_no_params_and_not_the_absence_of_a_declaration() -> No
     assert is_dataclass(fix.params)
     assert fields(fix.params) == ()
 
-
 def test_agl_run_on_a_params_less_workflow_parses_an_empty_line_and_no_other() -> None:
     """The half of "no params" that a `type[object]` would have got wrong in both directions.
 
@@ -543,7 +491,6 @@ def test_agl_run_on_a_params_less_workflow_parses_an_empty_line_and_no_other() -
     assert parse(fix.params, []) == parse(fix.params, [])
     with pytest.raises(InputError, match="unrecognized arguments"):
         parse(fix.params, ["--anything"])
-
 
 def test_a_params_class_declared_below_its_own_workflow_resolves() -> None:
     """The laziness, and the test that goes red if the read moves back to decoration time.
@@ -558,9 +505,7 @@ def test_a_params_class_declared_below_its_own_workflow_resolves() -> None:
     assert deferred.params is DeferredParams
     assert parse(deferred.params, ["-r", "add oauth"]) == DeferredParams(request="add oauth")
 
-
 # --- refusals: two at import time, and five at the first read of `params` -----------------------
-
 
 def _refused(fn: Callable[..., Awaitable[None]]) -> str:
     """The message `wf.params` refuses `fn` with, having first checked what every one of them has to
@@ -579,7 +524,6 @@ def _refused(fn: Callable[..., Awaitable[None]]) -> str:
     assert f"{fn.__code__.co_filename}:{fn.__code__.co_firstlineno}" in message
     return message
 
-
 @pytest.mark.parametrize("version", ["", "\t"])
 def test_a_blank_version_is_refused(version: str) -> None:
     """`RunSpec.workflow_version` refuses an empty one, so a run declared this way could not be
@@ -594,7 +538,6 @@ def test_a_blank_version_is_refused(version: str) -> None:
     with pytest.raises(InputError, match="version is required"):
         workflow(version=version)
 
-
 def test_a_function_that_is_not_a_coroutine_function_is_refused() -> None:
     """No `type: ignore` here on purpose: `_returns_an_awaitable` satisfies the declared parameter
     type exactly, and mypy has nothing to say about it. That is the whole case for the check."""
@@ -602,11 +545,9 @@ def test_a_function_that_is_not_a_coroutine_function_is_refused() -> None:
     with pytest.raises(InputError, match="async def"):
         declare(_returns_an_awaitable)
 
-
 def test_a_workflow_function_taking_no_parameters_is_refused() -> None:
     """There is nowhere for a params class to be declared, and nothing to hand a `Run` to."""
     assert "takes no parameters" in _refused(_takes_nothing)
-
 
 def test_an_unannotated_first_parameter_is_not_read_as_a_bare_run() -> None:
     """The refusal this deliverable exists to make, and the one a default would have swallowed.
@@ -619,11 +560,9 @@ def test_an_unannotated_first_parameter_is_not_read_as_a_bare_run() -> None:
     asked about no models and the run died at its first step instead of before it started."""
     assert "annotates nothing on its first parameter" in _refused(_unannotated)
 
-
 def test_a_first_parameter_that_is_not_a_run_is_refused() -> None:
     """An annotation that resolves perfectly and names something a workflow is never handed."""
     assert "async function taking a `Run`" in _refused(_not_a_run)
-
 
 def test_a_run_subclass_is_refused_rather_than_read_through() -> None:
     """`_MyRun[NoParams]` names a params class and is still refused, which is the deliberate half.
@@ -637,7 +576,6 @@ def test_a_run_subclass_is_refused_rather_than_read_through() -> None:
     params."""
     assert "subclass of `Run`" in _refused(_a_run_subclass)
 
-
 def test_an_annotation_naming_something_unresolvable_is_refused_as_an_input_error() -> None:
     """`get_type_hints` raises `NameError` here, and a workflow package's typo is not a crash.
 
@@ -646,7 +584,6 @@ def test_an_annotation_naming_something_unresolvable_is_refused_as_an_input_erro
     shape reused rather than reinvented, with the original chained so the traceback still shows the
     name."""
     assert "cannot be resolved" in _refused(_unresolvable)
-
 
 def test_the_original_error_is_chained_onto_the_refusal() -> None:
     """`raise ... from error`, so `NameError: name 'Undeclared' is not defined` is still in the

@@ -28,7 +28,6 @@ non-finite floats, and anything that would need a key which is not a `str`.
 
 import hashlib
 from typing import Final
-
 from agl.ports.home_layout import RunScope
 from agl.ports.ids import Namespace, ProjectName, RunLabel, StepName
 from agl.ports.run import JsonValue
@@ -54,7 +53,6 @@ OTHER_STEP: Final = StepName("review_quality")
 # document here, and a document that differs from another differs somewhere that matters.
 _AT: Final = "2026-08-18T09:16:41Z"
 
-
 def digest(seed: str) -> str:
     """A digest the way the journal makes one: sha256, hexdigest, 64 lowercase hex characters.
 
@@ -62,7 +60,6 @@ def digest(seed: str) -> str:
     same address in two tests, with nothing to keep in step by hand.
     """
     return hashlib.sha256(seed.encode("utf-8")).hexdigest()
-
 
 def entry(marker: str, *, value: JsonValue = None) -> dict[str, JsonValue]:
     """One step entry, its four fields, every one of them derived from `marker`.
@@ -76,7 +73,6 @@ def entry(marker: str, *, value: JsonValue = None) -> dict[str, JsonValue]:
         "head": digest(f"head:{marker}")[:40],
         "at": _AT,
     }
-
 
 def record(marker: str) -> dict[str, JsonValue]:
     """One run record, shaped like `run.json`, carrying a nested `params`.
@@ -94,7 +90,6 @@ def record(marker: str) -> dict[str, JsonValue]:
         "params": {"request": marker, "concurrent": 4, "tickets": ["T-01", "T-02"]},
         "created_at": _AT,
     }
-
 
 # Every shape `JsonValue` admits, as one document. The unicode string carries a character AGL
 # refuses in a *name* on purpose: names are ASCII and values are not, and an

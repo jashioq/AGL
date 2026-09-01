@@ -21,9 +21,7 @@ from dataclasses import MISSING, FrozenInstanceError, fields
 from math import inf, nan
 from pathlib import Path
 from typing import Final
-
 import pytest
-
 from agl.config.schema import AgentSettings, ClaudeSettings, OpenAiSettings, Project, Settings
 from agl.ports.agent import Provider
 from agl.ports.errors import InputError
@@ -43,9 +41,7 @@ _PROJECT: Final = Project(
     build_timeout=600,
 )
 
-
 # --- The shapes -------------------------------------------------------------------------------
-
 
 def test_a_project_holds_exactly_the_five_fields_init_writes_into_the_file() -> None:
     """`agl init` writes that file. A sixth field is a sixth thing every project answers for."""
@@ -62,13 +58,11 @@ def test_a_project_holds_exactly_the_five_fields_init_writes_into_the_file() -> 
     assert _PROJECT.build == "./gradlew build"
     assert _PROJECT.build_timeout == 600
 
-
 def test_settings_holds_the_home_and_the_agent_sections_and_nothing_from_a_project() -> None:
     """`agl init` and `agl workflows` construct this where no project file exists yet."""
     assert tuple(field.name for field in fields(Settings)) == ("home", "agents")
     assert _SETTINGS.home == AglHome(Path("/agl-home"))
     assert _SETTINGS.agents is _AGENTS
-
 
 def test_there_is_one_agent_section_per_provider_member() -> None:
     """The fix for flat, single-sourced configuration: a provider with no section is a provider
@@ -76,7 +70,6 @@ def test_there_is_one_agent_section_per_provider_member() -> None:
     assert {field.name for field in fields(AgentSettings)} == {str(one) for one in Provider}
     assert _SETTINGS.agents.claude is _CLAUDE
     assert _SETTINGS.agents.openai is _OPENAI
-
 
 def test_the_two_connector_sections_are_distinct_types_neither_derived_from_the_other() -> None:
     """One type reused would grow a field its sibling has no meaning for. Two cannot.
@@ -95,9 +88,7 @@ def test_the_two_connector_sections_are_distinct_types_neither_derived_from_the_
     openai: object = OpenAiSettings(enabled=True, cli_path=None)
     assert claude != openai, "identical values in two sections are still not interchangeable"
 
-
 # --- No defaults, and the consequence the module relies on --------------------------------------
-
 
 def test_no_field_on_any_of_these_types_carries_a_default() -> None:
     """A default here would be a precedence layer `sources.py` never composed and cannot see."""
@@ -107,7 +98,6 @@ def test_no_field_on_any_of_these_types_carries_a_default() -> None:
             assert field.default_factory is MISSING, (
                 f"{holder.__name__}.{field.name} has a default factory"
             )
-
 
 # The capital is `TypeError`, a real class name, inside a name that reads as a sentence - which is
 # the test-naming rule working rather than failing. N802 stays selected everywhere else, because a
@@ -130,7 +120,6 @@ def test_omitting_any_value_is_a_TypeError_rather_than_a_quietly_supplied_one() 
             build="make",
         )
 
-
 def test_a_missing_value_fails_before_any_validation_this_module_does() -> None:
     """`TypeError`, not `InputError`: nothing was supplied to refuse, so it is not a settings fault.
 
@@ -145,9 +134,7 @@ def test_a_missing_value_fails_before_any_validation_this_module_does() -> None:
             build="   ",
         )
 
-
 # --- Immutability -------------------------------------------------------------------------------
-
 
 def test_every_settings_object_is_frozen() -> None:
     """Validated once on the way in is worth nothing if the value can be edited afterwards."""
@@ -162,9 +149,7 @@ def test_every_settings_object_is_frozen() -> None:
     with pytest.raises(FrozenInstanceError):
         _PROJECT.build_timeout = 0.0  # type: ignore[misc]
 
-
 # --- What the constructors refuse ---------------------------------------------------------------
-
 
 def test_a_relative_repo_is_refused() -> None:
     """It would resolve against whatever directory the process started in."""
@@ -177,7 +162,6 @@ def test_a_relative_repo_is_refused() -> None:
             build_timeout=60.0,
         )
 
-
 @pytest.mark.parametrize("build", ["", " ", "\t\n  "])
 def test_a_blank_build_command_is_refused(build: str) -> None:
     """A gate that runs nothing passes everything, which is worse than having no gate."""
@@ -189,7 +173,6 @@ def test_a_blank_build_command_is_refused(build: str) -> None:
             build=build,
             build_timeout=60.0,
         )
-
 
 @pytest.mark.parametrize("timeout", [0.0, -1.0, -600.0, inf, -inf, nan])
 def test_a_build_timeout_that_is_not_a_finite_positive_number_of_seconds_is_refused(
@@ -205,7 +188,6 @@ def test_a_build_timeout_that_is_not_a_finite_positive_number_of_seconds_is_refu
             build_timeout=timeout,
         )
 
-
 def test_a_relative_cli_path_is_refused_by_each_section_under_its_own_name() -> None:
     """Both sections check it, and each says which section the operator should go and edit."""
     with pytest.raises(InputError, match="claude cli_path"):
@@ -213,15 +195,12 @@ def test_a_relative_cli_path_is_refused_by_each_section_under_its_own_name() -> 
     with pytest.raises(InputError, match="openai cli_path"):
         OpenAiSettings(enabled=True, cli_path=Path("../bin/harness"))
 
-
 def test_an_absent_cli_path_is_a_value_and_not_a_refusal() -> None:
     """`None` means "resolve it from PATH", which is a decision the adapter carries out."""
     assert ClaudeSettings(enabled=True, cli_path=None).cli_path is None
     assert OpenAiSettings(enabled=False, cli_path=None).cli_path is None
 
-
 # --- Where the refusals stop --------------------------------------------------------------------
-
 
 def test_the_roots_enforce_their_own_absoluteness_and_it_is_not_re_checked_here() -> None:
     """A relative root never reaches `Project` or `Settings`: the wrapper refuses it first."""
@@ -229,7 +208,6 @@ def test_the_roots_enforce_their_own_absoluteness_and_it_is_not_re_checked_here(
         TreesRoot(Path("relative/trees"))
     with pytest.raises(InputError, match="AGL_HOME"):
         AglHome(Path("relative/home"))
-
 
 def test_nothing_is_asked_of_the_filesystem() -> None:
     """Pure functions of their arguments: existence is preflight's question, not this module's."""
@@ -244,7 +222,6 @@ def test_nothing_is_asked_of_the_filesystem() -> None:
     assert ClaudeSettings(enabled=True, cli_path=Path("/no/such/claude")).cli_path == Path(
         "/no/such/claude"
     )
-
 
 def test_a_provider_can_be_configured_without_anything_claiming_it_is_available() -> None:
     """Configured is not available: there is no field here that could hold the second answer.

@@ -43,9 +43,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from types import MappingProxyType
 from typing import Final
-
 import pytest
-
 from agl.ports.agent import Claude, ModelId, Restriction, Tool, ToolResult
 from agl.ports.errors import InputError, exit_code_for
 from agl.ports.home_layout import AglHome, RunScope, step_entry
@@ -67,12 +65,10 @@ _BASE: Final = "9f2c4e" + "b" * 54 + "a71b"
 # moved". See the test that spends it.
 _UNMOVED: Final = "7306ba76493375197951fdd5b434cb08750602dc6e0c226b5997346c5037e46d"
 
-
 async def _never_called(payload: Mapping[str, JsonValue]) -> ToolResult:
     """A handler is a callable and a callable's `repr` carries an object id, so no fingerprint may
     hold one. Nothing in this suite runs an agent, which is why nothing calls this."""
     return ToolResult(text="")
-
 
 _HANDLER: Final[Callable[[Mapping[str, JsonValue]], Awaitable[ToolResult]]] = _never_called
 _SCHEMA: Final[Mapping[str, JsonValue]] = MappingProxyType(
@@ -82,7 +78,6 @@ _INPUTS: Final[Mapping[str, object]] = MappingProxyType({"request": "add oauth",
 _RESTRICTIONS: Final[AbstractSet[Restriction]] = frozenset(
     {Restriction.NO_VCS_WRITES, Restriction.NO_NETWORK}
 )
-
 
 def _tool(
     *,
@@ -94,7 +89,6 @@ def _tool(
     return Tool(
         name=name, description=description, payload_schema=payload_schema, handler=_HANDLER
     )
-
 
 def _base(
     *,
@@ -115,11 +109,9 @@ def _base(
         head=head,
     )
 
-
 def _digest(base: str, count: int) -> str:
     """The digest line, written out rather than imported: `sha256(base + ":" + str(n))`."""
     return hashlib.sha256(f"{base}:{count}".encode()).hexdigest()
-
 
 def _take(counter: Fingerprints, scope: RunScope, step: StepName, base: str = _BASE) -> str:
     """One address, and the claim that follows an entry landing at it.
@@ -133,9 +125,7 @@ def _take(counter: Fingerprints, scope: RunScope, step: StepName, base: str = _B
     counter.claim(scope, step, base)
     return digest
 
-
 # --- The counter advances on a claim, and a claim is an entry ------------------------------------
-
 
 def test_asking_for_an_address_twice_is_the_same_address_twice() -> None:
     """`digest` is a query and asking it is not an event.
@@ -149,7 +139,6 @@ def test_asking_for_an_address_twice_is_the_same_address_twice() -> None:
     counter = Fingerprints()
     assert counter.digest(_SCOPE, _STEP, _BASE) == counter.digest(_SCOPE, _STEP, _BASE)
     assert counter.digest(_SCOPE, _STEP, _BASE) == _digest(_BASE, 0)
-
 
 def test_a_step_that_claims_nothing_leaves_the_next_call_at_the_same_address() -> None:
     """The other half, and the reason for it: a step that crashed consumed no slot.
@@ -169,9 +158,7 @@ def test_a_step_that_claims_nothing_leaves_the_next_call_at_the_same_address() -
     assert crashed == retried == _digest(_BASE, 0), "an invocation that claimed nothing advanced n"
     assert after == _digest(_BASE, 1), "an entry was claimed and the next call did not move on"
 
-
 # --- The scoped counter: the counter's key is (namespace, step name) -----------------------------
-
 
 def test_two_concurrent_siblings_both_get_n_zero_rather_than_racing_for_it() -> None:
     """The failure a per-invocation counter produces, and the reason the counter is scoped.
@@ -187,7 +174,6 @@ def test_two_concurrent_siblings_both_get_n_zero_rather_than_racing_for_it() -> 
     second = _take(counter, _SCOPE.inside(Namespace("T-02")), _STEP)
     assert first == _digest(_BASE, 0)
     assert second == _digest(_BASE, 0)
-
 
 def test_the_order_two_siblings_happen_to_run_in_does_not_decide_either_digest() -> None:
     """The same claim from the angle that actually differs between a run and its resume.
@@ -209,14 +195,12 @@ def test_the_order_two_siblings_happen_to_run_in_does_not_decide_either_digest()
     }
     assert one_way == other_way
 
-
 def test_a_retry_loop_in_one_scope_counts_up_so_it_cannot_hit_its_own_cache() -> None:
     """Why the counter: same role, no inputs, no commits, and nothing else varying."""
     counter = Fingerprints()
     digests = [_take(counter, _SCOPE, _STEP) for _ in range(3)]
     assert digests == [_digest(_BASE, 0), _digest(_BASE, 1), _digest(_BASE, 2)]
     assert len(set(digests)) == 3
-
 
 def test_two_step_names_in_one_scope_count_independently() -> None:
     """`steps/review_quality/` and `steps/review_security/` are two directories, so two ledgers.
@@ -229,7 +213,6 @@ def test_two_step_names_in_one_scope_count_independently() -> None:
     quality = _take(counter, _SCOPE, StepName("review_quality"))
     security = _take(counter, _SCOPE, StepName("review_security"))
     assert quality == security == _digest(_BASE, 0)
-
 
 def test_two_spellings_of_one_step_name_count_as_one_ledger_because_they_are_one_directory() -> (
     None
@@ -255,7 +238,6 @@ def test_two_spellings_of_one_step_name_count_as_one_ledger_because_they_are_one
     assert lowercase == _digest(_BASE, 1), "two spellings of one directory both claimed n = 0"
     assert capitalised != lowercase
 
-
 def test_folding_the_counter_key_moves_no_digest_a_single_spelling_ever_wrote() -> None:
     """The fold is not a stored-format change, and this is the proof rather than the claim.
 
@@ -277,13 +259,11 @@ def test_folding_the_counter_key_moves_no_digest_a_single_spelling_ever_wrote() 
         "two lowercase names that were two counts became one"
     )
 
-
 def test_a_digest_is_a_filename_the_layout_will_spend_without_asking_again() -> None:
     """The consumer: `home_layout._checked_digest` refuses anything that is not 64 lowercase hex."""
     digest = Fingerprints().digest(_SCOPE, _STEP, _base())
     entry = step_entry(AglHome(Path("/agl-home")), _SCOPE, _STEP, digest)
     assert entry.name == f"{digest}.json"
-
 
 # --- Sort every set, and no `repr()` shortcut, which only a second process can prove -------------
 
@@ -322,7 +302,6 @@ print(base_of(instructions="fix", model=Claude.SONNET, restrictions=frozenset(),
 print(repr(findings[0]))
 """
 
-
 def _under_seeds(script: str) -> list[list[str]]:
     """`script` run once per seed in a fresh interpreter, each run's stdout split into lines.
 
@@ -343,7 +322,6 @@ def _under_seeds(script: str) -> list[list[str]]:
         assert finished.returncode == 0, f"PYTHONHASHSEED={seed} child failed:\n{finished.stderr}"
         runs.append(finished.stdout.splitlines())
     return runs
-
 
 def test_a_set_of_restrictions_fingerprints_the_same_in_every_process() -> None:
     """Sort every set, and it cannot be shown here: within one interpreter the order never changes.
@@ -366,7 +344,6 @@ def test_a_set_of_restrictions_fingerprints_the_same_in_every_process() -> None:
         f"them gave {orders} - so this test proves nothing and needs new seeds"
     )
 
-
 def test_a_dataclass_in_inputs_fingerprints_the_same_in_every_process() -> None:
     """No `repr()` shortcut, same argument: one object's `id()` does not move while it is alive.
 
@@ -388,9 +365,7 @@ def test_a_dataclass_in_inputs_fingerprints_the_same_in_every_process() -> None:
         f"and this test cannot tell a repr() shortcut apart from walking the fields"
     )
 
-
 # --- No `repr()` shortcut, in this process: what the refusal has to say --------------------------
-
 
 def test_a_value_the_walker_cannot_take_names_its_type_and_the_path_to_it() -> None:
     """`inputs.findings[0].deadline is a datetime` - the type alone would not be findable.
@@ -414,13 +389,11 @@ def test_a_value_the_walker_cannot_take_names_its_type_and_the_path_to_it() -> N
     assert "datetime" in message, message
     assert "fingerprint" in message, "the message has to say why, not only what"
 
-
 def test_a_plain_object_in_inputs_is_refused_at_the_key_that_holds_it() -> None:
     """The shallow case, which is the one somebody actually hits first."""
     with pytest.raises(InputError) as caught:
         _base(inputs={"handle": object()})
     assert "inputs.handle is a object" in str(caught.value)
-
 
 def test_the_walkers_other_refusals_each_name_what_they_found() -> None:
     """Non-finite floats, non-string keys, surrogates, and a dataclass class rather than one of it.
@@ -444,7 +417,6 @@ def test_the_walkers_other_refusals_each_name_what_they_found() -> None:
         canonical_json({"text": chr(0xD83D) + chr(0xDE00)})
     with pytest.raises(InputError, match="cannot be canonicalised"):
         canonical_json({"finding": Finding})
-
 
 # The one lone surrogate both modules below are asked about - built with `chr`, and deliberately not
 # written as the escape `"\ud800"`.
@@ -472,7 +444,6 @@ _RECORD: Final[dict[str, JsonValue]] = {
     "params": {},
     "created_at": "2026-08-18T09:14:02Z",
 }
-
 
 def test_both_surrogate_checks_in_agl_answer_one_string_with_one_exit_code() -> None:
     """One scan now answers both, and the two refusals still name what they each cost.
@@ -529,7 +500,6 @@ def test_both_surrogate_checks_in_agl_answer_one_string_with_one_exit_code() -> 
         "encode the document, refused at the call that still knows what it handed over"
     )
 
-
 # --- The qualified type name: a dataclass contributes its own ------------------------------------
 
 # Two pairs of twins, and the pairs differ in where the swap is. `Finding`/`Ticket` are the pair
@@ -538,33 +508,27 @@ def test_both_surrogate_checks_in_agl_answer_one_string_with_one_exit_code() -> 
 # declared with the same field names in the same order and is only ever built with the same values,
 # so the sole difference between the two canonical texts is the qualified type name.
 
-
 @dataclass(frozen=True)
 class Finding:
     ticket: str
     severity: int
-
 
 @dataclass(frozen=True)
 class Ticket:
     ticket: str
     severity: int
 
-
 @dataclass(frozen=True)
 class Inner:
     tokens: int
-
 
 @dataclass(frozen=True)
 class Other:
     tokens: int
 
-
 @dataclass(frozen=True)
 class Outer:
     budget: Inner | Other
-
 
 @dataclass(frozen=True)
 class _Elsewhere:
@@ -580,10 +544,8 @@ class _Elsewhere:
     ticket: str
     severity: int
 
-
 _Elsewhere.__qualname__ = "Finding"
 _Elsewhere.__module__ = "another.package"
-
 
 @dataclass(frozen=True)
 class _Smuggled:
@@ -595,7 +557,6 @@ class _Smuggled:
     """
 
     __agl_type__: str
-
 
 def test_two_dataclasses_with_one_shape_are_two_fingerprints() -> None:
     """The qualified type name's own pair, and the one failure here that is a false cache **hit**.
@@ -613,7 +574,6 @@ def test_two_dataclasses_with_one_shape_are_two_fingerprints() -> None:
         "the two twins no longer hold the same values, so this test would pass on the values alone"
     )
 
-
 def test_two_identically_named_dataclasses_in_two_modules_are_two_fingerprints() -> None:
     """The name is qualified: `__module__` and `__qualname__`, not `__name__`.
 
@@ -627,7 +587,6 @@ def test_two_identically_named_dataclasses_in_two_modules_are_two_fingerprints()
     assert _base(inputs={"finding": Finding("T-01", 3)}) != _base(
         inputs={"finding": _Elsewhere("T-01", 3)}
     )
-
 
 def test_a_nested_dataclass_carries_its_own_type_and_not_only_the_outermost_one() -> None:
     """Where `dataclasses.asdict` defeats the obvious fix, spelled as a test.
@@ -648,7 +607,6 @@ def test_a_nested_dataclass_carries_its_own_type_and_not_only_the_outermost_one(
     assert _base(inputs={"plan": {"a": Outer(Inner(1))}}) != _base(
         inputs={"plan": {"a": Outer(Other(1))}}
     )
-
 
 def test_the_type_name_is_written_under_one_reserved_key_that_nothing_else_may_hold() -> None:
     """The encoding, pinned - and the refusal that makes it one-to-one.
@@ -671,9 +629,7 @@ def test_the_type_name_is_written_under_one_reserved_key_that_nothing_else_may_h
     with pytest.raises(InputError, match="reserves"):
         canonical_json(_Smuggled("test_journal.Inner"))
 
-
 # --- What a tool contributes, and what it must not -----------------------------------------------
-
 
 def test_a_tool_built_the_ordinary_way_fingerprints_although_json_cannot_take_its_schema() -> None:
     """`Tool.__post_init__` wraps the schema in a `MappingProxyType`, and `json.dumps` refuses one.
@@ -687,7 +643,6 @@ def test_a_tool_built_the_ordinary_way_fingerprints_although_json_cannot_take_it
         json.dumps(tool.payload_schema)
     assert len(_base(tools=(tool,))) == 64
 
-
 def test_a_mapping_is_rebuilt_at_every_depth_and_not_only_at_the_top() -> None:
     """One `dict()` at the top level would leave a proxy nested inside a schema raising `TypeError`.
 
@@ -698,7 +653,6 @@ def test_a_mapping_is_rebuilt_at_every_depth_and_not_only_at_the_top() -> None:
     with pytest.raises(TypeError):
         json.dumps(nested)
     assert canonical_json(nested) == '{"properties":{"id":{"type":"string"}}}'
-
 
 def test_two_tools_differing_only_in_their_handler_are_one_fingerprint() -> None:
     """The handler is a callable whose `repr` embeds an object id, so it is not a term at all.
@@ -720,15 +674,12 @@ def test_two_tools_differing_only_in_their_handler_are_one_fingerprint() -> None
     assert declared.handler is not rebuilt.handler
     assert _base(tools=(declared,)) == _base(tools=(rebuilt,))
 
-
 def test_tools_keep_their_declared_order_rather_than_being_sorted_like_a_set() -> None:
     """A tuple's order is the author's and is stable across processes, so it is a real term."""
     first, second = _tool(name="report_tickets"), _tool(name="ask_the_operator")
     assert _base(tools=(first, second)) != _base(tools=(second, first))
 
-
 # --- The canonical text: what "canonical" means --------------------------------------------------
-
 
 def test_insertion_order_is_not_part_of_the_canonical_text() -> None:
     """`sort_keys=True`. Two dicts built by different code paths hold the same pairs, not the same
@@ -738,7 +689,6 @@ def test_insertion_order_is_not_part_of_the_canonical_text() -> None:
         inputs={"concurrent": 4, "request": "add oauth"}
     )
 
-
 def test_the_separators_are_the_compact_ones_at_every_depth() -> None:
     """`separators=(",", ":")`. Under `json.dumps`'s defaults this same value carries `", "` and
     `": "`, so their absence is the assertion and the whole text is pinned beside it."""
@@ -747,7 +697,6 @@ def test_the_separators_are_the_compact_ones_at_every_depth() -> None:
     assert ", " in json.dumps(value) and ": " in json.dumps(value), "the default this replaces"
     assert ", " not in text and ": " not in text
     assert text == '{"outer":{"a":[1,2],"b":"x"}}'
-
 
 def test_a_non_ascii_value_is_escaped_because_the_escaping_is_a_stored_format_too() -> None:
     """`ensure_ascii=True`, pinned - and nothing else in this file can see which spelling was used.
@@ -770,14 +719,12 @@ def test_a_non_ascii_value_is_escaped_because_the_escaping_is_a_stored_format_to
         {"who": "caf\xe9"}, sort_keys=True, separators=(",", ":"), ensure_ascii=False
     ), "the other spelling of the same value, which would fingerprint as a different step"
 
-
 def test_a_bool_and_the_int_it_equals_are_not_one_fingerprint() -> None:
     """`bool` is an `int`, so the two are taken by one branch and returned untouched. A branch that
     coerced would make a workflow passing a flag where it used to pass a count replay silently."""
     assert canonical_json({"x": True}) == '{"x":true}'
     assert canonical_json({"x": 1}) == '{"x":1}'
     assert _base(inputs={"concurrent": True}) != _base(inputs={"concurrent": 1})
-
 
 def test_a_set_nested_inside_inputs_is_sorted_too_and_not_only_restrictions() -> None:
     """The shape claim; the cross-process claim is the one made under seeds above.
@@ -793,9 +740,7 @@ def test_a_set_nested_inside_inputs_is_sorted_too_and_not_only_restrictions() ->
     assert canonical_json({"t": {2, 1, 10}}) == '{"t":[1,10,2]}'
     assert canonical_json([{"a", 1}]) == '[["a",1]]'
 
-
 # --- Every term of the fingerprint, and the complement -------------------------------------------
-
 
 def test_every_term_of_the_role_inputs_and_head_changes_the_fingerprint() -> None:
     """Nine terms, each varied alone. A term that stopped counting is a step that replays across
@@ -818,7 +763,6 @@ def test_every_term_of_the_role_inputs_and_head_changes_the_fingerprint() -> Non
     }
     assert not collisions, f"these terms do not reach the fingerprint at all: {sorted(collisions)}"
     assert len(set(bases.values())) == len(bases), "two different steps share one fingerprint"
-
 
 def test_the_same_role_inputs_and_head_are_the_same_base_twice() -> None:
     """The complement, and the half that replay actually depends on: nothing here is a nonce."""

@@ -1,7 +1,5 @@
-
 from dataclasses import dataclass
 from typing import Final
-
 from agl.sdk import describe, reporting_tool
 
 __all__ = ["HIGH", "SEVERITIES", "Finding", "Findings", "report_findings"]
@@ -10,10 +8,8 @@ HIGH: Final = "high"
 
 SEVERITIES: Final = (HIGH, "medium", "low")
 
-
 @dataclass(frozen=True, slots=True)
 class Finding:
-
     severity: str = describe(
         f"One of {', '.join(SEVERITIES)}. Use {HIGH!r} only for something that must be fixed "
         f"before this change can ship: that is the one value that sends the change back to be "
@@ -36,10 +32,8 @@ class Finding:
                 f"silently skip rather than one it would fail to understand"
             )
 
-
 @dataclass(frozen=True, slots=True)
 class Findings:
-
     findings: tuple[Finding, ...] = describe(
         "Every problem this review found, one entry per defect. Report an empty list when the "
         "change is sound: that is a result, not a failure to find anything."
@@ -47,7 +41,6 @@ class Findings:
 
     def high(self) -> tuple[Finding, ...]:
         return tuple(finding for finding in self.findings if finding.severity == HIGH)
-
 
 report_findings: Final = reporting_tool(
     "report_findings",

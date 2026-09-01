@@ -22,9 +22,7 @@ from dataclasses import fields
 from pathlib import Path
 from textwrap import dedent
 from typing import Final
-
 import pytest
-
 from agl.config.schema import ClaudeSettings, OpenAiSettings
 from agl.config.sources import Overrides, resolve, resolve_project, resolve_settings
 from agl.ports.errors import InputError, NotFoundError
@@ -44,25 +42,20 @@ _OPENAI_CLI_PATH: Final = "AGL_AGENT_OPENAI_CLI_PATH"
 
 _NAME: Final = "myapp"
 
-
 def _home(tmp_path: Path) -> AglHome:
     return AglHome(tmp_path.resolve() / "agl-home")
-
 
 def _env(home: AglHome, **rest: str) -> Mapping[str, str]:
     """An environment that names a home, plus whatever the case is about. A literal, every time."""
     return {_HOME: str(home.path), **rest}
-
 
 def _write(path: Path, text: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(dedent(text).lstrip(), encoding="utf-8")
     return path
 
-
 def _settings_file(home: AglHome, text: str) -> Path:
     return _write(home.path / "config.toml", text)
-
 
 def _repo(tmp_path: Path) -> Path:
     """A directory that looks like a working tree to a filesystem walk, and to nothing else."""
@@ -70,11 +63,9 @@ def _repo(tmp_path: Path) -> Path:
     (root / ".git").mkdir(parents=True, exist_ok=True)
     return root
 
-
 def _resolve_both(environ: Mapping[str, str], repo: Path) -> None:
     """Both halves of the core, in the order a command runs them. A refusal from either surfaces."""
     resolve_project(resolve_settings(Overrides(), environ), Overrides(), environ, repo)
-
 
 def _project_file(home: AglHome, repo: Path, *, keys: str = "") -> Path:
     """The project file: `name`, `repo` and `trees_root` always present and the rest per case."""
@@ -85,20 +76,16 @@ def _project_file(home: AglHome, repo: Path, *, keys: str = "") -> Path:
         f'trees_root = "{repo.parent}/.agl-trees/{_NAME}"\n{dedent(keys)}',
     )
 
-
 # --- home: three layers, and the file is not one of them ---------------------------------------
-
 
 def test_home_prefers_the_flag_over_the_environment_variable(tmp_path: Path) -> None:
     flagged = tmp_path.resolve() / "flagged"
     settings = resolve_settings(Overrides(home=flagged), _env(_home(tmp_path)))
     assert settings.home == AglHome(flagged)
 
-
 def test_home_falls_from_the_flag_to_the_environment_variable(tmp_path: Path) -> None:
     home = _home(tmp_path)
     assert resolve_settings(Overrides(), _env(home)).home == home
-
 
 def test_home_falls_from_the_environment_to_the_default_under_the_user_home(
     tmp_path: Path,
@@ -107,7 +94,6 @@ def test_home_falls_from_the_environment_to_the_default_under_the_user_home(
     user = tmp_path.resolve() / "somebody"
     settings = resolve_settings(Overrides(), {"HOME": str(user)})
     assert settings.home == AglHome(user / ".agl")
-
 
 def test_home_has_no_file_layer_because_the_file_lives_inside_it(tmp_path: Path) -> None:
     """The missing fourth layer and the reader's own refusal are one fact. This is the other."""
@@ -118,13 +104,11 @@ def test_home_has_no_file_layer_because_the_file_lives_inside_it(tmp_path: Path)
     assert str(path) in str(raised.value)
     assert "inside AGL_HOME" in str(raised.value)
 
-
 def test_a_relative_home_variable_is_refused_naming_the_variable(tmp_path: Path) -> None:
     with pytest.raises(InputError) as raised:
         resolve_settings(Overrides(), {_HOME: "relative/agl"})
     assert _HOME in str(raised.value)
     assert "relative/agl" in str(raised.value)
-
 
 def test_no_home_variable_and_no_user_home_is_refused_naming_both(tmp_path: Path) -> None:
     with pytest.raises(InputError) as raised:
@@ -132,9 +116,7 @@ def test_no_home_variable_and_no_user_home_is_refused_naming_both(tmp_path: Path
     assert _HOME in str(raised.value)
     assert "HOME" in str(raised.value)
 
-
 # --- the connector sections: four layers each ---------------------------------------------------
-
 
 def test_enabled_falls_flag_then_environment_then_file_then_true(tmp_path: Path) -> None:
     home = _home(tmp_path)
@@ -156,14 +138,12 @@ def test_enabled_falls_flag_then_environment_then_file_then_true(tmp_path: Path)
     _settings_file(home, "")
     assert resolve_settings(Overrides(), _env(home)).agents.claude.enabled is True
 
-
 def test_enabled_defaults_to_true_because_configured_is_not_available(tmp_path: Path) -> None:
     """`src/agl/ports/agent.py`: whether a harness is installed is `check_ready`'s answer, not a
     settings default."""
     agents = resolve_settings(Overrides(), _env(_home(tmp_path))).agents
     assert agents.claude.enabled
     assert agents.openai.enabled
-
 
 def test_cli_path_falls_flag_then_environment_then_file_then_none(tmp_path: Path) -> None:
     home = _home(tmp_path)
@@ -181,7 +161,6 @@ def test_cli_path_falls_flag_then_environment_then_file_then_none(tmp_path: Path
     assert resolve_settings(Overrides(), _env(home)).agents.openai.cli_path == Path("/from/file")
     _settings_file(home, "")
     assert resolve_settings(Overrides(), _env(home)).agents.openai.cli_path is None
-
 
 def test_every_one_of_the_seven_variables_is_spelled_as_the_rule_says(tmp_path: Path) -> None:
     """`AGL_` + the setting's path in upper snake case, pinned by driving all seven at once."""
@@ -206,9 +185,7 @@ def test_every_one_of_the_seven_variables_is_spelled_as_the_rule_says(tmp_path: 
     project = resolve_project(settings, Overrides(), environ, repo)
     assert (project.build, project.build_timeout) == ("make check", 12.5)
 
-
 # --- one setting, all four layers ----------------------------------------------------------------
-
 
 def test_build_timeout_falls_from_flag_then_env_then_file_then_default(
     tmp_path: Path,
@@ -238,9 +215,7 @@ def test_build_timeout_falls_from_flag_then_env_then_file_then_default(
     defaulted = resolve_project(settings, Overrides(), _env(home), repo)
     assert defaulted.build_timeout == 600.0
 
-
 # --- the rest of the project ---------------------------------------------------------------------
-
 
 def test_build_falls_flag_then_environment_then_file_and_has_no_default(tmp_path: Path) -> None:
     home = _home(tmp_path)
@@ -259,7 +234,6 @@ def test_build_falls_flag_then_environment_then_file_and_has_no_default(tmp_path
         resolve_project(settings, Overrides(), _env(home), repo)
     assert str(path) in str(raised.value)
     assert "build" in str(raised.value)
-
 
 def test_name_and_repo_and_trees_root_take_no_flag_and_no_environment_layer(
     tmp_path: Path,
@@ -281,7 +255,6 @@ def test_name_and_repo_and_trees_root_take_no_flag_and_no_environment_layer(
     assert project.repo == repo
     assert project.trees == TreesRoot(Path(f"{repo.parent}/.agl-trees/{_NAME}"))
 
-
 def test_a_command_run_outside_a_registered_repository_gets_not_found_unchanged(
     tmp_path: Path,
 ) -> None:
@@ -293,7 +266,6 @@ def test_a_command_run_outside_a_registered_repository_gets_not_found_unchanged(
         resolve_project(settings, Overrides(), _env(home), repo)
     assert "agl init" in str(raised.value)
 
-
 def test_a_directory_in_no_git_repository_gets_not_found_unchanged(tmp_path: Path) -> None:
     home = _home(tmp_path)
     outside = tmp_path.resolve() / "outside"
@@ -302,9 +274,7 @@ def test_a_directory_in_no_git_repository_gets_not_found_unchanged(tmp_path: Pat
     with pytest.raises(NotFoundError):
         resolve_project(settings, Overrides(), _env(home), outside)
 
-
 # --- what the environment layer refuses ----------------------------------------------------------
-
 
 @pytest.mark.parametrize(
     ("variable", "value", "expected"),
@@ -329,7 +299,6 @@ def test_a_malformed_variable_is_refused_naming_it_its_value_and_what_was_expect
     assert repr(value) in str(raised.value)
     assert expected in str(raised.value)
 
-
 @pytest.mark.parametrize("spelling", ["true", "TRUE", "True", " false ", "FALSE"])
 def test_the_two_accepted_boolean_spellings_are_case_insensitive_and_stripped(
     tmp_path: Path, spelling: str
@@ -337,7 +306,6 @@ def test_the_two_accepted_boolean_spellings_are_case_insensitive_and_stripped(
     home = _home(tmp_path)
     settings = resolve_settings(Overrides(), _env(home, **{_CLAUDE_ENABLED: spelling}))
     assert settings.agents.claude.enabled == (spelling.strip().lower() == "true")
-
 
 @pytest.mark.parametrize("variable", [_HOME, _CLAUDE_CLI_PATH, _BUILD, _BUILD_TIMEOUT])
 def test_a_variable_set_to_the_empty_string_is_refused_rather_than_treated_as_unset(
@@ -352,7 +320,6 @@ def test_a_variable_set_to_the_empty_string_is_refused_rather_than_treated_as_un
         _resolve_both(environ, repo)
     assert variable in str(raised.value)
 
-
 def test_a_relative_cli_path_variable_is_refused_naming_the_variable(tmp_path: Path) -> None:
     """`schema` refuses a relative harness path too; only this refusal can name the variable."""
     home = _home(tmp_path)
@@ -360,7 +327,6 @@ def test_a_relative_cli_path_variable_is_refused_naming_the_variable(tmp_path: P
         resolve_settings(Overrides(), _env(home, **{_OPENAI_CLI_PATH: "~/bin/harness"}))
     assert _OPENAI_CLI_PATH in str(raised.value)
     assert "~/bin/harness" in str(raised.value)
-
 
 def test_a_build_timeout_out_of_range_is_still_the_schema_refusal(tmp_path: Path) -> None:
     """This layer's job is that a number arrives; the range rule has one home, in `schema.py`."""
@@ -372,9 +338,7 @@ def test_a_build_timeout_out_of_range_is_still_the_schema_refusal(tmp_path: Path
         resolve_project(settings, Overrides(), _env(home, **{_BUILD_TIMEOUT: "0"}), repo)
     assert "build_timeout" in str(raised.value)
 
-
 # --- the pure core is pure, and the impure line is one line ---------------------------------------
-
 
 def test_the_pure_core_ignores_the_process_environment_entirely(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -386,7 +350,6 @@ def test_the_pure_core_ignores_the_process_environment_entirely(
     settings = resolve_settings(Overrides(), _env(home))
     assert settings.home == home
     assert settings.agents.claude.enabled
-
 
 def test_resolve_reads_the_environment_once_and_downstream_sees_that_snapshot(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

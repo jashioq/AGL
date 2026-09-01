@@ -1,27 +1,21 @@
-
 from collections import deque
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from types import TracebackType
 from typing import Self, cast
-
 from agl.adapters.rich_terminal.queues import Screens, View
 from agl.ports.errors import InternalError
 from agl.ports.terminal import Screen, Terminal
 
 __all__ = ["Press", "ScriptedTerminal"]
 
-
 @dataclass(frozen=True, slots=True)
 class Press:
-
     response: int = 0
 
     typed: str = ""
 
-
 class ScriptedTerminal(Terminal):
-
     __slots__ = ("_open", "_screens", "_script")
 
     def __init__(self, responses: Sequence[Press | int] = ()) -> None:
@@ -96,7 +90,6 @@ class ScriptedTerminal(Terminal):
         while self._script and self._screens.current is not None:
             press = self._script.popleft()
             self._screens.answer(press.response, press.typed)
-
 
 def _pressed(response: Press | int) -> Press:
     return Press(response) if isinstance(response, int) else response

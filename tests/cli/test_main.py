@@ -48,9 +48,7 @@ from dataclasses import dataclass
 from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Final
-
 import pytest
-
 from agl.cli import main
 from agl.config import container, registry, sources
 from agl.ports.errors import (
@@ -76,15 +74,12 @@ PROJECT: Final = ProjectName("myapp")
 LABEL: Final = RunLabel("auth")
 SCOPE: Final = RunScope(PROJECT, LABEL)
 
-
 @dataclass(frozen=True)
 class NoParams:
     """A workflow that takes nothing, so every flag on the line belongs to the generic parser."""
 
-
 class ReviewNotConverging(Stop):
     """A workflow's own reason to stop, subclassed as a workflow would."""
-
 
 # What the workflows below raise, so that the same failure can be raised sequentially and inside a
 # `TaskGroup` and the two outcomes compared word for word. Each is a sentence an adapter would have
@@ -95,29 +90,24 @@ UNPARSEABLE: Final = "the agent finished with no reporting-tool payload"
 TAKEN: Final = "another run holds the integration lease on agl/auth"
 UNTRANSLATED: Final = "a chunk's adapter forgot to translate this"
 
-
 # What each workflow was handed, at module level because the workflows have to be: `EntryPoint.load`
 # imports a module and reads an attribute in it, and sees no local of this module's functions.
 handed: Final[list[Run[NoParams]]] = []
-
 
 @workflow(version="1.1")
 async def probe(run: Run[NoParams]) -> None:
     """Returns. The wiring probe, standing in for a workflow package that does nothing."""
     handed.append(run)
 
-
 @workflow(version="0.1")
 async def halting(run: Run[NoParams]) -> None:
     """Ends deliberately, with a reason of its own - exit 7, and not printed as a failure."""
     raise ReviewNotConverging("two rounds and no convergence")
 
-
 @workflow(version="0.1")
 async def exploding(run: Run[NoParams]) -> None:
     """Raises something that is not an `AglError` at all: a translation that did not happen."""
     raise ValueError("an adapter forgot to translate this")
-
 
 async def _chunk(error: Exception) -> None:
     """One `TaskGroup` child, which raises before it awaits anything. **The absence is the point.**
@@ -130,19 +120,16 @@ async def _chunk(error: Exception) -> None:
     """
     raise error
 
-
 @workflow(version="0.1")
 async def failing(run: Run[NoParams]) -> None:
     """`fix`'s shape: one failure, raised sequentially. The half of the parity with no group."""
     raise UpstreamUnavailable(UNREACHABLE)
-
 
 @workflow(version="0.1")
 async def chunked(run: Run[NoParams]) -> None:
     """`split`'s shape: the same failure as `failing`, raised inside one child of a `TaskGroup`."""
     async with asyncio.TaskGroup() as chunks:
         chunks.create_task(_chunk(UpstreamUnavailable(UNREACHABLE)))
-
 
 @workflow(version="0.1")
 async def nested(run: Run[NoParams]) -> None:
@@ -155,14 +142,12 @@ async def nested(run: Run[NoParams]) -> None:
     async with asyncio.TaskGroup() as chunks:
         chunks.create_task(deeper())
 
-
 @workflow(version="0.1")
 async def agreeing(run: Run[NoParams]) -> None:
     """Two chunks, two classes, one code: "agree" about the code rather than about the class."""
     async with asyncio.TaskGroup() as chunks:
         chunks.create_task(_chunk(UpstreamUnavailable(UNREACHABLE)))
         chunks.create_task(_chunk(UpstreamUnexpected(UNPARSEABLE)))
-
 
 @workflow(version="0.1")
 async def disagreeing(run: Run[NoParams]) -> None:
@@ -171,13 +156,11 @@ async def disagreeing(run: Run[NoParams]) -> None:
         chunks.create_task(_chunk(UpstreamUnavailable(UNREACHABLE)))
         chunks.create_task(_chunk(ConflictError(TAKEN)))
 
-
 @workflow(version="0.1")
 async def halting_together(run: Run[NoParams]) -> None:
     """`halting`'s deliberate end, raised inside a chunk instead. The same words, on purpose."""
     async with asyncio.TaskGroup() as chunks:
         chunks.create_task(_chunk(ReviewNotConverging(NO_CONVERGENCE)))
-
 
 @workflow(version="0.1")
 async def halting_and_failing(run: Run[NoParams]) -> None:
@@ -186,18 +169,15 @@ async def halting_and_failing(run: Run[NoParams]) -> None:
         chunks.create_task(_chunk(ReviewNotConverging(NO_CONVERGENCE)))
         chunks.create_task(_chunk(UpstreamUnavailable(UNREACHABLE)))
 
-
 @workflow(version="0.1")
 async def chunked_bug(run: Run[NoParams]) -> None:
     """`exploding` inside a chunk: the leaf nobody translated, and the one a traceback is for."""
     async with asyncio.TaskGroup() as chunks:
         chunks.create_task(_chunk(ValueError(UNTRANSLATED)))
 
-
 def _point(name: str, attribute: str) -> EntryPoint:
     """A `probe = "agl.workflows.probe:probe"` line, pointed at this module instead."""
     return EntryPoint(name=name, value=f"{__name__}:{attribute}", group=registry.GROUP)
-
 
 POINTS: Final = (
     _point("probe", "probe"),
@@ -213,11 +193,9 @@ POINTS: Final = (
     _point("chunked_bug", "chunked_bug"),
 )
 
-
 def _fakes(tmp_path: Path) -> container.FakeServices:
     """Target #8's deployment: no network, no git, no process, one seeded repository."""
     return container.fakes(TreesRoot(tmp_path / "trees"), files={"src/a.txt": b"one\n"})
-
 
 def _compose(harness: container.FakeServices) -> main.Compose:
     """`main`'s seam, filled in: the fakes bundle, this project, and this module's workflows.
@@ -233,11 +211,9 @@ def _compose(harness: container.FakeServices) -> main.Compose:
         points=POINTS,
     )
 
-
 def _main(harness: container.FakeServices, *argv: str) -> int:
     """One `agl` invocation, through the real parser and the real handler."""
     return main.main(argv, compose=_compose(harness))
-
 
 def _unregistered(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A machine with an AGL home and a working directory that is nobody's project.
@@ -259,7 +235,6 @@ def _unregistered(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGL_HOME", str(home))
     monkeypatch.chdir(elsewhere)
 
-
 def _clauses() -> list[str]:
     """The exception classes `main.main`'s `try` catches, in the order they are written.
 
@@ -280,9 +255,7 @@ def _clauses() -> list[str]:
             caught.append(handler.type.id)
     return caught
 
-
 # --- the four acceptance criteria ----------------------------------------------------------------
-
 
 def test_a_workflow_that_returns_exits_zero(tmp_path: Path) -> None:
     """`agl run <workflow> -n <label>` end to end through argv - the first criterion.
@@ -299,7 +272,6 @@ def test_a_workflow_that_returns_exits_zero(tmp_path: Path) -> None:
     assert len(handed) == 1
     assert asyncio.run(harness.services.store.read_record(SCOPE)) is not None
 
-
 def test_the_workflow_is_handed_the_bundle_that_was_composed(tmp_path: Path) -> None:
     """`ARCHITECTURE.md`'s "Commands stay dumb", from the far end: one composition, and the ports
     reach the workflow.
@@ -314,7 +286,6 @@ def test_the_workflow_is_handed_the_bundle_that_was_composed(tmp_path: Path) -> 
 
     assert handed[0].services is harness.services
 
-
 def test_the_same_label_twice_exits_four(tmp_path: Path) -> None:
     """The second criterion: exit 4, with the refusal's own message reaching the user on stderr.
 
@@ -326,7 +297,6 @@ def test_the_same_label_twice_exits_four(tmp_path: Path) -> None:
     assert _main(harness, "run", "probe", "-n", "auth") == 0
 
     assert _main(harness, "run", "probe", "-n", "auth") == 4
-
 
 def test_the_existing_label_refusal_is_printed_as_written(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -344,7 +314,6 @@ def test_the_existing_label_refusal_is_printed_as_written(
     )
     assert captured.out == ""
 
-
 def test_an_unknown_workflow_exits_three(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -361,7 +330,6 @@ def test_an_unknown_workflow_exits_three(
     assert "there is no workflow named 'nosuch'" in captured.err
     assert "probe" in captured.err
 
-
 def test_a_workflows_own_stop_subclass_exits_seven(tmp_path: Path) -> None:
     """The fourth: 7, not 6 and not 70, for a class that appears in no table.
 
@@ -372,9 +340,7 @@ def test_a_workflows_own_stop_subclass_exits_seven(tmp_path: Path) -> None:
 
     assert _main(harness, "run", "halting", "-n", "auth") == 7
 
-
 # --- the ordering hazard, pinned twice and never by the exit code --------------------------------
-
 
 def test_a_deliberate_stop_is_not_rendered_as_a_failure(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -395,7 +361,6 @@ def test_a_deliberate_stop_is_not_rendered_as_a_failure(
     assert captured.out == "stopped: two rounds and no convergence\n"
     assert captured.err == "", "a deliberate end was reported as a failure"
 
-
 def test_the_handler_catches_stop_before_agl_error(tmp_path: Path) -> None:
     """The same criterion in the source: the clause order, read off `main`'s own text.
 
@@ -413,9 +378,7 @@ def test_the_handler_catches_stop_before_agl_error(tmp_path: Path) -> None:
     assert caught.index("Stop") < caught.index("AglError") < caught.index("Exception")
     assert "BaseException" not in caught
 
-
 # --- the group clause, which nothing below the CLI can observe -----------------------------------
-
 
 def test_a_failure_in_one_chunk_costs_what_the_same_failure_costs_sequentially(
     tmp_path: Path,
@@ -440,7 +403,6 @@ def test_a_failure_in_one_chunk_costs_what_the_same_failure_costs_sequentially(
     assert concurrently == sequentially
     assert sequentially == 6
 
-
 def test_a_leaf_costs_the_same_however_deeply_its_group_is_nested(tmp_path: Path) -> None:
     """Groups nest because `TaskGroup`s do, and a leaf is the same leaf at any depth.
 
@@ -455,7 +417,6 @@ def test_a_leaf_costs_the_same_however_deeply_its_group_is_nested(tmp_path: Path
     assert deeper == shallower
     assert shallower == 6
 
-
 def test_chunks_that_fail_the_same_way_exit_that_way_whatever_their_classes(
     tmp_path: Path,
 ) -> None:
@@ -468,7 +429,6 @@ def test_chunks_that_fail_the_same_way_exit_that_way_whatever_their_classes(
     distinction the hierarchy exists to remove.
     """
     assert _main(_fakes(tmp_path), "run", "agreeing", "-n", "auth") == 6
-
 
 def test_chunks_that_fail_differently_exit_seventy_naming_every_one_of_them(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -495,7 +455,6 @@ def test_chunks_that_fail_differently_exit_seventy_naming_every_one_of_them(
     assert "do not resolve to one exit status" in captured.err
     assert captured.out == ""
 
-
 def test_a_deliberate_stop_in_a_chunk_reads_exactly_like_one_raised_on_its_own(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -518,7 +477,6 @@ def test_a_deliberate_stop_in_a_chunk_reads_exactly_like_one_raised_on_its_own(
     assert concurrent.out == sequential.out == f"stopped: {NO_CONVERGENCE}\n"
     assert concurrent.err == sequential.err == ""
 
-
 def test_a_chunk_that_stopped_beside_a_chunk_that_broke_is_named_with_both(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -540,7 +498,6 @@ def test_a_chunk_that_stopped_beside_a_chunk_that_broke_is_named_with_both(
     assert f"6  UpstreamUnavailable: {UNREACHABLE}" in captured.err
     assert "Traceback" not in captured.err, "a translated refusal was rendered as a bug"
 
-
 def test_an_untranslated_exception_in_a_chunk_keeps_the_traceback_it_would_have_kept(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -561,9 +518,7 @@ def test_an_untranslated_exception_in_a_chunk_keeps_the_traceback_it_would_have_
     assert "AGL's own bug" in captured.err
     assert captured.out == ""
 
-
 # --- refusals a user can provoke, and the one that is ours ---------------------------------------
-
 
 def test_an_unknown_flag_exits_two_rather_than_leaving_through_system_exit(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -581,7 +536,6 @@ def test_an_unknown_flag_exits_two_rather_than_leaving_through_system_exit(
 
     assert "--nosuch" in capsys.readouterr().err
 
-
 def test_a_missing_label_exits_two_rather_than_leaving_through_system_exit(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -596,7 +550,6 @@ def test_a_missing_label_exits_two_rather_than_leaving_through_system_exit(
 
     assert "-n/--name" in capsys.readouterr().err
 
-
 def test_a_label_the_filesystem_would_not_take_exits_two(tmp_path: Path) -> None:
     """`RunLabel` validates on the way in, and its `InputError` is the same 2.
 
@@ -607,13 +560,11 @@ def test_a_label_the_filesystem_would_not_take_exits_two(tmp_path: Path) -> None
 
     assert _main(harness, "run", "probe", "-n", "my/label") == 2
 
-
 def test_no_subcommand_at_all_exits_two(tmp_path: Path) -> None:
     """A bare `agl` is a usage error, not a default command: `agl run` is not what silence means."""
     harness = _fakes(tmp_path)
 
     assert _main(harness) == 2
-
 
 def test_an_unexpected_exception_exits_seventy_with_its_traceback(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -636,7 +587,6 @@ def test_an_unexpected_exception_exits_seventy_with_its_traceback(
     assert "AGL's own bug" in captured.err
     assert captured.out == ""
 
-
 def test_help_still_exits_zero_through_system_exit(tmp_path: Path) -> None:
     """`-h` is `argparse`'s one sanctioned exit and `RefusingParser` leaves `exit()` untouched.
 
@@ -650,9 +600,7 @@ def test_help_still_exits_zero_through_system_exit(tmp_path: Path) -> None:
             main.main(argv, compose=_compose(harness))
         assert caught.value.code == 0
 
-
 # --- the composition, and the number this module may not write -----------------------------------
-
 
 def test_the_composition_happens_once_and_only_after_argv_is_understood(tmp_path: Path) -> None:
     """`ARCHITECTURE.md`'s "Commands stay dumb", measured: one resolution per invocation, and none
@@ -676,7 +624,6 @@ def test_the_composition_happens_once_and_only_after_argv_is_understood(tmp_path
     composed.clear()
     assert main.main(("run", "probe"), compose=counting) == 2
     assert composed == [], "argv was refused and the world was resolved anyway"
-
 
 def test_composing_resolves_settings_and_not_a_project(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -702,7 +649,6 @@ def test_composing_resolves_settings_and_not_a_project(
         invocation.registered()
     assert "agl init" in str(caught.value)
 
-
 def test_an_unregistered_repository_exits_three_naming_agl_init(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -722,7 +668,6 @@ def test_an_unregistered_repository_exits_three_naming_agl_init(
     captured = capsys.readouterr()
     assert "agl init" in captured.err
     assert captured.out == ""
-
 
 def test_main_writes_no_exit_code_of_its_own(tmp_path: Path) -> None:
     """"No integer literal appears in this file", made mechanical rather than promised.
@@ -745,7 +690,6 @@ def test_main_writes_no_exit_code_of_its_own(tmp_path: Path) -> None:
         f"agl/cli/main.py writes {written}. Exit codes are read out of `ports/errors.py`'s one "
         f"table through `cli/exit_codes.exit_status`, and nothing else here is a number"
     )
-
 
 def test_the_working_directory_is_read_exactly_once_in_the_whole_of_agl() -> None:
     """`ARCHITECTURE.md`'s "Commands stay dumb", counted: `Git(Path.cwd())` was constructed **four
@@ -779,7 +723,6 @@ def test_the_working_directory_is_read_exactly_once_in_the_whole_of_agl() -> Non
         f"takes a `cwd` parameter precisely so that nothing below `cli/` has to ask"
     )
 
-
 def test_the_seam_is_a_parameter_and_the_real_composition_is_its_default() -> None:
     """`compose=None` means the real one, spelled the way `api.run` spells `points=None`.
 
@@ -793,7 +736,6 @@ def test_the_seam_is_a_parameter_and_the_real_composition_is_its_default() -> No
     assert signature.parameters["compose"].default is None
     assert signature.parameters["compose"].kind is inspect.Parameter.KEYWORD_ONLY
     assert signature.return_annotation is int
-
 
 def test_argv_defaults_to_the_command_line_without_this_module_saying_so(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch

@@ -60,10 +60,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
-
 import pytest
 from rich.console import Console
-
 from agl.adapters.rich_terminal.terminal import RichTerminal, StdinKeys
 from agl.ports.errors import Stop, UpstreamUnavailable
 from agl.ports.terminal import (
@@ -138,7 +136,6 @@ EDITING: Final = "Edit: domain/usecase.kt"
 # reader reading.
 _MISTYPED: Final = ("", "banana", "0", "9")
 
-
 @dataclass(frozen=True, slots=True)
 class Answer:
     """What responding to one of these screens produces: the workflow's own type, in shape.
@@ -150,17 +147,14 @@ class Answer:
     asked: str
     said: str
 
-
 class Wobble(Exception):
     """What a view raises in the two tests where one does. Its own class, so a test asserting that
     a frame named the failure is not matching on something another failure could have produced."""
-
 
 def dashboard(line: str) -> Screen:
     """A passive screen with one line on it. `Screen` and not `Screen[None]`, which is the spelling
     a workflow author uses and the one PEP 696's default exists for."""
     return Screen(line)
-
 
 def board(rows: Mapping[str, str]) -> Screen:
     """A board over a mapping the caller keeps a reference to.
@@ -170,7 +164,6 @@ def board(rows: Mapping[str, str]) -> Screen:
     `show` and no notification of any kind.
     """
     return Screen(Rows([Row(name, activity) for name, activity in rows.items()]))
-
 
 def question(label: str) -> Screen[Answer]:
     """An approval screen: a body to read, a choice to pick and a field to type into.
@@ -188,7 +181,6 @@ def question(label: str) -> Screen[Answer]:
         ],
     )
 
-
 def enquiry(label: str, rows: Mapping[str, str]) -> Screen[Answer]:
     """`question`'s two responses over `board`'s live body: a question whose screen moves while up.
 
@@ -203,7 +195,6 @@ def enquiry(label: str, rows: Mapping[str, str]) -> Screen[Answer]:
     """
     return Screen(body=board(rows).body, responses=question(label).responses)
 
-
 def unreliable(label: str, wobbles: list[bool]) -> Screen:
     """A view that draws until its argument says otherwise, and raises from then on.
 
@@ -215,7 +206,6 @@ def unreliable(label: str, wobbles: list[bool]) -> Screen:
     if wobbles[0]:
         raise Wobble("this view cannot draw itself any more")
     return Screen(label)
-
 
 class Presses(TerminalDriver):
     """The person, played by the suite: what is on screen, and typing what answers it.
@@ -258,7 +248,6 @@ class Presses(TerminalDriver):
             lines.append(typed)
         await self._keys.entered(*lines)
 
-
 @pytest.fixture(autouse=True)
 def _not_a_dumb_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make rich's animation test answer the same way on every machine.
@@ -271,12 +260,10 @@ def _not_a_dumb_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     monkeypatch.setenv("TERM", "xterm-256color")
 
-
 @pytest.fixture
 def output() -> io.StringIO:
     """Where the terminal's bytes actually go. A buffer rather than a tty, and read as one."""
     return io.StringIO()
-
 
 @pytest.fixture
 def console(output: io.StringIO) -> Console:
@@ -289,12 +276,10 @@ def console(output: io.StringIO) -> Console:
     """
     return Console(file=output, force_terminal=True, width=_WIDTH)
 
-
 @pytest.fixture
 def keys() -> Typing:
     """The keyboard both the module-level tests and the contract suite's driver type on."""
     return Typing()
-
 
 @pytest.fixture
 def terminal(console: Console, keys: Typing) -> RichTerminal:
@@ -305,12 +290,10 @@ def terminal(console: Console, keys: Typing) -> RichTerminal:
     """
     return RichTerminal(console, keys)
 
-
 @pytest.fixture
 def driver(terminal: RichTerminal, keys: Typing) -> Presses:
     """A person at that terminal, typing on that keyboard."""
     return Presses(terminal, keys)
-
 
 class TestRichTerminal(TerminalContract):
     """The port in full, against a real rich console over a buffer.
@@ -329,7 +312,6 @@ class TestRichTerminal(TerminalContract):
     def driver(self, terminal: RichTerminal, keys: Typing) -> TerminalDriver:
         """The person, over that same terminal and that same keyboard."""
         return Presses(terminal, keys)
-
 
 async def test_the_screen_reported_as_displayed_is_the_text_the_console_actually_received(
     terminal: RichTerminal, driver: Presses, output: io.StringIO
@@ -362,7 +344,6 @@ async def test_the_screen_reported_as_displayed_is_the_text_the_console_actually
             f"synchronised against, so a terminal that reports a screen nobody could have seen "
             f"passes that suite while showing a person nothing at all"
         )
-
 
 async def test_a_question_is_drawn_with_its_responses_numbered_the_way_a_person_answers_them(
     terminal: RichTerminal, keys: Typing, output: io.StringIO
@@ -398,7 +379,6 @@ async def test_a_question_is_drawn_with_its_responses_numbered_the_way_a_person_
             "typing the number drawn beside a choice did not answer with that choice's own value. "
             "`Choice.value` *is* the answer, and the digit is the whole of how a person names it"
         )
-
 
 async def test_picking_a_text_field_takes_the_screen_to_read_it_and_gives_the_screen_back(
     terminal: RichTerminal, keys: Typing, output: io.StringIO
@@ -462,7 +442,6 @@ async def test_picking_a_text_field_takes_the_screen_to_read_it_and_gives_the_sc
             "terminal drawing into a live region it stopped and never restarted"
         )
 
-
 async def test_the_record_of_what_was_written_stands_still_while_the_screen_is_taken_to_be_read(
     terminal: RichTerminal, keys: Typing, output: io.StringIO
 ) -> None:
@@ -522,7 +501,6 @@ async def test_the_record_of_what_was_written_stands_still_while_the_screen_is_t
         )
         await _drawn(term, Text(LANDED))
 
-
 async def test_a_screen_that_has_not_changed_is_never_written_again_and_a_changed_one_is(
     terminal: RichTerminal, output: io.StringIO
 ) -> None:
@@ -562,7 +540,6 @@ async def test_a_screen_that_has_not_changed_is_never_written_again_and_a_change
             "a terminal that never writes passes the first half of this test perfectly"
         )
 
-
 async def test_a_live_argument_reaches_the_display_with_nothing_else_touching_the_terminal(
     terminal: RichTerminal, output: io.StringIO
 ) -> None:
@@ -593,7 +570,6 @@ async def test_a_live_argument_reaches_the_display_with_nothing_else_touching_th
             f"waits to be asked leaves a workflow's board frozen at whatever it said when the "
             f"last question was answered"
         )
-
 
 async def test_the_streams_rich_takes_over_are_the_same_objects_after_an_ordinary_run(
     terminal: RichTerminal,
@@ -631,7 +607,6 @@ async def test_the_streams_rich_takes_over_are_the_same_objects_after_an_ordinar
         f"made it and every traceback after this point goes through a console that is gone"
     )
 
-
 async def test_the_streams_are_put_back_when_the_run_ends_in_the_exception_it_was_stopped_by(
     terminal: RichTerminal,
 ) -> None:
@@ -655,7 +630,6 @@ async def test_the_streams_are_put_back_when_the_run_ends_in_the_exception_it_wa
         f"{sys.stderr!r}. Stopping the display is in a `finally` for this reason: the path that "
         f"reports a failure must not be the path that breaks the reporting"
     )
-
 
 async def test_a_console_that_cannot_animate_still_gets_every_frame_that_changed_and_no_others(
     keys: Typing,
@@ -700,7 +674,6 @@ async def test_a_console_that_cannot_animate_still_gets_every_frame_that_changed
             "here is this adapter taking over something it was never handed"
         )
 
-
 async def test_a_view_that_starts_raising_becomes_a_frame_and_the_loop_carries_on_drawing(
     terminal: RichTerminal, output: io.StringIO
 ) -> None:
@@ -738,7 +711,6 @@ async def test_a_view_that_starts_raising_becomes_a_frame_and_the_loop_carries_o
         await term.show(dashboard, line=LANDED)
         await _drawn(term, Text(LANDED))
 
-
 async def test_a_view_that_raises_the_first_time_raises_at_the_workflow_s_own_call_site(
     terminal: RichTerminal,
 ) -> None:
@@ -767,7 +739,6 @@ async def test_a_view_that_raises_the_first_time_raises_at_the_workflow_s_own_ca
             f"a `show` that raised at its own call site left {term.written!r} on screen. The view "
             f"never produced a screen, so there was nothing to register and nothing to draw"
         )
-
 
 async def test_a_line_that_names_no_response_is_ignored_and_the_question_stays_up(
     terminal: RichTerminal, keys: Typing
@@ -810,7 +781,6 @@ async def test_a_line_that_names_no_response_is_ignored_and_the_question_stays_u
             "on nobody"
         )
 
-
 async def test_shutting_down_does_not_wait_on_a_read_nobody_is_ever_going_to_answer(
     terminal: RichTerminal, keys: Typing
 ) -> None:
@@ -842,7 +812,6 @@ async def test_shutting_down_does_not_wait_on_a_read_nobody_is_ever_going_to_ans
     with pytest.raises(UpstreamUnavailable):
         await _within(asked)
 
-
 async def test_the_default_keyboard_reads_whole_lines_from_this_process_s_own_stdin(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -873,7 +842,6 @@ async def test_the_default_keyboard_reads_whole_lines_from_this_process_s_own_st
             "second, against whatever question was on screen"
         )
 
-
 async def test_a_keyboard_that_has_been_stopped_gives_up_instead_of_waiting_for_a_key(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -898,7 +866,6 @@ async def test_a_keyboard_that_has_been_stopped_gives_up_instead_of_waiting_for_
             "would hand a keystroke to a terminal that has already handed the display back"
         )
 
-
 async def _drawn(terminal: RichTerminal, body: Component) -> Screen[object]:
     """Wait until the terminal has written a screen with this body, and hand that screen back.
 
@@ -908,7 +875,6 @@ async def _drawn(terminal: RichTerminal, body: Component) -> Screen[object]:
     return await _until(
         terminal, lambda screen: screen.body == body, f"a screen whose body is {body!r}"
     )
-
 
 async def _until(
     terminal: RichTerminal, ready: Callable[[Screen[object]], bool], what: str
@@ -929,7 +895,6 @@ async def _until(
         f"{what} was never written within {DEADLINE:.0f}s. The last frame this terminal wrote is "
         f"{terminal.written!r}"
     )
-
 
 async def _printed(output: io.StringIO, since: str, text: str) -> str:
     """Wait until `text` has reached the console since `since` was read off it, and hand back the
@@ -955,7 +920,6 @@ async def _printed(output: io.StringIO, since: str, text: str) -> str:
         f"{text!r} never reached the console within {DEADLINE:.0f}s. What it received since the "
         f"caller last looked is {output.getvalue().removeprefix(since)!r}"
     )
-
 
 async def _within[T](work: asyncio.Task[T]) -> T:
     """Await something that ought to finish, under a deadline, so a failure is reported once."""

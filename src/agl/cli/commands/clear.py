@@ -1,9 +1,7 @@
-
 import argparse
 import asyncio
 import sys
 from typing import Final
-
 from agl import api
 from agl.cli.commands import Registered
 from agl.ports.errors import InternalError
@@ -24,7 +22,6 @@ _NOTHING_TO_REPORT: Final = 0
 # `argparse` has no public spelling for what `add_subparsers` returns, and the alternative is
 # `Any`, which is the one thing `mypy --strict` is here to keep out of the seam.
 type _Commands = argparse._SubParsersAction[RefusingParser]
-
 
 def declare(commands: _Commands) -> RefusingParser:
     parser = commands.add_parser(
@@ -50,7 +47,6 @@ def declare(commands: _Commands) -> RefusingParser:
     )
     return parser
 
-
 def execute(registered: Registered, parsed: argparse.Namespace) -> int:
     label = RunLabel(_said(parsed, _LABEL))
     force = _flagged(parsed, _FORCE)
@@ -61,20 +57,17 @@ def execute(registered: Registered, parsed: argparse.Namespace) -> int:
         print(kept, file=sys.stderr)
     return _NOTHING_TO_REPORT
 
-
 def _said(parsed: argparse.Namespace, dest: str) -> str:
     value = getattr(parsed, dest)
     if isinstance(value, str):
         return value
     raise InternalError(_disagreeing(value, dest))
 
-
 def _flagged(parsed: argparse.Namespace, dest: str) -> bool:
     value = getattr(parsed, dest)
     if isinstance(value, bool):
         return value
     raise InternalError(_disagreeing(value, dest))
-
 
 def _disagreeing(value: object, dest: str) -> str:
     return (

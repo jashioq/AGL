@@ -41,9 +41,7 @@ files of one name under different directories would collide at import.
 import subprocess
 from pathlib import Path
 from typing import Final
-
 import pytest
-
 from agl.adapters.git.history import GitHistory
 from agl.adapters.git.workspace import GitWorkspaceProvider
 from agl.ports.errors import NotFoundError, UpstreamUnavailable
@@ -76,7 +74,6 @@ WORK: Final = "agl-acceptance"
 # and a three-line file is one any heuristic is entitled to be unsure about.
 _LINES: Final = 24
 
-
 def _git(repository: Path, *argv: str) -> str:
     """Run git for the fixtures and the assertions. Synchronous on purpose: this is arrangement and
     observation, not the thing under test, and a test that built its repository through the adapter
@@ -86,11 +83,9 @@ def _git(repository: Path, *argv: str) -> str:
     )
     return done.stdout
 
-
 def _body(marker: str) -> str:
     """A file's contents, derived from `marker` so that two files differ on every line."""
     return "".join(f"{marker}: line {index} of {_LINES}.\n" for index in range(_LINES))
-
 
 def _write(workspace: Workspace, name: str, text: str) -> None:
     """Put `text` at a repository-relative, forward-slash separated `name` inside `workspace`.
@@ -101,7 +96,6 @@ def _write(workspace: Workspace, name: str, text: str) -> None:
     path = workspace.path.joinpath(*name.split("/"))
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
-
 
 @pytest.fixture
 def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -133,30 +127,25 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         _git(work, "commit", "-q", "-m", which)
     return work
 
-
 @pytest.fixture
 def trees(tmp_path: Path) -> TreesRoot:
     """The trees root, beside the repository and empty. Absolute, which is all `TreesRoot` asks."""
     return TreesRoot(tmp_path / "trees")
-
 
 @pytest.fixture
 def history(repository: Path) -> History:
     """The history the module-level tests drive. The contract suite has its own, on the class."""
     return GitHistory(repository)
 
-
 @pytest.fixture
 def provider(repository: Path, trees: TreesRoot) -> WorkspaceProvider:
     """The provider that records the states those tests ask about - over the same repository."""
     return GitWorkspaceProvider(repository, trees)
 
-
 @pytest.fixture
 def base(repository: Path) -> str:
     """The commit a run is cut from, resolved - the pinned `RunSpec.base_sha` shape of a base."""
     return _git(repository, "rev-parse", "HEAD").strip()
-
 
 class TestGitHistory(HistoryContract):
     """The port in full, against real git.
@@ -183,9 +172,7 @@ class TestGitHistory(HistoryContract):
         in this very suite, and would report one broken member as every test failing at once."""
         return _git(repository, "rev-parse", "HEAD").strip()
 
-
 # --- The rename decision, and both sides of the threshold it costs ------------------------------
-
 
 async def test_a_move_is_a_rename_even_where_the_repository_turned_detection_off(
     history: History, provider: WorkspaceProvider, repository: Path, base: str
@@ -227,7 +214,6 @@ async def test_a_move_is_a_rename_even_where_the_repository_turned_detection_off
         "something other than what happened"
     )
 
-
 async def test_a_move_that_rewrites_the_file_is_the_deletion_and_the_addition_it_has_become(
     history: History, provider: WorkspaceProvider, base: str
 ) -> None:
@@ -264,9 +250,7 @@ async def test_a_move_that_rewrites_the_file_is_the_deletion_and_the_addition_it
         "in both directions precisely because the two disagreeing means it was assembled wrong"
     )
 
-
 # --- What only a real repository shows about the reading -----------------------------------------
-
 
 async def test_changed_files_reads_paths_that_no_quoting_would_have_survived(
     history: History, provider: WorkspaceProvider, base: str
@@ -305,7 +289,6 @@ async def test_changed_files_reads_paths_that_no_quoting_would_have_survived(
     )
     assert all(change.kind is ChangeKind.ADDED for change in changed)
 
-
 async def test_a_file_that_became_a_symlink_is_a_modification(
     history: History, provider: WorkspaceProvider, base: str
 ) -> None:
@@ -333,7 +316,6 @@ async def test_a_file_that_became_a_symlink_is_a_modification(
         f"a file that became a symlink was reported as {changed}. One path, present in both states "
         f"with different content behind it, is one entry"
     )
-
 
 async def test_the_patch_is_a_unified_diff_that_the_repositorys_own_configuration_cannot_replace(
     history: History, provider: WorkspaceProvider, repository: Path, base: str
@@ -374,9 +356,7 @@ async def test_the_patch_is_a_unified_diff_that_the_repositorys_own_configuratio
         "as to a person, and `color.diff = always` is an ordinary thing for a person to have set"
     )
 
-
 # --- What the suite says outright it cannot reach -------------------------------------------------
-
 
 async def test_contains_is_true_once_a_line_of_work_has_been_merged_into_the_base(
     history: History, provider: WorkspaceProvider, repository: Path, base: str
@@ -415,7 +395,6 @@ async def test_contains_is_true_once_a_line_of_work_has_been_merged_into_the_bas
         "ancestry has a direction, and the merge commit is not inside the work it merged"
     )
 
-
 async def test_a_repository_git_cannot_read_is_upstream_unavailable_and_not_a_missing_ref(
     tmp_path: Path
 ) -> None:
@@ -440,7 +419,6 @@ async def test_a_repository_git_cannot_read_is_upstream_unavailable_and_not_a_mi
         await history.default_ref()
     with pytest.raises(UpstreamUnavailable):
         await history.resolve("HEAD")
-
 
 async def test_default_ref_is_the_full_ref_of_the_branch_this_repositorys_head_is_on(
     history: History, repository: Path
@@ -471,7 +449,6 @@ async def test_default_ref_is_the_full_ref_of_the_branch_this_repositorys_head_i
         "with a tag and a branch sharing one name, the default resolved to something other than "
         "the branch HEAD is on. Every run pins this as `base_sha` and lives on the pin for hours"
     )
-
 
 async def test_default_ref_refuses_a_detached_head_in_words_that_say_what_to_do_instead(
     history: History, repository: Path

@@ -33,9 +33,7 @@ Named `test_memory_store.py` and not `test_store.py`: `tests/` carries no `__ini
 
 import hashlib
 from typing import Final
-
 import pytest
-
 from agl.adapters.filesystem.memory_store import MemoryStore
 from agl.ports.home_layout import RunScope
 from agl.ports.ids import Namespace, ProjectName, RunLabel, StepName
@@ -56,7 +54,6 @@ GRANDCHILD: Final = Namespace("sub-b")
 STEP: Final = StepName("implement")
 DIGEST: Final = hashlib.sha256(b"one").hexdigest()
 
-
 class TestMemoryStore(StoreContract):
     """The port, in full, against the fake.
 
@@ -74,9 +71,7 @@ class TestMemoryStore(StoreContract):
         object does."""
         return MemoryStore()
 
-
 # --- Two stores are two stores -----------------------------------------------------------------
-
 
 async def test_two_memory_stores_share_nothing_in_either_direction() -> None:
     """State is per instance, and there is no class-level dict quietly behind both.
@@ -101,9 +96,7 @@ async def test_two_memory_stores_share_nothing_in_either_direction() -> None:
         "a write to the second store reached the first, so the two share their state"
     )
 
-
 # --- What a removal leaves, which only the fake can be asked ------------------------------------
-
 
 async def test_a_removed_scope_leaves_no_state_behind_at_all() -> None:
     """Removed, not marked removed - asserted past the port because the port cannot show it.

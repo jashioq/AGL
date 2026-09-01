@@ -1,22 +1,17 @@
-
 from collections.abc import Iterable, Mapping
 from importlib.metadata import EntryPoint, entry_points
 from typing import Final
-
 from agl.ports.errors import ConflictError, InputError, NotFoundError
 
 __all__ = ["GROUP", "installed", "load", "names"]
 
 GROUP: Final = "agl.workflows"
 
-
 def installed() -> tuple[EntryPoint, ...]:
     return tuple(entry_points(group=GROUP))
 
-
 def names(points: Iterable[EntryPoint]) -> tuple[str, ...]:
     return tuple(sorted(_index(points)))
-
 
 def load[T](points: Iterable[EntryPoint], name: str, kind: type[T]) -> T:
     index = _index(points)
@@ -41,7 +36,6 @@ def load[T](points: Iterable[EntryPoint], name: str, kind: type[T]) -> T:
         )
     return loaded
 
-
 def _index(points: Iterable[EntryPoint]) -> Mapping[str, EntryPoint]:
     index: dict[str, EntryPoint] = {}
     for point in points:
@@ -57,7 +51,6 @@ def _index(points: Iterable[EntryPoint]) -> Mapping[str, EntryPoint]:
         index[point.name] = point
     return index
 
-
 def _unknown(name: str, index: Mapping[str, EntryPoint]) -> str:
     registered = tuple(sorted(index))
     if not registered:
@@ -71,7 +64,6 @@ def _unknown(name: str, index: Mapping[str, EntryPoint]) -> str:
         f"there is no workflow named {name!r}. Installed and registered under {GROUP}: "
         f"{', '.join(registered)}. `agl workflows` prints the same list"
     )
-
 
 def _describe(kind: type[object]) -> str:
     return f"{kind.__module__}.{kind.__qualname__}"

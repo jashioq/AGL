@@ -18,9 +18,7 @@ one, and the `terminal` and `driver` fixtures these tests take are declared ther
 """
 
 import pytest
-
 from agl.ports.terminal import Terminal, Text
-
 from ._terminal_driver import (
     Asking,
     TerminalDriver,
@@ -31,7 +29,6 @@ from ._terminal_driver import (
     within,
 )
 from ._terminal_views import AGENT, APPROVE, EARLY, LANDED, RUNNING, dashboard, question
-
 
 class TerminalSlotContract:
     """A dashboard goes up, stays up, is replaced rather than queued, and outlives being hidden.

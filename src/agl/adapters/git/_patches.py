@@ -1,7 +1,5 @@
-
 from difflib import unified_diff
 from typing import Final
-
 from agl.adapters.git._snapshots import Tree
 from agl.ports.history import ChangeKind, FileChange
 
@@ -17,7 +15,6 @@ _ABSENT: Final = "/dev/null"
 _ENCODING: Final = "utf-8"
 _UNREADABLE: Final = "replace"
 
-
 def differences(before: Tree, after: Tree) -> tuple[FileChange, ...]:
     arrived = sorted(path for path in after if path not in before)
     gone = sorted(path for path in before if path not in after)
@@ -31,7 +28,6 @@ def differences(before: Tree, after: Tree) -> tuple[FileChange, ...]:
     found += [FileChange(path, ChangeKind.MODIFIED) for path in edited]
     return tuple(sorted(found, key=lambda change: change.path))
 
-
 def patch(before: Tree, after: Tree) -> str:
     written: list[str] = []
     for change in differences(before, after):
@@ -43,7 +39,6 @@ def patch(before: Tree, after: Tree) -> str:
         written += _body(was, change.path, before.get(was), after.get(change.path))
     return "\n".join(written) + "\n" if written else ""
 
-
 def _moves(before: Tree, after: Tree, arrived: list[str], gone: list[str]) -> dict[str, str]:
     available: dict[bytes, list[str]] = {}
     for path in gone:
@@ -54,7 +49,6 @@ def _moves(before: Tree, after: Tree, arrived: list[str], gone: list[str]) -> di
         if candidates:
             paired[path] = candidates.pop(0)
     return paired
-
 
 def _body(was: str, now: str, before: bytes | None, after: bytes | None) -> list[str]:
     if (before is not None and _NOT_TEXT in before) or (after is not None and _NOT_TEXT in after):
@@ -68,7 +62,6 @@ def _body(was: str, now: str, before: bytes | None, after: bytes | None) -> list
             lineterm="",
         )
     )
-
 
 def _readable(content: bytes | None) -> list[str]:
     if content is None:

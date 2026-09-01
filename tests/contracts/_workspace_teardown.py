@@ -30,9 +30,7 @@ this one, and the `provider` and `base` fixtures these tests take are declared t
 """
 
 import pytest
-
 from agl.ports.workspace import WorkspaceProvider
-
 from ._workspace_files import (
     CHILD,
     LABEL,
@@ -44,7 +42,6 @@ from ._workspace_files import (
     record,
     write,
 )
-
 
 class WorkspaceTeardownContract:
     """`remove` then `discard`: what each one takes, what survives it, and neither one raising.

@@ -36,7 +36,6 @@ import queue
 import threading
 from collections.abc import Callable
 from typing import Final
-
 from agl.adapters.rich_terminal.terminal import Keys
 
 __all__ = ["DEADLINE", "TICK", "Typing"]
@@ -56,7 +55,6 @@ flat out."""
 _POLL: Final = 0.01
 """What `read` does between looking at whether it has been stopped. Short, because
 `tests/adapters/test_rich_terminal.py` measures how long a shutdown takes with a read in flight."""
-
 
 class Typing(Keys):
     """A keyboard a test types on: lines in from the loop's thread, lines out on a worker thread.

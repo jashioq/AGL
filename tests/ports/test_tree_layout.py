@@ -22,10 +22,8 @@ import subprocess
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 from typing import Final
-
 import pytest
 from _corpus import ACCEPTED, PURE_IMPORTS, REF_SAMPLE, git_rejects, imported_modules, impurities
-
 from agl.ports import tree_layout
 from agl.ports.errors import InputError, InternalError
 from agl.ports.home_layout import AglHome, RunScope, project_config, project_dir, run_record
@@ -52,9 +50,7 @@ _WORK: Final = "_work"
 
 _NO_GIT: Final = "git is not on PATH, so the git-ref properties went UNVERIFIED"
 
-
 # --- The tree, and the branches that go with it -------------------------------------------------
-
 
 def test_every_path_under_the_trees_root_is_spelled_out_in_full() -> None:
     """Every path in the layout, spelled out rather than recomposed."""
@@ -65,7 +61,6 @@ def test_every_path_under_the_trees_root_is_spelled_out_in_full() -> None:
     billing = RunLabel("billing")
     assert base_worktree(_TREES, billing) == Path("/repo/.trees/billing/_base")
     assert worktree_dir(_TREES, billing, _T01) == Path("/repo/.trees/billing/T-01")
-
 
 def test_the_checkouts_of_one_run_are_siblings_and_never_contain_each_other() -> None:
     """Flat on purpose: a worktree inside another worktree is in that one's `git status`."""
@@ -78,14 +73,12 @@ def test_the_checkouts_of_one_run_are_siblings_and_never_contain_each_other() ->
     assert [checkout.parent for checkout in checkouts] == [run, run, run]
     assert len(set(checkouts)) == len(checkouts)
 
-
 def test_the_branch_derivations_are_the_two_this_layout_promises() -> None:
     """`agl/<label>` for the run, `agl/_work/<label>/<namespace>` for a child. Nothing else."""
     assert run_branch(_AUTH) == "agl/auth"
     assert worktree_branch(_AUTH, _T01) == "agl/_work/auth/T-01"
     assert run_branch(RunLabel("billing")) == "agl/billing"
     assert worktree_branch(RunLabel("billing"), Namespace("T-02")) == "agl/_work/billing/T-02"
-
 
 def test_the_run_branch_is_not_a_prefix_of_its_children_which_is_the_point_of_the_infix() -> None:
     """The one property the obvious naming had and this one deliberately does not.
@@ -100,9 +93,7 @@ def test_the_run_branch_is_not_a_prefix_of_its_children_which_is_the_point_of_th
     assert child.startswith(f"agl/{_WORK}/")
     assert run.split("/")[0] == child.split("/")[0] == "agl", "every ref AGL creates is agl/*"
 
-
 # --- `_base` and `_work`: this layout's words, refused as names by ids.py -----------------------
-
 
 def test_the_words_this_layout_spends_are_the_words_ids_refuses() -> None:
     """Two constants here and two reservations there are one decision written in two modules.
@@ -121,16 +112,13 @@ def test_the_words_this_layout_spends_are_the_words_ids_refuses() -> None:
     with pytest.raises(InputError, match="child branch"):
         RunLabel(_WORK)
 
-
 def test_neither_reservation_costs_the_other_layout_a_name() -> None:
     """`agl/_base` collides with nothing, and `.trees/<label>/_work/` is a directory like any."""
     assert run_branch(RunLabel(_BASE)) == "agl/_base"
     assert worktree_dir(_TREES, _AUTH, Namespace(_WORK)) == Path("/repo/.trees/auth/_work")
     assert worktree_branch(_AUTH, Namespace(_WORK)) == "agl/_work/auth/_work"
 
-
 # --- The property, over the corpus -------------------------------------------------------------
-
 
 def test_property_no_accepted_name_in_any_position_escapes_the_trees_root(tmp_path: Path) -> None:
     """Every accepted value as the label and as the namespace, resolved before it is asked.
@@ -154,9 +142,7 @@ def test_property_no_accepted_name_in_any_position_escapes_the_trees_root(tmp_pa
             f"{value!r} does not land where the layout says: {checkout}"
         )
 
-
 # --- The branches, asked of real git -----------------------------------------------------------
-
 
 @pytest.mark.skipif(shutil.which("git") is None, reason=_NO_GIT)
 def test_property_every_derived_branch_name_is_one_real_git_accepts() -> None:
@@ -169,19 +155,16 @@ def test_property_every_derived_branch_name_is_one_real_git_accepts() -> None:
     rejected = git_rejects(refnames)
     assert not rejected, f"git rejects {len(rejected)} of {len(refnames)}: {rejected[:10]}"
 
-
 @pytest.mark.skipif(shutil.which("git") is None, reason=_NO_GIT)
 def test_git_would_have_said_so_if_the_property_above_were_vacuous() -> None:
     """The control: the same helper, on names git must refuse. A stub would pass silently."""
     known_bad = ["refs/heads/agl/a b", "refs/heads/agl/a..b", "refs/heads/agl/x.lock", "@"]
     assert sorted(git_rejects(known_bad)) == sorted(known_bad)
 
-
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
     """Real git in one repo, with no global or system config allowed a say in the answer."""
     isolated = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull}
     return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, env=isolated)
-
 
 def _repo_with_one_commit(parent: Path, name: str) -> Path:
     repo = parent / name
@@ -194,7 +177,6 @@ def _repo_with_one_commit(parent: Path, name: str) -> Path:
     assert made.returncode == 0, made.stderr
     return repo
 
-
 def _agl_branches(repo: Path) -> list[str]:
     """Every ref AGL made, read back from git instead of assumed from the calls that made them.
 
@@ -205,13 +187,11 @@ def _agl_branches(repo: Path) -> list[str]:
     assert listed.returncode == 0, listed.stderr
     return sorted(listed.stdout.decode().split())
 
-
 def _resolved(repo: Path, branch: str) -> str:
     """The commit a branch points at, so that "intact" can mean more than "still listed"."""
     found = _git(repo, "rev-parse", f"refs/heads/{branch}")
     assert found.returncode == 0, found.stderr
     return found.stdout.decode().strip()
-
 
 @pytest.mark.skipif(shutil.which("git") is None, reason=_NO_GIT)
 def test_the_run_branch_and_its_children_all_coexist_in_one_repository(tmp_path: Path) -> None:
@@ -242,7 +222,6 @@ def test_the_run_branch_and_its_children_all_coexist_in_one_repository(tmp_path:
         assert _agl_branches(repo) == [run], f"{name}: the deliverable branch did not survive"
         assert _resolved(repo, run) == head, f"{name}: it survived, pointing somewhere else"
         assert _resolved(repo, "main") == head, f"{name}: the user's own branch was touched"
-
 
 @pytest.mark.skipif(shutil.which("git") is None, reason=_NO_GIT)
 def test_a_run_labelled_work_would_collide_with_every_child_branch_there_is(
@@ -275,9 +254,7 @@ def test_a_run_labelled_work_would_collide_with_every_child_branch_there_is(
     reverse = _git(backwards, "update-ref", f"refs/heads/{would_be}", "HEAD")
     assert reverse.returncode != 0, f"git took {would_be} beside {child}: the collision is gone"
 
-
 # --- The two roots -----------------------------------------------------------------------------
-
 
 def test_the_trees_root_must_be_absolute_and_is_not_itself_a_path() -> None:
     """A relative root resolves against the working directory, which this module may not read."""
@@ -287,7 +264,6 @@ def test_the_trees_root_must_be_absolute_and_is_not_itself_a_path() -> None:
     with pytest.raises(FrozenInstanceError):
         _TREES.path = Path("/elsewhere")  # type: ignore[misc]
     assert not hasattr(_TREES, "__fspath__"), "a root is passed to these functions, not to git"
-
 
 def test_an_agl_home_cannot_be_used_where_the_trees_root_belongs() -> None:
     """The mirror of `test_home_layout.py`'s: `mypy --strict` first, and this at runtime.
@@ -303,7 +279,6 @@ def test_an_agl_home_cannot_be_used_where_the_trees_root_belongs() -> None:
         base_worktree(home, _AUTH)  # type: ignore[arg-type]
     with pytest.raises(InternalError):
         worktree_dir(home, _AUTH, _T01)  # type: ignore[arg-type]
-
 
 def test_one_run_addressed_in_both_layouts_is_two_different_places(tmp_path: Path) -> None:
     """What separates the two in the end is that `config/` hands them different directories.
@@ -328,7 +303,6 @@ def test_one_run_addressed_in_both_layouts_is_two_different_places(tmp_path: Pat
             continue  # the `.toml` headroom, checked where it belongs
         checkouts = {run_trees_dir(trees, label), base_worktree(trees, label)}
         assert state.isdisjoint(checkouts), f"{value!r} addresses one place from two layouts"
-
 
 def test_the_layout_is_pure_computation_and_imports_nothing_that_could_make_it_otherwise() -> None:
     """No worktree is created here, nothing is read, and `agl.ports.home_layout` is not imported.

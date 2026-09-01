@@ -1,8 +1,6 @@
-
 from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Final
-
 from agl.adapters.git._runner import unreadable
 from agl.ports.history import ChangeKind, FileChange
 
@@ -29,7 +27,6 @@ _SCORE: Final = frozenset("0123456789")
 
 _WHAT: Final = "a list of changed files"
 
-
 def changes(output: str) -> tuple[FileChange, ...]:
     fields = output.split(_FIELD_END)
     if fields and not fields[-1]:
@@ -48,7 +45,6 @@ def changes(output: str) -> tuple[FileChange, ...]:
         found.append(FileChange(path, kind, came_from if kind is ChangeKind.RENAMED else None))
         index += 1 + names
     return tuple(found)
-
 
 def _kind(code: str, output: str) -> ChangeKind:
     kind = _KINDS.get(code[:1])

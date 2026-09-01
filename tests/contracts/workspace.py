@@ -113,13 +113,10 @@ contents rather than about timing, which is the half a suite in one process can 
 """
 
 from collections.abc import Iterator
-
 import pytest
-
 from agl.ports.errors import InputError
 from agl.ports.ids import Namespace
 from agl.ports.workspace import WorkspaceProvider
-
 from ._workspace_files import (
     ALPHA,
     BETA,
@@ -143,7 +140,6 @@ from ._workspace_teardown import WorkspaceTeardownContract
 # an encoding: `ids.py` refuses this word at construction, in every spelling, so a caller cannot
 # build the value that would otherwise be the obvious way to address the run's own workspace.
 _RESERVED_BASE_NAME = "_base"
-
 
 class WorkspaceContract(
     WorkspaceStepContract, WorkspaceTeardownContract, WorkspaceHoldingContract

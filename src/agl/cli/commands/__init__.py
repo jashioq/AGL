@@ -1,16 +1,12 @@
-
 import argparse
 from collections.abc import Callable
-
 from agl.ports.errors import InternalError
 from agl.ports.ids import ProjectName
 from agl.sdk._engine.services import Services
 
 __all__ = ["Registered"]
 
-
 type Registered = Callable[[], tuple[ProjectName, Services]]
-
 
 def _said(parsed: argparse.Namespace, dest: str, *, command: str) -> str:
     value = getattr(parsed, dest)

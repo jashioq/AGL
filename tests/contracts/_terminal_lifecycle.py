@@ -18,15 +18,11 @@ implementation and not the others is a clause the others are free to get wrong.
 """
 
 from collections.abc import Iterator
-
 import pytest
-
 from agl.ports.errors import InternalError, Stop
 from agl.ports.terminal import Terminal
-
 from ._terminal_driver import came_back
 from ._terminal_views import LANDED, RUNNING, dashboard
-
 
 class TerminalLifecycleContract:
     """Entering, leaving, and the two things that are true outside.

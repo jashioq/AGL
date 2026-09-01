@@ -1,14 +1,11 @@
-
 import string
 import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import ClassVar, Final
-
 from agl.ports.errors import InputError
 
 __all__ = ["Namespace", "ProjectName", "RunLabel", "StepName"]
-
 
 _ALLOWED_CHARACTERS: Final = frozenset(string.ascii_letters + string.digits + "._-")
 
@@ -32,16 +29,13 @@ _RESERVED_DEVICE_NAMES: Final = frozenset(
 _BASE_WORKTREE_DIRNAME: Final = "_base"
 _CHILD_BRANCH_INFIX: Final = "_work"
 
-
 def _describe(character: str) -> str:
     name = unicodedata.name(character, "")
     return f"{character!r} ({name})" if name else f"{character!r} (U+{ord(character):04X})"
 
-
 # Casefold then NFC: the two ways a filesystem merges names that git keeps apart.
 def _collision_key(value: str) -> str:
     return unicodedata.normalize("NFC", value.casefold())
-
 
 def _unusable(value: str) -> str | None:
     if not value:
@@ -91,10 +85,8 @@ def _unusable(value: str) -> str | None:
         )
     return None
 
-
 @dataclass(frozen=True, slots=True)
 class _Name:
-
     _KIND: ClassVar[str] = "name"
     _RESERVED: ClassVar[Mapping[str, str]] = {}
 
@@ -112,10 +104,8 @@ class _Name:
     def collision_key(self) -> str:
         return _collision_key(self.value)
 
-
 @dataclass(frozen=True, slots=True)
 class RunLabel(_Name):
-
     _KIND: ClassVar[str] = "run label"
     _RESERVED: ClassVar[Mapping[str, str]] = {
         _collision_key(_CHILD_BRANCH_INFIX): (
@@ -126,10 +116,8 @@ class RunLabel(_Name):
         ),
     }
 
-
 @dataclass(frozen=True, slots=True)
 class Namespace(_Name):
-
     _KIND: ClassVar[str] = "namespace"
     _RESERVED: ClassVar[Mapping[str, str]] = {
         _collision_key(_BASE_WORKTREE_DIRNAME): (
@@ -139,14 +127,10 @@ class Namespace(_Name):
         ),
     }
 
-
 @dataclass(frozen=True, slots=True)
 class ProjectName(_Name):
-
     _KIND: ClassVar[str] = "project name"
-
 
 @dataclass(frozen=True, slots=True)
 class StepName(_Name):
-
     _KIND: ClassVar[str] = "step name"

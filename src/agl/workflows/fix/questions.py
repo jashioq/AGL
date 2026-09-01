@@ -1,14 +1,10 @@
-
 from dataclasses import dataclass
-
 from agl.sdk import InternalError
 
 __all__ = ["Answer", "Question"]
 
-
 @dataclass(frozen=True, slots=True)
 class Question:
-
     prompt: str
 
     options: tuple[str, ...] = ()
@@ -32,8 +28,6 @@ class Question:
                 "free text allowed, or raises for the payload it could not read"
             )
 
-
 @dataclass(frozen=True, slots=True)
 class Answer:
-
     text: str

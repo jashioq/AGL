@@ -1,11 +1,9 @@
-
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 from types import MappingProxyType
-
 from agl.ports.errors import InputError, InternalError
 from agl.ports.run import JsonValue
 
@@ -26,15 +24,11 @@ __all__ = [
     "check_tool_declaration",
 ]
 
-
 class Provider(StrEnum):
-
     CLAUDE = "claude"
     OPENAI = "openai"
 
-
 class ModelId(StrEnum):
-
     @property
     def provider(self) -> Provider:
         """Which backend serves this model, read off the prefix before the colon.
@@ -52,47 +46,35 @@ class ModelId(StrEnum):
                 f"nobody types one, so a malformed id was written here, not passed in"
             ) from error
 
-
 class Claude(ModelId):
-
     OPUS = "claude:opus"
     SONNET = "claude:sonnet"
     HAIKU = "claude:haiku"
 
-
 class OpenAI(ModelId):
-
     SOL = "openai:sol"
     TERRA = "openai:terra"
     LUNA = "openai:luna"
 
-
 class Restriction(StrEnum):
-
     NO_VCS_WRITES = "no_vcs_writes"
     NO_FILE_WRITES = "no_file_writes"
     NO_SHELL = "no_shell"
     NO_NETWORK = "no_network"
 
-
 class Capability(StrEnum):
-
     FILE_EDIT = "file_edit"
     SHELL = "shell"
     TOOL_CALLING = "tool_calling"
 
-
 @dataclass(frozen=True, slots=True)
 class ToolResult:
-
     text: str
 
     rejected: bool = False
 
-
 @dataclass(frozen=True, slots=True)
 class Tool:
-
     name: str
 
     description: str
@@ -104,7 +86,6 @@ class Tool:
     def __post_init__(self) -> None:
         check_tool_declaration(self.name, self.description)
         object.__setattr__(self, "payload_schema", MappingProxyType(dict(self.payload_schema)))
-
 
 def check_tool_declaration(name: str, description: str) -> None:
     """Refuse a tool declaration no model could act on, wherever one is being assembled.
@@ -121,10 +102,8 @@ def check_tool_declaration(name: str, description: str) -> None:
             f"what the model reads to decide whether this tool is the one it wants"
         )
 
-
 @dataclass(frozen=True, slots=True)
 class AgentTask:
-
     instructions: str
 
     workspace: Path
@@ -156,27 +135,20 @@ class AgentTask:
                 f"is calling, so a duplicate is a call no backend can resolve to one handler"
             )
 
-
 class StopReason(StrEnum):
-
     COMPLETED = "completed"
 
     LIMIT = "limit"
 
-
 @dataclass(frozen=True, slots=True)
 class AgentOutcome:
-
     stop_reason: StopReason | None
 
     text: str
 
-
 type ActivityReporter = Callable[[str], None]
 
-
 class AgentRunner(ABC):
-
     @abstractmethod
     async def capabilities(self, model: ModelId) -> frozenset[Capability]:
         """What this backend can do when serving a model, compared against a role at preflight.

@@ -1,4 +1,3 @@
-
 import asyncio
 import os
 import signal
@@ -7,7 +6,6 @@ from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
-
 from agl.ports.errors import (
     AglError,
     InputError,
@@ -38,7 +36,6 @@ _REASON_LIMIT: Final = 500
 
 _REPOSITORY_PROBE: Final = ("rev-parse", "--git-dir")
 
-
 def unreadable(what: str, output: str) -> UpstreamUnexpected:
     return UpstreamUnexpected(
         f"git answered with something AGL cannot read as {what}: {_capped(output)!r}. The "
@@ -46,9 +43,7 @@ def unreadable(what: str, output: str) -> UpstreamUnexpected:
         f"answer the same way"
     )
 
-
 class GitRunner:
-
     def __init__(self, repository: Path, timeout: float = _DEFAULT_TIMEOUT) -> None:
         self._repository = repository
         self._timeout = timeout
@@ -132,14 +127,11 @@ class GitRunner:
             return False
         return probe.code == 0
 
-
 @dataclass(frozen=True, slots=True)
 class _Completed:
-
     code: int
     out: str
     err: str
-
 
 async def _spawned(argv: Sequence[str], where: Path) -> asyncio.subprocess.Process:
     try:
@@ -168,7 +160,6 @@ async def _spawned(argv: Sequence[str], where: Path) -> asyncio.subprocess.Proce
             f"may well succeed once git is installed and the directory is there"
         ) from error
 
-
 async def _stop(process: asyncio.subprocess.Process) -> None:
     _signal(process, signal.SIGTERM)
     try:
@@ -178,17 +169,14 @@ async def _stop(process: asyncio.subprocess.Process) -> None:
         _signal(process, signal.SIGKILL)
         await process.wait()
 
-
 def _signal(process: asyncio.subprocess.Process, sign: signal.Signals) -> None:
     if process.returncode is not None:
         return
     with suppress(ProcessLookupError, PermissionError):
         process.send_signal(sign)
 
-
 def _text(raw: bytes) -> str:
     return raw.decode(_ENCODING, errors=_UNDECODABLE)
-
 
 def _asked(argv: Sequence[str], where: Path) -> str:
     spelled = " ".join(
@@ -197,10 +185,8 @@ def _asked(argv: Sequence[str], where: Path) -> str:
     )
     return f"`git {spelled}` in {where}"
 
-
 def _reason(result: _Completed) -> str:
     return _capped(result.err.strip()) or _capped(result.out.strip()) or f"exit {result.code}"
-
 
 def _capped(text: str) -> str:
     return text if len(text) <= _REASON_LIMIT else f"{text[:_REASON_LIMIT]}..."

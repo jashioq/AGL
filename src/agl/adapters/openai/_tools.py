@@ -1,8 +1,6 @@
-
 from collections.abc import Mapping
 from types import TracebackType
 from typing import Final, Self
-
 from agl.adapters.openai._http import Listener, RpcAnswer, token
 from agl.ports.agent import Tool, ToolResult
 from agl.ports.run import JsonValue
@@ -25,9 +23,7 @@ _STOPPING: Final = (
     "it was asked: {raised}. Nothing you do from here is kept."
 )
 
-
 class Caller:
-
     def __init__(self) -> None:
         self.failure: Exception | None = None
 
@@ -46,9 +42,7 @@ class Caller:
             self.fail(raised)
             return ToolResult(text=_FAILED.format(name=tool.name, raised=raised), rejected=True)
 
-
 class Supply:
-
     def __init__(self, tools: tuple[Tool, ...], caller: Caller) -> None:
         self._offered = {_SUPPLIED: {tool.name: tool for tool in tools}}
         self._path = token()
@@ -75,9 +69,7 @@ class Supply:
     def urls(self) -> Mapping[str, str]:
         return {name: f"{self._listener.origin}/{self._path}/{name}" for name in self._offered}
 
-
 class _Route:
-
     def __init__(self, name: str, offered: Mapping[str, Tool], caller: Caller) -> None:
         self._name = name
         self._offered = offered
@@ -132,20 +124,17 @@ class _Route:
             )
         return await self._caller.handled(tool, arguments)
 
-
 def _advertised(tool: Tool) -> dict[str, JsonValue]:
     schema: dict[str, JsonValue] = dict(tool.payload_schema)
     schema.setdefault("type", "object")
     schema.setdefault("properties", {})
     return {"name": tool.name, "description": tool.description, "inputSchema": schema}
 
-
 def _content(result: ToolResult) -> dict[str, JsonValue]:
     return {
         "content": [{"type": "text", "text": result.text}],
         "isError": result.rejected,
     }
-
 
 def _ok(ident: JsonValue, result: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
     return {"jsonrpc": "2.0", "id": ident, "result": dict(result)}

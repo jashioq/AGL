@@ -45,7 +45,6 @@ import asyncio
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Final
-
 from agl.ports.agent import (
     ActivityReporter,
     AgentOutcome,
@@ -85,7 +84,6 @@ _SOURCE_TEXT: Final = '''def greet(name: str) -> str:
     return f"Hello, {name}."
 '''
 
-
 def workspace(root: Path) -> Path:
     """A workspace holding source code and nothing else, at an absolute path, and hand it back.
 
@@ -100,7 +98,6 @@ def workspace(root: Path) -> Path:
     (repo / _SOURCE).write_text(_SOURCE_TEXT, encoding="utf-8")
     return repo.resolve()
 
-
 def task(
     where: Path, model: ModelId, instructions: str, *, tools: Sequence[Tool] = ()
 ) -> AgentTask:
@@ -112,7 +109,6 @@ def task(
         restrictions=frozenset(),
         tools=tuple(tools),
     )
-
 
 async def outcome_of(
     runner: AgentRunner,
@@ -146,7 +142,6 @@ async def outcome_of(
     )
     return outcome
 
-
 NOTE: Final = "record_note"
 _NOTE_SCHEMA: Final[Mapping[str, JsonValue]] = {
     # `title` is here so that the free instruments exercise it, and for no other reason. This suite
@@ -170,7 +165,6 @@ _REJECTION: Final = (
 _ACCEPTANCE: Final = "Noted. Nothing else is needed from this tool."
 _FAILURE: Final = "the notebook this tool writes into is not there"
 
-
 class ToolFailed(Exception):
     """What a handler raises when a test asks it to fail rather than to refuse.
 
@@ -183,7 +177,6 @@ class ToolFailed(Exception):
     `BaseException` either - both fakes decline to catch those on purpose, and a suite raising one
     would be asking every implementation to swallow a cancellation.
     """
-
 
 class Notes:
     """The one tool this suite ever declares, and the record of what was handed to it.
@@ -236,7 +229,6 @@ class Notes:
             return ToolResult(text=_REJECTION, rejected=True)
         return ToolResult(text=_ACCEPTANCE)
 
-
 class ReporterFailed(Exception):
     """What an activity reporter raises when a test asks it to fail. `ToolFailed`'s sibling.
 
@@ -247,7 +239,6 @@ class ReporterFailed(Exception):
     a suite raising a `BaseException` would still be asking every implementation to survive
     something that means the task around the run is being torn down.
     """
-
 
 class Activity:
     """An activity reporter that records, and on request fails. It runs inside the adapter.
@@ -273,7 +264,6 @@ class Activity:
         self.lines.append(line)
         if len(self.lines) <= self._raise_first:
             raise ReporterFailed(f"the dashboard this reporter writes to is not there: {line!r}")
-
 
 SAY_WHAT_THIS_IS: Final = (
     "Read the file README.md at the root of the workspace you were given, and reply with one "

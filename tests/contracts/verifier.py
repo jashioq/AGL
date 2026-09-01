@@ -122,16 +122,13 @@ ask an implementation what it is over and so is told.
 
 from pathlib import Path
 from typing import Final
-
 import pytest
-
 from agl.ports.verifier import Verifier, VerifierOutcome
 
 # What the failing command below announces, so that this suite can see that output was carried
 # rather than invented. One token, no spaces and no quoting hazards, because an implementer has
 # to be able to paste it into whatever their runner takes without thinking about it.
 ANNOUNCEMENT: Final = "agl-contract-suite-build-gate-ran"
-
 
 def assert_carried(outcome: VerifierOutcome) -> None:
     """The three fields, in the shapes the framework and the failure screen rely on.
@@ -158,7 +155,6 @@ def assert_carried(outcome: VerifierOutcome) -> None:
         f"a verifier answered with output={outcome.output!r}, which is not text. It goes on the "
         f"failure screen as it stands, so empty is legal and absent is not"
     )
-
 
 class VerifierContract:
     """The suite. One method, three fields, and the two answers the framework tells apart.

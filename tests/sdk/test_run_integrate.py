@@ -66,9 +66,7 @@ from dataclasses import dataclass, replace
 from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Final
-
 import pytest
-
 from agl import api
 from agl.config import container, registry
 from agl.ports.agent import AgentTask, Claude, Restriction
@@ -144,7 +142,6 @@ _SERIALIZED: Final = 1.0
 # person was asked.
 _PATIENCE: Final = 3
 
-
 @dataclass(frozen=True)
 class _Pause:
     """A rendezvous a scripted agent parks on, so a test can hold one namespace's step open.
@@ -157,21 +154,17 @@ class _Pause:
     started: asyncio.Event
     release: asyncio.Event
 
-
 @dataclass(frozen=True)
 class Summary:
     """A reporting payload: one string, which is the whole of what these agents have to say."""
 
     text: str
 
-
 @dataclass(frozen=True)
 class NoParams:
     """A workflow that takes no flags - `api.run` still parses an empty argv against it."""
 
-
 REPORT: Final = reporting_tool("report", "report what you did", Summary)
-
 
 @role(model=Claude.SONNET)
 def _role(name: str, instructions: str) -> Role[Summary]:
@@ -183,7 +176,6 @@ def _role(name: str, instructions: str) -> Role[Summary]:
         restrictions=set[Restriction](),
         tools=(REPORT,),
     )
-
 
 # Module-level, which is what a `Role` is, and distinct per writer: the scripted agent below
 # decides what to write from the instructions it was handed, so two roles that shared a string would
@@ -206,7 +198,6 @@ _WRITES: Final[Mapping[str, Mapping[str, bytes]]] = {
     REVIEW.instructions: {},
     HOLDING.instructions: {},
 }
-
 
 def _agent(pause: _Pause | None = None) -> Agent:
     """One agent for every role here: write what this prompt is meant to write, then report.
@@ -233,9 +224,7 @@ def _agent(pause: _Pause | None = None) -> Agent:
 
     return _one
 
-
 # --- the bundle, the run, and the two places on disk ---------------------------------------------
-
 
 class _Recorded(Verifier):
     """A `Verifier` that answers a fixed verdict, remembers what it was asked, and can leave a mess.
@@ -266,7 +255,6 @@ class _Recorded(Verifier):
             passed=self._passed, status=0 if self._passed else 1, output="" if self._passed else RED
         )
 
-
 def _harness(
     tmp_path: Path, pause: _Pause | None = None, *, build: str = container.FAKE_BUILD
 ) -> container.FakeServices:
@@ -280,18 +268,15 @@ def _harness(
         TreesRoot(tmp_path / "trees"), files={SEEDED: SEED}, build=build, agent=_agent(pause)
     )
 
-
 async def _base(harness: container.FakeServices) -> str:
     """The pinned commit a run is cut from - `RunSpec.base_sha`'s shape, through the port."""
     history = harness.services.history
     return await history.resolve(await history.default_ref())
 
-
 async def _tree(harness: container.FakeServices) -> Run[None]:
     """One root `Run` over this bundle. Called twice with one bundle it is a resumed run: the same
     ledger, the same repository, the same checkouts, and everything the process held rebuilt."""
     return Run(params=None, services=harness.services, scope=SCOPE, base=await _base(harness))
-
 
 async def _tree_gated_by(harness: container.FakeServices, verifier: Verifier) -> Run[None]:
     """One root `Run` over this bundle, with the gate's verifier swapped for the one passed.
@@ -309,7 +294,6 @@ async def _tree_gated_by(harness: container.FakeServices, verifier: Verifier) ->
         base=await _base(harness),
     )
 
-
 async def _tree_integrated_by(harness: container.FakeServices, integrator: Integrator) -> Run[None]:
     """One root `Run` over this bundle, with the `Integrator` swapped for the one passed.
 
@@ -324,7 +308,6 @@ async def _tree_integrated_by(harness: container.FakeServices, integrator: Integ
         base=await _base(harness),
     )
 
-
 async def _head(harness: container.FakeServices, namespace: Namespace | None) -> str:
     """Where one checkout's line of work is now, asked through the port rather than of a dict.
 
@@ -335,24 +318,19 @@ async def _head(harness: container.FakeServices, namespace: Namespace | None) ->
     workspace = await harness.services.workspaces.open(LABEL, namespace, await _base(harness))
     return await workspace.head()
 
-
 # Both paths are **spelled out** rather than composed through `tree_layout`, for
 # `test_run_worktree.py`'s reason: a test that asked the layout where a checkout should be and then
 # looked there would agree with the layout whatever either of them said.
-
 
 def _target_dir(tmp_path: Path) -> Path:
     """`.trees/auth/_base/` - the run's own checkout, which is what children land into."""
     return tmp_path / "trees" / "auth" / "_base"
 
-
 def _child_dir(tmp_path: Path, namespace: str) -> Path:
     """`.trees/auth/<namespace>/` - a child's checkout, a flat sibling of `_base`."""
     return tmp_path / "trees" / "auth" / namespace
 
-
 # --- the root has no parent ----------------------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_the_root_run_refuses_to_integrate_and_says_main_is_unaddressable(
@@ -394,9 +372,7 @@ async def test_the_root_run_refuses_to_integrate_and_says_main_is_unaddressable(
         "`run.worktree(namespace)` has a parent to land into, and that is the whole of the fix"
     )
 
-
 # --- the landing, and the advance it must not forget ---------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_a_childs_work_lands_in_the_parents_line_of_work(tmp_path: Path) -> None:
@@ -431,7 +407,6 @@ async def test_a_childs_work_lands_in_the_parents_line_of_work(tmp_path: Path) -
         "gate runs in - a landing recorded but not applied is a gate deciding about another tree"
     )
 
-
 @pytest.mark.asyncio
 async def test_the_parents_last_good_advances_to_the_landing_head(tmp_path: Path) -> None:
     """In as many words: "`IntegrationOutcome.head` carries the value; the engine must write
@@ -457,7 +432,6 @@ async def test_the_parents_last_good_advances_to_the_landing_head(tmp_path: Path
         f"will ever move this value - forgetting it is one of three paths in the design "
         f"that destroy work rather than costing a re-run"
     )
-
 
 @pytest.mark.asyncio
 async def test_the_parents_next_step_does_not_delete_the_child_that_landed(tmp_path: Path) -> None:
@@ -492,7 +466,6 @@ async def test_the_parents_next_step_does_not_delete_the_child_that_landed(tmp_p
     assert (_target_dir(tmp_path) / CONTESTED).read_bytes() == PARENT_BODY, (
         "the parent's own work is gone too, so the restore went back further than the landing"
     )
-
 
 @pytest.mark.asyncio
 async def test_two_children_landing_at_once_serialize_and_both_go_in(tmp_path: Path) -> None:
@@ -534,7 +507,6 @@ async def test_two_children_landing_at_once_serialize_and_both_go_in(tmp_path: P
         )
     assert (_target_dir(tmp_path) / FIRST).is_file()
     assert (_target_dir(tmp_path) / SECOND).is_file()
-
 
 @pytest.mark.asyncio
 async def test_a_landing_waits_for_a_step_already_running_in_the_target_namespace(
@@ -589,9 +561,7 @@ async def test_a_landing_waits_for_a_step_already_running_in_the_target_namespac
     )
     assert (_target_dir(tmp_path) / FIRST).is_file()
 
-
 # --- the conflict, and the two verbs that end it -------------------------------------------------
-
 
 async def _hold_the_target(tmp_path: Path) -> tuple[container.FakeServices, Run[None], Run[None]]:
     """A run whose child cannot land: the parent and the child both create `CONTESTED`.
@@ -607,7 +577,6 @@ async def _hold_the_target(tmp_path: Path) -> tuple[container.FakeServices, Run[
     await run.step(PREPARE, commit="prepare the parent")
     await ticket.step(COLLIDE, commit="implement T-01")
     return harness, run, ticket
-
 
 @pytest.mark.asyncio
 async def test_a_conflicted_landing_comes_back_live_and_abort_puts_the_target_back(
@@ -659,7 +628,6 @@ async def test_a_conflicted_landing_comes_back_live_and_abort_puts_the_target_ba
     )
     assert run._steps.last_good == chain, "nothing landed, so the parent's chain must not move"
 
-
 @pytest.mark.asyncio
 async def test_retry_after_abort_is_an_internal_error_where_a_second_abort_says_nothing(
     tmp_path: Path,
@@ -700,7 +668,6 @@ async def test_retry_after_abort_is_an_internal_error_where_a_second_abort_says_
 
     await outcome.abort()
 
-
 @pytest.mark.asyncio
 async def test_a_landed_outcome_is_settled_too_and_neither_verb_acts_on_it(tmp_path: Path) -> None:
     """A landing settles the outcome exactly as an abort does, and both verbs answer accordingly.
@@ -728,9 +695,7 @@ async def test_a_landed_outcome_is_settled_too_and_neither_verb_acts_on_it(tmp_p
     assert (_target_dir(tmp_path) / FIRST).is_file(), "the landed work is gone after that abort"
     assert run._steps.last_good == settled
 
-
 # --- the containment check: a retry may conclude somebody else's landing -------------------------
-
 
 @pytest.mark.asyncio
 async def test_a_retry_that_concludes_another_childs_landing_is_not_reported_as_this_ones(
@@ -816,9 +781,7 @@ async def test_a_retry_that_concludes_another_childs_landing_is_not_reported_as_
         "concludes what they staged, and this port has no other opinion about their work"
     )
 
-
 # --- run exit: the lease goes back, and the hold deliberately does not ---------------------------
-
 
 _LEFT_HOLDING: list[Run[object]] = []
 """Where the workflow below hands its `Run` tree back to the test that started it.
@@ -827,7 +790,6 @@ A module-level cell because a workflow function takes a `Run` and returns `None`
 return value and no argument to smuggle one through, which is the shape chosen and not
 something to work around. The one test that reads it clears it first.
 """
-
 
 @workflow(version="1")
 async def walks_away(run: Run[NoParams]) -> None:
@@ -846,11 +808,9 @@ async def walks_away(run: Run[NoParams]) -> None:
         raise AssertionError("this workflow exists to leave a conflict unresolved")
     _LEFT_HOLDING.extend((run, ticket))
 
-
 def _point() -> EntryPoint:
     """The registration line, constructed rather than installed - `test_api.py`'s seam."""
     return EntryPoint(name="walks-away", value=f"{__name__}:walks_away", group=registry.GROUP)
-
 
 @pytest.mark.asyncio
 async def test_run_exit_gives_the_lease_back_and_leaves_the_adapters_hold_alone(
@@ -899,7 +859,6 @@ async def test_run_exit_gives_the_lease_back_and_leaves_the_adapters_hold_alone(
         "*recorded* and never touches the place it was recorded from"
     )
 
-
 @pytest.mark.asyncio
 async def test_resume_exit_gives_the_lease_back_the_way_run_exit_does(tmp_path: Path) -> None:
     """The test above, mirrored through `api.resume`. One claim, and there are two exits.
@@ -945,9 +904,7 @@ async def test_resume_exit_gives_the_lease_back_the_way_run_exit_does(tmp_path: 
         "a second integration into a target still holding a landing was not reported as a conflict"
     )
 
-
 # --- the merge gate, and the revert that follows a red one ---------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_a_landing_that_passes_the_gate_advances_the_chain(tmp_path: Path) -> None:
@@ -988,7 +945,6 @@ async def test_a_landing_that_passes_the_gate_advances_the_chain(tmp_path: Path)
         "left no trace on the outcome it decided"
     )
     assert outcome.verdict.output == "42 passed"
-
 
 @pytest.mark.asyncio
 async def test_a_failing_gate_reverts_the_landing_and_never_reaches_the_advance(
@@ -1082,7 +1038,6 @@ async def test_a_failing_gate_reverts_the_landing_and_never_reaches_the_advance(
         RED,
     ), "the verdict on the outcome is not the one the gate was answered with"
 
-
 @pytest.mark.asyncio
 async def test_the_gate_runs_the_configured_command_in_the_targets_own_checkout(
     tmp_path: Path,
@@ -1124,7 +1079,6 @@ async def test_the_gate_runs_the_configured_command_in_the_targets_own_checkout(
         "checkout, so the working directory that reached the port is not the one named above"
     )
 
-
 @pytest.mark.asyncio
 async def test_a_failing_gate_takes_the_builds_leavings_away_with_the_landing(
     tmp_path: Path,
@@ -1160,7 +1114,6 @@ async def test_a_failing_gate_takes_the_builds_leavings_away_with_the_landing(
         "the user's own work is gone from the target's checkout, so the revert took away more than "
         "the landing and the build put together"
     )
-
 
 @pytest.mark.asyncio
 async def test_abort_after_a_failed_gate_settles_it_and_gives_the_lease_back(
@@ -1210,7 +1163,6 @@ async def test_abort_after_a_failed_gate_settles_it_and_gives_the_lease_back(
         "not settle the way it claimed to"
     )
     await again.abort()
-
 
 @pytest.mark.asyncio
 async def test_retry_after_a_failed_gate_lands_again_and_goes_through_the_gate_again(
@@ -1272,7 +1224,6 @@ async def test_retry_after_a_failed_gate_lands_again_and_goes_through_the_gate_a
         "the outcome still carries the failing verdict from before the retry, so a workflow "
         "reading it would put a red build on the screen for a landing that went in"
     )
-
 
 @pytest.mark.asyncio
 async def test_a_retry_that_collides_leaves_no_trace_of_the_gate_that_refused_the_last_one(
@@ -1344,7 +1295,6 @@ async def test_a_retry_that_collides_leaves_no_trace_of_the_gate_that_refused_th
         "to"
     )
     assert outcome.head is None, "the two-case outcome, and this is the case with no head in it"
-
 
 @pytest.mark.asyncio
 async def test_refused_by_the_gate_is_true_for_a_red_build_and_false_for_a_textual_collision(
@@ -1423,9 +1373,7 @@ async def test_refused_by_the_gate_is_true_for_a_red_build_and_false_for_a_textu
         "has one shape, two causes and no way to tell which screen a person is owed"
     )
 
-
 # --- a verb that raises: every path out of a hold has to settle it -------------------------------
-
 
 class _RaisesGivingUp(Integrator):
     """The bundle's own integrator with one verb replaced by a failure it is entitled to have.
@@ -1452,7 +1400,6 @@ class _RaisesGivingUp(Integrator):
 
     async def abort(self, target: Workspace) -> None:
         raise UpstreamUnexpected(BROKE)
-
 
 @pytest.mark.asyncio
 async def test_a_retry_whose_landing_raises_settles_it_and_gives_the_targets_lease_back(
@@ -1585,7 +1532,6 @@ async def test_a_retry_whose_landing_raises_settles_it_and_gives_the_targets_lea
     await outcome.abort()
     await again.abort()
 
-
 @pytest.mark.asyncio
 async def test_a_workflow_that_catches_the_raise_and_loops_again_is_not_refused_its_own_loop(
     tmp_path: Path,
@@ -1692,7 +1638,6 @@ async def test_a_workflow_that_catches_the_raise_and_loops_again_is_not_refused_
     with pytest.raises(InternalError):
         await outcome.retry()
     await outcome.abort()
-
 
 @pytest.mark.asyncio
 async def test_an_abort_whose_integrator_raises_settles_it_and_gives_the_targets_lease_back(

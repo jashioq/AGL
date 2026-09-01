@@ -1,11 +1,9 @@
-
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Final
-
 from agl import api
 from agl.config import container, registry
 from agl.config.container import Press, ScriptedTerminal
@@ -45,23 +43,18 @@ _TREES: Final = "trees"
 
 _BASE: Final = "4a91c07f2b3e8d15c6a0f31d8e2b47c9a6013f5e"
 
-
 class _Interrupted(BaseException):
     ...
 
-
 @dataclass(frozen=True, slots=True)
 class Recorded:
-
     step: str
 
     namespace: str | None
 
     value: JsonValue
 
-
 class _Ledger(Store):
-
     def __init__(self, store: Store) -> None:
         self._store = store
         self.recorded: list[Recorded] = []
@@ -108,10 +101,8 @@ class _Ledger(Store):
     async def remove(self, scope: RunScope) -> None:
         await self._store.remove(scope)
 
-
 @dataclass(frozen=True, slots=True)
 class Harness:
-
     fakes: container.FakeServices
 
     scope: RunScope
@@ -171,7 +162,6 @@ class Harness:
         finally:
             self._ledger.interrupt_after(None)
 
-
 def harness(
     where: Path,
     *,
@@ -187,7 +177,6 @@ def harness(
         fakes = fakes.with_terminal(terminal)
     return over(fakes, project=project, label=label)
 
-
 def over(
     fakes: container.FakeServices,
     *,
@@ -201,10 +190,8 @@ def over(
         _ledger=ledger,
     )
 
-
 def answering(responses: Sequence[Press | int] = ()) -> ScriptedTerminal:
     return container.answering(responses)
-
 
 def a_run[P](
     harness: Harness,
@@ -219,16 +206,13 @@ def a_run[P](
     reports(run, activity)
     return run
 
-
 def reports(run: Run[object], activity: str | None) -> None:
     run._steps._activity = activity
-
 
 def _innermost(namespaces: Sequence[Namespace]) -> str | None:
     if not namespaces:
         return None
     return str(namespaces[-1])
-
 
 def _resolvable[P](workflow: Workflow[P]) -> EntryPoint:
     where = workflow.fn.__module__

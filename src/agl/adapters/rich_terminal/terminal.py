@@ -1,4 +1,3 @@
-
 import asyncio
 import select
 import sys
@@ -8,10 +7,8 @@ from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from types import TracebackType
 from typing import Final, Self, cast
-
 from rich.console import Console
 from rich.text import Text as RichText
-
 from agl.adapters.rich_terminal._display import Display, display_for
 from agl.adapters.rich_terminal._render import frame
 from agl.adapters.rich_terminal.queues import Registration, Screens, View
@@ -24,9 +21,7 @@ FRAMES_PER_SECOND: Final = 10.0
 
 _POLL: Final = 0.05
 
-
 class Keys(ABC):
-
     @abstractmethod
     def read(self) -> str | None:
         ...
@@ -35,9 +30,7 @@ class Keys(ABC):
     def stop(self) -> None:
         ...
 
-
 class StdinKeys(Keys):
-
     __slots__ = ("_stopped",)
 
     def __init__(self) -> None:
@@ -63,9 +56,7 @@ class StdinKeys(Keys):
     def stop(self) -> None:
         self._stopped.set()
 
-
 class RichTerminal(Terminal):
-
     __slots__ = (
         "_console",
         "_display",
@@ -235,7 +226,6 @@ class RichTerminal(Terminal):
             return await asyncio.get_running_loop().run_in_executor(reads, self._keys.read)
         except RuntimeError:
             return None
-
 
 def _position(line: str, offered: int) -> int | None:
     picked = line.strip()

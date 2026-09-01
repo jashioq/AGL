@@ -98,9 +98,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from types import TracebackType
 from typing import Final, Self, cast
-
 import pytest
-
 from agl import testing
 from agl.adapters.claude_code.fake import Conversation, Script
 from agl.adapters.shell.fake import FakeVerifier
@@ -183,9 +181,7 @@ outlast is a handful of dispatches against in-memory fakes - no process, no git,
 long, because a bound that fired before a queued landing could reach its first `await` would pass
 against exactly the implementation it is written to catch."""
 
-
 # --- the plan, and the agents that carry it out --------------------------------------------------
-
 
 def _payload(work: Mapping[str, tuple[str, bytes]]) -> dict[str, JsonValue]:
     """`work` as the call the planner makes: the JSON a model sends, not a `Chunks`.
@@ -201,7 +197,6 @@ def _payload(work: Mapping[str, tuple[str, bytes]]) -> dict[str, JsonValue]:
         for chunk, (path, _body) in work.items()
     ]
     return {"items": items}
-
 
 @dataclass(frozen=True, slots=True)
 class _Dispatches:
@@ -224,7 +219,6 @@ class _Dispatches:
     """What `report_chunks` said back to the planner, in order, for the one arrangement that
     reports a plan the payload type will not have. Empty everywhere else."""
 
-
 def _whose(task: AgentTask, work: Mapping[str, tuple[str, bytes]]) -> str:
     """Which chunk this dispatch is for, read off the prompt the framework composed.
 
@@ -243,7 +237,6 @@ def _whose(task: AgentTask, work: Mapping[str, tuple[str, bytes]]) -> str:
         f"an implementer was dispatched with no chunk of this plan in its inputs:\n"
         f"{task.instructions!r}"
     )
-
 
 def _agent(
     work: Mapping[str, tuple[str, bytes]],
@@ -295,7 +288,6 @@ def _agent(
 
     return agent
 
-
 def _correcting(
     work: Mapping[str, tuple[str, bytes]], seen: _Dispatches, refused: Mapping[str, JsonValue]
 ) -> Script:
@@ -333,9 +325,7 @@ def _correcting(
 
     return script
 
-
 # --- the bundle, the run, and reading one back ---------------------------------------------------
-
 
 def _over(
     tmp_path: Path,
@@ -368,12 +358,10 @@ def _over(
         fakes = fakes.with_terminal(terminal)
     return testing.over(fakes)
 
-
 def _started(harness: testing.Harness, chunks: int) -> asyncio.Task[None]:
     """`agl run split -n test -r <request> -c <chunks>`, as a task this file can wait on with a
     bound. Flags and not an instance, because that is the round trip `agl.testing` insists on."""
     return asyncio.create_task(harness.run(split, "-r", REQUEST, "-c", str(chunks)))
-
 
 async def _ended(running: asyncio.Task[None], seen: _Dispatches, why: str) -> None:
     """Wait for the run under `_LIVENESS`, and make the expiry the failure with `why` as the reason.
@@ -399,7 +387,6 @@ async def _ended(running: asyncio.Task[None], seen: _Dispatches, why: str) -> No
         )
     running.result()
 
-
 async def _record(harness: testing.Harness) -> Mapping[str, JsonValue]:
     """This run's `run.json`, through the store the harness wrapped - which `agl/testing.py`
     sanctions in as many words, and which is where the branch name and the base commit come from.
@@ -408,13 +395,11 @@ async def _record(harness: testing.Harness) -> Mapping[str, JsonValue]:
     assert record is not None, "the run wrote no run.json, so it never started"
     return record
 
-
 def _text(record: Mapping[str, JsonValue], key: str) -> str:
     """One string field of the record. `run.json` holds `JsonValue`s and two of them are needed."""
     value = record[key]
     assert isinstance(value, str), f"run.json holds a {type(value).__name__} at {key!r}"
     return value
-
 
 def _target(seen: _Dispatches) -> Path:
     """The run's own checkout, found beside a child's rather than composed out of the layout.
@@ -425,7 +410,6 @@ def _target(seen: _Dispatches) -> Path:
     """
     return next(iter(seen.where.values())).parent / "_base"
 
-
 def _files(where: Path) -> dict[str, bytes]:
     """Every file in a checkout, by its path relative to it. What a person would see in there."""
     return {
@@ -433,7 +417,6 @@ def _files(where: Path) -> dict[str, bytes]:
         for path in sorted(where.rglob("*"))
         if path.is_file()
     }
-
 
 def _committed(
     harness: testing.Harness, base: str, chunk: str, work: Mapping[str, tuple[str, bytes]]
@@ -457,9 +440,7 @@ def _committed(
     path, body = work[chunk]
     return harness.fakes.repository.record({**SEED, path: body}, (base,), f"implement {chunk}")
 
-
 # --- 1. N children, all at once ------------------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_no_chunk_can_finish_until_every_other_has_started_and_all_of_them_land(
@@ -532,7 +513,6 @@ async def test_no_chunk_can_finish_until_every_other_has_started_and_all_of_them
                 f"the children are not working in one checkout each - and two agents in one "
                 f"tree each commit the other's edits under their own message"
             )
-
 
 @pytest.mark.asyncio
 async def test_a_plan_the_payload_type_refuses_is_corrected_inside_the_planners_own_session(
@@ -608,9 +588,7 @@ async def test_a_plan_the_payload_type_refuses_is_corrected_inside_the_planners_
         f"to avoid, paid in full"
     )
 
-
 # --- 2. one target, one landing at a time --------------------------------------------------------
-
 
 class _Rendezvous(FakeVerifier):
     """A merge gate two landings would meet inside, if two landings could ever be inside one.
@@ -662,7 +640,6 @@ class _Rendezvous(FakeVerifier):
         except asyncio.BrokenBarrierError:
             pass
         return await super().verify(command, workdir)
-
 
 @pytest.mark.asyncio
 async def test_a_siblings_landing_waits_rather_than_meeting_another_inside_the_gate(
@@ -729,9 +706,7 @@ async def test_a_siblings_landing_waits_rather_than_meeting_another_inside_the_g
             f"both children were told they landed and only one of them did"
         )
 
-
 # --- 3. the conflict path ------------------------------------------------------------------------
-
 
 class _Held(FakeVerifier):
     """A green gate that says when it has been reached - which is a moment the lease is held.
@@ -763,7 +738,6 @@ class _Held(FakeVerifier):
         self.entered.append(workdir)
         self.reached.set()
         return await super().verify(command, workdir)
-
 
 class _Watched(Terminal):
     """A `Terminal` that says when a question is going up, and hands everything to a real one.
@@ -845,7 +819,6 @@ class _Watched(Terminal):
         tb: TracebackType | None,
     ) -> None:
         await self._inner.__aexit__(exc_type, exc, tb)
-
 
 @pytest.mark.asyncio
 async def test_the_target_is_held_across_the_decision_and_a_sibling_waits_behind_it(
@@ -981,7 +954,6 @@ async def test_the_target_is_held_across_the_decision_and_a_sibling_waits_behind
         "`abort()` the thing that released the lease rather than run exit"
     )
 
-
 @pytest.mark.asyncio
 async def test_giving_up_puts_the_target_back_and_leaves_the_chunks_own_branch_alone(
     tmp_path: Path,
@@ -1061,9 +1033,7 @@ async def test_giving_up_puts_the_target_back_and_leaves_the_chunks_own_branch_a
         "second clause of the label a person read before they chose it"
     )
 
-
 # --- 4. the red gate -----------------------------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_a_red_gate_leaves_the_branch_unmerged_and_the_target_clean(tmp_path: Path) -> None:

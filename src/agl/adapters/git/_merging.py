@@ -1,13 +1,10 @@
-
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import Final
-
 from agl.adapters.git._snapshots import Tree
 
 __all__ = ["Combination", "combined", "contested"]
-
 
 _OPENED: Final = b"<<<<<<< "
 _SPLIT: Final = b"=======\n"
@@ -17,16 +14,13 @@ _NEWLINE: Final = b"\n"
 # git's own rule for a file that is not text: a NUL is the byte a line-oriented format cannot hold.
 _NOT_TEXT: Final = b"\0"
 
-
 @dataclass(frozen=True, slots=True)
 class Combination:
-
     tree: Tree
 
     contested: Mapping[str, bytes]
 
     collisions: tuple[str, ...]
-
 
 def combined(base: Tree, ours: Tree, theirs: Tree, ours_at: str, theirs_at: str) -> Combination:
     tree: dict[str, bytes] = {}
@@ -55,16 +49,13 @@ def combined(base: Tree, ours: Tree, theirs: Tree, ours_at: str, theirs_at: str)
             tree[path] = kept
     return Combination(tree, disputed, tuple(sorted(disputed)))
 
-
 def contested(content: bytes | None) -> bool:
     if content is None:
         return False
     return any(line.startswith(_OPENED) for line in content.splitlines())
 
-
 def _both(mine: bytes | None, yours: bytes | None, ours_at: str, theirs_at: str) -> bytes:
     return _markers(_terminated(mine or b""), _terminated(yours or b""), ours_at, theirs_at)
-
 
 def _lines(
     was: bytes, mine: bytes, yours: bytes, ours_at: str, theirs_at: str
@@ -94,7 +85,6 @@ def _lines(
     out.extend(piece)
     return b"".join(out), collided or region_collided
 
-
 def _region(
     was: list[bytes], mine: list[bytes], yours: list[bytes], ours_at: str, theirs_at: str
 ) -> tuple[list[bytes], bool]:
@@ -105,7 +95,6 @@ def _region(
     if yours == was:
         return mine, False
     return [_markers(b"".join(mine), b"".join(yours), ours_at, theirs_at)], True
-
 
 def _markers(mine: bytes, yours: bytes, ours_at: str, theirs_at: str) -> bytes:
     return b"".join(
@@ -122,12 +111,10 @@ def _markers(mine: bytes, yours: bytes, ours_at: str, theirs_at: str) -> bytes:
         )
     )
 
-
 def _terminated(content: bytes) -> bytes:
     if not content or content.endswith(_NEWLINE):
         return content
     return content + _NEWLINE
-
 
 def _in_step(
     base: Sequence[bytes], ours: Sequence[bytes], theirs: Sequence[bytes]
@@ -148,7 +135,6 @@ def _in_step(
             runs.append((start, index + 1, to_ours[start], to_theirs[start]))
         index += 1
     return runs
-
 
 def _aligned(base: Sequence[bytes], other: Sequence[bytes]) -> dict[int, int]:
     mapping: dict[int, int] = {}

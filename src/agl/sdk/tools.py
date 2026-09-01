@@ -1,10 +1,8 @@
-
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import MISSING, Field, dataclass, field, fields, is_dataclass
 from math import isfinite
 from types import MappingProxyType, UnionType
 from typing import Any, Final, get_args, get_origin, overload
-
 from agl.ports.agent import Tool, ToolResult, check_tool_declaration
 from agl.ports.errors import InputError, InternalError
 from agl.ports.run import JsonValue
@@ -38,10 +36,8 @@ _SHOWN: Final = 80
 
 _METADATA_KEY: Final = "agl.sdk.tools"
 
-
 @dataclass(frozen=True, slots=True)
 class ReportingTool[P]:
-
     name: str
 
     description: str
@@ -92,7 +88,6 @@ class ReportingTool[P]:
             return None, tuple(problems)
         return built, ()
 
-
 def reporting_tool[P](name: str, description: str, payload: type[P]) -> ReportingTool[P]:
     """Declare the tool a step reports its result through; without one a step's result is `None`.
 
@@ -103,7 +98,6 @@ def reporting_tool[P](name: str, description: str, payload: type[P]) -> Reportin
     :raises InputError: at declaration time - an empty string, or a payload shape JSON refuses
     """
     return ReportingTool(name=name, description=description, payload=payload)
-
 
 def tool[P](
     name: str,
@@ -131,7 +125,6 @@ def tool[P](
 
     return Tool(name=name, description=description, payload_schema=schema, handler=_called)
 
-
 @overload
 def describe[T](text: str, *, default: T) -> T: ...
 @overload
@@ -155,7 +148,6 @@ def describe(text: str, *, default: Any = MISSING) -> Any:
     if default is MISSING:
         return field(metadata=described)
     return field(default=default, metadata=described)
-
 
 def _object_schema(
     kind: type[Any], where: str, inside: tuple[type[Any], ...]
@@ -186,7 +178,6 @@ def _object_schema(
         "additionalProperties": False,
     }
 
-
 def _schema_for(hint: object, where: str, inside: tuple[type[Any], ...]) -> dict[str, JsonValue]:
     optional = _optional(hint)
     if optional is not None:
@@ -206,7 +197,6 @@ def _schema_for(hint: object, where: str, inside: tuple[type[Any], ...]) -> dict
         f"type that does not survive JSON unchanged is one nothing could return"
     )
 
-
 def _instance(kind: type[Any], value: object, where: str, problems: list[str]) -> object:
     before = len(problems)
     given = _given(kind, value, where, problems)
@@ -218,7 +208,6 @@ def _instance(kind: type[Any], value: object, where: str, problems: list[str]) -
     except Exception as raised:
         problems.append(f"`{where}` is not a valid {named(kind)}: {raised}")
         return None
-
 
 def _given(kind: type[Any], value: object, where: str, problems: list[str]) -> dict[str, object]:
     if not isinstance(value, Mapping):
@@ -241,7 +230,6 @@ def _given(kind: type[Any], value: object, where: str, problems: list[str]) -> d
             problems.append(f"`{at}` is missing, and it is required: {_wording(hint)}")
     return given
 
-
 def _converted(hint: object, value: object, where: str, problems: list[str]) -> object:
     optional = _optional(hint)
     if optional is not None:
@@ -263,7 +251,6 @@ def _converted(hint: object, value: object, where: str, problems: list[str]) -> 
     _note_wrong(hint, value, where, problems)
     return None
 
-
 def _scalar(hint: object, value: object, where: str, problems: list[str]) -> object:
     if hint is str and isinstance(value, str):
         return value
@@ -281,10 +268,8 @@ def _scalar(hint: object, value: object, where: str, problems: list[str]) -> obj
     _note_wrong(hint, value, where, problems)
     return None
 
-
 def _note_wrong(hint: object, value: object, where: str, problems: list[str]) -> None:
     problems.append(f"`{where}` should be {_wording(hint)} and {_shown(value)} arrived")
-
 
 def _wording(hint: object) -> str:
     optional = _optional(hint)
@@ -300,7 +285,6 @@ def _wording(hint: object) -> str:
         return f"an object with the fields of {hint.__qualname__}"
     return f"a {named(hint)}, which is not a payload type at all"
 
-
 def _optional(hint: object) -> object | None:
     # `Optional[X]` and `X | None` are one type as of 3.14, so `UnionType` covers both spellings.
     if get_origin(hint) is not UnionType:
@@ -308,7 +292,6 @@ def _optional(hint: object) -> object | None:
     args: tuple[object, ...] = get_args(hint)
     real = [arg for arg in args if arg is not type(None)]
     return real[0] if len(args) == 2 and len(real) == 1 else None
-
 
 def _item(hint: object) -> object | None:
     origin = get_origin(hint)
@@ -319,7 +302,6 @@ def _item(hint: object) -> object | None:
         return args[0]
     return None
 
-
 def _check_payload(payload: object, name: str) -> None:
     if isinstance(payload, type) and is_dataclass(payload):
         return
@@ -329,7 +311,6 @@ def _check_payload(payload: object, name: str) -> None:
         f"schema is derived from and what the agent is asked to fill in"
     )
 
-
 def _refusal(name: str, problems: tuple[str, ...]) -> str:
     listed = "\n".join(f"  - {problem}" for problem in problems)
     return (
@@ -337,19 +318,15 @@ def _refusal(name: str, problems: tuple[str, ...]) -> str:
         f"these and call it again:\n{listed}"
     )
 
-
 def _required(default: object, factory: object) -> bool:
     return default is MISSING and factory is MISSING
-
 
 def _description(spec: Field[Any]) -> str | None:
     held = spec.metadata.get(_METADATA_KEY)
     return held if isinstance(held, str) else None
 
-
 def _at(where: str, name: object) -> str:
     return f"{where}.{name}"
-
 
 def _shown(value: object) -> str:
     text = repr(value)

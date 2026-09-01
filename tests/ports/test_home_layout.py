@@ -12,10 +12,8 @@ import hashlib
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 from typing import Final
-
 import pytest
 from _corpus import ACCEPTED, CORPUS, PURE_IMPORTS, imported_modules, impurities
-
 from agl.ports import home_layout
 from agl.ports.errors import InputError, InternalError
 from agl.ports.home_layout import (
@@ -38,9 +36,7 @@ _SCOPE: Final = RunScope(ProjectName("myapp"), RunLabel("auth"))
 _DIGEST: Final = "9f2c4e" + "b" * 54 + "a71b"
 _RUN: Final = "/agl-home/projects/myapp/runs/auth"
 
-
 # --- The tree, written out --------------------------------------------------------------------
-
 
 def test_every_named_path_under_agl_home_is_spelled_out_in_full() -> None:
     """Every path in the layout, spelled out rather than recomposed."""
@@ -58,7 +54,6 @@ def test_every_named_path_under_agl_home_is_spelled_out_in_full() -> None:
         f"{_RUN}/worktrees/T-01/steps/review_quality/{_DIGEST}.json"
     )
 
-
 def test_the_two_paths_under_home_that_no_project_name_composes() -> None:
     """The operator's own settings file at the top, and the directory the projects sit in.
 
@@ -70,7 +65,6 @@ def test_the_two_paths_under_home_that_no_project_name_composes() -> None:
     assert projects_dir(_HOME) == Path("/agl-home/projects")
     assert settings_file(_HOME).parent == _HOME.path, "at the top of AGL_HOME, not below it"
     assert projects_dir(_HOME).parent == _HOME.path
-
 
 def test_the_projects_directory_is_the_one_the_named_paths_are_composed_beneath() -> None:
     """The container and the paths under it are one answer, so a scan cannot look elsewhere.
@@ -85,7 +79,6 @@ def test_the_projects_directory_is_the_one_the_named_paths_are_composed_beneath(
     assert scope_dir(_HOME, _SCOPE).is_relative_to(projects_dir(_HOME))
     assert not settings_file(_HOME).is_relative_to(projects_dir(_HOME))
 
-
 def test_runs_are_stored_per_project_so_one_label_in_two_repos_is_two_runs() -> None:
     """Why `agl resume feat1` finds repo A's run and reports no such label in repo B."""
     label = RunLabel("feat1")
@@ -94,7 +87,6 @@ def test_runs_are_stored_per_project_so_one_label_in_two_repos_is_two_runs() -> 
     assert first != second
     assert not first.is_relative_to(second) and not second.is_relative_to(first)
     assert first.is_relative_to(project_dir(_HOME, ProjectName("alpha")))
-
 
 def test_worktrees_nest_arbitrarily_and_inside_is_the_only_thing_that_makes_depth() -> None:
     """A step inside `T-01/worktrees/sub-b/` is a sequence of namespaces, not one."""
@@ -109,7 +101,6 @@ def test_worktrees_nest_arbitrarily_and_inside_is_the_only_thing_that_makes_dept
     assert deep.run == _SCOPE
     assert deep.inside(Namespace("T-01")) != deep
 
-
 def test_steps_and_worktrees_are_siblings_so_one_name_cannot_be_both() -> None:
     """The reason for two subtrees: `worktree("review")` and `step("review", ...)`."""
     as_step = step_dir(_HOME, _SCOPE, StepName("review"))
@@ -118,7 +109,6 @@ def test_steps_and_worktrees_are_siblings_so_one_name_cannot_be_both() -> None:
     assert not as_step.is_relative_to(as_worktree)
     assert not as_worktree.is_relative_to(as_step)
     assert as_step.parent != as_worktree.parent
-
 
 def test_a_name_reaches_disk_in_the_spelling_its_author_wrote_and_not_a_folded_one() -> None:
     """The other half of the fold: it belongs in the counter's key, never in a path segment.
@@ -142,21 +132,17 @@ def test_a_name_reaches_disk_in_the_spelling_its_author_wrote_and_not_a_folded_o
         f"/agl-home/projects/MyApp/runs/Auth/worktrees/T-01/steps/Review/{_DIGEST}.json"
     )
 
-
 def test_the_run_record_is_per_run_wherever_inside_the_run_it_is_asked_from() -> None:
     """One `run.json`, at the top. A scope three worktrees down still answers with that one."""
     deep = _SCOPE.inside(Namespace("T-01")).inside(Namespace("sub-b"))
     assert run_record(_HOME, deep) == run_record(_HOME, _SCOPE) == Path(f"{_RUN}/run.json")
 
-
 # --- The property, over the corpus ------------------------------------------------------------
-
 
 def test_the_corpus_is_big_enough_and_mixed_enough_to_mean_anything() -> None:
     """A corpus that accepted nothing, or rejected nothing, would pass the property below."""
     assert len(CORPUS) > 1500, f"corpus collapsed to {len(CORPUS)} values"
     assert 250 < len(ACCEPTED) < len(CORPUS) - 250, f"{len(ACCEPTED)} of {len(CORPUS)} accepted"
-
 
 def test_property_no_accepted_name_in_any_position_escapes_agl_home(tmp_path: Path) -> None:
     """Every accepted value, as project, label, two nested namespaces and step, all at once.
@@ -190,15 +176,12 @@ def test_property_no_accepted_name_in_any_position_escapes_agl_home(tmp_path: Pa
     )
     assert refused, "the corpus no longer holds a name that long, so nothing was proved"
 
-
 # --- The two segments no validated type vouches for --------------------------------------------
-
 
 def test_a_real_sha256_hexdigest_is_the_shape_the_check_is_cut_to() -> None:
     """The check is only worth having if the thing the journal actually produces passes it."""
     digest = hashlib.sha256(b"a step fingerprint").hexdigest()
     assert step_entry(_HOME, _SCOPE, StepName("spec"), digest).name == f"{digest}.json"
-
 
 @pytest.mark.parametrize(
     "digest",
@@ -211,7 +194,6 @@ def test_a_step_entry_refuses_anything_that_is_not_a_digest(digest: str) -> None
     """`InternalError`, not `InputError`: nobody typed this, so it is our bug and exit 70."""
     with pytest.raises(InternalError, match="not a digest"):
         step_entry(_HOME, _SCOPE, StepName("spec"), digest)
-
 
 def test_a_project_name_that_fits_the_cap_but_whose_toml_file_would_not_is_refused() -> None:
     """The edge `ids.py` left: its 255-byte cap governs the name, and `.toml` adds five bytes."""
@@ -232,7 +214,6 @@ def test_a_project_name_that_fits_the_cap_but_whose_toml_file_would_not_is_refus
     with pytest.raises(InputError, match="255"):
         scope_dir(_HOME, RunScope(over, RunLabel("auth")))
 
-
 def test_the_headroom_is_measured_in_bytes_though_no_name_can_show_that_any_more() -> None:
     """`é` is one character and two bytes - and no name may carry one at all.
 
@@ -247,9 +228,7 @@ def test_the_headroom_is_measured_in_bytes_though_no_name_can_show_that_any_more
         ProjectName("\xe9" * 125)
     assert all(len(value.encode("utf-8")) == len(value) for value in ACCEPTED)
 
-
 # --- The root, and the other root --------------------------------------------------------------
-
 
 def test_agl_home_must_be_absolute() -> None:
     """A relative root resolves against the working directory, which this module may not read."""
@@ -258,7 +237,6 @@ def test_agl_home_must_be_absolute() -> None:
             AglHome(relative)
     assert AglHome(Path("/agl-home")).path == Path("/agl-home")
 
-
 def test_a_root_and_a_scope_are_frozen_and_are_not_themselves_paths() -> None:
     """Validated once on the way in is worth nothing if the value can be edited afterwards."""
     with pytest.raises(FrozenInstanceError):
@@ -266,7 +244,6 @@ def test_a_root_and_a_scope_are_frozen_and_are_not_themselves_paths() -> None:
     with pytest.raises(FrozenInstanceError):
         _SCOPE.namespaces = ()  # type: ignore[misc]
     assert not hasattr(_HOME, "__fspath__"), "a root is passed to these functions, not to open()"
-
 
 def test_a_trees_root_cannot_be_used_where_agl_home_belongs() -> None:
     """The two wrappers are structurally identical, so this is what tells them apart at runtime.
@@ -287,7 +264,6 @@ def test_a_trees_root_cannot_be_used_where_agl_home_belongs() -> None:
         settings_file(trees)  # type: ignore[arg-type]
     with pytest.raises(InternalError, match="TreesRoot"):
         projects_dir(trees)  # type: ignore[arg-type]
-
 
 def test_the_layout_is_pure_computation_and_imports_nothing_that_could_make_it_otherwise() -> None:
     """No `mkdir`, no `exists`, no environment, no `cwd` - and no `resolve`, which reads links.

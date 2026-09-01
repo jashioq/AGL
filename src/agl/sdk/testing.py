@@ -1,9 +1,7 @@
-
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Final
-
 from agl.ports.agent import AgentTask, StopReason
 from agl.ports.errors import InputError
 from agl.ports.run import JsonValue
@@ -12,10 +10,8 @@ __all__ = ["Agent", "Call", "Reply"]
 
 _NO_PAYLOAD: Final[Mapping[str, JsonValue]] = MappingProxyType({})
 
-
 @dataclass(frozen=True, slots=True)
 class Call:
-
     tool: str
 
     payload: Mapping[str, JsonValue] = _NO_PAYLOAD
@@ -32,10 +28,8 @@ class Call:
         # both fakes on its way to a handler, and `json.dumps` has no encoder for a proxy.
         object.__setattr__(self, "payload", dict(self.payload))
 
-
 @dataclass(frozen=True, slots=True)
 class Reply:
-
     calls: Sequence[Call] = ()
 
     activity: Sequence[str] = ()
@@ -47,6 +41,5 @@ class Reply:
     def __post_init__(self) -> None:
         object.__setattr__(self, "calls", tuple(self.calls))
         object.__setattr__(self, "activity", tuple(self.activity))
-
 
 type Agent = Callable[[AgentTask], Reply | Awaitable[Reply]]

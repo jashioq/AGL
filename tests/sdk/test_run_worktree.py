@@ -50,9 +50,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType
 from typing import Final
-
 import pytest
-
 from agl.adapters.claude_code.fake import Conversation, Script
 from agl.adapters.filesystem.store import FilesystemStore
 from agl.adapters.git.history import GitHistory
@@ -89,29 +87,23 @@ SIDEQUEST: Final = "src/sidequest.py"
 
 _NOTHING: Final[Mapping[str, bytes]] = MappingProxyType({})
 
-
 @dataclass(frozen=True)
 class Summary:
     """A reporting payload: one string, which is the whole of what these agents have to say."""
 
     text: str
 
-
 REPORT: Final = reporting_tool("report", "report what you did", Summary)
-
 
 class _Crash(Exception):
     """What an agent dying mid-step looks like from here. Any exception would do."""
 
-
 # --- the repository, the bundle, and the run -----------------------------------------------------
-
 
 def _git(where: Path, *argv: str) -> str:
     """One git command, for arranging and observing. Never for the thing under test."""
     done = subprocess.run(["git", *argv], cwd=where, capture_output=True, text=True, check=True)
     return done.stdout
-
 
 @pytest.fixture
 def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -137,12 +129,10 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     _git(work, "commit", "-q", "-m", "the state a run is cut from")
     return work
 
-
 @pytest.fixture
 def base(repository: Path) -> str:
     """The commit the run is cut from, resolved - the pinned `RunSpec.base_sha` shape of a base."""
     return _git(repository, "rev-parse", "HEAD").strip()
-
 
 def _run(repository: Path, tmp_path: Path, base: str, script: Script | None = None) -> Run[None]:
     """A `Run` over one real repository, one real ledger, one real history and one scripted agent.
@@ -167,9 +157,7 @@ def _run(repository: Path, tmp_path: Path, base: str, script: Script | None = No
     )
     return Run(params=None, services=services, scope=SCOPE, base=base)
 
-
 # --- roles, and the agents that serve them -------------------------------------------------------
-
 
 @role(model=Claude.SONNET)
 def _role(name: str, instructions: str, *, read_only: bool = False) -> Role[Summary]:
@@ -182,7 +170,6 @@ def _role(name: str, instructions: str, *, read_only: bool = False) -> Role[Summ
         tools=(REPORT,),
     )
 
-
 class _Agent:
     """What the fake was asked, and what it was told back, written down."""
 
@@ -193,7 +180,6 @@ class _Agent:
 
         self.results: list[ToolResult] = []
         """Every answer the reporting tool gave, refusals included."""
-
 
 def _agent(
     record: _Agent, *, writes: Mapping[str, bytes] = _NOTHING, dies_once: bool = False
@@ -222,7 +208,6 @@ def _agent(
 
     return _script
 
-
 # --- the ledger and the trees root, read off disk ------------------------------------------------
 #
 # Every path below is **spelled out** rather than composed through `home_layout` or `tree_layout`. A
@@ -230,11 +215,9 @@ def _agent(
 # layout whatever either of them said, and the layout is half of what this file is about: that
 # `AGL_HOME` nests and the trees root does not is a claim about two literal shapes on disk.
 
-
 def _run_dir(tmp_path: Path) -> Path:
     """`<home>/projects/myapp/runs/auth/` - depth zero, the run itself."""
     return tmp_path / "home" / "projects" / "myapp" / "runs" / "auth"
-
 
 def _steps_dir(tmp_path: Path, step: str, *namespaces: str) -> Path:
     """`<run>/worktrees/<n>/.../steps/<step>/` - the layout, written out rather than computed."""
@@ -243,11 +226,9 @@ def _steps_dir(tmp_path: Path, step: str, *namespaces: str) -> Path:
         where = where / "worktrees" / namespace
     return where / "steps" / step
 
-
 def _entries(tmp_path: Path, step: str, *namespaces: str) -> list[Path]:
     """Every entry file recorded for one step in one namespace, in filename order."""
     return sorted(_steps_dir(tmp_path, step, *namespaces).glob("*.json"))
-
 
 def _one(tmp_path: Path, step: str, *namespaces: str) -> dict[str, JsonValue]:
     """The one entry that step recorded there. Two would mean it ran twice."""
@@ -256,27 +237,22 @@ def _one(tmp_path: Path, step: str, *namespaces: str) -> dict[str, JsonValue]:
     parsed: dict[str, JsonValue] = json.loads(found[0].read_text(encoding="utf-8"))
     return parsed
 
-
 def _head(tmp_path: Path, step: str, *namespaces: str) -> str:
     """The commit one recorded step ended at - the value `last_good` is chained from."""
     recorded = _one(tmp_path, step, *namespaces)["head"]
     assert isinstance(recorded, str)
     return recorded
 
-
 def _trees_dir(tmp_path: Path) -> Path:
     """`.trees/auth/` - every checkout belonging to this run, and nothing else."""
     return tmp_path / "trees" / "auth"
-
 
 def _branches(repository: Path) -> list[str]:
     """Every branch in the repository, fully qualified, asked of git rather than of the layout."""
     listed = _git(repository, "for-each-ref", "--format=%(refname)", "refs/heads/")
     return listed.split()
 
-
 # --- the asymmetry: memo namespaces nest, checkouts do not ---------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_entries_nest_arbitrarily_while_every_checkout_is_a_flat_sibling(
@@ -327,9 +303,7 @@ async def test_entries_nest_arbitrarily_while_every_checkout_is_a_flat_sibling(
     assert (trees / "sub-b" / FEATURE).is_file()
     assert len(record.runs) == 3
 
-
 # --- one namespace per run, not one per parent ---------------------------------------------------
-
 
 @pytest.mark.parametrize("nested_first", [True, False])
 def test_a_grandchilds_name_and_a_top_level_name_collide_in_either_creation_order(
@@ -370,7 +344,6 @@ def test_a_grandchilds_name_and_a_top_level_name_collide_in_either_creation_orde
     )
     assert not (tmp_path / "trees").exists(), "a refused namespace provisioned a checkout anyway"
 
-
 def test_two_spellings_of_one_name_are_one_directory_and_the_second_is_refused(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
@@ -400,7 +373,6 @@ def test_two_spellings_of_one_name_are_one_directory_and_the_second_is_refused(
 
     assert "'t-01'" in str(raised.value) and "'T-01'" in str(raised.value)
 
-
 def test_a_namespace_name_that_could_not_be_a_path_segment_or_a_ref_is_refused(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
@@ -420,9 +392,7 @@ def test_a_namespace_name_that_could_not_be_a_path_segment_or_a_ref_is_refused(
     assert run.worktree("T-01") is not None
     assert not (tmp_path / "trees").exists()
 
-
 # --- reopen, and what a resume rests on ----------------------------------------------------------
-
 
 def test_asking_twice_for_one_name_hands_back_the_same_child_and_the_runs_own_tables(
     repository: Path, tmp_path: Path, base: str
@@ -463,9 +433,7 @@ def test_asking_twice_for_one_name_hands_back_the_same_child_and_the_runs_own_ta
     assert first.params is run.params and first.services is run.services
     assert first.scope == RunScope(PROJECT, LABEL, (TICKET,))
 
-
 # --- who cut whom: the link `integrate()` walks --------------------------------------------------
-
 
 def test_the_root_has_no_parent_and_every_child_holds_the_run_that_cut_it(
     repository: Path, tmp_path: Path, base: str
@@ -496,7 +464,6 @@ def test_the_root_has_no_parent_and_every_child_holds_the_run_that_cut_it(
     assert child._parent is run
     assert grandchild._parent is child
 
-
 def test_a_reopened_namespace_still_holds_the_parent_that_first_cut_it(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
@@ -516,7 +483,6 @@ def test_a_reopened_namespace_still_holds_the_parent_that_first_cut_it(
 
     assert again is first
     assert again._parent is child
-
 
 @pytest.mark.asyncio
 async def test_the_landing_seam_hands_out_the_namespaces_own_journal_and_checkout(
@@ -565,7 +531,6 @@ async def test_the_landing_seam_hands_out_the_namespaces_own_journal_and_checkou
         "one journal and every child after it was still cut from the commit before the landing"
     )
 
-
 @pytest.mark.asyncio
 async def test_a_reopened_namespace_replays_its_step_and_is_not_cut_again(
     repository: Path, tmp_path: Path, base: str
@@ -597,7 +562,6 @@ async def test_a_reopened_namespace_replays_its_step_and_is_not_cut_again(
         "child had already made - the one thing a resume exists to keep"
     )
     assert (_trees_dir(tmp_path) / "T-01" / FEATURE).is_file()
-
 
 @pytest.mark.asyncio
 async def test_a_second_walk_over_a_nested_run_replays_every_namespace(
@@ -635,7 +599,6 @@ async def test_a_second_walk_over_a_nested_run_replays_every_namespace(
     assert len(_entries(tmp_path, "implement", "T-01")) == 1
     assert len(_entries(tmp_path, "repair", "T-01", "sub-b")) == 1
 
-
 async def _nested(run: Run[None]) -> list[Summary]:
     """Three namespaces deep: one step in the run, one in a child, and one in a grandchild."""
     spec = await run.step(_role("spec", "write the spec", read_only=True))
@@ -645,9 +608,7 @@ async def _nested(run: Run[None]) -> list[Summary]:
     repaired = await nested.step(_role("repair", "repair", read_only=True))
     return [spec, built, repaired]
 
-
 # --- `steps/` and `worktrees/` are siblings ------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_a_step_and_a_worktree_of_the_same_name_address_different_places(
@@ -675,9 +636,7 @@ async def test_a_step_and_a_worktree_of_the_same_name_address_different_places(
     assert not (_run_dir(tmp_path) / "steps" / "review" / "worktrees").exists()
     assert len(record.runs) == 2
 
-
 # --- the two branch names, in a repository that has to hold both ---------------------------------
-
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("child_first", [False, True])
@@ -722,9 +681,7 @@ async def test_the_run_branch_and_a_child_branch_coexist_in_one_real_repository(
     assert _git(repository, "rev-parse", "refs/heads/agl/auth").strip() == base
     assert _git(repository, "rev-parse", "refs/heads/agl/_work/auth/T-01").strip() == base
 
-
 # --- where a child starts ------------------------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_a_child_starts_at_the_parents_logical_head_and_not_at_the_runs_base(
@@ -757,7 +714,6 @@ async def test_a_child_starts_at_the_parents_logical_head_and_not_at_the_runs_ba
     )
     assert (_trees_dir(tmp_path) / "T-01" / FEATURE).is_file()
 
-
 @pytest.mark.asyncio
 async def test_a_child_cut_from_a_sibling_starts_at_that_siblings_recorded_head(
     repository: Path, tmp_path: Path, base: str
@@ -785,7 +741,6 @@ async def test_a_child_cut_from_a_sibling_starts_at_that_siblings_recorded_head(
         "work it was waiting for is not in the tree it is working against"
     )
     assert (_trees_dir(tmp_path) / "b" / FEATURE).is_file()
-
 
 @pytest.mark.asyncio
 async def test_a_child_cut_from_a_ref_string_starts_where_that_ref_points(
@@ -820,7 +775,6 @@ async def test_a_child_cut_from_a_ref_string_starts_where_that_ref_points(
     )
     assert (_trees_dir(tmp_path) / "T-01" / SIDEQUEST).is_file()
     assert _git(_trees_dir(tmp_path) / "T-01", "rev-parse", "HEAD").strip() == elsewhere
-
 
 @pytest.mark.asyncio
 async def test_a_child_is_cut_from_the_chain_and_not_from_where_the_branch_actually_is(
@@ -860,9 +814,7 @@ async def test_a_child_is_cut_from_the_chain_and_not_from_where_the_branch_actua
     )
     assert not (_trees_dir(tmp_path) / "T-01" / FEATURE).exists()
 
-
 # --- the name is opaque --------------------------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_renaming_a_namespace_changes_the_paths_and_nothing_else(

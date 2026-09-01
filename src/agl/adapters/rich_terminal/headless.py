@@ -1,8 +1,6 @@
-
 from collections.abc import Callable, Mapping
 from types import MappingProxyType, TracebackType
 from typing import Final, Self, cast
-
 from agl.ports.errors import InternalError, UpstreamUnavailable
 from agl.ports.terminal import Screen, Terminal
 
@@ -10,9 +8,7 @@ __all__ = ["HeadlessTerminal"]
 
 _NOTHING_PENDING: Final[Mapping[int, int]] = MappingProxyType({})
 
-
 class HeadlessTerminal(Terminal):
-
     __slots__ = ("_open",)
 
     def __init__(self) -> None:

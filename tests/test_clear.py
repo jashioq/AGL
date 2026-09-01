@@ -64,9 +64,7 @@ from dataclasses import dataclass, replace
 from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Final
-
 import pytest
-
 from agl import api
 from agl.adapters.claude_code.fake import Conversation, Script
 from agl.adapters.git.history import GitHistory
@@ -107,11 +105,9 @@ _BASE: Final = "_base"
 # The file the repository is seeded with.
 SEEDED: Final = "src/a.txt"
 
-
 @dataclass(frozen=True)
 class NoParams:
     """A workflow that takes nothing, and still has a params class to derive no flags from."""
-
 
 @role(model=Claude.SONNET)
 def writing() -> Role:
@@ -122,7 +118,6 @@ def writing() -> Role:
     nothing below depends on which. A zero-argument factory because nothing about it is decided at
     a call site - three steps below run it and none of them varies anything."""
     return Role(name="work", instructions="leave some work behind")
-
 
 @workflow(version="1.0")
 async def nesting(run: Run[NoParams]) -> None:
@@ -142,7 +137,6 @@ async def nesting(run: Run[NoParams]) -> None:
     grandchild = child.worktree(str(GRANDCHILD))
     await grandchild.step(writing(), commit="the grandchild's work")
 
-
 @workflow(version="1.0")
 async def quiet(run: Run[NoParams]) -> None:
     """Takes no step at all, so `agl/auth` never leaves the commit the run was cut from.
@@ -152,11 +146,9 @@ async def quiet(run: Run[NoParams]) -> None:
     `clear` can take.
     """
 
-
 # What a `clear` issued from inside a live run raised, at module level because the workflow that
 # issues it has to be: `EntryPoint.load` imports a module and reads an attribute in it.
 refused: Final[list[ConflictError]] = []
-
 
 @workflow(version="1.0")
 async def clearing(run: Run[NoParams]) -> None:
@@ -174,16 +166,13 @@ async def clearing(run: Run[NoParams]) -> None:
     except ConflictError as conflict:
         refused.append(conflict)
 
-
 def _point(name: str, attribute: str) -> EntryPoint:
     """A `probe = "agl.workflows.probe:probe"` line, pointed at this module instead."""
     return EntryPoint(name=name, value=f"{__name__}:{attribute}", group=registry.GROUP)
 
-
 POINTS: Final = (
     _point("nesting", "nesting"), _point("quiet", "quiet"), _point("clearing", "clearing")
 )
-
 
 def _writing(dispatched: list[str]) -> Script:
     """An agent that leaves one file behind per dispatch and reports nothing.
@@ -202,18 +191,15 @@ def _writing(dispatched: list[str]) -> Script:
 
     return _script
 
-
 def _fakes(tmp_path: Path) -> container.FakeServices:
     """Target #8's deployment: one repository seeded with a file, one store, one frozen clock."""
     return container.fakes(
         _trees(tmp_path), files={SEEDED: b"one\n"}, claude=_writing([])
     )
 
-
 def _trees(tmp_path: Path) -> TreesRoot:
     """Where `container.fakes` puts this run's checkouts, spelled once."""
     return TreesRoot(tmp_path / "trees")
-
 
 async def _start(
     harness: container.FakeServices,
@@ -224,11 +210,9 @@ async def _start(
     """The first invocation: `agl run <name> -n auth`, with this module's entry points."""
     await api.run(harness.services, PROJECT, name, LABEL, (), points=points)
 
-
 async def _clear(harness: container.FakeServices, *, force: bool = False) -> str | None:
     """`agl clear auth [-f]`, and the warning it answers with."""
     return await api.clear(harness.services, PROJECT, LABEL, force=force)
-
 
 def _merged(harness: container.FakeServices) -> None:
     """Move the base ref up to the run's own branch: the world in which the work has landed.
@@ -241,9 +225,7 @@ def _merged(harness: container.FakeServices) -> None:
     assert tip is not None, "the run left no branch, so there is nothing to move the base ref to"
     harness.repository.move("main", tip)
 
-
 # --- the acceptance criterion ---------------------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_clear_on_an_unmerged_branch_warns_and_keeps_it(tmp_path: Path) -> None:
@@ -276,7 +258,6 @@ async def test_clear_on_an_unmerged_branch_warns_and_keeps_it(tmp_path: Path) ->
     )
     assert not run_trees_dir(_trees(tmp_path), LABEL).exists()
 
-
 @pytest.mark.asyncio
 async def test_force_deletes_the_unmerged_branch(tmp_path: Path) -> None:
     """Half two: `-f` is `git branch -D`, and it asks nothing at all.
@@ -294,7 +275,6 @@ async def test_force_deletes_the_unmerged_branch(tmp_path: Path) -> None:
         "`-f` is `git branch -D` and left the branch standing"
     )
     assert kept is None, "a forced clear kept nothing and warned about it anyway"
-
 
 @pytest.mark.asyncio
 async def test_a_merged_branch_is_deleted_without_force(tmp_path: Path) -> None:
@@ -318,7 +298,6 @@ async def test_a_merged_branch_is_deleted_without_force(tmp_path: Path) -> None:
     )
     assert kept is None
 
-
 @pytest.mark.asyncio
 async def test_a_run_that_committed_nothing_is_contained_and_goes_quietly(tmp_path: Path) -> None:
     """The ordinary end of an ordinary run: nothing was recorded, so nothing is at risk.
@@ -337,9 +316,7 @@ async def test_a_run_that_committed_nothing_is_contained_and_goes_quietly(tmp_pa
     assert harness.repository.tip(run_branch(LABEL)) is None
     assert await harness.services.store.read_record(SCOPE) is None
 
-
 # --- the traversal, and the order it happens in ---------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_every_namespace_at_every_depth_comes_away(tmp_path: Path) -> None:
@@ -382,7 +359,6 @@ async def test_every_namespace_at_every_depth_comes_away(tmp_path: Path) -> None
     )
     assert await harness.store.namespaces(SCOPE) == ()
 
-
 class _Recording(WorkspaceProvider):
     """The bundle's own provider with every call written into a shared list.
 
@@ -419,7 +395,6 @@ class _Recording(WorkspaceProvider):
         """
         return _noted(self._provider.hold(label), self._events)
 
-
 @asynccontextmanager
 async def _noted(
     claim: AbstractAsyncContextManager[None], events: list[str]
@@ -431,7 +406,6 @@ async def _noted(
             yield
         finally:
             events.append("release")
-
 
 class _RecordingStore(Store):
     """The bundle's own store, with the two members `clear` uses written into the same list.
@@ -469,12 +443,10 @@ class _RecordingStore(Store):
         self._events.append("remove the records")
         await self._store.remove(scope)
 
-
 def _named(namespace: Namespace | None) -> str:
     """How a namespace appears in the call sequence. `None` is the run's own place, which the
     trees layout calls `_base` and which `ids.py` refuses as a `Namespace` in every spelling."""
     return _BASE if namespace is None else str(namespace)
-
 
 @pytest.mark.asyncio
 async def test_the_order_is_enumerate_then_the_checkouts_then_the_records(tmp_path: Path) -> None:
@@ -527,9 +499,7 @@ async def test_the_order_is_enumerate_then_the_checkouts_then_the_records(tmp_pa
         "release",
     ]
 
-
 # --- what the retained branch now costs, and the claim that makes `clear` refuse -----------------
-
 
 @pytest.mark.asyncio
 async def test_a_kept_branch_refuses_the_next_run_until_the_branch_goes(tmp_path: Path) -> None:
@@ -581,7 +551,6 @@ async def test_a_kept_branch_refuses_the_next_run_until_the_branch_goes(tmp_path
         "above was about something other than the branch"
     )
 
-
 @pytest.mark.asyncio
 async def test_a_clear_aimed_at_a_live_run_refuses_and_takes_nothing(tmp_path: Path) -> None:
     """The last sentence, which had no mechanism behind it for a long time.
@@ -631,7 +600,6 @@ async def test_a_clear_aimed_at_a_live_run_refuses_and_takes_nothing(tmp_path: P
     assert await _clear(harness) is None
     assert await harness.services.store.read_record(SCOPE) is None
 
-
 @pytest.mark.asyncio
 async def test_a_clear_aimed_at_a_live_resume_refuses_too(tmp_path: Path) -> None:
     """The same claim, taken by the other verb that walks a run.
@@ -666,9 +634,7 @@ async def test_a_clear_aimed_at_a_live_resume_refuses_too(tmp_path: Path) -> Non
         "the refused `clear` took the resumed run's own checkout away anyway"
     )
 
-
 # --- absence, which is the ordinary case ----------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_a_label_with_no_record_is_a_not_found_and_reads_as_the_third_of_three(
@@ -697,7 +663,6 @@ async def test_a_label_with_no_record_is_a_not_found_and_reads_as_the_third_of_t
         "run 'other' does not exist - `agl run <workflow> -n other` starts one."
     )
 
-
 @pytest.mark.asyncio
 async def test_clearing_the_same_run_twice_refuses_the_second_time(tmp_path: Path) -> None:
     """`clear` twice in a row, which is what an operator does when the first one printed something.
@@ -716,7 +681,6 @@ async def test_clearing_the_same_run_twice_refuses_the_second_time(tmp_path: Pat
     with pytest.raises(NotFoundError) as caught:
         await _clear(harness, force=True)
     assert exit_code_for(caught.value) == 3
-
 
 @pytest.mark.asyncio
 async def test_a_run_whose_checkouts_were_never_cut_is_cleared_without_raising(
@@ -759,7 +723,6 @@ async def test_a_run_whose_checkouts_were_never_cut_is_cleared_without_raising(
     assert await harness.services.store.read_record(SCOPE) is None
     assert not run_trees_dir(_trees(tmp_path), LABEL).exists()
 
-
 @pytest.mark.asyncio
 async def test_a_clear_over_checkouts_something_already_took_back_succeeds(tmp_path: Path) -> None:
     """The other shape of absence: the run happened, and its places were given back by hand first.
@@ -780,9 +743,7 @@ async def test_a_clear_over_checkouts_something_already_took_back_succeeds(tmp_p
     assert await harness.services.store.read_record(SCOPE) is None
     assert not run_trees_dir(_trees(tmp_path), LABEL).exists()
 
-
 # --- the one sentence that needs real git ---------------------------------------------------------
-
 
 def _git(where: Path, *argv: str) -> str:
     """One git command, for arranging and observing. Never for the thing under test.
@@ -792,7 +753,6 @@ def _git(where: Path, *argv: str) -> str:
     """
     done = subprocess.run(["git", *argv], cwd=where, capture_output=True, text=True, check=True)
     return done.stdout
-
 
 @pytest.fixture
 def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -820,7 +780,6 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     _git(work, "commit", "-q", "-m", "the state a run is cut from")
     return work
 
-
 def _over(repository: Path, tmp_path: Path) -> container.FakeServices:
     """The fakes bundle with its two git ports made real - the smallest arrangement that puts
     `api.clear` over an actual repository.
@@ -841,7 +800,6 @@ def _over(repository: Path, tmp_path: Path) -> container.FakeServices:
         ),
     )
 
-
 def _branch_exists(repository: Path, branch: str) -> bool:
     """Whether git still has this name, asked of the fully qualified ref."""
     done = subprocess.run(
@@ -852,7 +810,6 @@ def _branch_exists(repository: Path, branch: str) -> bool:
         check=False,
     )
     return done.returncode == 0
-
 
 @pytest.mark.asyncio
 async def test_a_locked_worktree_is_what_refuses_a_clear(

@@ -57,7 +57,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
-
 from agl.adapters import git as git_package
 
 # The two members of `GitRunner` that turn arguments into an argv, and the attribute all three
@@ -92,7 +91,6 @@ FENCED_TODAY: Final = 11
 
 type _Scopes = tuple[Mapping[str, list[ast.expr]], ...]
 
-
 @dataclass(frozen=True, slots=True)
 class _Word:
     """One argv word as the source spells it: a constant's own value, or `ast.unparse`'s rendering
@@ -102,7 +100,6 @@ class _Word:
     text: str
     literal: bool
 
-
 @dataclass(frozen=True, slots=True)
 class _Site:
     """One call to the runner: where it is, and every argv it can hand git. More than one only
@@ -111,7 +108,6 @@ class _Site:
 
     where: str
     argvs: tuple[tuple[_Word, ...], ...]
-
 
 def test_every_git_argv_that_carries_a_value_from_outside_fences_it_with_end_of_options() -> None:
     """The package's own source, parsed, with every argv it can build read word by word.
@@ -148,14 +144,12 @@ def test_every_git_argv_that_carries_a_value_from_outside_fences_it_with_end_of_
         f"literals, so a test that found none of the others would be green and checking nothing"
     )
 
-
 def _sites(path: Path) -> list[_Site]:
     """Every runner call in one module, with the argvs each of them can hand git."""
     found: list[_Site] = []
     tree = ast.parse(path.read_text(encoding="utf-8"))
     _visit(tree, (_bound(tree),), path.name, found)
     return found
-
 
 def _visit(node: ast.AST, scopes: _Scopes, module: str, found: list[_Site]) -> None:
     """Walk `node`, carrying the scopes a name could be assigned in, innermost first. A function is
@@ -169,7 +163,6 @@ def _visit(node: ast.AST, scopes: _Scopes, module: str, found: list[_Site]) -> N
             found.append(_site(child, scopes, module))
         _visit(child, inner, module, found)
 
-
 def _site(call: ast.Call, scopes: _Scopes, module: str) -> _Site:
     """One call read into its argvs, or the failure for a receiver this file cannot vouch for.
     Matched on the member name alone, whatever it was reached through, which is what makes a
@@ -180,14 +173,12 @@ def _site(call: ast.Call, scopes: _Scopes, module: str) -> _Site:
         raise _unreadable(where, call, f"a runner member not reached through {RUNNER}")
     return _Site(where, tuple(tuple(argv) for argv in _argvs(call.args, scopes, where)))
 
-
 def _argvs(args: Sequence[ast.expr], scopes: _Scopes, where: str) -> list[list[_Word]]:
     """Every argv these arguments can produce - one per form each of them can take."""
     grown: list[list[_Word]] = [[]]
     for arg in args:
         grown = [built + option for built in grown for option in _options(arg, scopes, where)]
     return grown
-
 
 def _options(arg: ast.expr, scopes: _Scopes, where: str) -> list[list[_Word]]:
     """One argument as the words it contributes, once per form it can take.
@@ -209,7 +200,6 @@ def _options(arg: ast.expr, scopes: _Scopes, where: str) -> list[list[_Word]]:
         spread.extend(_argvs(elements, scopes, where))
     return spread
 
-
 def _forms(name: ast.Name, scopes: _Scopes, where: str) -> list[list[ast.expr]]:
     """The tuple, or the two tuples, that `name` can hold - read out of the nearest scope. Two
     shapes and no others: a tuple, and a conditional choosing between two of them, which is how
@@ -230,7 +220,6 @@ def _forms(name: ast.Name, scopes: _Scopes, where: str) -> list[list[ast.expr]]:
         raise _unreadable(where, value, "a splatted name that is not a tuple of arguments")
     raise _unreadable(where, name, "a splatted name nothing in this module assigns")
 
-
 def _bound(scope: ast.AST) -> dict[str, list[ast.expr]]:
     """Every plain name this scope assigns, to the expressions it was assigned. A list and not one
     expression, so that a name assigned twice fails at the call site that splats it rather than
@@ -249,7 +238,6 @@ def _bound(scope: ast.AST) -> dict[str, list[ast.expr]]:
                 bound.setdefault(target.id, []).append(value)
     return bound
 
-
 def _statements(scope: ast.AST) -> list[ast.AST]:
     """Everything in `scope` that is not inside a scope of its own."""
     inside: list[ast.AST] = []
@@ -258,7 +246,6 @@ def _statements(scope: ast.AST) -> list[ast.AST]:
         if not isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda):
             inside.extend(_statements(child))
     return inside
-
 
 def _outside(argv: Sequence[_Word]) -> list[tuple[int, _Word]]:
     """The words of `argv` that came from outside and that git has not already bound to an option:
@@ -271,7 +258,6 @@ def _outside(argv: Sequence[_Word]) -> list[tuple[int, _Word]]:
         and not (at > 0 and argv[at - 1].literal and argv[at - 1].text in BINDING)
     ]
 
-
 def _exposed(argv: Sequence[_Word]) -> list[_Word]:
     """Those of them git is still free to read as options: the ones standing before the fence.
 
@@ -283,7 +269,6 @@ def _exposed(argv: Sequence[_Word]) -> list[_Word]:
         (at for at, word in enumerate(argv) if word.literal and word.text == FENCE), len(argv)
     )
     return [word for at, word in _outside(argv) if at < fence]
-
 
 def _unreadable(where: str, node: ast.AST, what: str) -> AssertionError:
     """The failure for an argv this file cannot read. Returned, so call sites `raise` it.

@@ -69,9 +69,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, cast
-
 import pytest
-
 from agl.adapters.claude_code import fake as claude_fake
 from agl.adapters.openai import fake as openai_fake
 from agl.adapters.routing import RoutingAgentRunner
@@ -100,7 +98,6 @@ from contracts.agent import AgentContract
 # `asyncio_mode = "strict"` turns a missing marker into a test pytest silently skips - which is how
 # a file like this passes against a dispatch it never performed.
 pytestmark = pytest.mark.asyncio
-
 
 class TestRoutingOverBothFakes(AgentContract):
     """The port in full, six times over - once per model either provider serves.
@@ -136,7 +133,6 @@ class TestRoutingOverBothFakes(AgentContract):
         """
         return cast(ModelId, request.param)
 
-
 # --- What the fakes are asked to do, and how it is seen ------------------------------------------
 
 CLAUDE_RAN: Final = "the adapter registered under claude ran this task"
@@ -155,7 +151,6 @@ FAKES: Final[Mapping[Provider, Callable[[], AgentRunner]]] = {
     Provider.CLAUDE: claude_fake.FakeAgentRunner,
     Provider.OPENAI: openai_fake.FakeAgentRunner,
 }
-
 
 class Ran:
     """A script for either fake that records what it was handed and says which fake ran it.
@@ -185,7 +180,6 @@ class Ran:
         self.asked.append((said, work))
         return AgentOutcome(stop_reason=StopReason.COMPLETED, text=said)
 
-
 def recorded() -> tuple[Ran, RoutingAgentRunner]:
     """A router over both fakes, each scripted to say which one it is, and the record they share."""
     ran = Ran()
@@ -196,21 +190,16 @@ def recorded() -> tuple[Ran, RoutingAgentRunner]:
         }
     )
 
-
 type Member = Callable[[AgentRunner, ModelId, Path], Awaitable[None]]
-
 
 async def _capabilities(runner: AgentRunner, model: ModelId, where: Path) -> None:
     await runner.capabilities(model)
 
-
 async def _check_ready(runner: AgentRunner, model: ModelId, where: Path) -> None:
     await runner.check_ready(model)
 
-
 async def _run(runner: AgentRunner, model: ModelId, where: Path) -> None:
     await runner.run(task(where, model, SAY_WHAT_THIS_IS))
-
 
 # Every member of the port, so that the tests about refusing name all three rather than the one
 # that was easiest to write. A member that dispatched while its neighbours did not would be a
@@ -221,9 +210,7 @@ MEMBERS: Final[Mapping[str, Member]] = {
     "run": _run,
 }
 
-
 # --- Dispatch: the right adapter, the whole task, and nothing added on the way back --------------
-
 
 @pytest.mark.parametrize("provider", sorted(SERVED))
 async def test_a_task_is_run_by_the_adapter_registered_for_its_providers_key(
@@ -249,7 +236,6 @@ async def test_a_task_is_run_by_the_adapter_registered_for_its_providers_key(
     )
     assert outcome.text == said
 
-
 async def test_the_outcome_handed_back_is_the_one_the_adapter_answered_with(tmp_path: Path) -> None:
     """Identity, not equality: nothing is rebuilt, annotated or filled in on the way out.
 
@@ -273,7 +259,6 @@ async def test_the_outcome_handed_back_is_the_one_the_adapter_answered_with(tmp_
         "exactly the kind of vendor session identity this port carried, as `session_id`, before it "
         "was rewritten"
     )
-
 
 @pytest.mark.parametrize("member", sorted(MEMBERS))
 async def test_a_query_is_answered_by_the_runner_under_the_key_and_not_by_the_model(
@@ -303,7 +288,6 @@ async def test_a_query_is_answered_by_the_runner_under_the_key_and_not_by_the_mo
         f"this router was built with"
     )
 
-
 async def test_one_router_serves_two_providers_at_once(tmp_path: Path) -> None:
     """Two runs in flight against one instance, which is what a workflow's `split` does.
 
@@ -322,9 +306,7 @@ async def test_one_router_serves_two_providers_at_once(tmp_path: Path) -> None:
     assert sorted(ran.asked, key=lambda seen: seen[0]) == [(CLAUDE_RAN, mine), (OPENAI_RAN, yours)]
     assert [outcome.text for outcome in both] == [CLAUDE_RAN, OPENAI_RAN]
 
-
 # --- An unknown provider fails loudly ------------------------------------------------------------
-
 
 @pytest.mark.parametrize("member", sorted(MEMBERS))
 async def test_a_provider_with_no_adapter_is_refused_as_input_and_never_substituted(
@@ -368,7 +350,6 @@ async def test_a_provider_with_no_adapter_is_refused_as_input_and_never_substitu
         f"semantic, so substituting answers a different question than the workflow asked"
     )
 
-
 @pytest.mark.parametrize("member", sorted(MEMBERS))
 async def test_a_model_whose_prefix_names_no_provider_stays_an_internal_error(
     member: str, tmp_path: Path
@@ -402,9 +383,7 @@ async def test_a_model_whose_prefix_names_no_provider_stays_an_internal_error(
         "workflow"
     )
 
-
 # --- The constructor ------------------------------------------------------------------------------
-
 
 async def test_a_router_over_no_adapters_is_refused_where_it_is_built() -> None:
     """Nothing to route to is a fact about the bundle, so it is refused at the composition root.
@@ -420,7 +399,6 @@ async def test_a_router_over_no_adapters_is_refused_where_it_is_built() -> None:
 
     assert exit_code_for(refusal.value) == 2
     assert str(refusal.value), "an empty refusal leaves a reader to guess what was empty"
-
 
 async def test_the_mapping_is_copied_so_routing_cannot_be_changed_underneath_a_run(
     tmp_path: Path,
@@ -443,9 +421,7 @@ async def test_the_mapping_is_copied_so_routing_cannot_be_changed_underneath_a_r
     assert ran.asked == [(CLAUDE_RAN, work)]
     assert outcome.text == CLAUDE_RAN
 
-
 # --- What crosses the port on the way through -----------------------------------------------------
-
 
 @dataclass(frozen=True, slots=True)
 class Transcript:
@@ -468,7 +444,6 @@ class Transcript:
     activity: tuple[str, ...]
     payloads: tuple[str, ...]
 
-
 async def transcript(runner: AgentRunner, model: ModelId, where: Path) -> Transcript:
     """One unscripted run with both of the port's per-call channels wired up, recorded."""
     notes = Notes(reject_first=1)
@@ -482,7 +457,6 @@ async def transcript(runner: AgentRunner, model: ModelId, where: Path) -> Transc
         activity=tuple(repr(line) for line in activity.lines),
         payloads=tuple(repr(payload) for payload in notes.received),
     )
-
 
 @pytest.mark.parametrize("provider", sorted(SERVED))
 async def test_a_routed_run_is_indistinguishable_from_the_same_run_made_directly(
@@ -519,7 +493,6 @@ async def test_a_routed_run_is_indistinguishable_from_the_same_run_made_directly
         "hold against a router that dropped both"
     )
 
-
 @pytest.mark.parametrize("provider", sorted(SERVED))
 async def test_a_run_with_no_activity_reporter_reaches_the_adapter_unchanged(
     provider: Provider, tmp_path: Path
@@ -540,7 +513,6 @@ async def test_a_run_with_no_activity_reporter_reaches_the_adapter_unchanged(
     routed = await router.run(task(where, SERVED[provider], SAY_WHAT_THIS_IS))
 
     assert (routed.text, routed.stop_reason) == (direct.text, direct.stop_reason)
-
 
 @pytest.mark.parametrize("provider", sorted(SERVED))
 async def test_an_error_from_the_adapter_arrives_as_the_adapter_raised_it(

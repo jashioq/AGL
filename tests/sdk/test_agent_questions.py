@@ -95,10 +95,8 @@ from dataclasses import dataclass, replace
 from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Final
-
 import pytest
 from rich.console import Console
-
 from agl import api
 from agl.adapters.claude_code.fake import Conversation, Script
 from agl.adapters.filesystem.store import FilesystemStore
@@ -133,18 +131,15 @@ because "one journal entry" is read out of `steps/<name>/` and a test naming tha
 separately from the declaration would be checking its own spelling. It is on the role, because
 `run.step` carries no name of its own."""
 
-
 @dataclass(frozen=True)
 class NoParams:
     """A workflow that takes nothing, and still has a params class to derive no flags from."""
-
 
 @dataclass(frozen=True)
 class Summary:
     """A reporting payload: the whole of what these agents have to say, which is what they heard."""
 
     text: str
-
 
 REPORT: Final = reporting_tool("report", "report what you decided", Summary)
 
@@ -153,9 +148,7 @@ PROMPT: Final = "propose, ask for approval, revise until approved, then report"
 not read `task.instructions`, on purpose - and it is here because a role's prompt is what makes a
 negotiating agent a negotiating agent rather than a detail this file invented."""
 
-
 # --- the asking tool, which is the workflow's and not the framework's -----------------------------
-
 
 @dataclass(frozen=True, slots=True)
 class Asked:
@@ -180,7 +173,6 @@ class Asked:
         "Whether an answer other than the ones you offered is acceptable.", default=True
     )
 
-
 ASK: Final = "ask_the_operator"
 """The tool's name, which is the workflow's own. Nothing in AGL knows it, which is the point: the
 old `mcp__agl_ask__ask` was a constant in two adapters and reached every task ever dispatched."""
@@ -190,9 +182,7 @@ NO_QUESTION: Final = "That call asked nothing: write out what you are asking and
 `Question.__post_init__` refuses an empty prompt and an exception out of a tool handler ends the
 run - so a model that sent a blank question would kill the step over a correctable mistake."""
 
-
 # --- the views a workflow shows, and the answer type they produce ---------------------------------
-
 
 @dataclass(frozen=True, slots=True)
 class Question:
@@ -225,7 +215,6 @@ class Question:
         if not self.options and not self.allow_free_text:
             raise ValueError("that question offers no options and forbids free text")
 
-
 @dataclass(frozen=True)
 class Verdict:
     """What answering one of these screens produces: the workflow's own type, in shape.
@@ -237,7 +226,6 @@ class Verdict:
     """
 
     said: str
-
 
 def approve(question: Question) -> Screen[Verdict]:
     """The approval screen, built out of whatever the agent asked.
@@ -258,7 +246,6 @@ def approve(question: Question) -> Screen[Verdict]:
         responses.append(TextInput("Say more", maps=lambda typed: Verdict(said=typed)))
     return Screen(body=Text(question.prompt), responses=responses)
 
-
 # --- the workflows, reached through hand-constructed entry points ---------------------------------
 
 # What each workflow saw, at module level because the workflows have to be: `EntryPoint.load`
@@ -269,13 +256,11 @@ asked: Final[list[Asked]] = []
 given: Final[list[ToolResult]] = []
 reported: Final[list[Summary]] = []
 
-
 # The three workflows below share one role, and the difference this file is about is the one
 # argument its factory takes. A role *is* a `@role(model=…)` factory, and its parameter list is the
 # whole of what a call site may vary - so the asking tool arrives the way every other override
 # does, and the call is written out at each `run.step` below rather than parametrised once, because
 # the difference between these three is meant to be visible at the line that takes the step.
-
 
 @role(model=Claude.SONNET)
 def deciding(*, ask: Tool | None = None) -> Role[Summary]:
@@ -293,7 +278,6 @@ def deciding(*, ask: Tool | None = None) -> Role[Summary]:
     return Role[Summary](
         name=STEP, instructions=PROMPT, tools=[REPORT] if ask is None else [REPORT, ask]
     )
-
 
 def _asking(run: Run[NoParams], *, on_screen: bool) -> Tool:
     """This workflow's asking tool: a payload dataclass, a handler, and one `tool()` call.
@@ -333,7 +317,6 @@ def _asking(run: Run[NoParams], *, on_screen: bool) -> Tool:
 
     return tool(ASK, "ask the person running this task, and wait for their answer", Asked, answered)
 
-
 @workflow(version="1")
 async def negotiating(run: Run[NoParams]) -> None:
     """A role whose asking tool answers from the workflow, without showing anybody anything.
@@ -343,29 +326,23 @@ async def negotiating(run: Run[NoParams]) -> None:
     """
     reported.append(await run.step(deciding(ask=_asking(run, on_screen=False))))
 
-
 @workflow(version="1")
 async def approving(run: Run[NoParams]) -> None:
     """The standing example: the handler shows the question and returns what came back."""
     reported.append(await run.step(deciding(ask=_asking(run, on_screen=True))))
-
 
 @workflow(version="1")
 async def unattended(run: Run[NoParams]) -> None:
     """The same role with the asking tool left off, and nothing else changed."""
     reported.append(await run.step(deciding()))
 
-
 def _point(name: str) -> EntryPoint:
     """The `probe = "agl.workflows.probe:probe"` entry point, pointed at this module."""
     return EntryPoint(name=name, value=f"{__name__}:{name}", group=registry.GROUP)
 
-
 POINTS: Final = tuple(_point(name) for name in ("negotiating", "approving", "unattended"))
 
-
 # --- the agent, and the one thing it is asked to do -----------------------------------------------
-
 
 class _Agent:
     """What the fake was dispatched and what it was told, written down.
@@ -386,7 +363,6 @@ class _Agent:
         self.refused: list[InputError] = []
         """Every call the fake refused outright, which is what a tool nobody declared looks like."""
 
-
 def _payload(question: Question) -> dict[str, JsonValue]:
     """One question as the JSON a model would send, which is what crosses the port.
 
@@ -400,7 +376,6 @@ def _payload(question: Question) -> dict[str, JsonValue]:
         "options": list(question.options),
         "allow_free_text": question.allow_free_text,
     }
-
 
 def _asks(record: _Agent, *rounds: Question) -> Script:
     """An agent that asks each of `rounds` in turn and then reports what it was told.
@@ -432,15 +407,12 @@ def _asks(record: _Agent, *rounds: Question) -> Script:
 
     return _script
 
-
 # --- the repository, the bundle, and the run ------------------------------------------------------
-
 
 def _git(where: Path, *argv: str) -> str:
     """One git command, for arranging. Never for the thing under test."""
     done = subprocess.run(["git", *argv], cwd=where, capture_output=True, text=True, check=True)
     return done.stdout
-
 
 @pytest.fixture
 def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -464,12 +436,10 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     _git(work, "commit", "-q", "-m", "the state a run is cut from")
     return work
 
-
 @pytest.fixture
 def keys() -> Typing:
     """The person, played by the suite: a real `Keys` a test types digits and sentences into."""
     return Typing()
-
 
 @pytest.fixture
 def terminal(keys: Typing) -> RichTerminal:
@@ -477,7 +447,6 @@ def terminal(keys: Typing) -> RichTerminal:
     that. The width is fixed so what a frame holds is a fact about the terminal and not about the
     machine, though nothing here reads one."""
     return RichTerminal(Console(file=io.StringIO(), width=100), keys)
-
 
 def _services(repository: Path, tmp_path: Path, terminal: RichTerminal, script: Script) -> Services:
     """One bundle: real git, a real ledger, the real terminal, and one scripted agent.
@@ -497,7 +466,6 @@ def _services(repository: Path, tmp_path: Path, terminal: RichTerminal, script: 
         history=GitHistory(repository),
     )
 
-
 async def _ran(services: Services, name: str) -> None:
     """`api.run` over one of the workflows above, bounded.
 
@@ -507,7 +475,6 @@ async def _ran(services: Services, name: str) -> None:
     """
     async with asyncio.timeout(DEADLINE):
         await api.run(services, PROJECT, name, LABEL, (), points=POINTS)
-
 
 def _entries(tmp_path: Path) -> list[dict[str, object]]:
     """Everything recorded under `steps/<STEP>/`, in filename order. Empty when nothing is.
@@ -519,7 +486,6 @@ def _entries(tmp_path: Path) -> list[dict[str, object]]:
     found = sorted(directory.glob("*.json"))
     return [json.loads(path.read_text(encoding="utf-8")) for path in found]
 
-
 @pytest.fixture(autouse=True)
 def _nothing_carried_over() -> None:
     """The three module-level records, emptied before each test rather than after.
@@ -530,7 +496,6 @@ def _nothing_carried_over() -> None:
     """
     for record in (asked, given, reported):
         record.clear()
-
 
 # --- what the agent asked ------------------------------------------------------------------------
 
@@ -557,9 +522,7 @@ Three rather than two because two is the smallest number that can be a coinciden
 twice by a workflow loop asks once per invocation, so a two-round transcript and a two-invocation
 loop are the same list of questions. Three is not, and neither is one entry."""
 
-
 # --- the framework interposes nothing, in either direction ----------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_the_payload_the_agent_sent_is_the_one_the_handler_is_given(
@@ -598,9 +561,7 @@ async def test_the_payload_the_agent_sent_is_the_one_the_handler_is_given(
         f"arriving there is something between the two having produced an answer of its own"
     )
 
-
 # --- one session, N rounds ------------------------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_three_rounds_of_one_negotiation_are_one_task_one_dispatch_and_one_entry(
@@ -655,9 +616,7 @@ async def test_three_rounds_of_one_negotiation_are_one_task_one_dispatch_and_one
         f"the step's own result"
     )
 
-
 # --- the handler is a closure over the Run, and answers through the terminal ----------------------
-
 
 @pytest.mark.asyncio
 async def test_the_handler_shows_the_question_and_the_answer_is_what_a_person_picked(
@@ -721,9 +680,7 @@ async def test_the_handler_shows_the_question_and_the_answer_is_what_a_person_pi
         f"answered; more means one was answered twice"
     )
 
-
 # --- a role that declares no asking tool, whose agent tries anyway -------------------------------
-
 
 @pytest.mark.asyncio
 async def test_a_role_with_no_asking_tool_leaves_the_agent_nothing_to_call(

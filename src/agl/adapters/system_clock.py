@@ -1,24 +1,17 @@
-
 from datetime import UTC, datetime, timedelta
 from typing import Final
-
 from agl.ports.clock import Clock
 from agl.ports.errors import InputError
 
 __all__ = ["ManualClock", "SystemClock"]
 
-
 _DEFAULT_MOMENT: Final = datetime(2026, 8, 18, 9, 14, 2, tzinfo=UTC)
 
-
 class SystemClock(Clock):
-
     def now(self) -> datetime:
         return datetime.now(UTC)
 
-
 class ManualClock(Clock):
-
     def __init__(self, moment: datetime = _DEFAULT_MOMENT) -> None:
         self._moment = _aware(moment, "a clock is constructed with")
 
@@ -36,7 +29,6 @@ class ManualClock(Clock):
 
     def set_to(self, moment: datetime) -> None:
         self._moment = _aware(moment, "a clock is set to")
-
 
 def _aware(moment: datetime, what: str) -> datetime:
     if moment.tzinfo is None or moment.utcoffset() is None:

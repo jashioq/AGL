@@ -28,9 +28,7 @@ import ast
 import inspect
 from pathlib import Path
 from typing import Final
-
 import pytest
-
 from agl.cli import main
 from agl.cli.commands import init as init_command
 from agl.config import sources
@@ -41,7 +39,6 @@ from agl.sdk.params import RefusingParser
 
 BUILD: Final = "./gradlew build"
 
-
 def _repository(tmp_path: Path, name: str = "myapp") -> Path:
     """A real git repository, one level below a parent AGL can put a trees root in."""
     root = tmp_path.resolve() / "dev" / name
@@ -49,13 +46,11 @@ def _repository(tmp_path: Path, name: str = "myapp") -> Path:
     _git(root, "init", "-q", "-b", "main")
     return root
 
-
 def _git(cwd: Path, *argv: str) -> None:
     """One git command, for the repository this file's tests are run against."""
     import subprocess
 
     subprocess.run(("git", *argv), cwd=cwd, check=True, capture_output=True)
-
 
 def _home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """An `AGL_HOME` that does not exist yet - which is what a first `agl init` meets.
@@ -67,7 +62,6 @@ def _home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     home = tmp_path / "home"
     monkeypatch.setenv("AGL_HOME", str(home))
     return home
-
 
 def _main(cwd: Path, *argv: str, answer: str = BUILD) -> int:
     """One `agl` invocation composed for real, with the one question answered by a lambda.
@@ -85,16 +79,13 @@ def _main(cwd: Path, *argv: str, answer: str = BUILD) -> int:
         ),
     )
 
-
 def _init_parser() -> RefusingParser:
     """The `init` subparser alone, built the way `main.parser()` builds it, for inspection."""
     root = RefusingParser(prog="agl", allow_abbrev=False)
     commands = root.add_subparsers(dest="command", required=True, parser_class=RefusingParser)
     return init_command.declare(commands)
 
-
 # --- the acceptance criterion --------------------------------------------------------------------
-
 
 def test_agl_init_registers_a_repository_that_had_no_project_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
@@ -133,7 +124,6 @@ def test_agl_init_registers_a_repository_that_had_no_project_file(
         line.split(" = ")[0] for line in written.read_text(encoding="utf-8").splitlines()
     ] == ["name", "repo", "trees_root", "build", "build_timeout"]
 
-
 def test_a_run_in_that_repository_now_composes_where_it_could_not_before(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -156,9 +146,7 @@ def test_a_run_in_that_repository_now_composes_where_it_could_not_before(
     assert str(project) == "myapp"
     assert services.build == BUILD
 
-
 # --- the refusals, through argv ------------------------------------------------------------------
-
 
 def test_a_second_init_in_the_same_repository_exits_four(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
@@ -179,7 +167,6 @@ def test_a_second_init_in_the_same_repository_exits_four(
     settings = sources.resolve_settings(sources.Overrides(), {"AGL_HOME": str(home)})
     assert read_project(settings.home, ProjectName("myapp")).build == BUILD
 
-
 def test_init_outside_a_git_repository_exits_three(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -196,7 +183,6 @@ def test_init_outside_a_git_repository_exits_three(
 
     assert ".git" in capsys.readouterr().err
     assert not home.exists()
-
 
 def test_a_trees_root_a_symlink_puts_inside_the_repository_exits_two(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
@@ -217,9 +203,7 @@ def test_a_trees_root_a_symlink_puts_inside_the_repository_exits_two(
     assert "trees_root" in capsys.readouterr().err
     assert not (home / "projects").exists()
 
-
 # --- what the command is, read off the module ----------------------------------------------------
-
 
 def test_the_init_parser_holds_no_arguments_at_all(tmp_path: Path) -> None:
     """The line for this verb is one word. Everything `init` needs it works out for itself.
@@ -234,7 +218,6 @@ def test_the_init_parser_holds_no_arguments_at_all(tmp_path: Path) -> None:
 
     assert options == {"-h", "--help"}
     assert positionals == []
-
 
 def test_the_command_calls_exactly_one_api_function() -> None:
     """`ARCHITECTURE.md`'s "Commands stay dumb", made mechanical - and this is a command the rule
@@ -253,7 +236,6 @@ def test_the_command_calls_exactly_one_api_function() -> None:
     }
 
     assert called == {"init"}
-
 
 def test_the_command_never_asks_for_a_registered_repository(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -287,7 +269,6 @@ def test_the_command_never_asks_for_a_registered_repository(
     assert code == 0
     assert asked == []
 
-
 def test_the_command_starts_no_event_loop() -> None:
     """`api.init` is sync, so this module has no `asyncio.run` and does not import `asyncio`.
 
@@ -314,9 +295,7 @@ def test_the_command_starts_no_event_loop() -> None:
     assert "asyncio" not in imported
     assert "asyncio" not in called
 
-
 # --- the tail, which this command may not carry --------------------------------------------------
-
 
 def test_an_argument_on_an_init_line_is_refused_and_points_at_the_two_commands_that_take_one(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]

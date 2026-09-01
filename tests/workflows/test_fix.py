@@ -126,9 +126,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
 from typing import Final, Self, cast
-
 import pytest
-
 from agl import testing
 
 # The second reach past the front door, for the one claim no supported surface can answer:
@@ -183,11 +181,9 @@ PROMPTS: Final = Path(__file__).resolve().parents[2] / "src/agl/workflows/fix/pr
 REQUEST: Final = "the retry loop drops the last error"
 """What an operator asked for, in one place, because the board renders it and a step is given it."""
 
-
 def _finding(severity: str, file: str = "src/a.py") -> Finding:
     """One finding at a given severity. The other two fields are prose this package never reads."""
     return Finding(severity=severity, file=file, summary=f"a {severity}-severity problem")
-
 
 def test_high_returns_the_high_severity_findings_and_only_those() -> None:
     """The filter, over a payload holding one of each severity.
@@ -200,18 +196,15 @@ def test_high_returns_the_high_severity_findings_and_only_those() -> None:
 
     assert Findings((medium, high, low)).high() == (high,)
 
-
 def test_high_is_empty_when_the_review_found_nothing_that_must_be_fixed() -> None:
     """The other side of the branch: findings exist, none of them is `high`, and the workflow does
     not pay for a repair pass. A filter comparing against the wrong severity passes the test above
     and fails this one."""
     assert Findings((_finding("medium"), _finding("low"))).high() == ()
 
-
 def test_a_review_that_found_nothing_at_all_has_nothing_to_repair() -> None:
     """The empty payload, which `prompts/review.md` calls the right answer for a sound change."""
     assert Findings(()).high() == ()
-
 
 def test_high_findings_survive_the_fingerprint_that_the_repair_step_takes_over_them() -> None:
     """`high()`'s docstring claims its result can be passed straight into `run.step(implementer,
@@ -229,14 +222,12 @@ def test_high_findings_survive_the_fingerprint_that_the_repair_step_takes_over_t
     assert "agl.workflows.fix.findings.Finding" in encoded
     assert '"severity":"high"' in encoded
 
-
 def test_a_severity_the_workflow_would_silently_skip_is_refused_by_the_type() -> None:
     """`critical` is the shape of this failure: a plausible word, outside the vocabulary, that
     `high()` would filter away without complaint - leaving the repair step unrun and the run
     reporting success over a defect somebody marked as the worst kind."""
     with pytest.raises(ValueError, match="high, medium, low"):
         _finding("critical")
-
 
 def test_an_invented_severity_reaches_the_model_as_a_rejection_it_can_act_on() -> None:
     """The mechanism the module docstring leans on, end to end through the SDK: the payload walker
@@ -254,13 +245,11 @@ def test_an_invented_severity_reaches_the_model_as_a_rejection_it_can_act_on() -
     assert refusal is not None
     assert ", ".join(SEVERITIES) in refusal
 
-
 def test_a_missing_findings_list_is_a_rejection_and_an_empty_one_is_a_result() -> None:
     """Why the field has no default. "Found nothing" and "forgot to fill this in" are different
     answers, and only one of them is a review."""
     assert report_findings.rejection({}) is not None
     assert report_findings.rejection({"findings": []}) is None
-
 
 def test_the_two_roles_carry_the_names_their_entries_are_filed_under() -> None:
     """The declaration that moved here from the call sites, pinned where it is written.
@@ -271,7 +260,6 @@ def test_the_two_roles_carry_the_names_their_entries_are_filed_under() -> None:
     these names is spent twice; that is the section near the bottom of this file.
     """
     assert (implementer().name, reviewer().name) == ("implement", "review")
-
 
 def test_the_reviewer_is_declared_read_only_beside_a_step_that_will_wipe_its_worktree() -> None:
     """The pairing, half of it. The `review` call passes no `commit=`, so the framework restores
@@ -287,7 +275,6 @@ def test_the_reviewer_is_declared_read_only_beside_a_step_that_will_wipe_its_wor
     assert Restriction.NO_VCS_WRITES in reviewer().restrictions
     assert Restriction.NO_FILE_WRITES in reviewer().restrictions
 
-
 def test_the_implementer_leaves_committing_to_the_framework_that_is_going_to_do_it() -> None:
     """The same restriction on the role whose steps *do* pass `commit=`, and it is not the pairing
     rule above.
@@ -299,7 +286,6 @@ def test_the_implementer_leaves_committing_to_the_framework_that_is_going_to_do_
     agent's job. Nothing else in this suite pins it and no gate would notice it going missing."""
     assert Restriction.NO_VCS_WRITES in implementer().restrictions
 
-
 def test_the_two_roles_name_two_providers_and_no_vendor_syntax() -> None:
     """Target #4 as a declaration: one run, two providers, chosen by naming two models.
 
@@ -310,7 +296,6 @@ def test_the_two_roles_name_two_providers_and_no_vendor_syntax() -> None:
     assert implementer().model is Claude.OPUS
     assert reviewer().model is OpenAI.SOL
     assert implementer().model.provider is not reviewer().model.provider
-
 
 def test_the_reviewer_reports_through_one_tool_and_the_implementer_through_none() -> None:
     """What makes `review` a reporting step and `implement` an effect step - and therefore what
@@ -324,7 +309,6 @@ def test_the_reviewer_reports_through_one_tool_and_the_implementer_through_none(
     assert reviewer().tools == (report_findings,)
     assert implementer().tools == ()
     assert report_findings.payload is Findings
-
 
 def test_each_role_requires_what_its_prompt_actually_asks_of_a_backend() -> None:
     """`requires` is compared against what a provider can do at the first step that uses the role -
@@ -342,7 +326,6 @@ def test_each_role_requires_what_its_prompt_actually_asks_of_a_backend() -> None
     assert implementer().requires == frozenset({Capability.FILE_EDIT, Capability.SHELL})
     assert reviewer().requires == frozenset({Capability.SHELL, Capability.TOOL_CALLING})
 
-
 def test_both_roles_hold_their_prompt_text_and_not_a_path_to_it() -> None:
     """The rule, and the failure it prevents is silent: a role holding `"prompts/review.md"`
     fingerprints the filename, so editing the prompt moves no digest and a resume replays what the
@@ -351,14 +334,12 @@ def test_both_roles_hold_their_prompt_text_and_not_a_path_to_it() -> None:
     assert implementer().instructions == (PROMPTS / "implement.md").read_text(encoding="utf-8")
     assert reviewer().instructions == (PROMPTS / "review.md").read_text(encoding="utf-8")
 
-
 def test_the_review_prompt_names_the_commit_message_the_workflow_writes() -> None:
     """The one coupling in this package that nothing enforces. A commit message is outside the
     fingerprint, being cosmetic, so editing `commit="implement fix"` re-runs nothing and quietly
     stops agreeing with the prompt that tells the reviewer which commit to read. This is what
     notices."""
     assert "implement fix" in reviewer().instructions
-
 
 def test_the_implement_prompt_names_the_asking_tool_this_package_supplies() -> None:
     """The second coupling of that shape, and it went wrong once already.
@@ -388,14 +369,12 @@ def test_the_implement_prompt_names_the_asking_tool_this_package_supplies() -> N
     """
     assert ASK in implementer().instructions
 
-
 def test_the_review_prompt_promises_no_inputs_block_because_the_step_passes_none() -> None:
     """`run.step(reviewer())` passes no `**inputs`, and `_composed` then appends nothing at
     all - no heading, no separator, not a newline. A review prompt that told its agent to read a
     block underneath it would be describing something that is never there."""
     assert "## Inputs" not in reviewer().instructions
     assert "## Inputs" in implementer().instructions
-
 
 def test_the_request_is_a_required_named_flag_and_there_are_no_positionals() -> None:
     """Named flags only, and `--request` required because a `fix` run with nothing to fix has no
@@ -408,7 +387,6 @@ def test_the_request_is_a_required_named_flag_and_there_are_no_positionals() -> 
         sdk_params.parse(FixParams, [])
     with pytest.raises(InputError):
         sdk_params.parse(FixParams, ["a bare positional"])
-
 
 def test_the_workflow_declares_its_params_and_its_version_and_no_roles_at_all() -> None:
     """What `@workflow` hands the framework: nothing about roles, no name at all - `fix` is what
@@ -437,7 +415,7 @@ def test_the_workflow_declares_its_params_and_its_version_and_no_roles_at_all() 
     importing `reviewer` beside its workflow would start passing preflight on a machine with no
     Codex CLI and then die at the review step, which is exactly what preflight exists to
     prevent."""
-    assert fix.version == "2"
+    assert fix.version == "3"
     assert fix.params is FixParams
     bound = {
         name: found.model
@@ -445,7 +423,6 @@ def test_the_workflow_declares_its_params_and_its_version_and_no_roles_at_all() 
         if isinstance(found, RoleFactory)
     }
     assert bound == {"implementer": Claude.OPUS, "reviewer": OpenAI.SOL}
-
 
 def test_the_severity_the_workflow_branches_on_is_one_of_the_ones_it_asks_for() -> None:
     """A consistency check between the constant `high()` compares against and what the model is
@@ -466,7 +443,6 @@ def test_the_severity_the_workflow_branches_on_is_one_of_the_ones_it_asks_for() 
             f"- once into this description and once into the check - so a member missing here is "
             f"the interpolation having come apart"
         )
-
 
 def test_the_vocabulary_reaching_the_model_is_a_term_in_the_reviewers_fingerprint() -> None:
     """A finding this file recorded, closed, measured against this workflow rather than the SDK.
@@ -490,7 +466,6 @@ def test_the_vocabulary_reaching_the_model_is_a_term_in_the_reviewers_fingerprin
         "is not the one `base_of` would hash for the review step"
     )
 
-
 def _severity_description() -> str:
     """What the model is told about `Finding.severity`, read out of the derived schema.
 
@@ -505,9 +480,7 @@ def _severity_description() -> str:
     assert isinstance(schema, str)
     return schema
 
-
 # --- the board -------------------------------------------------------------------------------
-
 
 def _run(where: Path, activity: str | None = None) -> Run[FixParams]:
     """A `Run` to show a board over, with an activity line on it if the test wants one.
@@ -522,7 +495,6 @@ def _run(where: Path, activity: str | None = None) -> Run[FixParams]:
     Nothing it builds runs, commits or shows anything.
     """
     return testing.a_run(testing.harness(where), FixParams(request=REQUEST), activity=activity)
-
 
 def test_the_board_shows_the_request_and_the_line_the_adapter_last_reported(tmp_path: Path) -> None:
     """The whole board, as one value.
@@ -539,7 +511,6 @@ def test_the_board_shows_the_request_and_the_line_the_adapter_last_reported(tmp_
         Rows([Row("request", REQUEST), Row("agent", "Edit: src/retry.py")])
     )
 
-
 def test_the_board_shows_an_empty_cell_when_nothing_is_running(tmp_path: Path) -> None:
     """`run.activity` is `None` between steps, before an adapter's first line, and for the whole of
     a step replayed from the journal - where nothing is running and reporting anything would be a
@@ -549,7 +520,6 @@ def test_the_board_shows_an_empty_cell_when_nothing_is_running(tmp_path: Path) -
     assert views.board(_run(tmp_path), REQUEST) == Screen(
         Rows([Row("request", REQUEST), Row("agent", "")])
     )
-
 
 def test_the_board_reads_the_activity_again_on_every_frame(tmp_path: Path) -> None:
     """The property the whole design rests on: `show` registers this function and its arguments, so
@@ -575,7 +545,6 @@ def test_the_board_reads_the_activity_again_on_every_frame(tmp_path: Path) -> No
     assert first != second
     assert second == views.board(run, REQUEST)
 
-
 def test_the_board_is_passive_so_showing_it_never_waits_for_anybody(tmp_path: Path) -> None:
     """What the terminal dispatches on is whether `responses` is empty, and nothing at run time can
     see the `-> Screen` annotation. A board that grew a response would be queued as a question,
@@ -583,9 +552,7 @@ def test_the_board_is_passive_so_showing_it_never_waits_for_anybody(tmp_path: Pa
     terminals - so this is the assertion that the annotation and the value agree."""
     assert views.board(_run(tmp_path, activity="Bash: pytest -q"), REQUEST).responses == ()
 
-
 # --- the question screen ---------------------------------------------------------------------
-
 
 def test_the_question_screen_offers_the_agents_own_options_and_a_field_beside_them() -> None:
     """The ordinary question: what it asked, what it suggested, and room to say something else.
@@ -607,7 +574,6 @@ def test_the_question_screen_offers_the_agents_own_options_and_a_field_beside_th
     )
     assert views.agent_question(asked) == expected
 
-
 def test_a_question_that_forbids_free_text_is_shown_without_a_field() -> None:
     """`allow_free_text=False` is the agent saying it asked for a choice among what it offered, and
     honouring it here is the difference between a constraint and a suggestion. A view that offered
@@ -624,7 +590,6 @@ def test_a_question_that_forbids_free_text_is_shown_without_a_field() -> None:
         Choice("monkeypatch", value=Answer("monkeypatch")),
     )
 
-
 def test_a_question_with_no_options_is_answered_in_a_persons_own_words() -> None:
     """The open question - "empty is ordinary", and what every backend that can ask at all can ask.
 
@@ -635,7 +600,6 @@ def test_a_question_with_no_options_is_answered_in_a_persons_own_words() -> None
     screen = views.agent_question(Question(prompt="What should the retry limit be?"))
 
     assert screen.responses == (TextInput(FREE_TEXT, maps=Answer),)
-
 
 def test_what_a_person_types_reaches_the_agent_as_the_answer_they_typed() -> None:
     """`maps` is the workflow's half of the free-text field: the terminal collects a string and
@@ -648,7 +612,6 @@ def test_what_a_person_types_reaches_the_agent_as_the_answer_they_typed() -> Non
     assert isinstance(field, TextInput)
     assert field.maps("three, and log the last error") == Answer("three, and log the last error")
 
-
 def test_the_body_is_the_agents_own_prompt_with_nothing_added_to_it() -> None:
     """No heading, no "the agent asks:", no framing sentence. `Question` refuses a header field
     because a backend whose question is the next turn of a conversation has nothing to derive one
@@ -657,7 +620,6 @@ def test_the_body_is_the_agents_own_prompt_with_nothing_added_to_it() -> None:
     asked = Question(prompt="Is `src/retry.py` the right file?")
 
     assert views.agent_question(asked).body == Text("Is `src/retry.py` the right file?")
-
 
 def test_the_question_this_screen_could_not_answer_cannot_be_built(tmp_path: Path) -> None:
     """The edge this view deliberately does not handle, and the reason it does not have to.
@@ -672,9 +634,7 @@ def test_the_question_this_screen_could_not_answer_cannot_be_built(tmp_path: Pat
     with pytest.raises(InternalError):
         Question(prompt="Pick one.", options=(), allow_free_text=False)
 
-
 # --- the asking tool this package writes for itself -------------------------------------------
-
 
 class _Refusing(Terminal):
     """A `Terminal` whose `show` is a tripwire. Not a conforming implementation and claims to be
@@ -707,7 +667,6 @@ class _Refusing(Terminal):
     ) -> None:
         return None
 
-
 @pytest.mark.asyncio
 async def test_a_blank_question_comes_back_as_a_rejection_and_not_as_a_dead_step() -> None:
     """The correction the framework's own asking tool used to make, owed by this one now.
@@ -725,7 +684,6 @@ async def test_a_blank_question_comes_back_as_a_rejection_and_not_as_a_dead_step
 
     assert refused.rejected is True
     assert refused.text == NO_QUESTION
-
 
 @pytest.mark.asyncio
 async def test_no_options_and_no_free_text_is_normalised_rather_than_left_to_raise() -> None:
@@ -756,7 +714,6 @@ async def test_no_options_and_no_free_text_is_normalised_rather_than_left_to_rai
         f"model's own `allow_free_text`, and an empty option is dropped rather than shown"
     )
 
-
 @pytest.mark.asyncio
 async def test_an_answer_of_nothing_at_all_is_reported_as_no_preference() -> None:
     """What `fix` does with an empty answer, and why it is not the empty string.
@@ -771,7 +728,6 @@ async def test_an_answer_of_nothing_at_all_is_reported_as_no_preference() -> Non
     assert (await _handler(answers=[""])({"question": "Which?"})).text == SAID_NOTHING
     assert (await _handler(answers=["rename it"])({"question": "Which?"})).text == "rename it"
 
-
 def _handler(
     shown: list[Question] | None = None, *, answers: Sequence[str] | None = None
 ) -> Callable[[Mapping[str, JsonValue]], Awaitable[ToolResult]]:
@@ -784,7 +740,6 @@ def _handler(
     """
     terminal: Terminal = _Refusing() if answers is None else _Answering(shown, answers)
     return asking(terminal).handler
-
 
 class _Answering(Terminal):
     """A `Terminal` that records the `Question` it was handed and answers from a list.
@@ -826,7 +781,6 @@ class _Answering(Terminal):
     ) -> None:
         return None
 
-
 def test_the_asking_tools_schema_is_derived_from_its_own_payload_class() -> None:
     """What the model reads, and it is `describe()`'s output rather than a hand-written dict.
 
@@ -854,9 +808,7 @@ def test_the_asking_tools_schema_is_derived_from_its_own_payload_class() -> None
             f"there - a field that lost its call is invisible to a reader of the schema"
         )
 
-
 # --- what preflight sees before anything is written -------------------------------------------
-
 
 def test_the_declared_implementer_requires_less_than_the_asking_one_and_says_so() -> None:
     """The factory is the whole override surface, and this is what a call site can add to it.
@@ -890,7 +842,6 @@ def test_the_declared_implementer_requires_less_than_the_asking_one_and_says_so(
         "replay for a role that can now consult a person"
     )
 
-
 def _digest(role: Role[None]) -> str:
     """What `run.step` would address this role's entry by, over fixed inputs and a fixed head.
 
@@ -909,11 +860,9 @@ def _digest(role: Role[None]) -> str:
         head=_HEAD,
     )
 
-
 _HEAD: Final = "4a91c07f2b3e8d15c6a0b7f31d92e8054c6a0f13"
 """A head to fingerprint against. Any constant would do - it is a term of every digest here and the
 same one in both, so it cancels."""
-
 
 # --- driving the whole workflow on fakes ------------------------------------------------------
 #
@@ -974,7 +923,6 @@ WORTH_KNOWING: Final = _finding("medium", CHANGED)
 something, none of it high, is the case that separates "the branch was taken" from "the reviewer
 reported nothing at all", and `Findings.high()` is what has to tell them apart."""
 
-
 def _payload(found: Sequence[Finding]) -> testing.Call:
     """`found` as the call the reviewer makes - the JSON a model sends, not the dataclass.
 
@@ -994,7 +942,6 @@ def _payload(found: Sequence[Finding]) -> testing.Call:
         },
     )
 
-
 def _wrote(task: testing.AgentTask, name: str, content: bytes) -> None:
     """Put `content` at `name` inside the checkout this task was handed. What an agent does.
 
@@ -1005,7 +952,6 @@ def _wrote(task: testing.AgentTask, name: str, content: bytes) -> None:
     place = task.workspace / name
     place.parent.mkdir(parents=True, exist_ok=True)
     place.write_bytes(content)
-
 
 def _agent(seen: list[testing.AgentTask], *, found: Sequence[Finding]) -> testing.Agent:
     """The scripted agent for a whole run of `fix`, keeping every task it was handed.
@@ -1048,7 +994,6 @@ def _agent(seen: list[testing.AgentTask], *, found: Sequence[Finding]) -> testin
 
     return agent
 
-
 async def _record(harness: testing.Harness) -> Mapping[str, object]:
     """This run's `run.json`, through the store the harness wrapped.
 
@@ -1062,13 +1007,11 @@ async def _record(harness: testing.Harness) -> Mapping[str, object]:
     assert record is not None, "the run wrote no run.json, so it never started"
     return record
 
-
 def _text(record: Mapping[str, object], key: str) -> str:
     """One string field of the record. `run.json` is `JsonValue`s, and two of them are needed."""
     value = record[key]
     assert isinstance(value, str), f"run.json holds a {type(value).__name__} at {key!r}"
     return value
-
 
 def _files(where: Path) -> dict[str, bytes]:
     """Every file in a checkout, by its path relative to it. What a person would see in there."""
@@ -1077,7 +1020,6 @@ def _files(where: Path) -> dict[str, bytes]:
         for path in sorted(where.rglob("*"))
         if path.is_file()
     }
-
 
 async def _committed(harness: testing.Harness) -> tuple[str, frozenset[str]]:
     """What this run's branch is called at its tip, and every file that differs from its base.
@@ -1126,7 +1068,6 @@ async def _committed(harness: testing.Harness) -> tuple[str, frozenset[str]]:
         ),
     )
 
-
 @dataclass(frozen=True, slots=True)
 class _Outcome:
     """Everything one run of `fix` leaves behind, in the four places it leaves anything.
@@ -1159,7 +1100,6 @@ class _Outcome:
     checkout: Mapping[str, bytes]
     dispatches: int
 
-
 async def _outcome(harness: testing.Harness, seen: Sequence[testing.AgentTask]) -> _Outcome:
     """Read the four back off a finished run. The checkout is found through the agent's own task.
 
@@ -1174,7 +1114,6 @@ async def _outcome(harness: testing.Harness, seen: Sequence[testing.AgentTask]) 
         dispatches=len(seen),
     )
 
-
 async def _finished(where: Path, *, found: Sequence[Finding]) -> _Outcome:
     """One uninterrupted run of `fix`, and what it left. The reference every sweep compares to."""
     seen: list[testing.AgentTask] = []
@@ -1184,9 +1123,7 @@ async def _finished(where: Path, *, found: Sequence[Finding]) -> _Outcome:
 
     return await _outcome(harness, seen)
 
-
 # --- one complete run, both branches ----------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_a_whole_run_implements_reviews_and_repairs_on_fakes_alone(tmp_path: Path) -> None:
@@ -1207,7 +1144,6 @@ async def test_a_whole_run_implements_reviews_and_repairs_on_fakes_alone(tmp_pat
     assert [entry.step for entry in harness.recorded] == list(HIGH_RUN)
     assert [entry.namespace for entry in harness.recorded] == [None, None, None]
     assert harness.recorded[1].value == _payload((MUST_FIX, WORTH_KNOWING)).payload
-
 
 @pytest.mark.asyncio
 async def test_a_review_that_found_nothing_high_ends_the_run_after_two_steps(
@@ -1237,7 +1173,6 @@ async def test_a_review_that_found_nothing_high_ends_the_run_after_two_steps(
     )
     assert len(seen) == 2, "an agent was paid for a step the ledger says never happened"
 
-
 # --- one role, two steps, one directory ----------------------------------------------------------
 #
 # The assertion this section is built around, and the one this workflow is the shipped instance of.
@@ -1246,7 +1181,6 @@ async def test_a_review_that_found_nothing_high_ends_the_run_after_two_steps(
 # real `FilesystemStore`, because the claim is about *paths* and neither `Store` nor `Recorded`
 # hands one out - see the import at the top of this file for why that reach is here and nowhere
 # else.
-
 
 def _on_disk(
     where: Path, seen: list[testing.AgentTask], *, found: Sequence[Finding]
@@ -1265,7 +1199,6 @@ def _on_disk(
     )
     return testing.over(fakes.with_store(FilesystemStore(home))), home
 
-
 def _filed(home: AglHome, step: str) -> list[Mapping[str, object]]:
     """Every entry this run wrote under `steps/<step>/`, parsed, in filename order.
 
@@ -1281,11 +1214,9 @@ def _filed(home: AglHome, step: str) -> list[Mapping[str, object]]:
         if path.parent.name == step and path.parent.parent.name == "steps"
     ]
 
-
 def _distinct(entries: Sequence[Mapping[str, object]], field: str) -> set[object]:
     """The distinct values of one field across a step's entries."""
     return {entry[field] for entry in entries}
-
 
 @pytest.mark.asyncio
 async def test_the_implement_and_repair_steps_are_two_digests_in_one_directory(
@@ -1357,9 +1288,7 @@ async def test_the_implement_and_repair_steps_are_two_digests_in_one_directory(
         "ends before the repair commit, and the work is reachable from nothing the run recorded"
     )
 
-
 # --- what the run leaves in the repository ------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_the_run_commits_twice_under_its_own_messages_and_wipes_the_review(
@@ -1408,7 +1337,6 @@ async def test_the_run_commits_twice_under_its_own_messages_and_wipes_the_review
         f"checkout and removes everything that was not in it when that step ends"
     )
 
-
 @pytest.mark.asyncio
 async def test_a_clean_review_leaves_the_implement_commit_as_the_branch(tmp_path: Path) -> None:
     """The other side of `if findings.high():`, and where `implement fix` is readable as a message.
@@ -1439,7 +1367,6 @@ async def test_a_clean_review_leaves_the_implement_commit_as_the_branch(tmp_path
         f"into it and the `review` step passes no `commit=`, so the framework restores the "
         f"checkout to the implement commit and removes everything that was not in it"
     )
-
 
 @pytest.mark.asyncio
 async def test_the_operators_own_words_reach_the_implementer_and_the_findings_reach_the_repair(
@@ -1476,7 +1403,6 @@ async def test_the_operators_own_words_reach_the_implementer_and_the_findings_re
         "the repair agent was handed every finding rather than `findings.high()`, so it is being "
         "asked to fix what the review said need not be fixed"
     )
-
 
 @pytest.mark.asyncio
 async def test_one_run_addresses_two_providers_and_both_preflight_checks_pass(
@@ -1529,9 +1455,7 @@ async def test_one_run_addresses_two_providers_and_both_preflight_checks_pass(
             f"requires, so this run would have been refused at its first step on that model"
         )
 
-
 # --- the two screens, as a run reaches them ------------------------------------------------------
-
 
 class _Watching(Terminal):
     """A `Terminal` that keeps what `show` was handed and draws none of it.
@@ -1593,7 +1517,6 @@ class _Watching(Terminal):
     ) -> None:
         return None
 
-
 @pytest.mark.asyncio
 async def test_the_board_goes_up_once_with_the_run_and_the_request_on_it(tmp_path: Path) -> None:
     """The board, put up by the workflow rather than called by a test.
@@ -1625,7 +1548,6 @@ async def test_the_board_goes_up_once_with_the_run_and_the_request_on_it(tmp_pat
     assert params["request"] == REQUEST
     assert isinstance(params["run"], Run)
     assert view(**params) == Screen(Rows([Row("request", REQUEST), Row("agent", "")]))
-
 
 @pytest.mark.asyncio
 async def test_the_implementers_question_reaches_this_workflows_own_screen(tmp_path: Path) -> None:
@@ -1668,7 +1590,6 @@ async def test_the_implementers_question_reaches_this_workflows_own_screen(tmp_p
 
     assert harness.recorded == (), "a step that died on an unanswerable question left an entry"
 
-
 ASKED: Final[Mapping[str, JsonValue]] = {
     "question": "Rename the helper, or leave it?",
     "options": ["rename", "leave"],
@@ -1687,7 +1608,6 @@ gesture below names response **2**: index 0 and 1 are the agent's own options an
 `TextInput` this workflow puts after them. A screen of any other shape has no response there, and
 `queues.Screens.answer` refuses a position nothing occupies - so the index is itself the assertion
 that what took the gesture was `views.agent_question` with this question in it."""
-
 
 def _asking_agent(
     term: testing.ScriptedTerminal, behind: list[Screen[object] | None]
@@ -1713,7 +1633,6 @@ def _asking_agent(
         return testing.Reply(calls=[testing.Call(ASK, ASKED)], says="implemented it")
 
     return agent
-
 
 @pytest.mark.asyncio
 async def test_a_person_answers_the_implementers_question_and_the_run_carries_on(
@@ -1769,9 +1688,7 @@ async def test_a_person_answers_the_implementers_question_and_the_run_carries_on
         "never put up or it was shown as something other than a passive screen"
     )
 
-
 # --- kill at every step boundary, resume, assert identical --------------------------------------
-
 
 def _kill_points(total: int) -> tuple[tuple[int, ...], ...]:
     """Every way a run of `total` steps can be interrupted, as the sizes of its invocations.
@@ -1792,7 +1709,6 @@ def _kill_points(total: int) -> tuple[tuple[int, ...], ...]:
         found.extend((first, *rest) for rest in _kill_points(total - first))
     return tuple(found)
 
-
 SWEEP: Final = tuple(
     pytest.param(
         high,
@@ -1803,7 +1719,6 @@ SWEEP: Final = tuple(
     for kills in _kill_points(len(HIGH_RUN if high else CLEAN_RUN))
 )
 """Every kill point of both of `fix`'s programmes: ten cases, seven of them three steps long."""
-
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("high", "kills"), SWEEP)

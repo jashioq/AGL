@@ -1,24 +1,18 @@
-
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import StrEnum
-
 from agl.ports.errors import InternalError
 
 __all__ = ["ChangeKind", "FileChange", "History"]
 
-
 class ChangeKind(StrEnum):
-
     ADDED = "added"
     MODIFIED = "modified"
     DELETED = "deleted"
     RENAMED = "renamed"
 
-
 @dataclass(frozen=True, slots=True)
 class FileChange:
-
     path: str
 
     kind: ChangeKind
@@ -47,9 +41,7 @@ class FileChange:
                 f"change was assembled wrong"
             )
 
-
 class History(ABC):
-
     @abstractmethod
     async def default_ref(self) -> str:
         """Where a run starts from when the user names none. Only the repository knows this.

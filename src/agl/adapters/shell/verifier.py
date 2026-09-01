@@ -1,4 +1,3 @@
-
 import asyncio
 import os
 import signal
@@ -6,7 +5,6 @@ from collections.abc import Sequence
 from contextlib import suppress
 from pathlib import Path
 from typing import Final
-
 from agl.ports.errors import UpstreamUnavailable, UpstreamUnexpected
 from agl.ports.verifier import Verifier, VerifierOutcome
 
@@ -27,9 +25,7 @@ _CHUNK: Final = 65536
 
 _PASSED: Final = 0
 
-
 class ShellVerifier(Verifier):
-
     def __init__(self, build_timeout: float = _DEFAULT_BUILD_TIMEOUT) -> None:
         self._build_timeout = build_timeout
 
@@ -52,7 +48,6 @@ class ShellVerifier(Verifier):
             raise
         return VerifierOutcome(passed=finished == _PASSED, status=finished, output=_text(captured))
 
-
 async def _started(command: str, workdir: Path) -> asyncio.subprocess.Process:
     try:
         return await asyncio.create_subprocess_shell(
@@ -70,7 +65,6 @@ async def _started(command: str, workdir: Path) -> asyncio.subprocess.Process:
             f"directory is there and a shell can be started in it"
         ) from error
 
-
 async def _drain(process: asyncio.subprocess.Process, captured: list[bytes]) -> None:
     if process.stdout is None:
         raise UpstreamUnexpected(
@@ -81,7 +75,6 @@ async def _drain(process: asyncio.subprocess.Process, captured: list[bytes]) -> 
     while chunk := await process.stdout.read(_CHUNK):
         captured.append(chunk)
 
-
 async def _halted(process: asyncio.subprocess.Process) -> int:
     _signal(process, signal.SIGTERM)
     with suppress(TimeoutError):
@@ -89,7 +82,6 @@ async def _halted(process: asyncio.subprocess.Process) -> int:
             await process.wait()
     _signal(process, signal.SIGKILL)
     return await process.wait()
-
 
 def _signal(process: asyncio.subprocess.Process, sign: signal.Signals) -> None:
     if process.returncode is not None:
@@ -100,10 +92,8 @@ def _signal(process: asyncio.subprocess.Process, sign: signal.Signals) -> None:
         with suppress(ProcessLookupError):
             process.send_signal(sign)
 
-
 def _text(captured: Sequence[bytes]) -> str:
     return b"".join(captured).decode(_ENCODING, errors=_UNDECODABLE)
-
 
 def _expired(seconds: float) -> str:
     return (

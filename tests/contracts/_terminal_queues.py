@@ -22,10 +22,8 @@ one, and the `terminal` and `driver` fixtures these tests take are declared ther
 """
 
 import pytest
-
 from agl.ports.errors import InternalError
 from agl.ports.terminal import Terminal
-
 from ._terminal_driver import (
     Asking,
     TerminalDriver,
@@ -46,7 +44,6 @@ from ._terminal_views import (
     Approval,
     question,
 )
-
 
 class TerminalQueueContract:
     """Blocking, both kinds of response, FIFO within a priority, and one answerer.

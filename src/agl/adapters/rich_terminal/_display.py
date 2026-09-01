@@ -1,7 +1,5 @@
-
 from abc import ABC, abstractmethod
 from typing import Final
-
 from rich.console import Console, RenderableType
 from rich.live import Live
 from rich.text import Text as RichText
@@ -10,9 +8,7 @@ __all__ = ["Display", "display_for"]
 
 _NOTHING: Final[RenderableType] = RichText("")
 
-
 class Display(ABC):
-
     @abstractmethod
     def start(self) -> None:
         ...
@@ -33,9 +29,7 @@ class Display(ABC):
     def stop(self) -> None:
         ...
 
-
 class Animating(Display):
-
     __slots__ = ("_live",)
 
     def __init__(self, console: Console) -> None:
@@ -59,9 +53,7 @@ class Animating(Display):
     def stop(self) -> None:
         self._live.stop()
 
-
 class Appending(Display):
-
     __slots__ = ("_console",)
 
     def __init__(self, console: Console) -> None:
@@ -82,7 +74,6 @@ class Appending(Display):
 
     def stop(self) -> None:
         ...
-
 
 def display_for(console: Console) -> Display:
     if console.is_terminal and not console.is_dumb_terminal:

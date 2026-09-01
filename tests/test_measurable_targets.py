@@ -120,9 +120,7 @@ from dataclasses import dataclass, fields
 from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Final, NoReturn
-
 import pytest
-
 from agl import testing
 from agl.adapters.filesystem.store import FilesystemStore
 from agl.cli import main
@@ -208,9 +206,7 @@ SETTLED: Final[Mapping[int, tuple[str, ...]]] = {
     12: (f"{HERE}::test_target_twelve_is_unverifiable_because_tickets_does_not_exist",),
 }
 
-
 # --- readers: everything structural is derived from the tree, never from a list typed here -----
-
 
 def _modules(root: Path) -> list[Path]:
     """Every `.py` file under `root`, sorted, with `__pycache__` left out.
@@ -220,7 +216,6 @@ def _modules(root: Path) -> list[Path]:
     every number below it.
     """
     return sorted(p for p in root.rglob("*.py") if "__pycache__" not in p.parts)
-
 
 def _imported(source: str) -> set[str]:
     """Every module name `source` imports, from both statement shapes.
@@ -237,11 +232,9 @@ def _imported(source: str) -> set[str]:
             found |= {alias.name for alias in node.names}
     return found
 
-
 def _reaches(imported: str, package: str) -> bool:
     """Whether `imported` names `package` or something inside it."""
     return imported == package or imported.startswith(f"{package}.")
-
 
 def _importers(root: Path, package: str, *, base: Path) -> dict[str, tuple[str, ...]]:
     """Every module under `root` that imports `package` or a descendant, and what it named.
@@ -260,7 +253,6 @@ def _importers(root: Path, package: str, *, base: Path) -> dict[str, tuple[str, 
             found[str(path.relative_to(base))] = hits
     return found
 
-
 def _own_adapter(relative: str) -> str:
     """The adapter package the module at `relative` belongs to, or `""` for one outside `adapters/`.
 
@@ -273,7 +265,6 @@ def _own_adapter(relative: str) -> str:
     if parts[:2] != ("agl", "adapters") or len(parts) < 3:
         return ""
     return ".".join(parts[:3])
-
 
 def _statements(tree: ast.AST) -> Iterator[ast.stmt]:
     """Every statement in `tree`, nested ones included, with docstrings dropped.
@@ -289,7 +280,6 @@ def _statements(tree: ast.AST) -> Iterator[ast.stmt]:
                 if isinstance(statement, ast.stmt) and not _is_docstring(statement):
                     yield statement
 
-
 def _is_docstring(statement: ast.stmt) -> bool:
     """Whether `statement` is a bare string expression - a docstring of either kind."""
     return (
@@ -297,7 +287,6 @@ def _is_docstring(statement: ast.stmt) -> bool:
         and isinstance(statement.value, ast.Constant)
         and isinstance(statement.value.value, str)
     )
-
 
 def _spanned(statement: ast.stmt) -> range:
     """The lines a statement's own header occupies - decorators in, the body it encloses out.
@@ -317,12 +306,10 @@ def _spanned(statement: ast.stmt) -> range:
     end = body[0].lineno - 1 if body else (statement.end_lineno or statement.lineno)
     return range(start, end + 1)
 
-
 def _header(statement: ast.stmt, lines: Sequence[str]) -> str:
     """A statement's own source, without the body it encloses - the lines `_spanned` names."""
     span = _spanned(statement)
     return "\n".join(lines[span.start - 1 : span.stop - 1])
-
 
 def _entry_points() -> Mapping[str, str]:
     """`pyproject.toml`'s `agl.workflows` table: registered name to `module:attribute`.
@@ -337,7 +324,6 @@ def _entry_points() -> Mapping[str, str]:
     assert isinstance(table, dict)
     return {str(name): str(value) for name, value in table.items()}
 
-
 def _contract(number: str) -> Mapping[str, str]:
     """One `.importlinter` contract, as the raw text of its keys. Numbers are stable by policy."""
     config = ConfigParser()
@@ -350,7 +336,6 @@ def _contract(number: str) -> Mapping[str, str]:
         f"number against that file too."
     )
     return dict(config[section])
-
 
 def _shell_constant(name: str) -> str:
     """A `NAME="value"` assignment from `scripts/check`, read out of the script itself.
@@ -369,11 +354,9 @@ def _shell_constant(name: str) -> str:
         f"scope has moved somewhere this cannot read is a gate nothing here is measuring."
     )
 
-
 # ================================================================================================
 # Target 1 - adding a workflow touches one new package plus one entry-point line
 # ================================================================================================
-
 
 def test_nothing_outside_the_workflows_package_imports_a_workflow() -> None:
     """"No central dispatch to edit", read as a fact about the import graph.
@@ -408,7 +391,6 @@ def test_nothing_outside_the_workflows_package_imports_a_workflow() -> None:
         f"module the next workflow's author has to edit. Workflows are reached through the "
         f"`agl.workflows` entry points and through nothing else."
     )
-
 
 def test_the_registry_dispatches_through_no_name_it_was_handed() -> None:
     """The prohibition, read off the resolver's code and never off its prose.
@@ -474,7 +456,6 @@ def test_the_registry_dispatches_through_no_name_it_was_handed() -> None:
         f"hit here is code."
     )
 
-
 def test_every_workflow_package_is_one_entry_point_line_and_no_more() -> None:
     """The other half of #1: one package, one line, and the two lists derived from each other.
 
@@ -513,7 +494,6 @@ def test_every_workflow_package_is_one_entry_point_line_and_no_more() -> None:
             f"own decorated function, which is what makes the package plus the line the whole of "
             f"the edit - a value pointing elsewhere is a second convention to keep true."
         )
-
 
 # ================================================================================================
 # Target 2 - `fix` is ~8 lines, `split` is ~30
@@ -627,7 +607,6 @@ async def fix(run: Run[FixParams]) -> None:
         await run.step(asking, findings=findings.high(), commit="address review findings")
 '''
 
-
 def _counted(module: Path) -> tuple[int, int]:
     """A workflow package's statement count, and how many of those are interactive-screen wiring.
 
@@ -696,7 +675,6 @@ def _counted(module: Path) -> tuple[int, int]:
 
     return len(statements), sum(1 for statement in statements if wiring(statement))
 
-
 def test_both_workflows_are_the_size_the_target_records() -> None:
     """#2, under the one method the section header above names, applied to both workflows.
 
@@ -745,7 +723,6 @@ def test_both_workflows_are_the_size_the_target_records() -> None:
         f"({split_wiring} of those statements are screens.)"
     )
 
-
 def test_the_counting_method_reproduces_the_decomposition_the_target_recorded(
     tmp_path: Path,
 ) -> None:
@@ -788,12 +765,10 @@ def test_the_counting_method_reproduces_the_decomposition_the_target_recorded(
         f"the workflow. Its floor here would be {total - wiring} against the target's {FIX_CORE}."
     )
 
-
 # ================================================================================================
 # Target 3 - adding an agent backend touches one adapter package, one container line, one config
 #            section, and no workflow
 # ================================================================================================
-
 
 def test_only_the_composition_root_names_an_adapter() -> None:
     """The container is the one place a backend is wired in - the second half of #3, from the tree.
@@ -824,7 +799,6 @@ def test_only_the_composition_root_names_an_adapter() -> None:
         f"found: {reaching}"
     )
 
-
 def test_there_is_one_config_section_per_agent_backend() -> None:
     """One config section per backend: the correspondence between `AgentSettings` and `Provider`.
 
@@ -844,7 +818,6 @@ def test_there_is_one_config_section_per_agent_backend() -> None:
         f"a provider with no section ships unconfigurable, and a section with no provider "
         f"configures nothing."
     )
-
 
 def test_no_workflow_reaches_an_adapter_or_the_configuration() -> None:
     """No workflow changes: the absence that makes that true whoever adds the next backend.
@@ -877,7 +850,6 @@ def test_no_workflow_reaches_an_adapter_or_the_configuration() -> None:
         f"the next backend can break."
     )
 
-
 # ================================================================================================
 # Target 4 - one run addresses two providers
 # ================================================================================================
@@ -895,11 +867,9 @@ def test_no_workflow_reaches_an_adapter_or_the_configuration() -> None:
 # and says in its docstring that this is the workaround for an invisible half rather than a second
 # measurement of it. Re-asking them here would be a third copy of the same workaround.
 
-
 # ================================================================================================
 # Target 5 - vendor containment, tested two ways
 # ================================================================================================
-
 
 def test_vendor_containment_is_a_pair_of_instruments() -> None:
     """Two instruments, one per vendor, each shaped by how that vendor is reached.
@@ -972,7 +942,6 @@ def test_vendor_containment_is_a_pair_of_instruments() -> None:
         f"import to contain, and contract 3 is where it goes."
     )
 
-
 # ================================================================================================
 # Target 6 - deleting a connector breaks nothing else
 # ================================================================================================
@@ -995,7 +964,6 @@ def test_vendor_containment_is_a_pair_of_instruments() -> None:
 # answers is the target's own last clause - *nothing else breaks* - and the answer is a set of file
 # paths.
 
-
 def _adapter_packages() -> list[str]:
     """Every adapter under `src/agl/adapters/`, directories and single modules alike.
 
@@ -1009,7 +977,6 @@ def _adapter_packages() -> list[str]:
         if (path.is_dir() and path.name != "__pycache__")
         or (path.is_file() and path.suffix == ".py" and path.name != "__init__.py")
     )
-
 
 @pytest.mark.parametrize("adapter", _adapter_packages())
 def test_deleting_an_adapter_package_dangles_the_container_alone(
@@ -1075,7 +1042,6 @@ def test_deleting_an_adapter_package_dangles_the_container_alone(
         f"connector would have to find. What was found: {dangling}"
     )
 
-
 # ================================================================================================
 # Target 7 - every port has a contract suite both real and fake pass
 # ================================================================================================
@@ -1098,7 +1064,6 @@ def test_deleting_an_adapter_package_dangles_the_container_alone(
 # tool registration, deny-rule enforcement, the composed request - is covered for the real adapters
 # too.
 
-
 def _ports_with_an_abc() -> dict[str, tuple[str, ...]]:
     """Every `ports/` module declaring an ABC, and the ABCs it declares.
 
@@ -1118,7 +1083,6 @@ def _ports_with_an_abc() -> dict[str, tuple[str, ...]]:
         if classes:
             found[path.stem] = classes
     return found
-
 
 def _contract_suites() -> dict[str, tuple[str, ...]]:
     """Every public module in `tests/contracts/`, and the suite classes it declares.
@@ -1141,7 +1105,6 @@ def _contract_suites() -> dict[str, tuple[str, ...]]:
             found[path.stem] = classes
     return found
 
-
 def _implementations() -> dict[str, list[str]]:
     """Every class under `tests/` subclassing a contract suite, keyed by the suite it subclasses.
 
@@ -1161,7 +1124,6 @@ def _implementations() -> dict[str, list[str]]:
                 if name in found:
                     found[name].append(f"{path.relative_to(REPO_ROOT)}::{node.name}")
     return found
-
 
 def test_every_port_with_an_abc_has_a_contract_suite() -> None:
     """The parity itself: one suite per port that promises something, and no suite without a port.
@@ -1187,7 +1149,6 @@ def test_every_port_with_an_abc_has_a_contract_suite() -> None:
         f"its fake both pass - a port with no suite is a promise nothing holds an implementation "
         f"to, and a suite with no port is a suite about something that no longer exists."
     )
-
 
 def test_every_contract_suite_is_run_by_at_least_two_implementations() -> None:
     """The mechanism the parity is for: the real adapter and the fake subclass the same class.
@@ -1217,7 +1178,6 @@ def test_every_contract_suite_is_run_by_at_least_two_implementations() -> None:
         f"nothing to compare. All counts: {counted}"
     )
 
-
 # ================================================================================================
 # Target 8 - every command runs end-to-end on fakes alone, no network and no git
 # ================================================================================================
@@ -1241,19 +1201,16 @@ def test_every_contract_suite_is_run_by_at_least_two_implementations() -> None:
 # than the network. What is poisoned is `connect`, `connect_ex`, `sendto`, `create_connection`,
 # `getaddrinfo` and `gethostbyname` - every way to reach something that is not this process.
 
-
 @dataclass(frozen=True)
 class _EightParams:
     """The one flag `agl run` needs to have something to hand a workflow."""
 
     request: str = arg("-r", "--request", help="what to do")
 
-
 @role(model=Claude.SONNET)
 def _eight_role() -> Role:
     """The one role the probe runs, so `agl run` has work to do."""
     return Role(name="only", instructions="do the work")
-
 
 @workflow(version="1")
 async def probe(run: Run[_EightParams]) -> None:
@@ -1263,7 +1220,6 @@ async def probe(run: Run[_EightParams]) -> None:
     `<module>:<name>` - and a workflow declared inside a function names no module attribute.
     """
     await run.step(_eight_role(), request=run.params.request)
-
 
 _EIGHT_POINT: Final = EntryPoint(name="probe", value=f"{__name__}:probe", group=registry.GROUP)
 
@@ -1278,7 +1234,6 @@ _INVOCATIONS: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
     ("clear", ("clear", "auth", "-f")),
 )
 
-
 class _WentOutside(BaseException):
     """What a poisoned door raises, and it is a `BaseException` for `agl/testing.py`'s reason.
 
@@ -1290,7 +1245,6 @@ class _WentOutside(BaseException):
     the same reason.
     """
 
-
 def _refusing(door: str) -> object:
     """A stand-in for `door` that raises rather than doing what it was for."""
 
@@ -1301,7 +1255,6 @@ def _refusing(door: str) -> object:
         )
 
     return poisoned
-
 
 def _poison(monkeypatch: pytest.MonkeyPatch) -> None:
     """Close both doors out of the interpreter for the duration of one test.
@@ -1325,7 +1278,6 @@ def _poison(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(socket, "getaddrinfo", _refusing("socket.getaddrinfo"))
     monkeypatch.setattr(socket, "gethostbyname", _refusing("socket.gethostbyname"))
 
-
 def _declared_commands() -> set[str]:
     """Every subcommand the real parser admits, read off the object `agl` itself builds.
 
@@ -1340,11 +1292,9 @@ def _declared_commands() -> set[str]:
             found |= {str(name) for name in action.choices}
     return found
 
-
 def _eight_agent(task: AgentTask) -> Reply:
     """An agent that says it did something and touches nothing - no worktree state is asserted."""
     return Reply(says="done")
-
 
 def test_every_declared_command_runs_on_fakes_with_no_way_out(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -1420,7 +1370,6 @@ def test_every_declared_command_runs_on_fakes_with_no_way_out(
         f"process."
     )
 
-
 # ================================================================================================
 # Target 9 - three runs, one repo, concurrently
 # ================================================================================================
@@ -1430,7 +1379,6 @@ def test_every_declared_command_runs_on_fakes_with_no_way_out(
 # claim: two `split` runs and one `fix`, different base refs, overlapping in time, and three
 # independent local branches at the end. A copy made here would be the same test with less of the
 # apparatus that proves the runs actually overlapped, which is the hard half of that claim.
-
 
 # ================================================================================================
 # Target 10 - kill-and-resume is a property test
@@ -1449,7 +1397,6 @@ def test_every_declared_command_runs_on_fakes_with_no_way_out(
 # finish left both. That is the difference between a kill and an unwind, measured rather than
 # claimed - and without it a "kill" that was really an exception would sweep every boundary and
 # pass.
-
 
 # ================================================================================================
 # Target 11 - renaming every namespace and step name changes only that workflow
@@ -1488,16 +1435,13 @@ def test_every_declared_command_runs_on_fakes_with_no_way_out(
 # chunk id there moves a digest because an **input** moved, which says nothing about namespaces. The
 # workflow below is declared twice instead, so the rename is of names and of nothing else.
 
-
 @dataclass(frozen=True)
 class _RenameParams:
     """One flag, identical in both declarations, so that no input differs between the two runs."""
 
     request: str = arg("-r", "--request", help="what to do")
 
-
 _RENAME_PROMPT: Final = "do the work"
-
 
 @role(model=Claude.SONNET)
 def _renamed(name: str) -> Role[None]:
@@ -1512,14 +1456,12 @@ def _renamed(name: str) -> Role[None]:
     """
     return Role(name=name, instructions=_RENAME_PROMPT)
 
-
 _RENAME_REQUEST: Final = "the same request, twice"
 
 _FIRST_STEPS: Final = (_renamed("alpha"), _renamed("beta"), _renamed("gamma"))
 _SECOND_STEPS: Final = (_renamed("banana"), _renamed("coconut"), _renamed("durian"))
 _FIRST_SPACES: Final = ("one", "two")
 _SECOND_SPACES: Final = ("three", "four")
-
 
 async def _renameable(
     run: Run[_RenameParams],
@@ -1542,18 +1484,15 @@ async def _renameable(
         await run.worktree(space).step(steps[1], order=10 + index)
     await run.step(steps[2], order=99)
 
-
 @workflow(version="1")
 async def named_one(run: Run[_RenameParams]) -> None:
     """The workflow under one set of names."""
     await _renameable(run, steps=_FIRST_STEPS, spaces=_FIRST_SPACES)
 
-
 @workflow(version="1")
 async def named_two(run: Run[_RenameParams]) -> None:
     """The same workflow under a different name for every namespace and every step."""
     await _renameable(run, steps=_SECOND_STEPS, spaces=_SECOND_SPACES)
-
 
 async def _landing(run: Run[_RenameParams], *, space: str) -> None:
     """One child worktree, one committing step, one landing, then one step on the parent.
@@ -1568,18 +1507,15 @@ async def _landing(run: Run[_RenameParams], *, space: str) -> None:
     assert not outcome.conflicted
     await run.step(_renamed("work"), order=2)
 
-
 @workflow(version="1")
 async def landing_one(run: Run[_RenameParams]) -> None:
     """The landing programme under one namespace."""
     await _landing(run, space="one")
 
-
 @workflow(version="1")
 async def landing_two(run: Run[_RenameParams]) -> None:
     """The landing programme under a different namespace, and nothing else different."""
     await _landing(run, space="three")
-
 
 def _writing_agent(task: AgentTask) -> Reply:
     """An agent that leaves a file behind, so `commit=` records something and a landing carries it.
@@ -1590,7 +1526,6 @@ def _writing_agent(task: AgentTask) -> Reply:
     """
     (task.workspace / "left-behind.py").write_bytes(b"the agent's own work\n")
     return Reply(says="done")
-
 
 async def _ledger(
     where: Path, wf: Workflow[_RenameParams]
@@ -1619,11 +1554,9 @@ async def _ledger(
         if path.name != "run.json"
     }
 
-
 def _fingerprints(entries: Mapping[str, Mapping[str, object]]) -> list[str]:
     """Every entry's fingerprint, sorted - the ledger with its paths taken away."""
     return sorted(str(entry["fingerprint"]) for entry in entries.values())
-
 
 @pytest.mark.asyncio
 async def test_renaming_every_name_moves_no_fingerprint_at_all(tmp_path: Path) -> None:
@@ -1669,7 +1602,6 @@ async def test_renaming_every_name_moves_no_fingerprint_at_all(tmp_path: Path) -
         f"  first:  {_fingerprints(first)}\n"
         f"  second: {_fingerprints(second)}"
     )
-
 
 @pytest.mark.asyncio
 async def test_a_landing_writes_the_namespace_into_the_history(tmp_path: Path) -> None:
@@ -1721,11 +1653,9 @@ async def test_a_landing_writes_the_namespace_into_the_history(tmp_path: Path) -
         "test, and amend the section header above it - the finding it describes is gone."
     )
 
-
 # ================================================================================================
 # Target 12 - tickets (v1.2) requires no framework change
 # ================================================================================================
-
 
 def test_target_twelve_is_unverifiable_because_tickets_does_not_exist() -> None:
     """#12 cannot be verified today, and nothing here stands in for it.
@@ -1769,11 +1699,9 @@ def test_target_twelve_is_unverifiable_because_tickets_does_not_exist() -> None:
         f"written to be deleted by whoever adds tickets."
     )
 
-
 # ================================================================================================
 # The index itself - twelve targets, and every citation resolved against the real file
 # ================================================================================================
-
 
 def _test_names(path: Path) -> set[str]:
     """Every test function `path` declares, at module level or on a class."""
@@ -1784,7 +1712,6 @@ def _test_names(path: Path) -> set[str]:
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
         and node.name.startswith("test_")
     }
-
 
 def test_all_twelve_targets_are_accounted_for() -> None:
     """There are twelve targets and this file answers for all twelve, by number.
@@ -1803,7 +1730,6 @@ def test_all_twelve_targets_are_accounted_for() -> None:
         f"target recorded as answered and not answered - worse than one left out, because it reads "
         f"as covered."
     )
-
 
 @pytest.mark.parametrize(
     "citation", sorted({one for where in SETTLED.values() for one in where})

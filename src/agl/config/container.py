@@ -1,11 +1,9 @@
-
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from functools import partial
 from inspect import isawaitable
 from pathlib import Path
 from typing import Final
-
 from agl.adapters.claude_code import fake as claude_fake
 from agl.adapters.filesystem.memory_store import MemoryStore
 from agl.adapters.filesystem.store import FilesystemStore
@@ -49,10 +47,8 @@ __all__ = [
 
 FAKE_BUILD: Final = "agl-fake-build"
 
-
 @dataclass(frozen=True, slots=True)
 class FakeServices:
-
     services: Services
 
     repository: FakeRepository
@@ -74,7 +70,6 @@ class FakeServices:
     def with_verifier(self, verifier: FakeVerifier) -> FakeServices:
         return replace(self, services=replace(self.services, verifier=verifier), verifier=verifier)
 
-
 def real(settings: Settings, project: Project) -> Services:
     return Services(
         store=FilesystemStore(settings.home),
@@ -87,7 +82,6 @@ def real(settings: Settings, project: Project) -> Services:
         agents=_agents(settings.agents),
         build=project.build,
     )
-
 
 def fakes(
     trees: TreesRoot,
@@ -131,10 +125,8 @@ def fakes(
         clock=clock,
     )
 
-
 def answering(responses: Sequence[Press | int] = ()) -> ScriptedTerminal:
     return ScriptedTerminal(responses)
-
 
 def _claude_script(agent: Agent | None) -> claude_fake.Script | None:
     if agent is None:
@@ -147,7 +139,6 @@ def _claude_script(agent: Agent | None) -> claude_fake.Script | None:
 
     return script
 
-
 def _openai_script(agent: Agent | None) -> openai_fake.Script | None:
     if agent is None:
         return None
@@ -158,7 +149,6 @@ def _openai_script(agent: Agent | None) -> openai_fake.Script | None:
         )
 
     return script
-
 
 async def _performs(
     produced: Reply | Awaitable[Reply],
@@ -173,14 +163,12 @@ async def _performs(
         await call(made.tool, made.payload)
     return AgentOutcome(stop_reason=reply.stop_reason, text=reply.says)
 
-
 def _agents(agents: AgentSettings) -> AgentRunner:
     connectors: tuple[tuple[Provider, bool, Callable[[], AgentRunner]], ...] = (
         (Provider.CLAUDE, agents.claude.enabled, partial(_claude, agents.claude.cli_path)),
         (Provider.OPENAI, agents.openai.enabled, partial(OpenAiRunner, agents.openai.cli_path)),
     )
     return RoutingAgentRunner({name: build() for name, enabled, build in connectors if enabled})
-
 
 def _claude(cli_path: Path | None) -> AgentRunner:
     try:
@@ -195,7 +183,6 @@ def _claude(cli_path: Path | None) -> AgentRunner:
             "model"
         ) from error
     return ClaudeCodeRunner(cli_path)
-
 
 def _terminal() -> Terminal:
     try:

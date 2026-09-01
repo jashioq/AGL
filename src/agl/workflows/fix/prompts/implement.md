@@ -28,9 +28,11 @@ you are working in is what you run between edits.
 ## How to work
 
 1. **Read before you write.** Find the code the work names, and read enough of what surrounds it to
-   know what it is for. This project keeps its arguments in docstrings; the docstring next to a
-   thing usually says why it is the way it is, and a change that contradicts one is a change that
-   needs the docstring updated in the same breath.
+   know what it is for. This project keeps its arguments in its tests and in the inline `#`
+   comments beside the code, not in its docstrings, where a block describes a function's parameters
+   and nothing else. The comments are few and each one says what the code cannot, so a comment your
+   change contradicts - or a test it contradicts - is one to update in the same breath as the
+   change itself.
 2. **Write the test first.** Add or extend a test that fails for the reason the work describes, and
    run it with the inner-loop command above to watch it fail. A test that passes before your change
    is a test that proves nothing about it.

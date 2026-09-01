@@ -1,4 +1,3 @@
-
 import asyncio
 import contextlib
 import json
@@ -8,7 +7,6 @@ from collections import deque
 from collections.abc import AsyncIterator, Sequence
 from pathlib import Path
 from typing import Final
-
 from agl.adapters.openai._tools import Caller
 from agl.adapters.openai.translate import activity, failure, launch_failure, unreadable
 from agl.ports.agent import ActivityReporter, AgentOutcome, StopReason
@@ -28,9 +26,7 @@ _BUFFER_BYTES: Final = 1 << 20
 # and unlink them on being asked to stop.
 _GRACE: Final = 5.0
 
-
 class Tail:
-
     def __init__(self) -> None:
         self._lines: deque[str] = deque(maxlen=_STDERR_LINES)
 
@@ -40,9 +36,7 @@ class Tail:
     def text(self) -> str:
         return "\n".join(self._lines)
 
-
 class _Read:
-
     def __init__(self) -> None:
         self.said = ""
 
@@ -51,7 +45,6 @@ class _Read:
         self.completed = False
 
         self.shown = ""
-
 
 async def outcome_of(
     argv: Sequence[str],
@@ -104,7 +97,6 @@ async def outcome_of(
         text=read.said,
     )
 
-
 def _frame(
     line: bytes,
     read: _Read,
@@ -131,7 +123,6 @@ def _frame(
     elif kind in ("item.started", "item.updated", "item.completed"):
         _item(frame.get("item"), kind, read, workspace, on_activity)
 
-
 def _item(
     item: JsonValue,
     kind: str,
@@ -152,13 +143,11 @@ def _item(
         read.shown = line
         on_activity(line)
 
-
 def _message(payload: JsonValue) -> str | None:
     if not isinstance(payload, dict):
         return None
     said = payload.get("message")
     return said if isinstance(said, str) and said.strip() else None
-
 
 async def _lines(child: asyncio.subprocess.Process) -> AsyncIterator[bytes]:
     stream = child.stdout
@@ -182,7 +171,6 @@ async def _lines(child: asyncio.subprocess.Process) -> AsyncIterator[bytes]:
             yield b"".join([*parts, line])
         parts, held = [], 0
 
-
 async def _feed(child: asyncio.subprocess.Process, prompt: str) -> None:
     stream = child.stdin
     assert stream is not None, "the child was started without a pipe on its standard input"
@@ -195,13 +183,11 @@ async def _feed(child: asyncio.subprocess.Process, prompt: str) -> None:
         with contextlib.suppress(ConnectionError, BrokenPipeError):
             stream.close()
 
-
 async def _drain(child: asyncio.subprocess.Process, tail: Tail) -> None:
     stream = child.stderr
     assert stream is not None, "the child was started without a pipe on its standard error"
     async for line in stream:
         tail.add(line.decode("utf-8", errors="replace"))
-
 
 async def _closed(
     child: asyncio.subprocess.Process,
@@ -217,14 +203,12 @@ async def _closed(
     await asyncio.gather(*aside, return_exceptions=True)
     return status
 
-
 async def _halt(child: asyncio.subprocess.Process) -> None:
     _signal(child, signal.SIGTERM)
     with contextlib.suppress(TimeoutError):
         async with asyncio.timeout(_GRACE):
             await child.wait()
     _signal(child, signal.SIGKILL)
-
 
 def _signal(child: asyncio.subprocess.Process, number: int) -> None:
     if child.returncode is not None:

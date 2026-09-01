@@ -1,7 +1,5 @@
-
 from pathlib import Path
 from typing import Final
-
 from agl.adapters.git._runner import unreadable
 from agl.ports.integration import Conflict
 
@@ -16,7 +14,6 @@ _NAMED: Final = 3
 
 _WHAT: Final = "a list of unresolved files"
 
-
 def unmerged(listing: str) -> tuple[str, ...]:
     records = listing.split(_RECORD_END)
     if records and not records[-1]:
@@ -29,14 +26,11 @@ def unmerged(listing: str) -> tuple[str, ...]:
         found[path] = None
     return tuple(found)
 
-
 def collided(paths: tuple[str, ...], source: str, target: str, where: Path) -> Conflict:
     return _conflict(paths, f"{source} will not combine into {target}", where)
 
-
 def unresolved(paths: tuple[str, ...], target: str, where: Path) -> Conflict:
     return _conflict(paths, f"the landing {target} is holding still will not combine", where)
-
 
 def already_holding(paths: tuple[str, ...], source: str, target: str, where: Path) -> Conflict:
     lead = (
@@ -54,7 +48,6 @@ def already_holding(paths: tuple[str, ...], source: str, target: str, where: Pat
         f"held is held in {where}",
     )
 
-
 def _conflict(paths: tuple[str, ...], lead: str, where: Path) -> Conflict:
     if not paths:
         return Conflict(
@@ -62,7 +55,6 @@ def _conflict(paths: tuple[str, ...], lead: str, where: Path) -> Conflict:
             f"{lead}, and git left no unresolved file to name. The landing is held in {where}",
         )
     return Conflict(paths, f"{lead}: {_named(paths)}. The landing is held in {where}")
-
 
 def _named(paths: tuple[str, ...]) -> str:
     rest = len(paths) - _NAMED

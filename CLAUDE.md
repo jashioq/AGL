@@ -139,6 +139,27 @@ def tool[P](
   is never a restatement of the name. This is C1's spirit surviving the inversion, and it is the
   half no gate reads.
 
+## The blank-line convention
+
+Four rules, and one file holds all four: `tests/test_blank_line_convention.py` parses both trees and
+names the file and the line of anything it objects to, so none of this is a reviewer's. What that
+file deliberately does *not* hold is the sorting — `I001`, configured under `pyproject.toml`'s
+`[tool.ruff.lint.isort]`, orders the import block and decides where a separator goes inside it, and
+the `no-lines-before` and `lines-after-imports` settings written there are what keep the lint gate
+and the test from arguing about the same blank line. ruff's own blank-line rules are preview-only,
+so a bare `ruff check` holds none of the four. Blank lines *inside* a function body are judgement
+and the convention says nothing about them.
+
+- **B1. The imports are one contiguous block.** One blank line is permitted and only directly above
+  a standalone comment, because `I001` mandates that one and puts it back if it is removed.
+- **B2. One blank line between top-level definitions, never two adjacent.** A blank, a `# ---`
+  banner and a blank again is not two adjacent and is the layout; an `@overload` stack with no gap
+  at all is idiomatic and stays.
+- **B3. No blank line under a `class` statement.** The docstring, the first attribute or the first
+  method sits directly under the header, however many lines the header itself takes.
+- **B4. No blank line at the top of a file.** A zero-byte `__init__.py` has no first line and is not
+  one of these.
+
 ## The gates
 
 ```

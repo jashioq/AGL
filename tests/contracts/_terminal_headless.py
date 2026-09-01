@@ -26,19 +26,15 @@ never this one, and the `terminal` fixture these tests take is declared in `_ter
 """
 
 from typing import Final
-
 import pytest
-
 from agl.ports.errors import UpstreamUnavailable
 from agl.ports.terminal import Terminal
-
 from ._terminal_driver import came_back, within
 from ._terminal_views import AGENT, EARLY, LANDED, LATE, RUNNING, dashboard, question
 
 # How many times each rule is asked for, in the test that pins the answer not changing. Three,
 # interleaved, because the failure being ruled out is an answer that depends on when it was asked.
 _ROUNDS: Final = 3
-
 
 class HeadlessRulesContract:
     """No-op, refuse, and answer the same way every time for as long as the terminal is open.

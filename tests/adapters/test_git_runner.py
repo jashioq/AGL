@@ -41,9 +41,7 @@ from collections.abc import Iterator
 from contextlib import suppress
 from pathlib import Path
 from typing import Final
-
 import pytest
-
 from agl.adapters.git import _runner as git_runner
 from agl.adapters.git._runner import GitRunner, unreadable
 from agl.ports.errors import (
@@ -95,7 +93,6 @@ SELF_SIGNALLING: Final = ("-c", "alias.boom=!kill -TERM $PPID", "boom")
 LONE_SURROGATE: Final = chr(0xD800)
 EMBEDDED_NUL: Final = "a\x00b"
 
-
 def _git(repository: Path, *argv: str) -> str:
     """Run git for the fixtures. Synchronous on purpose: this is arrangement, not the thing under
     test, and a test that built its repository through the runner would be resting the arrangement
@@ -104,7 +101,6 @@ def _git(repository: Path, *argv: str) -> str:
         ["git", *argv], cwd=repository, capture_output=True, text=True, check=True
     )
     return done.stdout
-
 
 @pytest.fixture
 def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
@@ -129,15 +125,12 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path
     _git(work, "commit", "-q", "-m", "first")
     yield work
 
-
 @pytest.fixture
 def runner(repository: Path) -> GitRunner:
     """The runner under test, over that repository, with the module's own default timeout."""
     return GitRunner(repository)
 
-
 # --- What comes back when git answers -----------------------------------------------------------
-
 
 async def test_a_command_that_succeeds_hands_back_what_git_wrote(
     runner: GitRunner, repository: Path
@@ -150,7 +143,6 @@ async def test_a_command_that_succeeds_hands_back_what_git_wrote(
         "the output was stripped on the way through. A `-z` form ends in a NUL that is data, and "
         "a runner that tidied one line would silently eat the last field of the next parse"
     )
-
 
 async def test_output_that_is_not_utf8_comes_back_with_replacements_rather_than_surrogates(
     runner: GitRunner, repository: Path
@@ -173,7 +165,6 @@ async def test_output_that_is_not_utf8_comes_back_with_replacements_rather_than_
         "a lone surrogate reached a caller, and the store refuses to write one"
     )
 
-
 async def test_answers_reads_gits_yes_and_no_off_the_exit_status(
     runner: GitRunner, repository: Path
 ) -> None:
@@ -191,9 +182,7 @@ async def test_answers_reads_gits_yes_and_no_off_the_exit_status(
     assert await runner.answers(*ancestry, "HEAD~1", "HEAD", refusal=NotFoundError)
     assert not await runner.answers(*ancestry, "HEAD", "HEAD~1", refusal=NotFoundError)
 
-
 # --- A refusal git states deliberately ----------------------------------------------------------
-
 
 async def test_the_same_refusal_raises_whichever_class_the_call_site_named(
     runner: GitRunner,
@@ -215,7 +204,6 @@ async def test_the_same_refusal_raises_whichever_class_the_call_site_named(
         "has to go on here, which is why it is carried into the error rather than handed back"
     )
 
-
 async def test_a_conflict_git_states_is_the_refusal_a_worktree_provider_will_declare(
     runner: GitRunner,
 ) -> None:
@@ -234,7 +222,6 @@ async def test_a_conflict_git_states_is_the_refusal_a_worktree_provider_will_dec
     assert "spoken-for" in str(refused.value)
     assert await runner.run(*VERIFY, "spoken-for", refusal=NotFoundError)
 
-
 async def test_answers_refuses_a_status_that_is_not_one_of_the_two_answers(
     runner: GitRunner,
 ) -> None:
@@ -249,9 +236,7 @@ async def test_answers_refuses_a_status_that_is_not_one_of_the_two_answers(
             "merge-base", "--is-ancestor", ABSENT_ID, "HEAD", refusal=NotFoundError
         )
 
-
 # --- git is not there ---------------------------------------------------------------------------
-
 
 async def test_a_directory_with_no_repository_is_unavailable_whatever_the_caller_declared(
     tmp_path: Path,
@@ -271,7 +256,6 @@ async def test_a_directory_with_no_repository_is_unavailable_whatever_the_caller
 
     assert str(empty) in str(unreachable.value)
 
-
 async def test_a_git_that_is_not_on_path_is_unavailable(
     runner: GitRunner, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -290,12 +274,10 @@ async def test_a_git_that_is_not_on_path_is_unavailable(
 
     assert "could not be started" in str(missing.value)
 
-
 async def test_a_working_directory_that_is_not_there_is_unavailable(tmp_path: Path) -> None:
     """The other way a process fails to start, and the same answer: nothing ran."""
     with pytest.raises(UpstreamUnavailable):
         await GitRunner(tmp_path / "never-created").run("status", refusal=ConflictError)
-
 
 async def test_a_value_that_cannot_be_encoded_at_all_is_input_and_not_an_upstream_failure(
     runner: GitRunner,
@@ -351,9 +333,7 @@ async def test_a_value_that_cannot_be_encoded_at_all_is_input_and_not_an_upstrea
             f"repository looking for something that was never asked about"
         )
 
-
 # --- git does not finish, or does not answer at all ----------------------------------------------
-
 
 async def test_a_command_that_runs_too_long_is_stopped_and_the_repository_still_works(
     repository: Path,
@@ -379,7 +359,6 @@ async def test_a_command_that_runs_too_long_is_stopped_and_the_repository_still_
     assert not list((repository / ".git").glob("*.lock"))
     assert _git(repository, "status", "--porcelain") == ""
 
-
 async def test_the_timeout_can_be_named_per_call_as_well_as_per_runner(
     runner: GitRunner,
 ) -> None:
@@ -391,7 +370,6 @@ async def test_the_timeout_can_be_named_per_call_as_well_as_per_runner(
     """
     with pytest.raises(UpstreamUnavailable):
         await runner.run(*SLOW, refusal=ConflictError, timeout=0.2)
-
 
 async def test_a_cancelled_call_raises_cancellation_and_not_an_agl_error(
     runner: GitRunner, repository: Path
@@ -416,7 +394,6 @@ async def test_a_cancelled_call_raises_cancellation_and_not_an_agl_error(
         await task
 
     assert _git(repository, "status", "--porcelain") == ""
-
 
 # --- The two clauses inside `_signal` that no answer can witness ---------------------------------
 
@@ -454,7 +431,6 @@ BRIEF: Final = ("-c", "alias.brief=!sleep 1", "brief")
 # How long the reaped-child arrangement is given to become the state it is about.
 REAPED_WITHIN: Final = 10.0
 
-
 async def _reaped_with_the_pipe_still_open(repository: Path) -> asyncio.subprocess.Process:
     """A git that has exited and been reaped, whose transport is still open. Fails if it cannot.
 
@@ -473,7 +449,6 @@ async def _reaped_with_the_pipe_still_open(repository: Path) -> asyncio.subproce
     )
     return process
 
-
 def _orphan(repository: Path) -> int | None:
     """The pid of the grandchild this file started, so the test can take it away again."""
     pidfile = repository / ORPHANED
@@ -481,7 +456,6 @@ def _orphan(repository: Path) -> int | None:
         return None
     said = pidfile.read_text(encoding="utf-8").strip()
     return int(said) if said else None
-
 
 async def test_a_git_that_has_already_been_reaped_is_never_signalled(
     repository: Path, monkeypatch: pytest.MonkeyPatch
@@ -534,7 +508,6 @@ async def test_a_git_that_has_already_been_reaped_is_never_signalled(
         f"in this adapter's answer would ever show it"
     )
 
-
 async def test_a_signal_the_os_refuses_leaves_the_timeout_saying_what_it_always_says(
     repository: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -571,7 +544,6 @@ async def test_a_signal_the_os_refuses_leaves_the_timeout_saying_what_it_always_
         f"not answer in time"
     )
 
-
 async def test_a_cancelled_call_still_raises_cancellation_when_the_signal_is_refused(
     repository: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -600,7 +572,6 @@ async def test_a_cancelled_call_still_raises_cancellation_when_the_signal_is_ref
     with pytest.raises(asyncio.CancelledError):
         await task
 
-
 async def test_a_command_runs_where_the_caller_said_and_not_where_the_runner_lives(
     runner: GitRunner, repository: Path
 ) -> None:
@@ -618,7 +589,6 @@ async def test_a_command_runs_where_the_caller_said_and_not_where_the_runner_liv
     assert prefix.strip() == "nested/"
     assert (await runner.run("rev-parse", "--show-prefix", refusal=ConflictError)).strip() == ""
 
-
 async def test_a_git_killed_by_a_signal_is_unexpected_rather_than_the_callers_refusal(
     runner: GitRunner,
 ) -> None:
@@ -634,9 +604,7 @@ async def test_a_git_killed_by_a_signal_is_unexpected_rather_than_the_callers_re
 
     assert "killed by signal" in str(died.value)
 
-
 # --- No shell, ever -------------------------------------------------------------------------------
-
 
 async def test_an_argument_that_would_be_dangerous_in_a_shell_arrives_literally_and_does_nothing(
     runner: GitRunner, repository: Path
@@ -666,7 +634,6 @@ async def test_an_argument_that_would_be_dangerous_in_a_shell_arrives_literally_
     for mark in MARKS:
         assert not (repository / mark).exists(), f"a shell ran the {mark!r} half of the argument"
 
-
 async def test_a_dangerous_argument_that_names_nothing_still_only_refuses(
     runner: GitRunner, repository: Path
 ) -> None:
@@ -682,9 +649,7 @@ async def test_a_dangerous_argument_that_names_nothing_still_only_refuses(
     for mark in MARKS:
         assert not (repository / mark).exists()
 
-
 # --- The error a caller raises when its own parse fails -------------------------------------------
-
 
 async def test_unreadable_says_the_repository_is_fine_and_our_reading_of_it_is_not() -> None:
     """`UpstreamUnexpected`, spelled once for the three adapters that parse porcelain.
@@ -699,7 +664,6 @@ async def test_unreadable_says_the_repository_is_fine_and_our_reading_of_it_is_n
     assert isinstance(error, UpstreamUnexpected)
     assert "a worktree registration" in str(error)
     assert "nonsense" in str(error)
-
 
 async def test_unreadable_does_not_put_a_whole_patch_in_a_message() -> None:
     """A message a person reads on a terminal is not the place for a megabyte of output."""

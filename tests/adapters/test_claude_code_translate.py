@@ -24,7 +24,6 @@ under different directories would collide at import.
 import re
 from pathlib import Path
 from typing import Any, Final
-
 import pytest
 from claude_agent_sdk import (
     ClaudeSDKError,
@@ -36,7 +35,6 @@ from claude_agent_sdk import (
     ToolUseBlock,
 )
 from claude_agent_sdk._errors import MessageParseError
-
 from agl.adapters.claude_code.translate import (
     Restraint,
     activity,
@@ -61,11 +59,9 @@ _UNCONSULTED_PATH_RULES: Final = ("Write", "NotebookEdit", "MultiEdit", "Glob")
 
 _WORKSPACE: Final = Path("/trees/proj/agl-fix-auth")
 
-
 def _call(name: str, payload: dict[str, Any]) -> ToolUseBlock:
     """One tool call, as the SDK delivers it. The id is never read and is here to satisfy it."""
     return ToolUseBlock(id="toolu_probe", name=name, input=payload)
-
 
 class TestRestrictionsRender:
     """(a) Every restriction produces both halves, and the set they came from does not leak."""
@@ -141,7 +137,6 @@ class TestRestrictionsRender:
             "the sentences did not come out in Restriction's declaration order, which is the only "
             "ordering in this module that does not move between processes"
         )
-
 
 class TestRestrictionsObeyThePermissionGrammar:
     """(a) Every rule is something Claude Code's own rule validator accepts and consults."""
@@ -222,7 +217,6 @@ class TestRestrictionsObeyThePermissionGrammar:
         """
         assert expected in restraint(frozenset({member})).denied_tools
 
-
 class TestModelNames:
     """(b) The tier alias for a model this adapter serves, and a refusal for anything else."""
 
@@ -269,7 +263,6 @@ class TestModelNames:
         message = str(refused.value)
         for served in Claude:
             assert str(served) in message
-
 
 class TestVendorExceptions:
     """(c) Every member of the SDK's hierarchy, and the base, become an `AglError`."""
@@ -357,7 +350,6 @@ class TestVendorExceptions:
         refusal = unready(error)
         assert isinstance(refusal, UpstreamUnavailable)
         assert str(refusal).strip()
-
 
 class TestActivityStrings:
     """(d) The tool's own name, and one generic rule about the payload."""

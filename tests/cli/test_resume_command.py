@@ -33,9 +33,7 @@ from dataclasses import dataclass
 from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Final
-
 import pytest
-
 from agl.cli import main
 from agl.cli.commands import resume as resume_command
 from agl.config import container, registry, sources
@@ -57,7 +55,6 @@ PROJECT: Final = ProjectName("myapp")
 LABEL: Final = RunLabel("auth")
 SCOPE: Final = RunScope(PROJECT, LABEL)
 
-
 @dataclass(frozen=True)
 class FlaggedParams:
     """The example params shape, so that `agl run flagged -n auth -r "add oauth"` has flags to
@@ -66,11 +63,9 @@ class FlaggedParams:
     request: str = arg("-r", "--request", help="what to build")
     concurrent: int = arg("-c", "--concurrent", default=3)
 
-
 # What the workflow was handed, once per invocation. Module level for `EntryPoint.load`'s reason: it
 # imports a module and reads an attribute in it, so a workflow declared in a test is unreachable.
 flagged_with: Final[list[FlaggedParams]] = []
-
 
 @workflow(version="1.1")
 async def flagged(run: Run[FlaggedParams]) -> None:
@@ -78,19 +73,15 @@ async def flagged(run: Run[FlaggedParams]) -> None:
     visible from the argv side without this module reading a store."""
     flagged_with.append(run.params)
 
-
 def _point(name: str) -> EntryPoint:
     """A registration line, pointed at this module: a name, a `module:attr`, and a group."""
     return EntryPoint(name=name, value=f"{__name__}:{name}", group=registry.GROUP)
 
-
 POINTS: Final = (_point("flagged"),)
-
 
 def _fakes(tmp_path: Path) -> container.FakeServices:
     """Target #8's deployment, seeded so `History` has a default ref and a commit to resolve."""
     return container.fakes(TreesRoot(tmp_path / "trees"), files={"src/a.txt": b"one\n"})
-
 
 def _main(harness: container.FakeServices, *argv: str) -> int:
     """One `agl` invocation, with this module's workflows in place of what is installed."""
@@ -104,16 +95,13 @@ def _main(harness: container.FakeServices, *argv: str) -> int:
         ),
     )
 
-
 def _resume_parser() -> RefusingParser:
     """The `resume` subparser alone, built the way `main.parser()` builds it, for inspection."""
     root = RefusingParser(prog="agl", allow_abbrev=False)
     commands = root.add_subparsers(dest="command", required=True, parser_class=RefusingParser)
     return resume_command.declare(commands)
 
-
 # --- the grammar, read off the parser -------------------------------------------------------------
-
 
 def test_the_resume_parser_holds_one_positional_and_no_flags() -> None:
     """The sentence, read off the object: `resume` takes the label only.
@@ -130,14 +118,12 @@ def test_the_resume_parser_holds_one_positional_and_no_flags() -> None:
     assert options == {"-h", "--help"}
     assert positionals == ["label"]
 
-
 def test_abbreviation_is_off_on_the_resume_subparser() -> None:
     """A subparser does not inherit `allow_abbrev` - `add_parser` builds a fresh `ArgumentParser`
     which reads the flag off its own arguments. It matters less here than on `run`, this parser
     declaring no long flag to be a prefix of, and it is written anyway: the reason a later stage
     would add one is that a flag appeared, and by then the abbreviating would already be on."""
     assert _resume_parser().allow_abbrev is False
-
 
 def test_the_command_calls_exactly_one_api_function() -> None:
     """`ARCHITECTURE.md`'s "Commands stay dumb", made mechanical: this module reaches `api` once,
@@ -156,9 +142,7 @@ def test_the_command_calls_exactly_one_api_function() -> None:
 
     assert called == {"resume"}
 
-
 # --- end to end through argv ----------------------------------------------------------------------
-
 
 def test_a_resume_runs_the_workflow_the_record_names_with_the_params_it_stored(
     tmp_path: Path,
@@ -181,7 +165,6 @@ def test_a_resume_runs_the_workflow_the_record_names_with_the_params_it_stored(
         FlaggedParams(request="add oauth", concurrent=4),
     ]
 
-
 def test_a_finished_resume_is_named_the_way_the_run_command_names_one(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -198,7 +181,6 @@ def test_a_finished_resume_is_named_the_way_the_run_command_names_one(
     assert _main(harness, "resume", "auth") == 0
 
     assert capsys.readouterr().out == "resume 'auth' finished\n"
-
 
 def test_resuming_a_label_with_no_record_exits_three(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -219,7 +201,6 @@ def test_resuming_a_label_with_no_record_exits_three(
     )
     assert captured.out == ""
 
-
 def test_a_label_the_filesystem_would_not_take_exits_two(tmp_path: Path) -> None:
     """`RunLabel` validates on the way in and its `InputError` is the same 2 `agl run` answers with.
 
@@ -231,16 +212,13 @@ def test_a_label_the_filesystem_would_not_take_exits_two(tmp_path: Path) -> None
 
     assert _main(harness, "resume", "my/label") == 2
 
-
 def test_no_label_at_all_exits_two(tmp_path: Path) -> None:
     """The positional is required: a bare `agl resume` is a usage error and not a default label."""
     harness = _fakes(tmp_path)
 
     assert _main(harness, "resume") == 2
 
-
 # --- the tail, which this command may not carry ---------------------------------------------------
-
 
 def test_a_workflow_flag_on_a_resume_line_is_refused_and_says_where_flags_went(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -270,7 +248,6 @@ def test_a_workflow_flag_on_a_resume_line_is_refused_and_says_where_flags_went(
     assert "agl run <workflow> -n <label>" in captured.err
     assert flagged_with == [], "a refused resume ran the workflow anyway"
 
-
 def test_a_second_positional_is_refused_the_same_way(tmp_path: Path) -> None:
     """The other shape of a tail: one label is the grammar, and two words are not one label.
 
@@ -282,7 +259,6 @@ def test_a_second_positional_is_refused_the_same_way(tmp_path: Path) -> None:
     assert _main(harness, "run", "flagged", "-n", "auth", "-r", "x") == 0
 
     assert _main(harness, "resume", "auth", "other") == 2
-
 
 def test_the_run_command_still_carries_its_tail(tmp_path: Path) -> None:
     """The other half of the refusal, so that it is about `resume` and not about tails.

@@ -1,4 +1,3 @@
-
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from collections.abc import Set as AbstractSet
@@ -6,7 +5,6 @@ from dataclasses import dataclass, replace
 from functools import update_wrapper
 from pathlib import Path
 from typing import Protocol
-
 from agl.ports.agent import (
     Capability,
     Claude,
@@ -32,10 +30,8 @@ __all__ = [
     "role",
 ]
 
-
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Role[P = None]:
-
     name: str
 
     instructions: str
@@ -98,9 +94,7 @@ class Role[P = None]:
             )
         return self._model
 
-
 class RoleFactory[**P, R]:
-
     __name__: str
     __qualname__: str
 
@@ -117,11 +111,8 @@ class RoleFactory[**P, R]:
     def __call__(self, *args: P.args, **kwargs: P.kwargs) -> Role[R]:
         return replace(self._declaration(*args, **kwargs), _model=self.model)
 
-
 class _RoleDecorator(Protocol):
-
     def __call__[**P, R](self, declaration: Callable[P, Role[R]], /) -> RoleFactory[P, R]: ...
-
 
 def role(*, model: ModelId) -> _RoleDecorator:
     """Declare a role factory, naming the model here so preflight can read it without calling it.
@@ -134,7 +125,6 @@ def role(*, model: ModelId) -> _RoleDecorator:
         return RoleFactory(declaration, model)
 
     return decorate
-
 
 def prompt_file(path: str | Path) -> str:
     """Read a prompt now, at the declaration, so the text and not the filename is fingerprinted.
@@ -181,10 +171,8 @@ def prompt_file(path: str | Path) -> str:
         )
     return text
 
-
 class RoleIncompleteError(UpstreamUnexpected):
     ...
-
 
 def _beside_the_caller(caller: Mapping[str, object], asked: Path) -> Path:
     declared = caller.get("__file__")

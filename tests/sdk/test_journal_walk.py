@@ -83,9 +83,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from types import MappingProxyType
 from typing import Final
-
 import pytest
-
 from agl.config import container
 from agl.ports.agent import Claude, Restriction, Tool, ToolResult
 from agl.ports.errors import InputError, InternalError, exit_code_for
@@ -118,17 +116,14 @@ INSTRUCTIONS: Final = "implement the ticket and leave the tree building"
 INPUTS: Final[Mapping[str, object]] = MappingProxyType({"request": "add oauth"})
 RESTRICTIONS: Final = frozenset({Restriction.NO_VCS_WRITES})
 
-
 class _Crash(Exception):
     """What an agent dying mid-step looks like from here. Any exception would do; the rule is
     that the walk has no opinion about which, and lets it out untouched."""
-
 
 async def _unused(payload: Mapping[str, JsonValue]) -> ToolResult:
     """No agent runs in this file, so no tool handler is ever called. A `Tool` needs one all the
     same, and `base_of` must keep it out of the fingerprint - `test_journal.py` pins that."""
     return ToolResult(text="")
-
 
 TOOL: Final = Tool(
     name="report_findings",
@@ -137,12 +132,9 @@ TOOL: Final = Tool(
     handler=_unused,
 )
 
-
 # --- the harness -------------------------------------------------------------------------------
 
-
 _Opened = tuple[container.FakeServices, Workspace, str]
-
 
 async def _opened(root: Path, namespace: Namespace | None = None) -> _Opened:
     """A bundle, one checkout provisioned from `main`, and the commit it starts at.
@@ -154,7 +146,6 @@ async def _opened(root: Path, namespace: Namespace | None = None) -> _Opened:
     harness = container.fakes(TreesRoot(root / "trees"), files=dict(SEED))
     workspace = await harness.services.workspaces.open(LABEL, namespace, MAIN)
     return harness, workspace, await workspace.head()
-
 
 def _journal(
     harness: container.FakeServices,
@@ -175,7 +166,6 @@ def _journal(
         Fingerprints() if fingerprints is None else fingerprints,
         base,
     )
-
 
 async def _step(
     journal: Journal,
@@ -202,7 +192,6 @@ async def _step(
         commit=commit,
     )
 
-
 def _digest(
     head: str,
     count: int = 0,
@@ -223,7 +212,6 @@ def _digest(
     )
     return hashlib.sha256(f"{base}:{count}".encode()).hexdigest()
 
-
 async def _entry_at(
     harness: container.FakeServices,
     name: StepName,
@@ -233,13 +221,11 @@ async def _entry_at(
     """The entry recorded at this address, or `None`. A thin name for a long expression."""
     return await read_entry(harness.services.store, scope, name, digest)
 
-
 def _write(workspace: Workspace, name: str, content: bytes) -> None:
     """What an agent does: put a file in the checkout. Nothing here stages or commits anything."""
     target = workspace.path / name
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(content)
-
 
 class _Worker:
     """A step's worker: counts its runs, does whatever it was given to do, hands back a value.
@@ -259,7 +245,6 @@ class _Worker:
         if self._does is not None:
             self._does()
         return self._value
-
 
 class _Recorded(Workspace):
     """A `Workspace` that writes down what it was asked to do and delegates the doing.
@@ -294,9 +279,7 @@ class _Recorded(Workspace):
         self.calls.append(("restore", head))
         await self._inner.restore(head)
 
-
 # --- a miss, and then a hit ----------------------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_a_miss_runs_the_worker_writes_one_entry_and_a_second_walk_hits(
@@ -320,9 +303,7 @@ async def test_a_miss_runs_the_worker_writes_one_entry_and_a_second_walk_hits(
     assert second.runs == 0, "the entry was on the ledger and the agent was paid for again anyway"
     assert replayed == {"tickets": ["T-01"]}
 
-
 # --- `last_good` is chained logically ------------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_last_good_is_chained_from_entries_and_never_read_from_the_worktree(
@@ -369,7 +350,6 @@ async def test_last_good_is_chained_from_entries_and_never_read_from_the_worktre
 
     assert (spec.runs, tickets.runs) == (0, 0), "a resume re-ran steps that were on the ledger"
 
-
 @pytest.mark.asyncio
 async def test_a_base_that_advanced_between_runs_does_not_invalidate_earlier_steps(
     tmp_path: Path,
@@ -394,9 +374,7 @@ async def test_a_base_that_advanced_between_runs_does_not_invalidate_earlier_ste
     assert await _step(resumed, TICKETS, tickets) == {"tickets": ["T-01", "T-02", "T-03"]}
     assert (spec.runs, tickets.runs) == (0, 0)
 
-
 # --- `advance`: the third writer of the chain ----------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_advance_moves_the_chain_to_a_landed_head_and_the_next_restore_keeps_it(
@@ -448,7 +426,6 @@ async def test_advance_moves_the_chain_to_a_landed_head_and_the_next_restore_kee
     )
     assert (raw.path / "src" / "landed.txt").read_bytes() == b"from T-01\n"
 
-
 @pytest.mark.asyncio
 async def test_advance_writes_no_entry_and_a_second_walk_starts_from_the_ledger(
     tmp_path: Path,
@@ -477,7 +454,6 @@ async def test_advance_writes_no_entry_and_a_second_walk_starts_from_the_ledger(
     assert await _step(resumed, SPEC, spec) == {"spec": "oauth"}
     assert spec.runs == 0, "the entry recorded before the landing stopped replaying after it"
 
-
 @pytest.mark.asyncio
 async def test_advance_refuses_an_empty_head_and_leaves_the_chain_where_it_was(
     tmp_path: Path,
@@ -494,9 +470,7 @@ async def test_advance_refuses_an_empty_head_and_leaves_the_chain_where_it_was(
 
     assert journal.last_good == base
 
-
 # --- the pre-run restore -------------------------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_the_pre_run_restore_is_unconditional_and_not_guarded_on_head(
@@ -545,9 +519,7 @@ async def test_the_pre_run_restore_is_unconditional_and_not_guarded_on_head(
     assert calls == [("restore", base), ("worker", "tickets"), ("restore", base)]
     assert not (raw.path / "scratch" / "notes.md").exists()
 
-
 # --- the two endings -----------------------------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_a_read_only_step_leaves_the_worktree_at_last_good(tmp_path: Path) -> None:
@@ -576,7 +548,6 @@ async def test_a_read_only_step_leaves_the_worktree_at_last_good(tmp_path: Path)
     assert entry is not None
     assert entry.head == base
 
-
 @pytest.mark.asyncio
 async def test_an_effect_step_records_a_head_that_holds_the_workers_changes(
     tmp_path: Path,
@@ -604,7 +575,6 @@ async def test_an_effect_step_records_a_head_that_holds_the_workers_changes(
     assert follower is not None
     assert follower.head == after
 
-
 @pytest.mark.asyncio
 async def test_changing_only_the_commit_message_does_not_invalidate_the_entry(
     tmp_path: Path,
@@ -631,9 +601,7 @@ async def test_changing_only_the_commit_message_does_not_invalidate_the_entry(
     assert first.runs == 1
     assert second.runs == 0, "editing a commit message re-ran the agent"
 
-
 # --- a crash, and the counter --------------------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_a_crashed_step_leaves_no_entry_and_the_next_attempt_re_runs_it(
@@ -660,7 +628,6 @@ async def test_a_crashed_step_leaves_no_entry_and_the_next_attempt_re_runs_it(
     entry = await _entry_at(harness, SPEC, _digest(base))
     assert entry is not None
     assert entry.value == {"spec": "oauth"}
-
 
 @pytest.mark.asyncio
 async def test_a_step_that_raised_claims_no_slot_and_its_retry_lands_at_n_zero(
@@ -706,7 +673,6 @@ async def test_a_step_that_raised_claims_no_slot_and_its_retry_lands_at_n_zero(
     assert await _step(_journal(harness, workspace, base), SPEC, resumed) == {"spec": "oauth"}
     assert resumed.runs == 0, "a resume re-ran a step whose entry was on the ledger"
 
-
 @pytest.mark.asyncio
 async def test_a_retry_loop_with_nothing_varying_counts_up_and_replays_in_order(
     tmp_path: Path,
@@ -737,9 +703,7 @@ async def test_a_retry_loop_with_nothing_varying_counts_up_and_replays_in_order(
     assert values == [{"attempt": 0}, {"attempt": 1}, {"attempt": 2}]
     assert [worker.runs for worker in replays] == [0, 0, 0]
 
-
 # --- the counter is taken before the walk can suspend --------------------------------------------
-
 
 class _Watching(Fingerprints):
     """A `Fingerprints` that writes down when it was asked, so a test can ask *when*.
@@ -756,7 +720,6 @@ class _Watching(Fingerprints):
     def digest(self, scope: RunScope, step: StepName, base: str) -> str:
         self._taken.append(str(step))
         return super().digest(scope, step, base)
-
 
 class _Suspending(Workspace):
     """A workspace whose every awaited member really suspends before it does anything.
@@ -791,7 +754,6 @@ class _Suspending(Workspace):
         await asyncio.sleep(0)
         await self._inner.restore(head)
 
-
 class _SuspendingStore(Store):
     """The same trick over the ledger, for the same reason: `MemoryStore` never yields either."""
 
@@ -825,7 +787,6 @@ class _SuspendingStore(Store):
     async def remove(self, scope: RunScope) -> None:
         await asyncio.sleep(0)
         await self._inner.remove(scope)
-
 
 @pytest.mark.asyncio
 async def test_the_counter_is_taken_before_the_walk_can_suspend(tmp_path: Path) -> None:
@@ -867,7 +828,6 @@ async def test_the_counter_is_taken_before_the_walk_can_suspend(tmp_path: Path) 
         "their `n` decided by the interleaving - and the interleaving differs on resume"
     )
 
-
 @pytest.mark.asyncio
 async def test_two_same_name_steps_in_one_scope_land_at_the_same_digests_either_way(
     tmp_path: Path,
@@ -890,7 +850,6 @@ async def test_two_same_name_steps_in_one_scope_land_at_the_same_digests_either_
     """
     assert await _gathered(tmp_path / "a", "one") == {0: {"by": "one"}, 1: {"by": "two"}}
     assert await _gathered(tmp_path / "b", "two") == {0: {"by": "one"}, 1: {"by": "two"}}
-
 
 async def _gathered(root: Path, first: str) -> dict[int, JsonValue]:
     """Two same-name steps under one `gather`, with `first`'s worker released first."""
@@ -922,16 +881,13 @@ async def _gathered(root: Path, first: str) -> dict[int, JsonValue]:
         recorded[count] = entry.value
     return recorded
 
-
 async def _settled() -> None:
     """Let every runnable task reach its next suspension. Ten turns is arbitrary and generous;
     the walk suspends once per awaited dependency and there are four of them per step."""
     for _ in range(10):
         await asyncio.sleep(0)
 
-
 # --- a namespace's workspace is single-threaded --------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_two_gathered_steps_in_one_namespace_do_not_overlap(tmp_path: Path) -> None:
@@ -992,9 +948,7 @@ async def test_two_gathered_steps_in_one_namespace_do_not_overlap(tmp_path: Path
         "`Workspace`, so that is one step emptying the checkout another is working in"
     )
 
-
 # --- concurrent siblings -------------------------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_concurrent_siblings_each_write_their_own_entry_and_both_replay(
@@ -1026,7 +980,6 @@ async def test_concurrent_siblings_each_write_their_own_entry_and_both_replay(
 
     replayed = await _siblings(harness, children, workspaces, base, order=(1, 0), replay=True)
     assert replayed == [{"by": "T-01"}, {"by": "T-02"}]
-
 
 async def _siblings(
     harness: container.FakeServices,
@@ -1063,9 +1016,7 @@ async def _siblings(
         assert [worker.runs for worker in workers] == [0, 0], "a sibling re-ran on resume"
     return list(values)
 
-
 # --- a step's result is stored text too -----------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_a_steps_result_answers_a_lone_surrogate_the_way_its_inputs_do(
@@ -1172,7 +1123,6 @@ async def test_a_steps_result_answers_a_lone_surrogate_the_way_its_inputs_do(
         "reservation has no meaning here and would refuse a document for a reason untrue of it"
     )
 
-
 @pytest.mark.asyncio
 async def test_a_steps_result_refuses_a_key_the_encoder_would_rename(tmp_path: Path) -> None:
     """The worst failure shape this codebase has a name for: silent, and it lands on the record.
@@ -1239,7 +1189,6 @@ async def test_a_steps_result_refuses_a_key_the_encoder_would_rename(tmp_path: P
         "the strings those keys would have been coerced *to* are ordinary keys and must still "
         "record - the rule is the type of the key, not its spelling"
     )
-
 
 @pytest.mark.asyncio
 async def test_a_steps_result_refuses_a_float_json_has_no_spelling_for(tmp_path: Path) -> None:

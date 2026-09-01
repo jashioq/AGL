@@ -30,9 +30,7 @@ same reason and would pass just as well on `1` and `2`.
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final
-
 from agl.ports.terminal import Choice, Row, Rows, Screen, Text, TextInput
-
 
 @dataclass(frozen=True, slots=True)
 class Approval:
@@ -49,7 +47,6 @@ class Approval:
 
     said: str
     """What the response produced: `APPROVED` from the choice, or whatever was typed."""
-
 
 # The two responses `question` offers, in the order it offers them, because a driver names a
 # response by position and a test that wrote `0` and `1` would be naming nothing a reader can see.
@@ -87,7 +84,6 @@ EDITING: Final = "Edit: domain/usecase.kt"
 AGENT: Final = 5
 CONFLICT: Final = 10
 
-
 def dashboard(line: str) -> Screen:
     """A passive screen with one line on it, annotated the way a dashboard is.
 
@@ -97,7 +93,6 @@ def dashboard(line: str) -> Screen:
     here because a view with nothing to answer is what a dashboard is.
     """
     return Screen(line)
-
 
 def board(rows: Mapping[str, str]) -> Screen:
     """A ticket board, over a mapping the caller keeps a reference to.
@@ -112,7 +107,6 @@ def board(rows: Mapping[str, str]) -> Screen:
     a blank one is the honest thing to show for a ticket with no run behind it yet.
     """
     return Screen(Rows([Row(name, activity) for name, activity in rows.items()]))
-
 
 def question(label: str) -> Screen[Approval]:
     """An approval screen: a body to read, a choice to pick, and a field to type into.
@@ -134,7 +128,6 @@ def question(label: str) -> Screen[Approval]:
             TextInput("Say more", maps=lambda typed: Approval(label=label, said=typed)),
         ],
     )
-
 
 def offer(label: str, options: Sequence[str]) -> Screen[Approval]:
     """An interactive screen whose *responses* come from a live argument rather than its body.

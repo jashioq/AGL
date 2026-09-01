@@ -153,12 +153,9 @@ states that is anybody's answer, so an implementation that produces one has gues
 """
 
 from collections.abc import Iterator
-
 import pytest
-
 from agl.ports.integration import Integrator
 from agl.ports.workspace import WorkspaceProvider
-
 from ._integration_protocol import IntegrationProtocolContract
 from ._integration_targets import (
     CHILD_WORK,
@@ -166,7 +163,6 @@ from ._integration_targets import (
     open_a_target_and_two_children,
 )
 from ._workspace_files import ALPHA, TRACKED, body, read, record, write
-
 
 class IntegratorContract(IntegrationProtocolContract):
     """The suite. One question - is this work in the target now - and the protocol its second

@@ -77,9 +77,7 @@ from collections.abc import Awaitable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
-
 import pytest
-
 from agl import testing
 from agl.adapters.claude_code.fake import Conversation, Script
 from agl.config import container
@@ -118,16 +116,13 @@ performance assertion - these runs are in-memory and take milliseconds - and it 
 something is genuinely never going to be answered. `remaining` catches the opposite mistake, a
 script the run never fully spent, and it is a comparison rather than a wait."""
 
-
 # --- what a workflow author writes -----------------------------------------------------------
-
 
 @dataclass(frozen=True)
 class DemoParams:
     """The params shape: named flags, no positionals. `agl run demo -n test -r "add oauth"`."""
 
     request: str = arg("-r", "--request", help="what to build")
-
 
 @dataclass(frozen=True)
 class Findings:
@@ -136,7 +131,6 @@ class Findings:
     summary: str
     high: int
 
-
 REPORT: Final = reporting_tool("report_findings", "report what the review found", Findings)
 
 @role(model=Claude.SONNET)
@@ -144,7 +138,6 @@ def implement() -> Role:
     """An effect role: no reporting tool, so the step's result is `null` and its effect is
     commits."""
     return Role(name="implement", instructions="implement what the request asks for")
-
 
 @role(model=OpenAI.SOL)
 def review() -> Role[Findings]:
@@ -157,7 +150,6 @@ def review() -> Role[Findings]:
         restrictions={Restriction.NO_VCS_WRITES},
         tools=[REPORT],
     )
-
 
 @role(model=Claude.SONNET)
 def decide(*, ask: Tool | None = None) -> Role[Findings]:
@@ -177,7 +169,6 @@ def decide(*, ask: Tool | None = None) -> Role[Findings]:
         tools=[REPORT] if ask is None else [REPORT, ask],
     )
 
-
 @dataclass(frozen=True, slots=True)
 class Asked:
     """The payload of the asking tool `asking` supplies. AGL declares none, so a workflow does.
@@ -190,11 +181,9 @@ class Asked:
 
     options: tuple[str, ...] = describe("The answers you are suggesting.", default=())
 
-
 ASK: Final = "ask_the_operator"
 """What this file's workflow calls its asking tool. A workflow's own name for its own tool: the
 framework supplies none and so knows none."""
-
 
 @dataclass(frozen=True, slots=True)
 class Question:
@@ -221,7 +210,6 @@ class Question:
 
     allow_free_text: bool = True
 
-
 @dataclass(frozen=True, slots=True)
 class Answer:
     """What answering one of these screens produces. One string, and the workflow's own type.
@@ -233,7 +221,6 @@ class Answer:
 
     text: str
 
-
 def approve(question: Question) -> Screen[Answer]:
     """The screen the agent's question is shown on. A pure function of what it was handed.
 
@@ -244,7 +231,6 @@ def approve(question: Question) -> Screen[Answer]:
         body=Text(question.prompt),
         responses=[Choice(option, value=Answer(option)) for option in question.options],
     )
-
 
 @workflow(version="1")
 async def demo(run: Run[DemoParams]) -> None:
@@ -259,7 +245,6 @@ async def demo(run: Run[DemoParams]) -> None:
     findings = await run.step(review(), request=run.params.request)
     if findings.high:
         await run.step(implement(), note=findings.summary, commit="address the review")
-
 
 @workflow(version="1")
 async def asking(run: Run[DemoParams]) -> None:
@@ -279,7 +264,6 @@ async def asking(run: Run[DemoParams]) -> None:
 
     await run.step(decide(ask=tool(ASK, "ask whether to go ahead", Asked, answered)))
 
-
 @workflow(version="1")
 async def landing(run: Run[DemoParams]) -> None:
     """One child worktree, one committing step, one integration - a run's shape at its smallest.
@@ -294,7 +278,6 @@ async def landing(run: Run[DemoParams]) -> None:
     outcome = await ticket.integrate()
     verdict = outcome.verdict
     gated.append((outcome.conflicted, "" if verdict is None else verdict.output))
-
 
 asked: Final[list[Question]] = []
 """Every question this file's workflows were asked, at module level because the workflows are:
@@ -315,7 +298,6 @@ Two plain values and not the `Integration` itself, for `answers`' reason: what a
 on is what their own workflow saw, and a framework type parked at module level here would be a
 name this file has to import in order to read a `bool` and a `str` back out of it."""
 
-
 # --- the agent, which is the author's own function -------------------------------------------
 
 SUMMARY: Final = "one thing worth changing"
@@ -325,7 +307,6 @@ NOT_YET: Final = "not yet"
 LANDED: Final = "landed.py"
 """What `landing`'s agent writes into the child's checkout, so `commit=` records something and the
 integration has work to carry. Top level in the tree, there being no directory to make first."""
-
 
 def _agent(seen: list[str], *, high: int = 0) -> Agent:
     """What every role's agent does, and a record of which of them ran.
@@ -356,7 +337,6 @@ def _agent(seen: list[str], *, high: int = 0) -> Agent:
 
     return agent
 
-
 def _building() -> Agent:
     """An agent that leaves a file behind, which is what gives a landing something to land.
 
@@ -371,7 +351,6 @@ def _building() -> Agent:
         return Reply(activity=[f"Write: {LANDED}"], says="implemented it")
 
     return agent
-
 
 def _asking_agent(seen: list[str]) -> Agent:
     """An agent that stops to ask before it reports. The question is this file's, the answer is
@@ -395,7 +374,6 @@ def _asking_agent(seen: list[str]) -> Agent:
 
     return agent
 
-
 @pytest.fixture(autouse=True)
 def _nothing_carried_over() -> None:
     """The module-level records, emptied before each test and never by a workflow."""
@@ -403,14 +381,11 @@ def _nothing_carried_over() -> None:
     answers.clear()
     gated.clear()
 
-
 def _steps(recorded: tuple[Recorded, ...]) -> list[str]:
     """Which steps recorded something, in the order they did it."""
     return [entry.step for entry in recorded]
 
-
 # --- the four the deliverable asks for --------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_a_workflow_runs_to_completion_on_fakes(tmp_path: Path) -> None:
@@ -428,7 +403,6 @@ async def test_a_workflow_runs_to_completion_on_fakes(tmp_path: Path) -> None:
     assert _steps(harness.recorded) == ["implement", "review"]
     assert seen == ["effect", "reporting"]
 
-
 @pytest.mark.asyncio
 async def test_a_scripted_payload_comes_back_as_the_step_result(tmp_path: Path) -> None:
     """The capture mechanism, end to end: what the agent reported *is* the step's result.
@@ -443,7 +417,6 @@ async def test_a_scripted_payload_comes_back_as_the_step_result(tmp_path: Path) 
 
     assert [entry.value for entry in harness.recorded] == [None, {"summary": SUMMARY, "high": 0}]
     assert [entry.namespace for entry in harness.recorded] == [None, None]
-
 
 @pytest.mark.asyncio
 async def test_a_scripted_question_reaches_the_workflows_own_screen(tmp_path: Path) -> None:
@@ -474,7 +447,6 @@ async def test_a_scripted_question_reaches_the_workflows_own_screen(tmp_path: Pa
     assert _steps(harness.recorded) == ["decide"]
     assert seen == ["asking"], "the question was answered by re-running the step, not in-session"
     assert term.remaining == (), "the run never showed a screen, so nothing spent the gesture"
-
 
 @pytest.mark.asyncio
 async def test_the_answer_returns_into_the_same_session(tmp_path: Path) -> None:
@@ -508,7 +480,6 @@ async def test_the_answer_returns_into_the_same_session(tmp_path: Path) -> None:
     assert [entry.value for entry in harness.recorded] == [{"summary": NOT_YET, "high": 0}]
     assert term.remaining == ()
 
-
 @pytest.mark.asyncio
 async def test_an_interrupted_run_resumes_without_redoing_completed_steps(tmp_path: Path) -> None:
     """Replay, driven the way a workflow author drives it.
@@ -537,9 +508,7 @@ async def test_an_interrupted_run_resumes_without_redoing_completed_steps(tmp_pa
     assert _steps(harness.recorded) == ["implement", "review"]
     assert seen == ["effect", "reporting"]
 
-
 # --- the properties those four rest on --------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_a_whole_workflow_runs_with_no_agent_written_at_all(tmp_path: Path) -> None:
@@ -558,7 +527,6 @@ async def test_a_whole_workflow_runs_with_no_agent_written_at_all(tmp_path: Path
     reported = harness.recorded[-1].value
     assert isinstance(reported, dict) and set(reported) == {"summary", "high"}
 
-
 @pytest.mark.asyncio
 async def test_the_run_is_recorded_where_agl_would_have_recorded_it(tmp_path: Path) -> None:
     """The harness runs the real operation, so `run.json` is the real record.
@@ -576,7 +544,6 @@ async def test_the_run_is_recorded_where_agl_would_have_recorded_it(tmp_path: Pa
     assert record["workflow"] == "demo"
     assert record["params"] == {"request": "add oauth"}
 
-
 @pytest.mark.asyncio
 async def test_the_workflows_own_flags_are_parsed_by_the_parser_agl_run_uses(
     tmp_path: Path,
@@ -592,7 +559,6 @@ async def test_the_workflows_own_flags_are_parsed_by_the_parser_agl_run_uses(
         await harness.run(demo)
 
     assert harness.recorded == ()
-
 
 @pytest.mark.asyncio
 async def test_a_workflow_declared_inside_a_function_is_refused_with_the_reason(
@@ -614,7 +580,6 @@ async def test_a_workflow_declared_inside_a_function_is_refused_with_the_reason(
     with pytest.raises(InputError, match="top level of its module"):
         await harness.run(hidden, "-r", "add oauth")
 
-
 @pytest.mark.asyncio
 async def test_an_interruption_before_the_first_step_is_refused(tmp_path: Path) -> None:
     """`interrupt_after=0` asks for a run that recorded nothing, which is a run that did nothing."""
@@ -622,7 +587,6 @@ async def test_an_interruption_before_the_first_step_is_refused(tmp_path: Path) 
 
     with pytest.raises(InputError, match="smallest one"):
         await harness.run(demo, "-r", "add oauth", interrupt_after=0)
-
 
 @pytest.mark.asyncio
 async def test_the_workflows_own_exception_leaves_the_harness_untouched(tmp_path: Path) -> None:
@@ -638,10 +602,8 @@ async def test_the_workflows_own_exception_leaves_the_harness_untouched(tmp_path
 
     assert harness.recorded == ()
 
-
 class Refused(Exception):
     """What an agent that will not do the work raises. A workflow author's own class."""
-
 
 def _raising() -> Agent:
     """An agent that raises rather than replying, which is an ordinary thing to want to test."""
@@ -650,7 +612,6 @@ def _raising() -> Agent:
         raise Refused("this agent would not do the work")
 
     return agent
-
 
 def _negotiating() -> Script:
     """A raw script that reads the answer it was given and reports it. The escape hatch itself.
@@ -671,7 +632,6 @@ def _negotiating() -> Script:
         return AgentOutcome(stop_reason=StopReason.COMPLETED, text=f"decided: {said}")
 
     return script
-
 
 # --- the five remaining keywords, each through the operation it reaches --------------------------
 #
@@ -697,7 +657,6 @@ PROJECT: Final = "checkout-service"
 FIRST_RUN: Final = "auth"
 SECOND_RUN: Final = "billing"
 """Two runs in one directory, neither of them the `test` a harness falls back to."""
-
 
 @pytest.mark.asyncio
 async def test_a_resume_can_be_interrupted_at_its_own_first_step(tmp_path: Path) -> None:
@@ -742,7 +701,6 @@ async def test_a_resume_can_be_interrupted_at_its_own_first_step(tmp_path: Path)
         "resume abandons what comes after its kill point and replays what came before it"
     )
 
-
 @pytest.mark.asyncio
 async def test_a_resumes_kill_point_counts_that_resumes_own_entries(tmp_path: Path) -> None:
     """The other half of the keyword: on a resume, *two* means two more, not the second one ever.
@@ -769,7 +727,6 @@ async def test_a_resumes_kill_point_counts_that_resumes_own_entries(tmp_path: Pa
         "what an earlier invocation wrote as well as its own"
     )
     assert seen == ["effect", "reporting", "effect"]
-
 
 @pytest.mark.asyncio
 async def test_a_run_can_be_started_from_a_ref_other_than_the_default(tmp_path: Path) -> None:
@@ -808,7 +765,6 @@ async def test_a_run_can_be_started_from_a_ref_other_than_the_default(tmp_path: 
         "one whose first step starts on a tree the operator did not ask for"
     )
 
-
 @pytest.mark.asyncio
 async def test_the_merge_gate_runs_the_build_command_the_harness_was_given(tmp_path: Path) -> None:
     """`build=` is the project's own command, and the merge gate is the only thing that runs it.
@@ -834,7 +790,6 @@ async def test_the_merge_gate_runs_the_build_command_the_harness_was_given(tmp_p
         "the gate did not answer with the verdict scripted against this harness's own build "
         "command, so what reached `Verifier.verify` is not what the bundle was built with"
     )
-
 
 @pytest.mark.asyncio
 async def test_two_harnesses_in_one_directory_are_told_apart_by_project_and_label(
@@ -872,7 +827,6 @@ async def test_two_harnesses_in_one_directory_are_told_apart_by_project_and_labe
     assert record["label"] == FIRST_RUN
     assert record["params"] == {"request": "add oauth"}
 
-
 # --- `a_run`, and what a `Reply` alone does not do -----------------------------------------------
 #
 # Two things an author meets once they go past a workflow that merely runs: showing their own
@@ -894,7 +848,6 @@ ACTIVITY: Final = "Edit: src/a.py"
 ELSEWHERE: Final = "b7c1d4f09a2e63518cd047fb29e15a83d604c7f2"
 """A head of the caller's own choosing, to tell `base=` from the default `a_run` falls back to."""
 
-
 def a_board(run: Run, request: str) -> Screen:
     """A workflow author's board: what was asked for, and what the agent is doing about it.
 
@@ -904,7 +857,6 @@ def a_board(run: Run, request: str) -> Screen:
     anyone. It takes the `Run` and not `run.activity`, which is the whole point.
     """
     return Screen(Rows([Row("request", request), Row("agent", run.activity or "")]))
-
 
 def _writing(seen: list[str]) -> Agent:
     """`_agent`'s replies, plus the file an implementer would have left in the checkout.
@@ -929,7 +881,6 @@ def _writing(seen: list[str]) -> Agent:
 
     return agent
 
-
 def _on_the_branch(harness: testing.Harness) -> Mapping[str, bytes]:
     """What the run's own line of work holds now - which is what its `commit=` steps put there.
 
@@ -940,7 +891,6 @@ def _on_the_branch(harness: testing.Harness) -> Mapping[str, bytes]:
     tip = harness.fakes.repository.tip(run_branch(harness.scope.label))
     assert tip is not None, "the run's branch does not exist, so nothing ran here at all"
     return harness.fakes.repository.tree_of(tip)
-
 
 def test_a_run_is_built_over_the_harnesss_own_bundle_and_its_own_address(tmp_path: Path) -> None:
     """`a_run` composes the two things a `Run` needs and `agl.sdk` cannot hand over.
@@ -959,7 +909,6 @@ def test_a_run_is_built_over_the_harnesss_own_bundle_and_its_own_address(tmp_pat
     assert run.scope is harness.scope
     assert run.terminal is harness.fakes.services.terminal
 
-
 def test_a_run_reports_the_activity_it_was_built_with_and_nothing_otherwise(tmp_path: Path) -> None:
     """`activity=` is the harness's one write of the engine's cell; `None` is the ordinary value.
 
@@ -973,7 +922,6 @@ def test_a_run_reports_the_activity_it_was_built_with_and_nothing_otherwise(tmp_
     assert testing.a_run(harness, DemoParams(request="add oauth"), activity=ACTIVITY).activity == (
         ACTIVITY
     )
-
 
 def test_a_board_is_a_function_of_the_run_it_is_handed(tmp_path: Path) -> None:
     """What `a_run` is for: calling a view, and comparing the `Screen` it answered with.
@@ -989,7 +937,6 @@ def test_a_board_is_a_function_of_the_run_it_is_handed(tmp_path: Path) -> None:
         Rows([Row("request", "add oauth"), Row("agent", "")])
     )
     assert a_board(working, "add oauth") != a_board(idle, "add oauth")
-
 
 def test_reports_moves_a_board_that_is_already_up(tmp_path: Path) -> None:
     """`reports` is the half of the reach a constructor argument cannot express.
@@ -1021,7 +968,6 @@ def test_reports_moves_a_board_that_is_already_up(tmp_path: Path) -> None:
         Rows([Row("request", "add oauth"), Row("agent", "")])
     )
 
-
 @pytest.mark.asyncio
 async def test_a_run_built_for_a_view_starts_where_it_was_told_and_records_nothing(
     tmp_path: Path,
@@ -1043,7 +989,6 @@ async def test_a_run_built_for_a_view_starts_where_it_was_told_and_records_nothi
     assert default.base != ELSEWHERE
     assert harness.recorded == ()
     assert await harness.fakes.store.read_record(harness.scope) is None
-
 
 @pytest.mark.asyncio
 async def test_an_agent_that_only_replies_leaves_every_commit_message_with_nothing_to_carry(

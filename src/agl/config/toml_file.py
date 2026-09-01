@@ -1,10 +1,8 @@
-
 import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
-
 from agl.ports.errors import ConflictError, InputError, NotFoundError
 from agl.ports.home_layout import AglHome, project_config, projects_dir, settings_file
 from agl.ports.ids import ProjectName
@@ -22,7 +20,6 @@ __all__ = [
     "resolve_project",
     "write_project",
 ]
-
 
 _PROJECT_SUFFIX: Final = ".toml"
 _AGENT: Final = "agent"
@@ -60,25 +57,19 @@ _ESCAPED: Final = {
 _FIRST_PRINTABLE: Final = 0x20
 _DELETE: Final = 0x7F
 
-
 @dataclass(frozen=True, slots=True)
 class FileAgent:
-
     enabled: bool | None
 
     cli_path: Path | None
 
-
 @dataclass(frozen=True, slots=True)
 class FileSettings:
-
     claude: FileAgent
     openai: FileAgent
 
-
 @dataclass(frozen=True, slots=True)
 class FileProject:
-
     name: ProjectName
 
     repo: Path | None
@@ -89,12 +80,10 @@ class FileProject:
 
     build_timeout: float | None
 
-
 _NOTHING_SAID: Final = FileSettings(
     claude=FileAgent(enabled=None, cli_path=None),
     openai=FileAgent(enabled=None, cli_path=None),
 )
-
 
 def read_settings(home: AglHome) -> FileSettings:
     path = settings_file(home)
@@ -116,7 +105,6 @@ def read_settings(home: AglHome) -> FileSettings:
         openai=_agent(_sub_table(agents, _OPENAI, path, f"{_AGENT}."), path, _OPENAI),
     )
 
-
 def read_project(home: AglHome, project: ProjectName) -> FileProject:
     path = project_config(home, project)
     document = _document(path)
@@ -127,13 +115,11 @@ def read_project(home: AglHome, project: ProjectName) -> FileProject:
         )
     return _project(path, document)
 
-
 def check_unregistered(home: AglHome, project: ProjectName) -> Path:
     path = project_config(home, project)
     if path.exists():
         raise ConflictError(_already(path, project))
     return path
-
 
 def write_project(
     home: AglHome,
@@ -166,7 +152,6 @@ def write_project(
         ) from error
     return path
 
-
 def git_root(start: Path) -> Path:
     directory = start.resolve()
     for candidate in (directory, *directory.parents):
@@ -177,7 +162,6 @@ def git_root(start: Path) -> Path:
         f"{directory.anchor} looking for a {_GIT} entry and found none. AGL works on a "
         f"repository, so run it from inside one - and `agl init` there to register it"
     )
-
 
 def check_trees_root(path: Path, repo: Path, trees_root: Path) -> None:
     inside = trees_root.resolve()
@@ -192,7 +176,6 @@ def check_trees_root(path: Path, repo: Path, trees_root: Path) -> None:
         f"AGL_HOME so that it never appears there. Point {_TREES_ROOT} at a directory beside the "
         f"repository rather than under it"
     )
-
 
 def resolve_project(home: AglHome, start: Path) -> FileProject:
     root = git_root(start)
@@ -217,7 +200,6 @@ def resolve_project(home: AglHome, start: Path) -> FileProject:
         f"{root} to write one"
     )
 
-
 def _document(path: Path) -> Mapping[str, object] | None:
     try:
         with path.open("rb") as handle:
@@ -233,7 +215,6 @@ def _document(path: Path) -> Mapping[str, object] | None:
         raise InputError(f"{path} cannot be read: {error}") from error
     return document
 
-
 def _project(path: Path, document: Mapping[str, object]) -> FileProject:
     _only(document, _PROJECT_KEYS, path, "")
     trees = _absolute(document, _TREES_ROOT, path, "")
@@ -247,7 +228,6 @@ def _project(path: Path, document: Mapping[str, object]) -> FileProject:
         build=_text(document, _BUILD, path, ""),
         build_timeout=_seconds(document, _BUILD_TIMEOUT, path, ""),
     )
-
 
 def _project_name(path: Path, spelled: str | None) -> ProjectName:
     try:
@@ -264,7 +244,6 @@ def _project_name(path: Path, spelled: str | None) -> ProjectName:
         )
     return name
 
-
 def _project_files(home: AglHome) -> list[Path]:
     directory = projects_dir(home)
     try:
@@ -275,7 +254,6 @@ def _project_files(home: AglHome) -> list[Path]:
         raise InputError(f"{directory} cannot be listed: {error}") from error
     return [entry for entry in entries if entry.suffix == _PROJECT_SUFFIX and entry.is_file()]
 
-
 def _agent(table: Mapping[str, object], path: Path, section: str) -> FileAgent:
     prefix = f"{_AGENT}.{section}."
     _only(table, _AGENT_KEYS, path, prefix)
@@ -283,7 +261,6 @@ def _agent(table: Mapping[str, object], path: Path, section: str) -> FileAgent:
         enabled=_flag(table, _ENABLED, path, prefix),
         cli_path=_absolute(table, _CLI_PATH, path, prefix),
     )
-
 
 def _only(table: Mapping[str, object], expected: tuple[str, ...], path: Path, prefix: str) -> None:
     for key in table:
@@ -293,7 +270,6 @@ def _only(table: Mapping[str, object], expected: tuple[str, ...], path: Path, pr
                 f"{', '.join(prefix + name for name in expected)}. An unknown key is refused "
                 f"rather than ignored, because a misspelt one would keep the default silently"
             )
-
 
 def _sub_table(
     table: Mapping[str, object], key: str, path: Path, prefix: str
@@ -305,7 +281,6 @@ def _sub_table(
         return raw
     raise _wrong(path, prefix + key, "a table", raw)
 
-
 def _flag(table: Mapping[str, object], key: str, path: Path, prefix: str) -> bool | None:
     raw = table.get(key)
     if raw is None:
@@ -313,7 +288,6 @@ def _flag(table: Mapping[str, object], key: str, path: Path, prefix: str) -> boo
     if isinstance(raw, bool):
         return raw
     raise _wrong(path, prefix + key, "true or false", raw)
-
 
 def _text(table: Mapping[str, object], key: str, path: Path, prefix: str) -> str | None:
     raw = table.get(key)
@@ -323,7 +297,6 @@ def _text(table: Mapping[str, object], key: str, path: Path, prefix: str) -> str
         return raw
     raise _wrong(path, prefix + key, "a string", raw)
 
-
 def _seconds(table: Mapping[str, object], key: str, path: Path, prefix: str) -> float | None:
     raw = table.get(key)
     if raw is None:
@@ -331,7 +304,6 @@ def _seconds(table: Mapping[str, object], key: str, path: Path, prefix: str) -> 
     if isinstance(raw, bool) or not isinstance(raw, int | float):
         raise _wrong(path, prefix + key, "a number of seconds", raw)
     return float(raw)
-
 
 def _absolute(table: Mapping[str, object], key: str, path: Path, prefix: str) -> Path | None:
     text = _text(table, key, path, prefix)
@@ -346,7 +318,6 @@ def _absolute(table: Mapping[str, object], key: str, path: Path, prefix: str) ->
         )
     return value
 
-
 def _already(path: Path, project: ProjectName) -> str:
     return (
         f"a project named {str(project)!r} is already registered: {path} exists, and `agl init` "
@@ -356,7 +327,6 @@ def _already(path: Path, project: ProjectName) -> str:
         f"carry the same name, one of the two has to be renamed: a project's name is its "
         f"directory's name, and that name is the file AGL records its runs beside"
     )
-
 
 def _quoted(value: str) -> str:
     escaped = "".join(
@@ -368,7 +338,6 @@ def _quoted(value: str) -> str:
         for character in value
     )
     return f'"{escaped}"'
-
 
 def _wrong(path: Path, key: str, expected: str, got: object) -> InputError:
     return InputError(

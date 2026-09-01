@@ -36,18 +36,15 @@ this one, and the `integrator`, `provider` and `base` fixtures these tests take 
 """
 
 import pytest
-
 from agl.ports.errors import InternalError
 from agl.ports.integration import Integrator
 from agl.ports.workspace import WorkspaceProvider
-
 from ._integration_targets import (
     CHILD_WORK,
     hold_a_target,
     open_a_target_and_two_children,
 )
 from ._workspace_files import ALPHA, TRACKED, read, record, write
-
 
 class IntegrationProtocolContract:
     """`retry` and `abort`: the loop, the release, and what each of them does with nothing pending.

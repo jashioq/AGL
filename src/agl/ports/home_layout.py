@@ -1,8 +1,6 @@
-
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
-
 from agl.ports.errors import InputError, InternalError
 from agl.ports.ids import Namespace, ProjectName, RunLabel, StepName
 
@@ -19,7 +17,6 @@ __all__ = [
     "step_entry",
 ]
 
-
 _SETTINGS_FILE: Final = "config.toml"
 _PROJECTS: Final = "projects"
 _RUNS: Final = "runs"
@@ -34,10 +31,8 @@ _MAX_SEGMENT_BYTES: Final = 255
 _DIGEST_CHARACTERS: Final = frozenset("0123456789abcdef")
 _DIGEST_LENGTH: Final = 64
 
-
 @dataclass(frozen=True, slots=True)
 class AglHome:
-
     path: Path
 
     def __post_init__(self) -> None:
@@ -47,10 +42,8 @@ class AglHome:
                 f"relative root resolves against the current working directory"
             )
 
-
 @dataclass(frozen=True, slots=True)
 class RunScope:
-
     project: ProjectName
     label: RunLabel
     namespaces: tuple[Namespace, ...] = ()
@@ -71,7 +64,6 @@ class RunScope:
         """
         return RunScope(self.project, self.label)
 
-
 def settings_file(home: AglHome) -> Path:
     """The operator's own settings, and the only file at the top of AGL's own root.
 
@@ -80,7 +72,6 @@ def settings_file(home: AglHome) -> Path:
     """
     return _root(home) / _SETTINGS_FILE
 
-
 def projects_dir(home: AglHome) -> Path:
     """The registered projects, one settings file and one recorded subtree each.
 
@@ -88,7 +79,6 @@ def projects_dir(home: AglHome) -> Path:
     :return: `<home>/projects/`, the one container here whose contents are themselves an answer
     """
     return _root(home) / _PROJECTS
-
 
 def project_config(home: AglHome, project: ProjectName) -> Path:
     """One project's settings file - a repository, a trees root, a build command.
@@ -99,7 +89,6 @@ def project_config(home: AglHome, project: ProjectName) -> Path:
     """
     return projects_dir(home) / f"{_checked_project(project)}{_PROJECT_SUFFIX}"
 
-
 def project_dir(home: AglHome, project: ProjectName) -> Path:
     """Everything AGL has recorded about one project, its runs included.
 
@@ -108,7 +97,6 @@ def project_dir(home: AglHome, project: ProjectName) -> Path:
     :return: `<home>/projects/<project>/`
     """
     return projects_dir(home) / _checked_project(project)
-
 
 def scope_dir(home: AglHome, scope: RunScope) -> Path:
     """The directory a scope addresses. The one place the worktree nesting is written down.
@@ -122,7 +110,6 @@ def scope_dir(home: AglHome, scope: RunScope) -> Path:
         path = path / _WORKTREES / str(namespace)
     return path
 
-
 def run_record(home: AglHome, scope: RunScope) -> Path:
     """The run's own record, of which there is one per run and it sits at the top.
 
@@ -131,7 +118,6 @@ def run_record(home: AglHome, scope: RunScope) -> Path:
     :return: `<run>/run.json`
     """
     return scope_dir(home, scope.run) / _RUN_RECORD
-
 
 def step_dir(home: AglHome, scope: RunScope, step: StepName) -> Path:
     """One step's entries, in the scope that ran it - every recorded run of it, superseded ones too.
@@ -142,7 +128,6 @@ def step_dir(home: AglHome, scope: RunScope, step: StepName) -> Path:
     :return: `<scope>/steps/<step>/`, a sibling of `worktrees/` and so never colliding with one
     """
     return scope_dir(home, scope) / _STEPS / str(step)
-
 
 def step_entry(home: AglHome, scope: RunScope, step: StepName, digest: str) -> Path:
     """One recorded run of one step - the file whose existence is the whole of a step's status.
@@ -155,7 +140,6 @@ def step_entry(home: AglHome, scope: RunScope, step: StepName, digest: str) -> P
     """
     return step_dir(home, scope, step) / f"{_checked_digest(digest)}{_ENTRY_SUFFIX}"
 
-
 def _root(home: AglHome) -> Path:
     if not isinstance(home, AglHome):
         raise InternalError(
@@ -163,7 +147,6 @@ def _root(home: AglHome) -> Path:
             f"trees root are different directories, and their layouts are never conflated"
         )
     return home.path
-
 
 def _checked_project(project: ProjectName) -> str:
     name = str(project)
@@ -175,7 +158,6 @@ def _checked_project(project: ProjectName) -> str:
             f"not exceed {_MAX_SEGMENT_BYTES}"
         )
     return name
-
 
 def _checked_digest(digest: str) -> str:
     if len(digest) != _DIGEST_LENGTH or not _DIGEST_CHARACTERS.issuperset(digest):

@@ -60,9 +60,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from types import MappingProxyType
 from typing import Final, cast
-
 import pytest
-
 from agl.adapters.filesystem.memory_store import MemoryStore
 from agl.adapters.filesystem.store import FilesystemStore
 from agl.ports.errors import AglError, InputError, InternalError
@@ -112,7 +110,6 @@ EVERY_SHAPE: Final[dict[str, JsonValue]] = {
     "mixed array": [1, "two", None, True, 3.5, {"four": 4}, [5, [6]]],
 }
 
-
 @pytest.fixture
 def stores(tmp_path: Path) -> Mapping[str, Store]:
     """Both implementations of the port, empty, to be asked the same questions in the same order.
@@ -122,7 +119,6 @@ def stores(tmp_path: Path) -> Mapping[str, Store]:
     failure message can say which store answered differently without counting positions.
     """
     return {_FILESYSTEM: FilesystemStore(AglHome(tmp_path)), _MEMORY: MemoryStore()}
-
 
 async def _alike[T](
     stores: Mapping[str, Store], ask: Callable[[Store], Awaitable[T]]
@@ -141,7 +137,6 @@ async def _alike[T](
             f"two implementations of this port have drifted apart somewhere the port is silent"
         )
     return answers
-
 
 async def _refused[T](
     stores: Mapping[str, Store], ask: Callable[[Store], Awaitable[T]]
@@ -169,7 +164,6 @@ async def _refused[T](
     assert refusal is not None, "both stores accepted a value this test expected both to refuse"
     return refusal
 
-
 async def _refusals(
     stores: Mapping[str, Store], ask: Callable[[Store], Awaitable[object]]
 ) -> dict[str, str]:
@@ -191,7 +185,6 @@ async def _refusals(
             )
     return said
 
-
 def _writing(value: Mapping[str, JsonValue]) -> Callable[[Store], Awaitable[None]]:
     """`write_entry` of one document at one address, as a callable over a store.
 
@@ -199,7 +192,6 @@ def _writing(value: Mapping[str, JsonValue]) -> Callable[[Store], Awaitable[None
     tests below can loop over several values without a closure capturing a loop variable.
     """
     return lambda store: store.write_entry(RUN, STEP, DIGEST, value)
-
 
 def _assert_json_kinds(document: Mapping[str, JsonValue], where: str) -> None:
     """The four facts about `EVERY_SHAPE` that comparing whole documents cannot establish.
@@ -215,9 +207,7 @@ def _assert_json_kinds(document: Mapping[str, JsonValue], where: str) -> None:
     assert isinstance(document["float"], float), f"{where}: a float is not an integer either"
     assert document["wider than a double"] == 2**53 + 1, f"{where}: an integer was approximated"
 
-
 # --- What both stores refuse --------------------------------------------------------------------
-
 
 async def test_a_non_finite_float_is_refused_by_both_and_neither_keeps_anything(
     stores: Mapping[str, Store],
@@ -243,7 +233,6 @@ async def test_a_non_finite_float_is_refused_by_both_and_neither_keeps_anything(
         await _alike(stores, lambda store: store.read_entry(RUN, STEP, DIGEST))
     ).values():
         assert answer is None, "a write that could not encode still put something on the ledger"
-
 
 async def test_a_lone_surrogate_in_a_value_is_refused_by_both_and_neither_keeps_anything(
     stores: Mapping[str, Store],
@@ -287,7 +276,6 @@ async def test_a_lone_surrogate_in_a_value_is_refused_by_both_and_neither_keeps_
     ).values():
         assert answer == paired, "a well-formed astral character is not a lone surrogate"
 
-
 async def test_a_value_json_cannot_write_at_all_is_refused_by_both_with_the_same_error(
     stores: Mapping[str, Store],
 ) -> None:
@@ -309,7 +297,6 @@ async def test_a_value_json_cannot_write_at_all_is_refused_by_both_with_the_same
         "nowhere else, because `JsonValue` spells its nested objects `dict` and json refuses the "
         "rest - so the two stores agree about where the tolerance stops as well as that it exists"
     )
-
 
 async def test_a_refusal_from_either_store_names_the_run_the_step_and_the_digest(
     stores: Mapping[str, Store],
@@ -366,9 +353,7 @@ async def test_a_refusal_from_either_store_names_the_run_the_step_and_the_digest
                 f"this was, and there is nothing else left by the time they read it"
             )
 
-
 # --- What both stores accept, and what it turns into ---------------------------------------------
-
 
 async def test_a_mapping_proxy_is_accepted_by_both_and_reads_back_as_a_plain_dict(
     stores: Mapping[str, Store],
@@ -389,7 +374,6 @@ async def test_a_mapping_proxy_is_accepted_by_both_and_reads_back_as_a_plain_dic
     for name, answer in (await _alike(stores, lambda store: store.read_record(RUN))).items():
         assert answer == dict(proxy)
         assert type(answer) is dict, f"the {name} store handed back a {type(answer).__name__}"
-
 
 async def test_a_tuple_in_a_value_reads_back_as_a_list_from_both(
     stores: Mapping[str, Store],
@@ -414,7 +398,6 @@ async def test_a_tuple_in_a_value_reads_back_as_a_list_from_both(
         assert isinstance(value, dict)
         assert type(value["tickets"]) is list
 
-
 async def test_a_non_string_key_is_renamed_by_both_rather_than_kept_or_refused(
     stores: Mapping[str, Store],
 ) -> None:
@@ -430,7 +413,6 @@ async def test_a_non_string_key_is_renamed_by_both_rather_than_kept_or_refused(
 
     for answer in (await _alike(stores, lambda store: store.read_record(RUN))).values():
         assert answer == {"1": "one", "two": 2}
-
 
 async def test_every_shape_of_json_round_trips_identically_from_both(
     stores: Mapping[str, Store],
@@ -456,7 +438,6 @@ async def test_every_shape_of_json_round_trips_identically_from_both(
         value = answer["value"]
         assert isinstance(value, dict)
         _assert_json_kinds(value, f"the {name} store's entry")
-
 
 async def test_both_answer_namespaces_in_the_same_order_for_the_same_recorded_set(
     stores: Mapping[str, Store],
@@ -484,9 +465,7 @@ async def test_both_answer_namespaces_in_the_same_order_for_the_same_recorded_se
     ).values():
         assert answer == (GRANDCHILD,)
 
-
 # --- Where the two deliberately disagree ---------------------------------------------------------
-
 
 async def test_an_ill_formed_digest_is_refused_by_the_real_store_and_accepted_by_the_fake(
     stores: Mapping[str, Store],
@@ -513,7 +492,6 @@ async def test_an_ill_formed_digest_is_refused_by_the_real_store_and_accepted_by
     assert await stores[_MEMORY].read_entry(RUN, STEP, "abc") == DOCUMENT
     assert await stores[_MEMORY].read_entry(RUN, STEP, DIGEST.upper()) is None
 
-
 async def test_a_project_name_with_no_room_for_its_settings_file_is_refused_only_by_the_real_store(
     stores: Mapping[str, Store],
 ) -> None:
@@ -535,7 +513,6 @@ async def test_a_project_name_with_no_room_for_its_settings_file_is_refused_only
 
     await stores[_MEMORY].write_record(crowded, DOCUMENT)
     assert await stores[_MEMORY].read_record(crowded) == DOCUMENT
-
 
 async def test_removing_a_scope_two_deep_leaves_its_parent_named_by_the_real_store_only(
     stores: Mapping[str, Store],
@@ -570,7 +547,6 @@ async def test_removing_a_scope_two_deep_leaves_its_parent_named_by_the_real_sto
         await _alike(stores, lambda store: store.read_entry(deep, STEP, DIGEST))
     ).values():
         assert answer is None, "the removal itself is not where the two differ"
-
 
 async def test_removing_a_run_leaves_the_two_agreeing_exactly(
     stores: Mapping[str, Store],

@@ -1,15 +1,11 @@
-
 from dataclasses import dataclass
 from typing import Final
-
 from agl.sdk import Namespace, describe, reporting_tool
 
 __all__ = ["Chunk", "Chunks", "report_chunks"]
 
-
 @dataclass(frozen=True, slots=True)
 class Chunk:
-
     id: str = describe(
         "This chunk's name. It becomes a git branch and a directory, so it may hold only letters "
         "A-Z a-z, digits, '.', '_' and '-' - no spaces, no slashes, no leading or trailing '.' or "
@@ -30,10 +26,8 @@ class Chunk:
     def __post_init__(self) -> None:
         Namespace(self.id)
 
-
 @dataclass(frozen=True, slots=True)
 class Chunks:
-
     items: tuple[Chunk, ...] = describe(
         "Every chunk this job divides into. Report at least one: a job too small to divide is a "
         "plan with one chunk in it."
@@ -59,7 +53,6 @@ class Chunks:
                     f"shares, compared without regard to case"
                 )
             taken[key] = chunk.id
-
 
 report_chunks: Final = reporting_tool(
     "report_chunks",

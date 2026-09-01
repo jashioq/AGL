@@ -24,7 +24,6 @@ from instruments.preflight import NoParams, entered
 
 __all__ = ["unused"]
 
-
 @workflow(version="1.1")
 async def unused(run: Run[NoParams]) -> None:
     """Steps with nothing, and demands `reviewer`'s provider at second zero all the same."""

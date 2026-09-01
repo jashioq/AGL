@@ -37,9 +37,7 @@ import hashlib
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Final
-
 import pytest
-
 from agl.adapters.filesystem.memory_store import MemoryStore
 from agl.adapters.filesystem.store import FilesystemStore
 from agl.ports.errors import InternalError
@@ -80,7 +78,6 @@ AT: Final = datetime(2026, 8, 18, 9, 16, 41, tzinfo=UTC)
 _MEMORY: Final = "memory"
 _FILESYSTEM: Final = "filesystem"
 
-
 @pytest.fixture(params=[_MEMORY, _FILESYSTEM])
 def store(request: pytest.FixtureRequest, tmp_path: Path) -> Store:
     """One of the two real `Store` implementations, so every behavioural test runs twice.
@@ -94,7 +91,6 @@ def store(request: pytest.FixtureRequest, tmp_path: Path) -> Store:
         return MemoryStore()
     return FilesystemStore(AglHome(tmp_path))
 
-
 def _entry(digest: str, *, value: JsonValue = None, head: str = HEAD, at: datetime = AT) -> Entry:
     """One entry, filed under `digest` and claiming it - which is the ordinary, agreeing case.
 
@@ -103,9 +99,7 @@ def _entry(digest: str, *, value: JsonValue = None, head: str = HEAD, at: dateti
     """
     return Entry(fingerprint=digest, value=value, head=head, at=at)
 
-
 # --- The round trip, which is the whole of what an entry is for ---------------------------------
-
 
 @pytest.mark.parametrize(
     "value",
@@ -136,7 +130,6 @@ async def test_an_entry_written_is_the_entry_read_back(store: Store, value: Json
     assert found == entry
     assert found is not None and found.value == value
 
-
 @pytest.mark.asyncio
 async def test_a_recorded_null_is_an_entry_and_not_an_absence(store: Store) -> None:
     """The silent failure this test exists to be the notice of.
@@ -160,9 +153,7 @@ async def test_a_recorded_null_is_an_entry_and_not_an_absence(store: Store) -> N
     assert found == effect
     assert await read_entry(store, RUN, STEP, SECOND) is None, "and this is what absence is"
 
-
 # --- Match on path AND fingerprint ---------------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_a_fingerprint_that_disagrees_with_the_path_is_a_miss(store: Store) -> None:
@@ -187,7 +178,6 @@ async def test_a_fingerprint_that_disagrees_with_the_path_is_a_miss(store: Store
     assert document is not None and document["fingerprint"] == SECOND
     await write_entry(store, RUN, STEP, SECOND, misfiled)
     assert await read_entry(store, RUN, STEP, SECOND) == misfiled
-
 
 @pytest.mark.asyncio
 async def test_nothing_in_the_read_path_branches_on_at(store: Store) -> None:
@@ -218,9 +208,7 @@ async def test_nothing_in_the_read_path_branches_on_at(store: Store) -> None:
     assert found_stale.value == found_future.value == "the same result"
     assert found_stale.at != found_future.at, "the field really did differ between the two"
 
-
 # --- `steps/` and `worktrees/` are siblings -------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_a_step_and_a_worktree_of_one_name_are_two_entries(store: Store) -> None:
@@ -241,9 +229,7 @@ async def test_a_step_and_a_worktree_of_one_name_are_two_entries(store: Store) -
     assert await read_entry(store, RUN, REVIEW, FIRST) == at_the_run
     assert await read_entry(store, inside, REVIEW, FIRST) == in_the_worktree
 
-
 # --- Concurrency: one write each, and no coordination anywhere ------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_two_concurrent_siblings_each_land_their_own_entry(store: Store) -> None:
@@ -266,7 +252,6 @@ async def test_two_concurrent_siblings_each_land_their_own_entry(store: Store) -
     assert await read_entry(store, first, STEP, FIRST) == one
     assert await read_entry(store, second, STEP, FIRST) == two
 
-
 @pytest.mark.asyncio
 async def test_two_concurrent_runs_of_one_step_land_at_their_own_digests(store: Store) -> None:
     """The other axis of the same clause: one scope, one step name, two digests.
@@ -284,7 +269,6 @@ async def test_two_concurrent_runs_of_one_step_land_at_their_own_digests(store: 
 
     assert await read_entry(store, RUN, STEP, FIRST) == first
     assert await read_entry(store, RUN, STEP, SECOND) == second
-
 
 @pytest.mark.asyncio
 async def test_a_superseded_entry_stays_readable_beside_the_one_that_replaced_it(
@@ -306,9 +290,7 @@ async def test_a_superseded_entry_stays_readable_beside_the_one_that_replaced_it
     assert await read_entry(store, RUN, STEP, FIRST) == stale
     assert await read_entry(store, RUN, STEP, SECOND) == fresh
 
-
 # --- The wire form, held still --------------------------------------------------------------------
-
 
 def test_the_wire_shape_is_the_four_fields_fingerprint_value_head_and_at() -> None:
     """The published shape, spelled out here rather than read off `Entry`'s own fields.
@@ -328,13 +310,11 @@ def test_the_wire_shape_is_the_four_fields_fingerprint_value_head_and_at() -> No
         "at": "2026-08-18T09:16:41Z",
     }
 
-
 def test_an_entry_read_back_from_its_own_wire_form_is_the_same_entry() -> None:
     """Both directions on one type, which is what keeps the two agreeing (`ports/run.py`'s rule)."""
     entry = _entry(FIRST, value={"rows": [1, None, "two"]})
 
     assert Entry.from_json(entry.to_json()) == entry
-
 
 def test_from_json_refuses_a_missing_key_an_unknown_one_and_a_non_object() -> None:
     """`InternalError` for every one: nobody types these files, AGL writes them and AGL reads them.
@@ -360,7 +340,6 @@ def test_from_json_refuses_a_missing_key_an_unknown_one_and_a_non_object() -> No
         Entry.from_json({**document, "head": 7})
     with pytest.raises(InternalError, match="cannot read back"):
         Entry.from_json({**document, "at": "last tuesday"})
-
 
 def test_an_entry_and_a_run_record_write_one_spelling_of_a_timestamp() -> None:
     """`_WIRE_TIME` was a deliberate second copy here; it is now one constant in `ports/run.py`.
@@ -389,7 +368,6 @@ def test_an_entry_and_a_run_record_write_one_spelling_of_a_timestamp() -> None:
 
     assert entry.to_json()["at"] == spec.to_json()["created_at"] == "2026-08-18T07:16:41Z"
 
-
 def test_a_naive_at_is_refused_rather_than_read_as_the_machines_local_time() -> None:
     """Refused *before* `astimezone` is called, which is `WireShape.normalised`'s reason:
     `astimezone` on a naive value quietly reads the local timezone, and an entry that recorded
@@ -397,7 +375,6 @@ def test_a_naive_at_is_refused_rather_than_read_as_the_machines_local_time() -> 
     injectable clock exists to make answerable."""
     with pytest.raises(InternalError, match="no timezone"):
         Entry(fingerprint=FIRST, value=None, head=HEAD, at=datetime(2026, 8, 18, 9, 16, 41))
-
 
 def test_one_wire_shape_speaks_for_both_records_and_neither_lost_its_own_words() -> None:
     """The fold's assertion: one implementation, two vocabularies, and the texts unchanged.
@@ -479,7 +456,6 @@ def test_one_wire_shape_speaks_for_both_records_and_neither_lost_its_own_words()
         f"reading with no place is not a moment - a run record carries an instant, written as UTC"
     )
 
-
 def test_an_empty_fingerprint_or_head_names_nothing() -> None:
     """The whole of what the two strings are held to - the head's shape is git's to judge, at
     `restore`, and the fingerprint's is settled by the digest it is about to be compared with."""
@@ -488,9 +464,7 @@ def test_an_empty_fingerprint_or_head_names_nothing() -> None:
     with pytest.raises(InternalError, match="'head'"):
         Entry(fingerprint=FIRST, value=None, head="", at=AT)
 
-
 # --- What only a disk can be asked ----------------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_the_two_subtrees_really_are_siblings_on_disk(tmp_path: Path) -> None:
@@ -518,7 +492,6 @@ async def test_the_two_subtrees_really_are_siblings_on_disk(tmp_path: Path) -> N
     assert in_the_worktree.relative_to(run_dir) == nested
     assert at_the_run.is_file() and in_the_worktree.is_file()
     assert not in_the_worktree.is_relative_to(run_dir / "steps")
-
 
 @pytest.mark.asyncio
 async def test_one_file_per_step_named_by_its_digest(tmp_path: Path) -> None:

@@ -1,15 +1,11 @@
-
 from abc import ABC, abstractmethod
 from contextlib import AbstractAsyncContextManager
 from pathlib import Path
-
 from agl.ports.ids import Namespace, RunLabel
 
 __all__ = ["Workspace", "WorkspaceProvider"]
 
-
 class WorkspaceProvider(ABC):
-
     @abstractmethod
     async def open(self, label: RunLabel, namespace: Namespace | None, base: str) -> Workspace:
         """Provision an isolated place for these identifiers, or hand back the one already there.
@@ -50,9 +46,7 @@ class WorkspaceProvider(ABC):
         """
         ...
 
-
 class Workspace(ABC):
-
     @property
     @abstractmethod
     def path(self) -> Path:

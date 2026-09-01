@@ -1,4 +1,3 @@
-
 from agl.ports.terminal import (
     Choice,
     Component,

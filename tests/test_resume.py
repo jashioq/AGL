@@ -35,9 +35,7 @@ from datetime import timedelta
 from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Final
-
 import pytest
-
 from agl import api
 from agl.adapters.claude_code.fake import Conversation, Script
 from agl.config import container, registry
@@ -81,7 +79,6 @@ SCOPE: Final = RunScope(PROJECT, LABEL)
 SEEDED: Final = "src/a.txt"
 LANDED: Final = "src/landed.txt"
 
-
 @dataclass(frozen=True)
 class ResumeParams:
     """The example params shape. `concurrent` is a default the user never typed, the half of
@@ -90,7 +87,6 @@ class ResumeParams:
     request: str = arg("-r", "--request", help="what to build")
     concurrent: int = arg("-c", "--concurrent", default=3)
 
-
 @dataclass(frozen=True)
 class OtherParams:
     """`ResumeParams`' fields under other names: what a workflow that changed its params looks
@@ -98,18 +94,15 @@ class OtherParams:
 
     ask: str = arg("-a", "--ask", help="what to build, spelled another way")
 
-
 @dataclass(frozen=True)
 class NoParams:
     """A workflow that takes nothing, and still has a params class to derive no flags from."""
-
 
 @dataclass(frozen=True)
 class Summary:
     """A reporting payload: one string, which is the whole of what these agents have to say."""
 
     text: str
-
 
 REPORT: Final = reporting_tool("report", "report what this step produced", Summary)
 
@@ -122,7 +115,6 @@ REPORT: Final = reporting_tool("report", "report what this step produced", Summa
 # whose fingerprint terms a call site can move. The duplication is four literals and it is the
 # honest version of a distinction that is only ever declared once.
 
-
 @role(model=Claude.SONNET)
 def first() -> Role[Summary]:
     """The first of two steps, and the address `steps/first/`."""
@@ -132,7 +124,6 @@ def first() -> Role[Summary]:
         restrictions={Restriction.NO_VCS_WRITES},
         tools=(REPORT,),
     )
-
 
 @role(model=Claude.SONNET)
 def second() -> Role[Summary]:
@@ -144,7 +135,6 @@ def second() -> Role[Summary]:
         tools=(REPORT,),
     )
 
-
 class Interrupted(Exception):
     """What a run dying between two steps looks like from here.
 
@@ -153,10 +143,8 @@ class Interrupted(Exception):
     it arrives at the test as itself.
     """
 
-
 class ReviewNotConverging(Stop):
     """A workflow's own reason to stop, spelled against the SDK's `Stop`."""
-
 
 # What each workflow was handed, what its steps gave back, and the interruption a test arms. Module
 # level because the workflows have to be: `EntryPoint.load` imports a module and reads an attribute
@@ -165,7 +153,6 @@ handed: Final[list[Run[object]]] = []
 produced: Final[list[Summary]] = []
 interrupt: Final[list[str]] = []
 raised: Final[list[Stop]] = []
-
 
 @workflow(version="1.1")
 async def two_steps(run: Run[ResumeParams]) -> None:
@@ -182,13 +169,11 @@ async def two_steps(run: Run[ResumeParams]) -> None:
         raise Interrupted(interrupt[0])
     produced.append(await run.step(second()))
 
-
 @workflow(version="1")
 async def quiet(run: Run[NoParams]) -> None:
     """Takes no step at all - the run for which "`agl/<label>` is a real ref from run start" is
     only true if something above the first step provisioned `_base`."""
     handed.append(run)
-
 
 @workflow(version="0.1")
 async def halting(run: Run[NoParams]) -> None:
@@ -198,12 +183,10 @@ async def halting(run: Run[NoParams]) -> None:
     raised.append(stop)
     raise stop
 
-
 @workflow(version="1.0")
 async def shifting_before(run: Run[NoParams]) -> None:
     """The workflow the record is stamped by. Registered under `shifting`."""
     handed.append(run)
-
 
 @workflow(version="2.0")
 async def shifting_after(run: Run[NoParams]) -> None:
@@ -215,12 +198,10 @@ async def shifting_after(run: Run[NoParams]) -> None:
     """
     handed.append(run)
 
-
 @workflow(version="1.0")
 async def drifting_before(run: Run[ResumeParams]) -> None:
     """The params class the record is written from. Registered under `drifting`."""
     handed.append(run)
-
 
 @workflow(version="1.0")
 async def drifting_after(run: Run[OtherParams]) -> None:
@@ -228,11 +209,9 @@ async def drifting_after(run: Run[OtherParams]) -> None:
     record can reach `params.from_json` disagreeing with the class, and the fault it names."""
     handed.append(run)
 
-
 def _point(name: str, attribute: str) -> EntryPoint:
     """A `probe = "agl.workflows.probe:probe"` line, pointed at this module instead."""
     return EntryPoint(name=name, value=f"{__name__}:{attribute}", group=registry.GROUP)
-
 
 POINTS: Final = (
     _point("two_steps", "two_steps"),
@@ -250,7 +229,6 @@ AFTER: Final = (
     *POINTS, _point("shifting", "shifting_after"), _point("drifting", "drifting_after")
 )
 
-
 def _reporting(dispatched: list[str]) -> Script:
     """An agent that writes nothing, reports one payload, and records that it was paid for.
 
@@ -267,20 +245,17 @@ def _reporting(dispatched: list[str]) -> Script:
 
     return _script
 
-
 def _fakes(tmp_path: Path, dispatched: list[str]) -> container.FakeServices:
     """Target #8's deployment: one repository seeded with a file, one store, one frozen clock."""
     return container.fakes(
         TreesRoot(tmp_path / "trees"), files={SEEDED: b"one\n"}, claude=_reporting(dispatched)
     )
 
-
 async def _record(harness: container.FakeServices) -> dict[str, JsonValue]:
     """The run's record, asserted present - every caller below is testing what is in it."""
     record = await harness.services.store.read_record(SCOPE)
     assert record is not None, "no run.json was written for this run"
     return record
-
 
 async def _start(
     harness: container.FakeServices,
@@ -292,7 +267,6 @@ async def _start(
     """The first invocation: `agl run <name> -n auth`, with this module's entry points."""
     await api.run(harness.services, PROJECT, name, LABEL, argv, points=points)
 
-
 async def _resume(
     harness: container.FakeServices,
     *,
@@ -302,7 +276,6 @@ async def _resume(
     """The second invocation: `agl resume auth`, and the label is the whole of what it takes."""
     await api.resume(harness.services, PROJECT, label, points=points)
 
-
 def _clear() -> None:
     """Every module-level recorder, between invocations. Called by hand rather than through a
     fixture so that a test can clear one of them mid-scenario and keep the rest."""
@@ -311,9 +284,7 @@ def _clear() -> None:
     interrupt.clear()
     raised.clear()
 
-
 # --- the headline property: a resumed run replays what is on the ledger --------------------------
-
 
 @pytest.mark.asyncio
 async def test_a_resumed_run_replays_the_completed_step_and_runs_only_the_rest(
@@ -358,7 +329,6 @@ async def test_a_resumed_run_replays_the_completed_step_and_runs_only_the_rest(
         Summary("do the second thing done"),
     ], "the replayed step did not hand back the value its entry recorded"
 
-
 @pytest.mark.asyncio
 async def test_resuming_a_finished_run_runs_no_worker_at_all(tmp_path: Path) -> None:
     """The other end of the sweep: everything is on the ledger, so nothing is asked of an agent.
@@ -384,7 +354,6 @@ async def test_resuming_a_finished_run_runs_no_worker_at_all(tmp_path: Path) -> 
         Summary("do the second thing done"),
     ]
 
-
 @pytest.mark.asyncio
 async def test_the_workflow_is_handed_its_params_as_the_dataclass_the_record_stored(
     tmp_path: Path,
@@ -409,9 +378,7 @@ async def test_the_workflow_is_handed_its_params_as_the_dataclass_the_record_sto
     assert handed[0].params == ResumeParams(request="add oauth", concurrent=4)
     assert type(handed[0].params.concurrent) is int
 
-
 # --- the record is read and never written --------------------------------------------------------
-
 
 class _Counting(Store):
     """The bundle's own store with a note taken of every write it is asked for, and nothing changed.
@@ -459,7 +426,6 @@ class _Counting(Store):
 
     async def remove(self, scope: RunScope) -> None:
         await self._store.remove(scope)
-
 
 @pytest.mark.asyncio
 async def test_a_resume_does_not_rewrite_run_json(tmp_path: Path) -> None:
@@ -520,7 +486,6 @@ async def test_a_resume_does_not_rewrite_run_json(tmp_path: Path) -> None:
     )
     assert handed[0].base == pinned, "the resumed run started from somewhere other than the pin"
 
-
 class _Watching(WorkspaceProvider):
     """The bundle's own provider with a note taken of every `open`.
 
@@ -546,7 +511,6 @@ class _Watching(WorkspaceProvider):
 
     def hold(self, label: RunLabel) -> AbstractAsyncContextManager[None]:
         return self._provider.hold(label)
-
 
 @pytest.mark.asyncio
 async def test_a_resume_reopens_base_from_the_pin_even_when_the_workflow_takes_no_step(
@@ -589,9 +553,7 @@ async def test_a_resume_reopens_base_from_the_pin_even_when_the_workflow_takes_n
     assert base_worktree(TreesRoot(tmp_path / "trees"), LABEL).is_dir()
     assert harness.repository.tip(run_branch(LABEL)) == pinned
 
-
 # --- the refusals ---------------------------------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_a_label_with_no_record_is_a_not_found_and_reads_as_runs_mirror(
@@ -622,7 +584,6 @@ async def test_a_label_with_no_record_is_a_not_found_and_reads_as_runs_mirror(
     with pytest.raises(ConflictError) as taken:
         await _start(harness)
     assert str(taken.value) == "run 'auth' already exists - `agl resume auth` or `agl clear auth`."
-
 
 @pytest.mark.asyncio
 async def test_a_workflow_version_the_record_was_not_stamped_with_is_refused(
@@ -657,7 +618,6 @@ async def test_a_workflow_version_the_record_was_not_stamped_with_is_refused(
     assert await _record(harness) == before, "a refused resume changed the run it refused"
     assert len(handed) == 1, "the workflow ran under a version the record was not stamped with"
 
-
 @pytest.mark.asyncio
 async def test_the_same_version_is_not_a_mismatch(tmp_path: Path) -> None:
     """The other side of `==`, so that the test above is about a comparison and not about refusing.
@@ -673,7 +633,6 @@ async def test_the_same_version_is_not_a_mismatch(tmp_path: Path) -> None:
     await _resume(harness, points=BEFORE)
 
     assert len(handed) == 2
-
 
 @pytest.mark.asyncio
 async def test_params_the_workflows_current_class_will_not_take_are_refused(
@@ -700,7 +659,6 @@ async def test_params_the_workflows_current_class_will_not_take_are_refused(
     assert "'request'" in message and "'concurrent'" in message and "ask" in message
     assert len(handed) == 1, "a workflow was handed params its own class does not declare"
 
-
 @pytest.mark.asyncio
 async def test_a_workflow_the_record_names_and_nothing_registers_is_a_not_found(
     tmp_path: Path,
@@ -718,9 +676,7 @@ async def test_a_workflow_the_record_names_and_nothing_registers_is_a_not_found(
     assert exit_code_for(caught.value) == 3
     assert "quiet" in str(caught.value)
 
-
 # --- the ordering hazard, on the resumed side ----------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_a_stop_raised_by_a_resumed_workflow_leaves_api_resume_unwrapped(
@@ -748,9 +704,7 @@ async def test_a_stop_raised_by_a_resumed_workflow_leaves_api_resume_unwrapped(
     assert exit_code_for(caught.value) == 7
     assert (await _record(harness))["workflow"] == "halting"
 
-
 # --- the ordering of the refusals in front of preflight -------------------------------------------
-
 
 class _NotReady(AgentRunner):
     """An `AgentRunner` whose `check_ready` refuses, and which writes down that it was asked.
@@ -783,7 +737,6 @@ class _NotReady(AgentRunner):
         on_activity: ActivityReporter | None = None,
     ) -> AgentOutcome:
         raise AssertionError("preflight refused this run and an agent was dispatched anyway")
-
 
 @pytest.mark.asyncio
 async def test_the_params_rebuild_refuses_before_preflight_spends_a_turn(tmp_path: Path) -> None:
@@ -824,7 +777,6 @@ async def test_the_params_rebuild_refuses_before_preflight_spends_a_turn(tmp_pat
     assert runner.asked == [Claude.SONNET], (
         "the stub never refused anything, so the assertion above is not about an ordering"
     )
-
 
 class _NotTaken(WorkspaceProvider):
     """A provider that refuses to have been reached. Every member is a tripwire, `hold` above all.
@@ -871,7 +823,6 @@ class _NotTaken(WorkspaceProvider):
             "lock on the run's own directory and making that directory is the one side effect of "
             "taking it, so a refusal underneath it is a refusal that left something behind"
         )
-
 
 @pytest.mark.asyncio
 async def test_a_resume_refused_at_preflight_takes_no_lock_and_writes_nothing(

@@ -61,9 +61,7 @@ from importlib import import_module
 from pathlib import Path
 from types import ModuleType
 from typing import Final
-
 import pytest
-
 import agl.sdk
 from agl.ports import errors as ports_errors
 from agl.ports import terminal as ports_terminal
@@ -131,7 +129,6 @@ _OFF_THE_SURFACE: Final[Mapping[str, str]] = {
     "agl.sdk._engine.preflight": "internal, for the same reason",
 }
 
-
 def _exported(module: ModuleType) -> frozenset[str]:
     """A module's own `__all__`, which every module under `src/agl/` has."""
     names = getattr(module, "__all__", None)
@@ -140,7 +137,6 @@ def _exported(module: ModuleType) -> frozenset[str]:
         f"file compares the door against them - so without it there is nothing here to compare."
     )
     return frozenset(names)
-
 
 def _claimed() -> dict[str, str]:
     """Every name the door is expected to carry, mapped to the module it must come from."""
@@ -154,7 +150,6 @@ def _claimed() -> dict[str, str]:
             )
             claimed[exposed] = name
     return claimed
-
 
 @pytest.mark.parametrize("name", sorted(_exported(agl.sdk)))
 def test_every_name_on_the_door_is_the_submodules_own_object(name: str) -> None:
@@ -172,7 +167,6 @@ def test_every_name_on_the_door_is_the_submodules_own_object(name: str) -> None:
         f"surface. Add the module to `_DOOR`, or take the name off the door."
     )
     assert getattr(agl.sdk, name) is getattr(import_module(claimed[name]), name)
-
 
 def test_every_authoring_name_a_submodule_exports_is_on_the_door() -> None:
     """The drift check, in the direction that fails open: a name added and never re-exported.
@@ -198,7 +192,6 @@ def test_every_authoring_name_a_submodule_exports_is_on_the_door() -> None:
     ]
     assert not missing, "\n\n".join(missing)
 
-
 def test_nothing_absent_by_decision_is_on_the_door() -> None:
     """The other half of `_ABSENT`: a name explained as out must actually be out.
 
@@ -213,7 +206,6 @@ def test_nothing_absent_by_decision_is_on_the_door() -> None:
         f"the entry should go, or the re-export was added by mistake."
     )
 
-
 @pytest.mark.parametrize(("module", "reason"), sorted(_OFF_THE_SURFACE.items()))
 def test_nothing_off_the_authoring_surface_reaches_the_door(module: str, reason: str) -> None:
     """`_engine` stays internal and the testing vocabulary stays on its own door.
@@ -226,7 +218,6 @@ def test_nothing_off_the_authoring_surface_reaches_the_door(module: str, reason:
         f"{leaked} appear on `agl.sdk`'s front door and are exported by {module}, which is off the "
         f"authoring surface: {reason}."
     )
-
 
 def test_the_error_facade_takes_the_hierarchy_and_names_everything_it_leaves() -> None:
     """`sdk/errors.py` is the one facade over a port module that holds two vocabularies.
@@ -256,7 +247,6 @@ def test_the_error_facade_takes_the_hierarchy_and_names_everything_it_leaves() -
         f"`_NOT_ON_THE_ERROR_FACADE` in this test as deliberately not. One of the two is wrong."
     )
 
-
 @pytest.mark.parametrize("name", sorted(_exported(sdk_errors)))
 def test_the_error_facade_re_exports_the_class_ports_defines(name: str) -> None:
     """`is`-identical, and here that is load-bearing rather than a matter of hygiene.
@@ -266,7 +256,6 @@ def test_the_error_facade_re_exports_the_class_ports_defines(name: str) -> None:
     failure that looks like the framework not refusing at all.
     """
     assert getattr(sdk_errors, name) is getattr(ports_errors, name)
-
 
 def test_stop_reaches_the_door_through_the_workflow_module_and_not_through_the_facade() -> None:
     """The one class in the hierarchy that is on the door from somewhere else, and stays that way.
@@ -278,7 +267,6 @@ def test_stop_reaches_the_door_through_the_workflow_module_and_not_through_the_f
     """
     assert agl.sdk.Stop is ports_errors.Stop
     assert "Stop" not in _exported(sdk_errors)
-
 
 def test_the_sentence_the_repository_writes_about_the_terminal_is_true() -> None:
     """`ARCHITECTURE.md`'s "The layers" spells it: a workflow author writes `from agl.sdk import
@@ -297,7 +285,6 @@ def test_the_sentence_the_repository_writes_about_the_terminal_is_true() -> None
     """
     assert agl.sdk.Screen is ports_terminal.Screen
     assert agl.sdk.Terminal is ports_terminal.Terminal
-
 
 def test_no_module_under_the_package_imports_the_package() -> None:
     """The cycle guard, parsed rather than grepped.
@@ -326,7 +313,6 @@ def test_no_module_under_the_package_imports_the_package() -> None:
         + "\n\nImport the submodule directly instead - `from agl.sdk.tools import ReportingTool`."
     )
 
-
 def _imports_the_package(node: ast.Import | ast.ImportFrom) -> bool:
     """Whether `node` is an import of `agl.sdk` itself, in either spelling.
 
@@ -338,7 +324,6 @@ def _imports_the_package(node: ast.Import | ast.ImportFrom) -> bool:
     if isinstance(node, ast.ImportFrom):
         return node.module == PACKAGE or (node.level == 1 and node.module is None)
     return any(alias.name == PACKAGE for alias in node.names)
-
 
 def test_the_cycle_guard_can_see_both_spellings() -> None:
     """Non-vacuity: the walk above finds nothing today, so this is what says it could.

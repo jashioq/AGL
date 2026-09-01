@@ -77,7 +77,6 @@ filenames, and this one has to be distinct from `test_api.py`'s rather than a se
 import ast
 from pathlib import Path
 from typing import Final
-
 from agl import api as api_module
 
 # The floor, in the spirit of `test_filesystem_no_lock.py`'s `MODULES_TODAY`. The assertion below
@@ -101,7 +100,6 @@ SWEEPS_TODAY: Final = 1
 # claim "one walk catches both spellings" is checked against the interpreter running the suite
 # instead of being trusted to a docstring.
 EXCEPT_STAR: Final = "try:\n    work()\nexcept* ValueError:\n    pass\n"
-
 
 def test_api_holds_no_except_clause_of_any_width_anywhere_in_it() -> None:
     """`api.py`'s own source, parsed, with every `except` clause in it counted. There are none.
@@ -169,7 +167,6 @@ def test_api_holds_no_except_clause_of_any_width_anywhere_in_it() -> None:
         "nodes (PEP 654); if that has changed, this file needs a second node type, not a rewrite"
     )
 
-
 def _handlers(tree: ast.AST) -> list[ast.ExceptHandler]:
     """Every `except` clause in `tree`, whichever of the two statements wrote it.
 
@@ -178,7 +175,6 @@ def _handlers(tree: ast.AST) -> list[ast.ExceptHandler]:
     `try` with only a `finally` produces none, which is the case this file is careful to allow.
     """
     return [node for node in ast.walk(tree) if isinstance(node, ast.ExceptHandler)]
-
 
 def _caught(handler: ast.ExceptHandler) -> str:
     """What one clause names, as a reader will find it on the line, for quoting in the failure.

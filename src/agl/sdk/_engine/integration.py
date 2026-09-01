@@ -1,7 +1,5 @@
-
 import asyncio
 from collections.abc import Callable
-
 from agl.ports.errors import InternalError
 from agl.ports.history import History
 from agl.ports.home_layout import RunScope
@@ -14,9 +12,7 @@ from agl.sdk._engine.steps import Steps
 
 __all__ = ["Integration", "Leases", "integrate"]
 
-
 class Leases:
-
     def __init__(self) -> None:
         self._locks: dict[RunScope, asyncio.Lock] = {}
         self._live: dict[RunScope, Lease] = {}
@@ -44,9 +40,7 @@ class Leases:
         if self._live.get(lease.target) is lease:
             del self._live[lease.target]
 
-
 class Lease:
-
     def __init__(
         self,
         target: RunScope,
@@ -70,9 +64,7 @@ class Lease:
         self._lease.release()
         self._forget(self)
 
-
 class Integration:
-
     def __init__(
         self,
         *,
@@ -189,7 +181,6 @@ class Integration:
         self._settled = True
         self._lease.release()
 
-
 async def integrate(
     *,
     source: Steps,
@@ -221,7 +212,6 @@ async def integrate(
         raise
     return integration
 
-
 def _nothing_to_retry(head: str | None) -> str:
     ended = (
         f"it landed, and the target is at {head!r}"
@@ -239,7 +229,6 @@ def _nothing_to_retry(head: str | None) -> str:
         f"nothing; this is the asymmetry `ports/integration.py` pins for its own two verbs"
     )
 
-
 def _gate_refused(command: str, status: int, target: str, before: str) -> str:
     return (
         f"the build gate refused this landing. {target!r} took the work with no textual collision, "
@@ -250,7 +239,6 @@ def _gate_refused(command: str, status: int, target: str, before: str) -> str:
         f"gate exists to catch and the reason two pieces of work that each build alone can still "
         f"be refused together. The build's own output is on the outcome, beside this conflict"
     )
-
 
 def _still_not_in(source: str, target: str, head: str) -> str:
     return (

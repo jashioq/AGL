@@ -1,4 +1,3 @@
-
 import argparse
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import MISSING, dataclass, field, fields, is_dataclass
@@ -6,7 +5,6 @@ from math import isfinite
 from string import ascii_letters, digits
 from types import MappingProxyType
 from typing import Any, Final, NoReturn, overload
-
 from agl.ports.errors import InputError
 from agl.ports.run import JsonValue
 from agl.sdk._declarations import annotations_of, named
@@ -23,15 +21,12 @@ _PARSEABLE: Final = (str, int, float)
 # must read back what `to_json` wrote; PEP 484 widens the same way. A `bool` is already an `int`.
 _ADMITTED: Final = ((bool, (bool,)), (int, (int,)), (float, (int, float)), (str, (str,)))
 
-
 @dataclass(frozen=True, slots=True)
 class _Declared:
     flags: tuple[str, ...]
     help: str
 
-
 class RefusingParser(argparse.ArgumentParser):
-
     def error(self, message: str) -> NoReturn:
         """Raise where `argparse` would exit, so a refusal goes through AGL's own exit-code table.
 
@@ -39,7 +34,6 @@ class RefusingParser(argparse.ArgumentParser):
         :raises InputError: always - this call has no way out that returns
         """
         raise InputError(f"{self.format_usage().strip()}\n{message}")
-
 
 @overload
 def arg[T](*flags: str, default: T, help: str = "") -> T: ...
@@ -73,7 +67,6 @@ def arg(*flags: str, default: Any = MISSING, help: str = "") -> Any:
             f"parameter is a str, an int, a float or a bool - what a shell hands over as text"
         )
     return field(default=default, metadata=declared)
-
 
 def parser_for(params: type[object], *, prog: str | None = None) -> RefusingParser:
     """Build the flag parser for a params dataclass, apart from `parse` so it can be inspected.
@@ -109,7 +102,6 @@ def parser_for(params: type[object], *, prog: str | None = None) -> RefusingPars
         )
     return parser
 
-
 def parse[T](params: type[T], argv: Sequence[str], *, prog: str | None = None) -> T:
     """Read a workflow's own arguments into its params instance, before any agent has been paid for.
 
@@ -122,7 +114,6 @@ def parse[T](params: type[T], argv: Sequence[str], *, prog: str | None = None) -
     parsed = parser_for(params, prog=prog).parse_args(argv)
     factory: Callable[..., T] = params
     return factory(**vars(parsed))
-
 
 def to_json(instance: object) -> Mapping[str, JsonValue]:
     """Write the parameters a run was started with into the shape `run.json` carries them in.
@@ -141,7 +132,6 @@ def to_json(instance: object) -> Mapping[str, JsonValue]:
         spec.name: _storable(f"{kind}.{spec.name}", getattr(instance, spec.name))
         for spec in fields(instance)
     })
-
 
 def from_json[T](params: type[T], data: Mapping[str, JsonValue]) -> T:
     """Rebuild a resumed run's parameters from its record, refusing rather than converting anything.
@@ -169,12 +159,10 @@ def from_json[T](params: type[T], data: Mapping[str, JsonValue]) -> T:
         **{name: _restored(f"{kind}.{name}", hints.get(name), data[name]) for name in declared}
     )
 
-
 def _field_names(params: object) -> tuple[str, ...]:
     if not is_dataclass(params):
         raise InputError(f"{named(params)} is not a dataclass of `arg()` fields")
     return tuple(spec.name for spec in fields(params))
-
 
 def _restored(where: str, hint: object, value: JsonValue) -> JsonValue:
     for declared, admitted in _ADMITTED:
@@ -193,7 +181,6 @@ def _restored(where: str, hint: object, value: JsonValue) -> JsonValue:
         f"written when the field was one of the four, and reading it back needs it to still be"
     )
 
-
 def _storable(where: str, value: object) -> JsonValue:
     try:
         if isinstance(value, bool | int) or (isinstance(value, float) and isfinite(value)):
@@ -207,7 +194,6 @@ def _storable(where: str, value: object) -> JsonValue:
         f"{where} holds {value!r}, which `run.json` cannot: a parameter is a bool, an int, a "
         f"finite float, or a str that UTF-8 can encode"
     )
-
 
 def _consumes(where: str, hint: object, default: object) -> dict[str, Any]:
     # `bool("false")` is `True`, which is why a bool field is a switch and never a converter.
@@ -226,7 +212,6 @@ def _consumes(where: str, hint: object, default: object) -> dict[str, Any]:
         f"{where} is a {named(hint)}, and a parameter is a str, an int, a float or a bool: "
         f"what a shell hands over as text and what `run.json` holds unchanged"
     )
-
 
 def _unusable_flag(flag: str) -> str | None:
     if not flag.startswith("-"):

@@ -30,7 +30,6 @@ real: `tests/cli/test_main.py`. Both halves are needed, and neither is the other
 import ast
 import inspect
 from typing import Final, get_type_hints
-
 from agl.cli import exit_codes
 from agl.cli.exit_codes import EXIT_CODES, exit_code_for, exit_status, leaves
 from agl.ports import errors
@@ -63,10 +62,8 @@ _PUBLISHED: Final[tuple[tuple[type[AglError], int], ...]] = (
     (InternalError, 70),
 )
 
-
 class ReviewNotConverging(Stop):
     """A workflow's own reason to stop - in no table, and still worth 7."""
-
 
 def _hierarchy() -> list[type[AglError]]:
     """Every class `agl.ports.errors` itself defines, walked rather than listed.
@@ -87,15 +84,12 @@ def _hierarchy() -> list[type[AglError]]:
         (cls for cls in seen if cls.__module__ == AglError.__module__), key=lambda cls: cls.__name__
     )
 
-
 # --- the re-export ------------------------------------------------------------------------------
-
 
 def test_the_re_exported_names_are_the_ports_own_objects() -> None:
     """Not copies: a second `EXIT_CODES` is the second table this module exists not to have."""
     assert EXIT_CODES is errors.EXIT_CODES
     assert exit_code_for is errors.exit_code_for
-
 
 def test_this_module_writes_no_number_of_its_own() -> None:
     """The claim "holds no table of its own", made mechanical.
@@ -116,9 +110,7 @@ def test_this_module_writes_no_number_of_its_own() -> None:
         f"exception-to-exit-code table is `ports/errors.py`'s, and this module consumes it"
     )
 
-
 # --- every class in the hierarchy ----------------------------------------------------------------
-
 
 def test_every_published_class_resolves_to_its_published_code() -> None:
     """The numbers, through the door `cli/` opens, on an instance and on the class alike."""
@@ -126,27 +118,22 @@ def test_every_published_class_resolves_to_its_published_code() -> None:
         assert exit_code_for(cls) == code, cls.__name__
         assert exit_status(cls("something happened")) == code, cls.__name__
 
-
 def test_the_published_list_covers_every_class_the_hierarchy_defines() -> None:
     """Exhaustiveness by walking: a branch added to `errors.py` cannot skip the list above."""
     listed = {cls for cls, _ in _PUBLISHED}
     missing = sorted(cls.__name__ for cls in _hierarchy() if cls not in listed)
     assert not missing, f"error classes with no published code asserted here: {missing}"
 
-
 def test_a_workflows_own_stop_subclass_resolves_to_seven_without_being_listed() -> None:
     """The MRO walk, from this side: 7 is how a script tells "needs you" from "broken"."""
     assert exit_status(ReviewNotConverging("two rounds and no convergence")) == 7
 
-
 # --- the one decision ----------------------------------------------------------------------------
-
 
 def test_an_exception_that_is_not_an_agl_error_is_our_bug() -> None:
     """The module's only decision. An adapter that failed to translate is what 70 reports."""
     assert exit_status(ValueError("something an adapter did not translate")) == 70
     assert exit_status(ValueError("x")) == exit_code_for(InternalError)
-
 
 def test_an_unmapped_branch_and_an_untranslated_exception_agree() -> None:
     """One meaning for 70, arrived at from both sides - an unmapped `AglError` and no `AglError`
@@ -157,9 +144,7 @@ def test_an_unmapped_branch_and_an_untranslated_exception_agree() -> None:
 
     assert exit_status(_UnmappedBranch("no code")) == exit_status(OSError("not ours to see"))
 
-
 # --- the group rule -----------------------------------------------------------------------------
-
 
 def test_a_single_leaf_group_is_worth_exactly_what_its_leaf_is_worth() -> None:
     """"Unwrap a single-exception group and map its leaf" - the parity, stated as one.
@@ -175,7 +160,6 @@ def test_a_single_leaf_group_is_worth_exactly_what_its_leaf_is_worth() -> None:
         alone
     )
 
-
 def test_leaves_agree_when_their_codes_agree_and_not_when_their_classes_do() -> None:
     """"Several leaves that agree" is about the resolved code, which is the only thing published.
 
@@ -188,7 +172,6 @@ def test_leaves_agree_when_their_codes_agree_and_not_when_their_classes_do() -> 
     unparseable = UpstreamUnexpected("it finished with no reporting-tool payload")
 
     assert exit_status(ExceptionGroup("two chunks", [unreachable, unparseable])) == 6
-
 
 def test_leaves_that_disagree_are_seventy_because_no_one_of_them_is_the_answer() -> None:
     """"For leaves that disagree, 70" - and 70 here is a decision, not a fallback.
@@ -203,7 +186,6 @@ def test_leaves_that_disagree_are_seventy_because_no_one_of_them_is_the_answer()
     assert exit_status(group) == 70
     assert exit_status(group) == exit_code_for(InternalError)
 
-
 def test_a_deliberate_stop_inside_a_group_is_still_seven() -> None:
     """The group rule's other half, and the half a `Stop` subclass reaches too.
 
@@ -214,7 +196,6 @@ def test_a_deliberate_stop_inside_a_group_is_still_seven() -> None:
     """
     assert exit_status(ExceptionGroup("one chunk", [Stop("nothing left to pick up")])) == 7
     assert exit_status(ExceptionGroup("one chunk", [ReviewNotConverging("no convergence")])) == 7
-
 
 def test_a_leaf_resolves_the_same_however_deeply_its_group_is_nested() -> None:
     """Groups nest because `TaskGroup`s do, so the rule is about leaves and not about children.
@@ -230,7 +211,6 @@ def test_a_leaf_resolves_the_same_however_deeply_its_group_is_nested() -> None:
 
     assert exit_status(deep) == exit_status(shallow) == exit_status(leaf)
 
-
 def test_a_leaf_nobody_translated_takes_part_in_agreement_like_any_other() -> None:
     """The module's one decision, reaching inside a group: an untranslated exception is our bug.
 
@@ -243,7 +223,6 @@ def test_a_leaf_nobody_translated_takes_part_in_agreement_like_any_other() -> No
     assert exit_status(ours) == 70
     assert exit_status(ExceptionGroup("one chunk", [OSError("not ours")])) == 70
     assert exit_status(ExceptionGroup("two chunks", [OSError("x"), InputError("y")])) == 70
-
 
 def test_leaves_hands_back_every_exception_a_group_holds_and_nothing_else() -> None:
     """The walk `cli/main.py` names all of them with, asserted by identity and in order.
@@ -261,7 +240,6 @@ def test_leaves_hands_back_every_exception_a_group_holds_and_nothing_else() -> N
     assert list(leaves(group)) == [first, second]
     assert list(leaves(first)) == [first]
 
-
 def test_a_group_carrying_a_keyboard_interrupt_is_not_this_modules_to_answer_for() -> None:
     """The Ctrl-C decision, inherited whole by the group rule rather than restated in it.
 
@@ -276,7 +254,6 @@ def test_a_group_carrying_a_keyboard_interrupt_is_not_this_modules_to_answer_for
 
     assert not isinstance(interrupted, Exception)
     assert isinstance(ordinary, ExceptionGroup)
-
 
 def test_a_keyboard_interrupt_is_not_this_modules_to_answer_for() -> None:
     """The decision, enforced by the annotation rather than by a sentence.

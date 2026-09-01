@@ -1,7 +1,5 @@
-
 from collections import deque
 from typing import Final
-
 from claude_agent_sdk import (
     AssistantMessage,
     ClaudeAgentOptions,
@@ -11,7 +9,6 @@ from claude_agent_sdk import (
     ToolUseBlock,
     query,
 )
-
 from agl.adapters.claude_code._tools import Caller
 from agl.adapters.claude_code.translate import activity, translated
 from agl.ports.agent import ActivityReporter, AgentOutcome, AgentTask, StopReason
@@ -39,9 +36,7 @@ _STOP_REASONS: Final[dict[str, StopReason | None]] = {
 
 _STDERR_LINES: Final = 50
 
-
 class Stderr:
-
     def __init__(self) -> None:
         self._lines: deque[str] = deque(maxlen=_STDERR_LINES)
 
@@ -50,7 +45,6 @@ class Stderr:
 
     def tail(self) -> str:
         return "\n".join(self._lines)
-
 
 async def outcome_of(
     task: AgentTask,
@@ -96,7 +90,6 @@ async def outcome_of(
         )
     return _answered(reported, said)
 
-
 def _read(
     message: AssistantMessage,
     task: AgentTask,
@@ -115,16 +108,13 @@ def _read(
             said = block.text
     return said
 
-
 def _limited(reported: ResultMessage | None, said: str) -> AgentOutcome | None:
     if reported is None or _stopped(reported) is not StopReason.LIMIT:
         return None
     return _answered(reported, said)
 
-
 def _answered(reported: ResultMessage, said: str) -> AgentOutcome:
     return AgentOutcome(stop_reason=_stopped(reported), text=reported.result or said)
-
 
 def _stopped(reported: ResultMessage) -> StopReason | None:
     for value, table in (

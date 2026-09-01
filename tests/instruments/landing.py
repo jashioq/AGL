@@ -65,7 +65,6 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
-
 from agl.adapters.claude_code import fake as claude_fake
 from agl.adapters.filesystem.store import FilesystemStore
 from agl.adapters.git.history import GitHistory
@@ -130,16 +129,13 @@ _CHILD_WORK: Final = "what the child built\n"
 _AFTER: Final = "notes/after.md"
 _AFTER_BODY: Final = "written by the parent's step after the landing\n"
 
-
 @dataclass(frozen=True)
 class Summary:
     """A reporting payload: one string, which is the whole of what these agents have to say."""
 
     text: str
 
-
 REPORT: Final = reporting_tool("report", "report what you did", Summary)
-
 
 @role(model=Claude.SONNET)
 def _role(name: str, instructions: str) -> Role[Summary]:
@@ -156,7 +152,6 @@ def _role(name: str, instructions: str) -> Role[Summary]:
         tools=(REPORT,),
     )
 
-
 PREPARE: Final = _role("prepare", "prepare the parent")
 COLLIDE: Final = _role("implement", "implement over the same file the parent touched")
 IMPLEMENT: Final = _role("implement", "implement the ticket")
@@ -171,9 +166,7 @@ _WRITES: Final[Mapping[str, Mapping[str, str]]] = {
     AFTERWARDS.instructions: {_AFTER: _AFTER_BODY},
 }
 
-
 # --- the configuration one child process is handed ------------------------------------------------
-
 
 @dataclass(frozen=True, slots=True)
 class Config:
@@ -253,16 +246,13 @@ class Config:
             tag=_text(data, "tag"),
         )
 
-
 def _text(data: Mapping[str, object], key: str) -> str:
     value = data[key]
     if not isinstance(value, str):
         raise SystemExit(f"landing: {key!r} is a string, not a {type(value).__name__}")
     return value
 
-
 # --- one process's run ----------------------------------------------------------------------------
-
 
 class _Driver:
     """The bundle, the `Run`, the log, and the kill.
@@ -399,9 +389,7 @@ class _Driver:
         finally:
             leases.release_all()
 
-
 # --- the programmes -------------------------------------------------------------------------------
-
 
 async def _conflict(driver: _Driver, run: Run[None]) -> None:
     """A child whose work will not combine with its parent's, and a decision about it.
@@ -429,7 +417,6 @@ async def _conflict(driver: _Driver, run: Run[None]) -> None:
         await outcome.abort()
         driver.report("settled", outcome)
 
-
 async def _clean(driver: _Driver, run: Run[None]) -> None:
     """A child that lands, and a parent step after it - the replay question in its smallest shape.
 
@@ -448,27 +435,22 @@ async def _clean(driver: _Driver, run: Run[None]) -> None:
     driver.kill("integrated")
     await run.step(AFTERWARDS, commit="record what landed")
 
-
 PROGRAMMES: Final[Mapping[str, Callable[[_Driver, Run[None]], Awaitable[None]]]] = {
     "conflict": _conflict,
     "clean": _clean,
 }
 
-
 # --- the entry point ------------------------------------------------------------------------------
-
 
 def driver_path() -> Path:
     """This file, absolutely - what the parent hands `sys.executable` to start a child."""
     return Path(__file__).resolve()
-
 
 async def _drive(config: Config) -> None:
     programme = PROGRAMMES.get(config.programme)
     if programme is None:
         raise SystemExit(f"landing: no programme named {config.programme!r}")
     await _Driver(config).run(programme)
-
 
 def main(argv: Sequence[str]) -> int:
     """Run one programme, map whatever it raised to an exit status, and leave the markers behind.
@@ -500,7 +482,6 @@ def main(argv: Sequence[str]) -> int:
     marker("finally")
     return 0
 
-
 def _marker(config: Config) -> Callable[[str], None]:
     """A one-argument writer for the two end-of-process markers, bound to this run's log."""
 
@@ -509,7 +490,6 @@ def _marker(config: Config) -> Callable[[str], None]:
 
     return _write
 
-
 def _record(config: Config, record: Mapping[str, object]) -> None:
     """One line on the log from outside a `_Driver` - the two markers and the mapped exit status."""
     line = json.dumps({"tag": config.tag, **record}, sort_keys=True)
@@ -517,7 +497,6 @@ def _record(config: Config, record: Mapping[str, object]) -> None:
         handle.write(line + "\n")
         handle.flush()
         os.fsync(handle.fileno())
-
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv))

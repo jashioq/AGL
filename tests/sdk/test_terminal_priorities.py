@@ -112,10 +112,8 @@ from dataclasses import dataclass
 from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Final
-
 import pytest
 from rich.console import Console
-
 from agl import api
 from agl.adapters.claude_code.fake import Conversation, Script
 from agl.adapters.rich_terminal.terminal import RichTerminal
@@ -199,14 +197,11 @@ before the step could have reached its worker would pass against exactly the bui
 catch. `tests/sdk/test_run_integrate.py` spends the same second for the same reason one layer
 down."""
 
-
 @dataclass(frozen=True)
 class NoParams:
     """A workflow that takes nothing, and still has a params class to derive no flags from."""
 
-
 # --- the rendezvous, and what the workflows hand back ---------------------------------------------
-
 
 @dataclass(frozen=True)
 class _Scene:
@@ -230,7 +225,6 @@ class _Scene:
     about the frame that comes back when the queues drain has to be read while the run is still
     alive, which is also when a person would be reading it."""
 
-
 _STAGED: Final[list[_Scene]] = []
 """Where a test leaves the `_Scene` its workflow will pick up. Module level because the workflows
 have to be: `EntryPoint.load` imports a module and reads an attribute in it, and sees no local."""
@@ -250,7 +244,6 @@ class Question:
 
     options: tuple[str, ...] = ()
 
-
 @dataclass(frozen=True, slots=True)
 class _Asked:
     """The payload of the asking tool the workflow below supplies. A question, and what it offers.
@@ -264,7 +257,6 @@ class _Asked:
     question: str = describe("What you are asking, in full.")
 
     options: tuple[str, ...] = describe("The answers you are suggesting.", default=())
-
 
 ASK: Final = "ask_the_operator"
 """The asking tool's name, which is the workflow's own and which AGL has never heard of."""
@@ -297,13 +289,11 @@ One entry, holding `0`, is what makes "the slot was written while a question was
 than a hope: a question is displayed for as long as one is queued, so a write made with nothing
 answered is a write made behind a screen the board was not on."""
 
-
 # --- the views a workflow shows ------------------------------------------------------------------
 
 # Built out of `agl.sdk.terminal`, which is the front door for exactly this: a workflow
 # author writing a view never reaches into `agl.ports`. Every name it re-exports is the object
 # `ports/terminal.py` defines, so this is a spelling and not a second set of classes.
-
 
 def board(lines: Mapping[str, str]) -> Screen:
     """The board: one row per thing the run is doing, over a mapping the workflow keeps.
@@ -321,7 +311,6 @@ def board(lines: Mapping[str, str]) -> Screen:
     """
     return Screen(Rows([Row(name, state) for name, state in lines.items()]))
 
-
 def choose(question: Question) -> Screen[str]:
     """The screen an agent's question becomes: what it asked, and the answers it offered.
 
@@ -333,7 +322,6 @@ def choose(question: Question) -> Screen[str]:
         body=Text(question.prompt),
         responses=[Choice(option, value=option) for option in question.options],
     )
-
 
 TRY_AGAIN: Final = "Try again"
 GIVE_UP: Final = "Give up on this landing"
@@ -347,7 +335,6 @@ because they are what a test types, and a digit typed inline would be the one pl
 with an implementation detail by coincidence."""
 
 _SETTLED: Final = "this landing has already been decided"
-
 
 def conflict(outcome: Integration) -> Screen[bool]:
     """The conflict view, in the workflow's own words and out of the outcome's own summary.
@@ -378,9 +365,7 @@ def conflict(outcome: Integration) -> Screen[bool]:
         responses=[Choice(TRY_AGAIN, value=True), Choice(GIVE_UP, value=False)],
     )
 
-
 # --- the agents, and what each of them is for -----------------------------------------------------
-
 
 @role(model=Claude.SONNET)
 def _role(name: str, instructions: str) -> Role[None]:
@@ -390,7 +375,6 @@ def _role(name: str, instructions: str) -> Role[None]:
     steps are for is the files they leave, the lock they hold and the questions they ask.
     """
     return Role(name=name, instructions=instructions)
-
 
 @role(model=Claude.SONNET)
 def _asking(instructions: str, ask: Tool) -> Role[None]:
@@ -403,7 +387,6 @@ def _asking(instructions: str, ask: Tool) -> Role[None]:
     nothing here restates.
     """
     return Role(name="ask", instructions=instructions, tools=(ask,))
-
 
 PREPARE: Final = _role("prepare", "prepare the parent")
 COLLIDE: Final = _role("implement", "implement T-03, over the same file the parent touched")
@@ -440,7 +423,6 @@ _WRITES: Final[Mapping[str, Mapping[str, bytes]]] = {
 asking roles write nothing: their steps take no `commit=`, so anything they left would be wiped on
 the way out anyway, and what they are here for is the question."""
 
-
 class _Agent:
     """What the fake was dispatched, what it was told, and one reading taken at a moment.
 
@@ -460,7 +442,6 @@ class _Agent:
         """How many questions had been answered at the instant the parent's own step reached its
         agent - the whole claim of the preemption test, taken **inside** the dispatch rather than
         checked afterwards, so that no scheduling between the two moments can make it true."""
-
 
 def _agent(record: _Agent) -> Script:
     """One agent for every role here: ask if this role asks, write what it writes, and stop.
@@ -492,9 +473,7 @@ def _agent(record: _Agent) -> Script:
 
     return _script
 
-
 # --- the workflows, reached through hand-constructed entry points ---------------------------------
-
 
 @workflow(version="1")
 async def deciding(run: Run[NoParams]) -> None:
@@ -553,7 +532,6 @@ async def deciding(run: Run[NoParams]) -> None:
             await outcome.retry()
         else:
             await outcome.abort()
-
 
 @workflow(version="1")
 async def contested(run: Run[NoParams]) -> None:
@@ -618,23 +596,18 @@ async def contested(run: Run[NoParams]) -> None:
     await questions
     await scene.finish.wait()
 
-
 def _point(name: str) -> EntryPoint:
     """The `probe = "agl.workflows.probe:probe"` entry point, pointed at this module."""
     return EntryPoint(name=name, value=f"{__name__}:{name}", group=registry.GROUP)
 
-
 POINTS: Final = tuple(_point(name) for name in ("deciding", "contested"))
 
-
 # --- the bundle, the terminal, and the place on disk ----------------------------------------------
-
 
 @pytest.fixture
 def keys() -> Typing:
     """The person, played by the suite: a real `Keys` a test types digits into."""
     return Typing()
-
 
 @pytest.fixture
 def terminal(keys: Typing) -> RichTerminal:
@@ -643,19 +616,16 @@ def terminal(keys: Typing) -> RichTerminal:
     about the machine, though nothing here reads a rendered one."""
     return RichTerminal(Console(file=io.StringIO(), width=100), keys)
 
-
 def _harness(tmp_path: Path, record: _Agent) -> container.FakeServices:
     """The all-fakes bundle: no network, no git, no process, one repository behind all three."""
     return container.fakes(
         TreesRoot(tmp_path / "trees"), files={SEEDED: SEED}, claude=_agent(record)
     )
 
-
 async def _base(harness: container.FakeServices) -> str:
     """The pinned commit a run is cut from - `RunSpec.base_sha`'s shape, through the port."""
     history = harness.services.history
     return await history.resolve(await history.default_ref())
-
 
 async def _head(harness: container.FakeServices, namespace: Namespace | None) -> str:
     """Where one checkout's line of work is now, asked through the port rather than of a dict.
@@ -666,16 +636,13 @@ async def _head(harness: container.FakeServices, namespace: Namespace | None) ->
     workspace = await harness.services.workspaces.open(LABEL, namespace, await _base(harness))
     return await workspace.head()
 
-
 # The path below is spelled out rather than composed through `tree_layout`, for the reason
 # `test_run_worktree.py` gives: a test that asked the layout where a checkout should be and then
 # looked there would agree with the layout whatever either of them said.
 
-
 def _target_dir(tmp_path: Path) -> Path:
     """`.trees/auth/_base/` - the run's own checkout, which is what children land into."""
     return tmp_path / "trees" / "auth" / "_base"
-
 
 @pytest.fixture(autouse=True)
 def _nothing_carried_over() -> None:
@@ -688,16 +655,13 @@ def _nothing_carried_over() -> None:
     for record in (asked, answered, decided, boards, under, _STAGED):
         record.clear()
 
-
 def _staged() -> _Scene:
     """A fresh rendezvous, left where the workflow will pick it up."""
     scene = _Scene(proceed=asyncio.Event(), finish=asyncio.Event())
     _STAGED.append(scene)
     return scene
 
-
 # --- reading what is on screen --------------------------------------------------------------------
-
 
 def _text(screen: Screen[object] | None) -> str | None:
     """The body of a screen whose body is one `Text` - a question's prompt, or a conflict's summary.
@@ -710,13 +674,11 @@ def _text(screen: Screen[object] | None) -> str | None:
         return None
     return screen.body.value
 
-
 def _rows(screen: Screen[object] | None) -> tuple[str, ...]:
     """Every cell of a `Rows` body, flattened, in the order the view laid them out."""
     if screen is None or not isinstance(screen.body, Rows):
         return ()
     return tuple(cell.value for row in screen.body.rows for cell in row.cells)
-
 
 async def _until(terminal: RichTerminal, ready: Callable[[], bool], what: str) -> None:
     """Wait for `ready`, and say what was still waiting if it never comes.
@@ -739,9 +701,7 @@ async def _until(terminal: RichTerminal, ready: Callable[[], bool], what: str) -
         f"answered. There are no timeouts anywhere, so this is a wait that would never end"
     )
 
-
 # --- the conflict loop, both branches -------------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_a_person_who_resolves_the_collision_and_retries_lands_the_work(
@@ -813,7 +773,6 @@ async def test_a_person_who_resolves_the_collision_and_retries_lands_the_work(
         "what landed was the resolution alone"
     )
 
-
 @pytest.mark.asyncio
 async def test_a_person_who_gives_up_at_the_conflict_screen_puts_the_target_back(
     tmp_path: Path, terminal: RichTerminal, keys: Typing
@@ -880,9 +839,7 @@ async def test_a_person_who_gives_up_at_the_conflict_screen_puts_the_target_back
         "that only moved the branch leaves the next step reading half of somebody's landing"
     )
 
-
 # --- preemption, and the merge queue that does not stall ------------------------------------------
-
 
 async def _reached_the_conflict(terminal: RichTerminal, keys: Typing, scene: _Scene) -> None:
     """Drive `contested` to the moment described: a conflict on screen, two questions behind.
@@ -917,7 +874,6 @@ async def _reached_the_conflict(terminal: RichTerminal, keys: Typing, scene: _Sc
         lambda: _text(terminal.written) == summary,
         "the conflict to take the screen from the question that was on it",
     )
-
 
 @pytest.mark.asyncio
 async def test_a_conflict_preempts_two_agent_questions_and_the_parents_step_goes_on(
@@ -1029,7 +985,6 @@ async def test_a_conflict_preempts_two_agent_questions_and_the_parents_step_goes
         f"a run that never got past them - the round trip itself is elsewhere, not re-proved here"
     )
 
-
 @pytest.mark.asyncio
 async def test_pending_is_the_specified_map_with_the_conflict_displayed(
     tmp_path: Path, terminal: RichTerminal, keys: Typing
@@ -1081,9 +1036,7 @@ async def test_pending_is_the_specified_map_with_the_conflict_displayed(
         scene.finish.set()
         await running
 
-
 # --- the board that comes back, and what it says when it does -------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_the_board_that_comes_back_shows_what_changed_while_it_was_off_screen(

@@ -18,14 +18,11 @@ only way it could have been, and the test below is what keeps it found.
 
 import json
 from dataclasses import FrozenInstanceError
-
 import pytest
-
 from agl.ports.agent import StopReason
 from agl.ports.errors import InputError
 from agl.ports.run import JsonValue
 from agl.sdk.testing import Call, Reply
-
 
 def test_a_call_with_no_tool_name_is_refused_where_it_is_written() -> None:
     """`InputError` at declaration time, which is `arg()`'s register and `reporting_tool()`'s.
@@ -35,7 +32,6 @@ def test_a_call_with_no_tool_name_is_refused_where_it_is_written() -> None:
     """
     with pytest.raises(InputError, match="names nothing a session could route"):
         Call("")
-
 
 def test_a_calls_payload_is_copied_off_the_dict_it_was_handed() -> None:
     """`ports/store.py`'s rule about any mapping a caller hands over, at the other end of the run.
@@ -50,7 +46,6 @@ def test_a_calls_payload_is_copied_off_the_dict_it_was_handed() -> None:
     assert first.payload == {"summary": "the first thing"}
     assert first.payload is not building
 
-
 def test_a_calls_payload_is_json_serialisable_and_not_a_mapping_proxy() -> None:
     """The trap the module docstring names, pinned rather than left to be re-found.
 
@@ -61,13 +56,11 @@ def test_a_calls_payload_is_json_serialisable_and_not_a_mapping_proxy() -> None:
     """
     assert json.dumps(Call("report", {"summary": "clean", "high": 0}).payload, allow_nan=False)
 
-
 def test_a_call_is_frozen_once_it_is_built() -> None:
     """A `Reply` is routinely a module-level constant shared by every task a test dispatches, so a
     call one of them could edit would be a call edited for all of them - `Role`'s own reason."""
     with pytest.raises(FrozenInstanceError):
         Call("report").tool = "something else"  # type: ignore[misc]
-
 
 def test_a_reply_normalises_every_sequence_to_a_tuple() -> None:
     """A list the author goes on appending to must not change what an agent already did.
@@ -86,7 +79,6 @@ def test_a_reply_normalises_every_sequence_to_a_tuple() -> None:
 
     assert reply.calls == (Call("report"),)
     assert reply.activity == ("Edit: src/a.py",)
-
 
 def test_an_empty_reply_is_an_agent_that_reported_nothing_and_completed() -> None:
     """`Reply()` is the shape a test about a reporting step whose agent never reported writes.

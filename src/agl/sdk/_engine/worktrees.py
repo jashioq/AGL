@@ -1,16 +1,12 @@
-
 from collections.abc import Callable
 from dataclasses import dataclass
-
 from agl.ports.errors import ConflictError
 from agl.ports.home_layout import RunScope
 from agl.ports.ids import Namespace
 
 __all__ = ["Worktrees"]
 
-
 class Worktrees[R]:
-
     def __init__(self) -> None:
         self._taken: dict[str, _Taken[R]] = {}
 
@@ -28,16 +24,13 @@ class Worktrees[R]:
         self._taken[key] = _Taken(wanted, scope, child)
         return child
 
-
 @dataclass(frozen=True, slots=True)
 class _Taken[R]:
-
     namespace: Namespace
 
     scope: RunScope
 
     child: R
-
 
 def _collision(namespace: Namespace, scope: RunScope, held: Namespace, holder: RunScope) -> str:
     return (
@@ -48,7 +41,6 @@ def _collision(namespace: Namespace, scope: RunScope, held: Namespace, holder: R
         f"and whichever opened second would be handed the other's working tree. Nothing was "
         f"changed: pick another name"
     )
-
 
 def _where(scope: RunScope) -> str:
     if not scope.namespaces:

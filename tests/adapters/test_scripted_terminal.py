@@ -49,9 +49,7 @@ files of one name under different directories would collide at import.
 import asyncio
 from pathlib import Path
 from typing import Final
-
 import pytest
-
 from agl import testing
 from agl.adapters.rich_terminal.scripted import Press, ScriptedTerminal
 from agl.ports.errors import UpstreamUnavailable
@@ -100,12 +98,10 @@ AGENT: Final = 5
 """The agent-question priority. One integer, never a vocabulary: the port refuses named levels
 and so does this file."""
 
-
 def dashboard(line: str) -> Screen:
     """A passive screen with one line on it. `Screen` and not `Screen[None]`, which is the spelling
     a workflow author uses and the one PEP 696's default exists for."""
     return Screen(line)
-
 
 def question(label: str) -> Screen[str]:
     """An approval screen: a body to read, a choice to pick and a field to type into.
@@ -122,7 +118,6 @@ def question(label: str) -> Screen[str]:
             TextInput("Say more", maps=lambda typed: f"{label}: {typed}"),
         ],
     )
-
 
 class Gestures(TerminalDriver):
     """The person, played by the suite: two members over the terminal's own two.
@@ -145,7 +140,6 @@ class Gestures(TerminalDriver):
         awaits, because appending a press and spending it is the whole of what a gesture costs."""
         self._terminal.respond(response, typed)
 
-
 @pytest.fixture
 def terminal() -> ScriptedTerminal:
     """The terminal the module-level tests drive, with an **empty** script, built and not entered.
@@ -158,7 +152,6 @@ def terminal() -> ScriptedTerminal:
     the ABC deliberately does not have.
     """
     return ScriptedTerminal()
-
 
 class TestScriptedTerminal(TerminalContract):
     """The input-capable half of the port in full, and nothing added.
@@ -183,7 +176,6 @@ class TestScriptedTerminal(TerminalContract):
     def driver(self, terminal: ScriptedTerminal) -> TerminalDriver:
         """The person, over that same terminal."""
         return Gestures(terminal)
-
 
 async def test_a_script_is_spent_in_order_and_a_bare_int_is_the_press_at_that_position() -> None:
     """The two things about a list of gestures that no driver can show: the order, and the coercion.
@@ -234,7 +226,6 @@ async def test_a_script_is_spent_in_order_and_a_bare_int_is_the_press_at_that_po
             f"the script still holds {term.remaining!r} after both of its gestures were spent"
         )
 
-
 async def test_a_question_with_nothing_left_in_the_script_waits_instead_of_failing(
     terminal: ScriptedTerminal,
 ) -> None:
@@ -275,7 +266,6 @@ async def test_a_question_with_nothing_left_in_the_script_waits_instead_of_faili
             "is the whole of what waiting is for"
         )
 
-
 async def test_a_gesture_that_arrives_before_the_question_waits_in_the_script_for_it(
     terminal: ScriptedTerminal,
 ) -> None:
@@ -309,7 +299,6 @@ async def test_a_gesture_that_arrives_before_the_question_waits_in_the_script_fo
             f"it - which is the same line that spends a scripted one"
         )
         assert not term.remaining, "the waiting gesture was spent, so nothing is left of it"
-
 
 async def test_the_board_is_readable_behind_a_question_and_keeps_being_written_while_it_is_up(
     terminal: ScriptedTerminal,
@@ -356,7 +345,6 @@ async def test_the_board_is_readable_behind_a_question_and_keeps_being_written_w
             "would need a re-show nobody can know to make"
         )
 
-
 async def test_a_script_the_run_never_spent_is_still_there_when_the_terminal_has_closed() -> None:
     """The assertion that catches the direction a hang does not: gestures the run never asked for.
 
@@ -378,7 +366,6 @@ async def test_a_script_the_run_never_spent_is_still_there_when_the_terminal_has
         f"{term.remaining!r}. Closing is not somebody un-writing the test: the gesture the run "
         f"never asked for is the finding, and it is the only trace of a screen that was never shown"
     )
-
 
 async def test_leaving_with_a_question_still_waiting_fails_it_rather_than_leaving_it_blocked(
     terminal: ScriptedTerminal,
@@ -402,7 +389,6 @@ async def test_leaving_with_a_question_still_waiting_fails_it_rather_than_leavin
 
     with pytest.raises(UpstreamUnavailable):
         await asyncio.wait_for(asked, DEADLINE)
-
 
 async def test_the_spelling_a_workflow_author_writes_reaches_this_class_and_the_bundle(
     tmp_path: Path,
@@ -440,7 +426,6 @@ async def test_the_spelling_a_workflow_author_writes_reaches_this_class_and_the_
         "apart is one where a test reads the terminal the run did not use"
     )
 
-
 def _body(screen: Screen[object] | None) -> Text | None:
     """The body of a screen a read-back reported, or `None` if it reported nothing.
 
@@ -450,11 +435,9 @@ def _body(screen: Screen[object] | None) -> Text | None:
     """
     return None if screen is None else _text(screen.body)
 
-
 def _text(body: object) -> Text | None:
     """The body as a `Text`, or `None` for a component that is not one. Every view here has one."""
     return body if isinstance(body, Text) else None
-
 
 async def _displaying(term: ScriptedTerminal, want: str) -> None:
     """Wait until `want` is the body of what a person would see, or fail saying what is.

@@ -50,11 +50,8 @@ Codex is protected by having no credential and not by where it would send one.
 """
 
 from collections.abc import Iterator
-
 import pytest
-
 from instruments.loopback import DUMMY_KEY, REPLY, Loopback
-
 
 @pytest.fixture(scope="session", autouse=True)
 def loopback(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Loopback]:
@@ -88,7 +85,6 @@ def loopback(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Loopback]:
         environment.setenv("ANTHROPIC_API_KEY", DUMMY_KEY)
         environment.setenv("CODEX_HOME", str(tmp_path_factory.mktemp("codex-home-no-credential")))
         yield endpoint
-
 
 @pytest.fixture(autouse=True)
 def _one_test_at_a_time(loopback: Loopback) -> Iterator[None]:

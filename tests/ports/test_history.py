@@ -13,12 +13,9 @@ a modification carrying one means whoever assembled it filled in a field they ha
 """
 
 from dataclasses import FrozenInstanceError, fields
-
 import pytest
-
 from agl.ports.errors import InternalError
 from agl.ports.history import ChangeKind, FileChange
-
 
 def test_the_change_kinds_are_the_strings_a_stored_result_holds() -> None:
     """Pinned by hand. The absent fifth member is the design, so it is asserted and not assumed."""
@@ -30,13 +27,11 @@ def test_the_change_kinds_are_the_strings_a_stored_result_holds() -> None:
     }
     assert not hasattr(ChangeKind, "UNMERGED"), "an unresolved conflict is a Conflict, elsewhere"
 
-
 def test_a_change_that_is_not_a_rename_need_not_say_where_the_file_was() -> None:
     """Three of the four kinds have no previous path, which is what the default is for."""
     change = FileChange(path="src/agl/ports/history.py", kind=ChangeKind.MODIFIED)
     assert change.previous_path is None
     assert [field.name for field in fields(FileChange)] == ["path", "kind", "previous_path"]
-
 
 def test_a_rename_carries_both_of_its_names() -> None:
     """Repository-relative, forward slashes, and the two names are the whole of a rename."""
@@ -48,7 +43,6 @@ def test_a_rename_carries_both_of_its_names() -> None:
     change = FileChange(**renamed)  # type: ignore[arg-type]
     assert change.previous_path == "src/agl/ports/the_old_name.py"
     assert change == FileChange(**renamed)  # type: ignore[arg-type]
-
 
 @pytest.mark.parametrize(
     "change",
@@ -73,7 +67,6 @@ def test_a_change_that_does_not_read_as_one_is_refused(change: dict[str, object]
     """`InternalError`, not `InputError`: an adapter assembled this out of what it read."""
     with pytest.raises(InternalError):
         FileChange(**change)  # type: ignore[arg-type]
-
 
 def test_a_change_is_frozen() -> None:
     """A value: checked once on the way in, and not editable afterwards."""

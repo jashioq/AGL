@@ -83,7 +83,6 @@ import ast
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Final
-
 from agl.adapters import filesystem as filesystem_package
 
 # The closed set: every name that means "something here waits for something else there". Grouped by
@@ -132,7 +131,6 @@ LOCK_MODULES: Final = frozenset({"filelock"})
 # so an ordinary edit never moves it, and a scan that stopped parsing cannot clear it.
 MODULES_TODAY: Final = 4
 NODES_TODAY: Final = 400
-
 
 def test_no_module_in_the_filesystem_package_names_a_synchronisation_primitive() -> None:
     """The package's own source, parsed, with every name it spells read against the closed set.
@@ -186,7 +184,6 @@ def test_no_module_in_the_filesystem_package_names_a_synchronisation_primitive()
         f"held 1,555 when this was written. {NODES_TODAY} is a floor rather than a measurement, so "
         f"reaching it means something stopped parsing rather than that somebody wrote less code"
     )
-
 
 def _spelled(node: ast.AST) -> Iterator[tuple[int, str]]:
     """Every name one node spells, with the line it spells it on, as the closed set writes them.

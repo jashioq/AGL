@@ -1,9 +1,7 @@
-
 from agl.sdk import Capability, Claude, OpenAI, Restriction, Role, Tool, prompt_file, role
 from agl.workflows.fix.findings import Findings, report_findings
 
 __all__ = ["implementer", "reviewer"]
-
 
 @role(model=Claude.OPUS)
 def implementer(*, ask: Tool | None = None) -> Role:
@@ -14,7 +12,6 @@ def implementer(*, ask: Tool | None = None) -> Role:
         tools=() if ask is None else (ask,),
         requires={Capability.FILE_EDIT, Capability.SHELL},
     )
-
 
 @role(model=OpenAI.SOL)
 def reviewer() -> Role[Findings]:

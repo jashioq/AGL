@@ -27,9 +27,7 @@ this one, and the `provider` and `base` fixtures these tests take are declared t
 """
 
 import pytest
-
 from agl.ports.workspace import WorkspaceProvider
-
 from ._workspace_files import (
     ALPHA,
     AWKWARD_MESSAGE,
@@ -48,7 +46,6 @@ from ._workspace_files import (
     record,
     write,
 )
-
 
 class WorkspaceStepContract:
     """`path`, `branch`, `head`, `commit_all`, `restore` - one checkout and what is done to it.

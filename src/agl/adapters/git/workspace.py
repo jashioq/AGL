@@ -1,8 +1,6 @@
-
 from contextlib import AbstractAsyncContextManager
 from pathlib import Path
 from typing import Final
-
 from agl.adapters.git._runner import GitRunner, unreadable
 from agl.adapters.git._trees import (
     _Place,
@@ -20,7 +18,6 @@ from agl.ports.workspace import Workspace, WorkspaceProvider
 
 __all__ = ["GitWorkspaceProvider"]
 
-
 _ASKING: Final = 30.0
 
 # git's worktree registry in the `-z` form (git 2.36): every attribute ends in a NUL and an empty
@@ -33,9 +30,7 @@ _REGISTERED_ON: Final = "branch "
 # repository holding both answers about the tag.
 _BRANCH_REF: Final = "refs/heads/"
 
-
 class GitWorkspaceProvider(WorkspaceProvider):
-
     def __init__(self, repository: Path, trees: TreesRoot) -> None:
         self._git = GitRunner(repository)
         self._trees = trees
@@ -122,9 +117,7 @@ class GitWorkspaceProvider(WorkspaceProvider):
             timeout=_ASKING,
         )
 
-
 class _GitWorkspace(Workspace):
-
     def __init__(self, place: _Place, git: GitRunner) -> None:
         self._at = place
         self._git = git
@@ -172,10 +165,8 @@ class _GitWorkspace(Workspace):
         )
         await self._git.run("clean", "-ffd", cwd=self.path, refusal=UpstreamUnexpected)
 
-
 def _short(ref: str) -> str:
     return ref[len(_BRANCH_REF) :] if ref.startswith(_BRANCH_REF) else ref
-
 
 def _one(answer: str, what: str) -> str:
     stripped = answer.strip()

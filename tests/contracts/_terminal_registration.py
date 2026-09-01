@@ -38,11 +38,8 @@ one, and the `terminal` and `driver` fixtures these tests take are declared ther
 """
 
 from typing import Final
-
 import pytest
-
 from agl.ports.terminal import Row, Rows, Terminal, Text
-
 from ._terminal_driver import (
     Asking,
     TerminalDriver,
@@ -76,7 +73,6 @@ _GROWN_RESPONSE: Final = 1
 # What a ticket with no run behind it yet shows in its activity cell. `Text`'s own docstring calls
 # an empty label ordinary, and a ticket board writes exactly this.
 _NOTHING_YET: Final = ""
-
 
 class TerminalRegistrationContract:
     """A registration, its frames, two of them at once, and two arguments that move underneath.

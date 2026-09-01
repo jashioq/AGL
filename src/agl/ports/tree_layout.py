@@ -1,8 +1,6 @@
-
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
-
 from agl.ports.errors import InputError, InternalError
 from agl.ports.ids import Namespace, RunLabel
 
@@ -15,7 +13,6 @@ __all__ = [
     "worktree_dir",
 ]
 
-
 _BASE_DIRNAME: Final = "_base"
 # Refs are files under `refs/heads/`, so `agl/<label>` and `agl/<label>/<name>` cannot both exist -
 # one would have to be a file and a directory at once - in either creation order. The infix is what
@@ -24,10 +21,8 @@ _WORK_INFIX: Final = "_work"
 _BRANCH_PREFIX: Final = "agl"
 _BRANCH_SEPARATOR: Final = "/"
 
-
 @dataclass(frozen=True, slots=True)
 class TreesRoot:
-
     path: Path
 
     def __post_init__(self) -> None:
@@ -36,7 +31,6 @@ class TreesRoot:
                 f"trees root {str(self.path)!r} cannot be used: it is a relative path, and a "
                 f"relative root resolves against the current working directory"
             )
-
 
 def run_trees_dir(trees: TreesRoot, label: RunLabel) -> Path:
     """Every working checkout belonging to one run, and nothing else.
@@ -47,7 +41,6 @@ def run_trees_dir(trees: TreesRoot, label: RunLabel) -> Path:
     """
     return _root(trees) / str(label)
 
-
 def base_worktree(trees: TreesRoot, label: RunLabel) -> Path:
     """The run's own checkout, which is what a run's children are cut from.
 
@@ -56,7 +49,6 @@ def base_worktree(trees: TreesRoot, label: RunLabel) -> Path:
     :return: `<trees>/<label>/_base/`, on the branch `run_branch` composes
     """
     return run_trees_dir(trees, label) / _BASE_DIRNAME
-
 
 def worktree_dir(trees: TreesRoot, label: RunLabel, namespace: Namespace) -> Path:
     """One child checkout, a sibling of the run's own and of every other child.
@@ -68,7 +60,6 @@ def worktree_dir(trees: TreesRoot, label: RunLabel, namespace: Namespace) -> Pat
     """
     return run_trees_dir(trees, label) / str(namespace)
 
-
 def run_branch(label: RunLabel) -> str:
     """The branch the run's own checkout is on - the deliverable, and what a user pushes.
 
@@ -76,7 +67,6 @@ def run_branch(label: RunLabel) -> str:
     :return: `agl/<label>`
     """
     return f"{_BRANCH_PREFIX}{_BRANCH_SEPARATOR}{label}"
-
 
 def worktree_branch(label: RunLabel, namespace: Namespace) -> str:
     """A child checkout's branch, cut from the run's own and kept clear of its name.
@@ -87,7 +77,6 @@ def worktree_branch(label: RunLabel, namespace: Namespace) -> str:
     """
     parts = (_BRANCH_PREFIX, _WORK_INFIX, str(label), str(namespace))
     return _BRANCH_SEPARATOR.join(parts)
-
 
 def _root(trees: TreesRoot) -> Path:
     if not isinstance(trees, TreesRoot):

@@ -17,9 +17,7 @@ from dataclasses import fields
 from pathlib import Path
 from textwrap import dedent
 from typing import Final
-
 import pytest
-
 from agl.config.schema import AgentSettings
 from agl.config.sources import DEFAULT_BUILD_TIMEOUT
 from agl.config.toml_file import (
@@ -41,25 +39,20 @@ from agl.ports.tree_layout import TreesRoot
 
 _SILENT: Final = FileAgent(enabled=None, cli_path=None)
 
-
 def _write(path: Path, text: str) -> Path:
     """A file with its parents, dedented so the cases below can be written as they look on disk."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(dedent(text).lstrip(), encoding="utf-8")
     return path
 
-
 def _home(tmp_path: Path) -> AglHome:
     return AglHome(tmp_path.resolve() / "agl-home")
-
 
 def _settings_file(home: AglHome, text: str) -> Path:
     return _write(home.path / "config.toml", text)
 
-
 def _project_file(home: AglHome, name: str, text: str) -> Path:
     return _write(project_config(home, ProjectName(name)), text)
-
 
 def _repo(tmp_path: Path, name: str, *, marker: str = "dir") -> Path:
     """A directory that looks like a working tree. `.git` is a directory or a file, as git does."""
@@ -70,7 +63,6 @@ def _repo(tmp_path: Path, name: str, *, marker: str = "dir") -> Path:
     else:
         (root / ".git").write_text("gitdir: /elsewhere/.git/worktrees/w\n", encoding="utf-8")
     return root
-
 
 def _beside(tmp_path: Path) -> tuple[Path, TreesRoot]:
     """A repository and a trees root laid out the way `agl init` lays them out: siblings.
@@ -83,9 +75,7 @@ def _beside(tmp_path: Path) -> tuple[Path, TreesRoot]:
     dev = tmp_path.resolve() / "dev"
     return dev / "myapp", TreesRoot(dev / ".agl-trees" / "myapp")
 
-
 # --- The global settings file -----------------------------------------------------------------
-
 
 def test_the_global_file_round_trips_a_nested_section_per_connector(tmp_path: Path) -> None:
     """Per-connector nesting: `[agent.<connector>]`, which a flat file could not express."""
@@ -107,11 +97,9 @@ def test_the_global_file_round_trips_a_nested_section_per_connector(tmp_path: Pa
         openai=FileAgent(enabled=False, cli_path=Path("/opt/homebrew/bin/harness")),
     )
 
-
 def test_a_missing_global_file_is_silence_and_not_a_refusal(tmp_path: Path) -> None:
     """The ordinary case: an operator who configured nothing has a working installation."""
     assert read_settings(_home(tmp_path)) == FileSettings(claude=_SILENT, openai=_SILENT)
-
 
 def test_a_section_the_file_omits_says_nothing_rather_than_saying_off(tmp_path: Path) -> None:
     """`None` is silence. Deciding what it means is `sources.py`'s job, and it needs to see it."""
@@ -121,12 +109,10 @@ def test_a_section_the_file_omits_says_nothing_rather_than_saying_off(tmp_path: 
     assert settings.claude == FileAgent(enabled=True, cli_path=None)
     assert settings.openai == _SILENT
 
-
 def test_an_empty_section_and_an_absent_one_are_the_same_answer(tmp_path: Path) -> None:
     home = _home(tmp_path)
     _settings_file(home, "[agent.claude]\n")
     assert read_settings(home) == read_settings(_home(tmp_path / "elsewhere"))
-
 
 def test_the_file_names_its_sections_exactly_as_the_settings_object_names_its_fields() -> None:
     """The one mapping that must not drift: `[agent.<x>]` fills `AgentSettings.<x>`.
@@ -141,7 +127,6 @@ def test_the_file_names_its_sections_exactly_as_the_settings_object_names_its_fi
         field.name for field in fields(AgentSettings)
     )
 
-
 def test_agl_home_is_refused_as_a_key_in_the_file_that_lives_inside_it(tmp_path: Path) -> None:
     """It could only be read once home was resolved - hence three precedence layers, not four."""
     home = _home(tmp_path)
@@ -151,9 +136,7 @@ def test_agl_home_is_refused_as_a_key_in_the_file_that_lives_inside_it(tmp_path:
     assert str(path) in str(raised.value)
     assert "AGL_HOME" in str(raised.value)
 
-
 # --- Strictness -------------------------------------------------------------------------------
-
 
 def test_an_unknown_top_level_key_is_refused_and_the_expected_keys_are_named(
     tmp_path: Path,
@@ -166,7 +149,6 @@ def test_an_unknown_top_level_key_is_refused_and_the_expected_keys_are_named(
     assert "concurrency" in str(raised.value)
     assert "agent" in str(raised.value)
 
-
 def test_an_unknown_connector_section_is_refused_rather_than_carried_along(tmp_path: Path) -> None:
     """`Provider` is a closed set, so `[agent.anthropic]` is not data to pass on - it is a typo."""
     home = _home(tmp_path)
@@ -176,7 +158,6 @@ def test_an_unknown_connector_section_is_refused_rather_than_carried_along(tmp_p
     assert "agent.anthropic" in str(raised.value)
     assert "agent.claude" in str(raised.value)
 
-
 def test_an_unknown_key_inside_a_section_is_refused(tmp_path: Path) -> None:
     home = _home(tmp_path)
     _settings_file(home, "[agent.claude]\nenabld = true\n")
@@ -184,7 +165,6 @@ def test_an_unknown_key_inside_a_section_is_refused(tmp_path: Path) -> None:
         read_settings(home)
     assert "agent.claude.enabld" in str(raised.value)
     assert "agent.claude.enabled" in str(raised.value)
-
 
 def test_a_value_of_the_wrong_type_is_refused_and_never_coerced(tmp_path: Path) -> None:
     home = _home(tmp_path)
@@ -194,7 +174,6 @@ def test_a_value_of_the_wrong_type_is_refused_and_never_coerced(tmp_path: Path) 
     assert str(path) in str(raised.value)
     assert "agent.claude.enabled" in str(raised.value)
 
-
 def test_a_section_that_is_not_a_table_is_refused(tmp_path: Path) -> None:
     home = _home(tmp_path)
     _settings_file(home, "agent = 3\n")
@@ -202,14 +181,12 @@ def test_a_section_that_is_not_a_table_is_refused(tmp_path: Path) -> None:
         read_settings(home)
     assert "agent" in str(raised.value)
 
-
 def test_malformed_toml_is_an_input_error_naming_the_file(tmp_path: Path) -> None:
     home = _home(tmp_path)
     path = _settings_file(home, "[agent.claude\nenabled = true\n")
     with pytest.raises(InputError) as raised:
         read_settings(home)
     assert str(path) in str(raised.value)
-
 
 def test_a_file_that_cannot_be_read_is_an_input_error_and_not_a_missing_file(
     tmp_path: Path,
@@ -226,7 +203,6 @@ def test_a_file_that_cannot_be_read_is_an_input_error_and_not_a_missing_file(
         read_settings(home)
     assert str(home.path / "config.toml") in str(raised.value)
 
-
 def test_a_relative_path_is_refused_wherever_a_file_holds_one(tmp_path: Path) -> None:
     """The rule the `schema.py` types state in their own constructors, said here with the file
     and key."""
@@ -237,9 +213,7 @@ def test_a_relative_path_is_refused_wherever_a_file_holds_one(tmp_path: Path) ->
     assert str(path) in str(raised.value)
     assert "agent.claude.cli_path" in str(raised.value)
 
-
 # --- The project file -------------------------------------------------------------------------
-
 
 def test_the_project_file_round_trips_the_five_keys_init_writes(tmp_path: Path) -> None:
     """All five keys. `trees_root` keeps its name here; `schema.Project` calls it `trees`."""
@@ -263,7 +237,6 @@ def test_the_project_file_round_trips_the_five_keys_init_writes(tmp_path: Path) 
         build_timeout=600.0,
     )
 
-
 def test_an_integer_timeout_arrives_as_the_float_the_settings_object_declares(
     tmp_path: Path,
 ) -> None:
@@ -273,14 +246,12 @@ def test_an_integer_timeout_arrives_as_the_float_the_settings_object_declares(
     assert timeout == 600.0
     assert isinstance(timeout, float)
 
-
 def test_a_boolean_timeout_is_refused_although_python_calls_it_an_integer(tmp_path: Path) -> None:
     home = _home(tmp_path)
     _project_file(home, "myapp", "build_timeout = true\n")
     with pytest.raises(InputError) as raised:
         read_project(home, ProjectName("myapp"))
     assert "build_timeout" in str(raised.value)
-
 
 def test_the_typo_that_would_silently_keep_a_default_is_refused(tmp_path: Path) -> None:
     """`build_timout` is the failure a configuration file exists to prevent."""
@@ -292,13 +263,11 @@ def test_the_typo_that_would_silently_keep_a_default_is_refused(tmp_path: Path) 
     assert "build_timout" in str(raised.value)
     assert "build_timeout" in str(raised.value)
 
-
 def test_the_name_comes_from_the_filename_when_the_key_is_absent(tmp_path: Path) -> None:
     """A project's identity on disk is its filename, and this module alone ever sees that."""
     home = _home(tmp_path)
     _project_file(home, "myapp", 'repo = "/dev/myapp"\n')
     assert read_project(home, ProjectName("myapp")).name == ProjectName("myapp")
-
 
 def test_a_name_key_that_disagrees_with_the_filename_is_refused(tmp_path: Path) -> None:
     """Two spellings of one fact, reconciled where both are visible rather than downstream."""
@@ -309,7 +278,6 @@ def test_a_name_key_that_disagrees_with_the_filename_is_refused(tmp_path: Path) 
     assert str(path) in str(raised.value)
     assert "other" in str(raised.value)
 
-
 def test_a_relative_repo_is_refused_with_the_file_and_the_key_named(tmp_path: Path) -> None:
     home = _home(tmp_path)
     path = _project_file(home, "myapp", 'repo = "../myapp"\n')
@@ -318,7 +286,6 @@ def test_a_relative_repo_is_refused_with_the_file_and_the_key_named(tmp_path: Pa
     assert str(path) in str(raised.value)
     assert "repo" in str(raised.value)
 
-
 def test_a_relative_trees_root_is_refused_before_it_reaches_the_wrapper(tmp_path: Path) -> None:
     home = _home(tmp_path)
     _project_file(home, "myapp", 'trees_root = ".agl-trees/myapp"\n')
@@ -326,13 +293,11 @@ def test_a_relative_trees_root_is_refused_before_it_reaches_the_wrapper(tmp_path
         read_project(home, ProjectName("myapp"))
     assert "trees_root" in str(raised.value)
 
-
 def test_a_project_that_was_never_registered_is_not_found(tmp_path: Path) -> None:
     """A name is not a guess: absence here is a refusal, unlike the global settings file."""
     with pytest.raises(NotFoundError) as raised:
         read_project(_home(tmp_path), ProjectName("nobody"))
     assert "agl init" in str(raised.value)
-
 
 # --- The writer, which is only interesting as the reader's inverse ------------------------------
 #
@@ -341,7 +306,6 @@ def test_a_project_that_was_never_registered_is_not_found(tmp_path: Path) -> Non
 # reads. So the tests below assert the round trip rather than the bytes - a test comparing the
 # rendered text against a literal would pass while agreeing with nothing, and would have to be
 # edited by anybody who changed the spacing.
-
 
 def test_a_file_the_writer_writes_is_one_the_reader_accepts(tmp_path: Path) -> None:
     """The round trip, which is the writer's entire contract: the file written and read back.
@@ -369,7 +333,6 @@ def test_a_file_the_writer_writes_is_one_the_reader_accepts(tmp_path: Path) -> N
         build_timeout=DEFAULT_BUILD_TIMEOUT,
     )
 
-
 def test_a_build_command_holding_the_format_s_own_punctuation_round_trips(tmp_path: Path) -> None:
     """A build command is a shell line, so a quote and a backslash in it are ordinary.
 
@@ -383,7 +346,6 @@ def test_a_build_command_holding_the_format_s_own_punctuation_round_trips(tmp_pa
     write_project(home, ProjectName("myapp"), *_beside(tmp_path), build, DEFAULT_BUILD_TIMEOUT)
 
     assert read_project(home, ProjectName("myapp")).build == build
-
 
 def test_the_writer_never_writes_over_a_project_file_that_is_already_there(tmp_path: Path) -> None:
     """`agl init` runs once per repo, and running it twice must not take a file away.
@@ -402,7 +364,6 @@ def test_the_writer_never_writes_over_a_project_file_that_is_already_there(tmp_p
 
     assert "myapp" in str(raised.value)
     assert read_project(home, ProjectName("myapp")).build == "make"
-
 
 def test_the_free_refusal_and_the_write_refusal_are_one_message(tmp_path: Path) -> None:
     """`check_unregistered` answers with the path a new project's file goes to, or refuses.
@@ -425,7 +386,6 @@ def test_the_free_refusal_and_the_write_refusal_are_one_message(tmp_path: Path) 
 
     assert str(free.value) == str(written.value)
 
-
 def test_the_writer_makes_the_projects_directory_when_there_is_none(tmp_path: Path) -> None:
     """`agl init` is the first thing an installation runs, so `projects/` does not exist yet.
 
@@ -440,7 +400,6 @@ def test_the_writer_makes_the_projects_directory_when_there_is_none(tmp_path: Pa
 
     assert read_project(home, ProjectName("myapp")).build == "make"
 
-
 # --- A trees root inside the repository, refused -------------------------------------------------
 #
 # `schema.Project` cannot make this check, because seeing it needs `Path.resolve()` and that type is
@@ -448,14 +407,12 @@ def test_the_writer_makes_the_projects_directory_when_there_is_none(tmp_path: Pa
 # It lives here instead, where a `Project` comes out of a file and where the git-root walk already
 # reads the filesystem, and is exported so that `init` refuses the same file when it writes one.
 
-
 def _nested(tmp_path: Path, trees: str) -> Path:
     """A project file whose repo is a real directory and whose trees root is spelled `trees`."""
     home = _home(tmp_path)
     repo = tmp_path.resolve() / "myapp"
     repo.mkdir(parents=True, exist_ok=True)
     return _project_file(home, "myapp", f'repo = "{repo}"\ntrees_root = "{trees}"\n')
-
 
 def test_a_trees_root_inside_the_repository_is_refused(tmp_path: Path) -> None:
     """AGL lives outside the target repo, and this is the one refusal a project file earns that is
@@ -478,7 +435,6 @@ def test_a_trees_root_inside_the_repository_is_refused(tmp_path: Path) -> None:
     assert str(tmp_path.resolve() / "myapp" / ".agl-trees") in said
     assert str(tmp_path.resolve() / "myapp") in said
 
-
 def test_a_trees_root_that_is_the_repository_itself_is_refused(tmp_path: Path) -> None:
     """`is_relative_to` calls a path relative to itself, and that answer is the right one here: a
     trees root *at* the repository is the same failure at its worst, every checkout landing in the
@@ -486,7 +442,6 @@ def test_a_trees_root_that_is_the_repository_itself_is_refused(tmp_path: Path) -
     _nested(tmp_path, str(tmp_path.resolve() / "myapp"))
     with pytest.raises(InputError):
         read_project(_home(tmp_path), ProjectName("myapp"))
-
 
 def test_a_trees_root_that_only_resolution_shows_to_be_inside_is_refused(tmp_path: Path) -> None:
     """**Why this could not live in `schema.Project.__post_init__`.** Spelled through a symlink and
@@ -504,7 +459,6 @@ def test_a_trees_root_that_only_resolution_shows_to_be_inside_is_refused(tmp_pat
         read_project(home, ProjectName("myapp"))
     assert "trees_root" in str(raised.value)
 
-
 def test_a_trees_root_beside_the_repository_is_accepted(tmp_path: Path) -> None:
     """The control, and what `agl init` lays out is exactly this shape - `/Users/jan/dev/myapp` and
     `/Users/jan/dev/.agl-trees/myapp`. A refusal that fired on a sibling would refuse every project
@@ -513,7 +467,6 @@ def test_a_trees_root_beside_the_repository_is_accepted(tmp_path: Path) -> None:
     project = read_project(_home(tmp_path), ProjectName("myapp"))
     assert project.trees_root == TreesRoot(tmp_path.resolve() / ".agl-trees" / "myapp")
 
-
 def test_a_file_that_names_only_one_of_the_two_paths_is_not_refused(tmp_path: Path) -> None:
     """Silence is not a value here (the module's own rule), and a rule about how two paths sit
     relative to each other has nothing to say when the file supplied one of them. Which silence
@@ -521,7 +474,6 @@ def test_a_file_that_names_only_one_of_the_two_paths_is_not_refused(tmp_path: Pa
     home = _home(tmp_path)
     _project_file(home, "myapp", 'trees_root = "/tmp/agl-trees/myapp"\n')
     assert read_project(home, ProjectName("myapp")).repo is None
-
 
 def test_the_check_is_exported_so_that_init_can_refuse_before_it_writes(tmp_path: Path) -> None:
     """`init` writes the very file the tests above read, and it must refuse the same pair.
@@ -538,9 +490,7 @@ def test_the_check_is_exported_so_that_init_can_refuse_before_it_writes(tmp_path
         check_trees_root(destination, repo, repo / ".agl-trees")
     assert str(destination) in str(raised.value)
 
-
 # --- Walking up to the git root -----------------------------------------------------------------
-
 
 def test_the_walk_finds_a_git_directory_from_a_nested_working_directory(tmp_path: Path) -> None:
     root = _repo(tmp_path, "myapp")
@@ -548,20 +498,17 @@ def test_the_walk_finds_a_git_directory_from_a_nested_working_directory(tmp_path
     deep.mkdir(parents=True)
     assert git_root(deep) == root
 
-
 def test_the_walk_finds_a_git_file_as_well_as_a_git_directory(tmp_path: Path) -> None:
     """A linked worktree and a submodule write a `gitdir:` file, so existence is the test."""
     root = _repo(tmp_path, "worktree", marker="file")
     assert (root / ".git").is_file()
     assert git_root(root) == root
 
-
 def test_the_walk_answers_with_a_resolved_path(tmp_path: Path) -> None:
     root = _repo(tmp_path, "myapp")
     link = tmp_path.resolve() / "link"
     link.symlink_to(root, target_is_directory=True)
     assert git_root(link / "src") == root
-
 
 def test_a_directory_in_no_repository_at_all_is_not_found(tmp_path: Path) -> None:
     """One of the two absences, and it gets its own message: there is nothing here to register."""
@@ -571,13 +518,10 @@ def test_a_directory_in_no_repository_at_all_is_not_found(tmp_path: Path) -> Non
         git_root(outside)
     assert "not inside a git repository" in str(raised.value)
 
-
 # --- Resolving which project a directory is in --------------------------------------------------
-
 
 def _register(home: AglHome, name: str, repo: Path) -> None:
     _project_file(home, name, f'repo = "{repo}"\nbuild = "make"\nbuild_timeout = 60\n')
-
 
 def test_only_the_project_whose_repo_is_this_git_root_matches(tmp_path: Path) -> None:
     """What makes labels per-project: repo A's run is not repo B's, because this returns B."""
@@ -587,7 +531,6 @@ def test_only_the_project_whose_repo_is_this_git_root_matches(tmp_path: Path) ->
     _register(home, "beta", second)
     assert resolve_project(home, second / "src").name == ProjectName("beta")
     assert resolve_project(home, first).name == ProjectName("alpha")
-
 
 def test_a_repository_reached_through_a_symlink_is_the_same_project(tmp_path: Path) -> None:
     """Both sides are compared resolved, so one repository is one project by whatever route."""
@@ -599,7 +542,6 @@ def test_a_repository_reached_through_a_symlink_is_the_same_project(tmp_path: Pa
     _register(home, "myapp", root)
     assert resolve_project(home, link / "src").name == ProjectName("myapp")
 
-
 def test_a_registered_repo_spelled_through_a_symlink_still_matches(tmp_path: Path) -> None:
     """The other direction: the *file* names the link, the caller stands in the real directory."""
     home = _home(tmp_path)
@@ -608,7 +550,6 @@ def test_a_registered_repo_spelled_through_a_symlink_still_matches(tmp_path: Pat
     link.symlink_to(root, target_is_directory=True)
     _register(home, "myapp", link)
     assert resolve_project(home, root).name == ProjectName("myapp")
-
 
 def test_a_repository_spelled_in_another_case_is_the_same_project(tmp_path: Path) -> None:
     """One directory reached by two spellings, and the filesystem is what says they are one.
@@ -629,7 +570,6 @@ def test_a_repository_spelled_in_another_case_is_the_same_project(tmp_path: Path
     _register(home, "myapp", _repo(tmp_path, "Myapp"))
     assert resolve_project(home, tmp_path.resolve() / "myapp").name == ProjectName("myapp")
 
-
 def test_a_project_registered_for_a_repository_that_is_gone_is_skipped(tmp_path: Path) -> None:
     """A registration whose repository no longer exists is stale, not a refusal for everyone else.
 
@@ -644,7 +584,6 @@ def test_a_project_registered_for_a_repository_that_is_gone_is_skipped(tmp_path:
     _register(home, "myapp", root)
     assert resolve_project(home, root).name == ProjectName("myapp")
 
-
 def test_a_listing_of_nothing_but_stale_registrations_is_still_not_found(tmp_path: Path) -> None:
     """And when the stale one is all there is, the operator gets the message, not an `OSError`."""
     home = _home(tmp_path)
@@ -654,7 +593,6 @@ def test_a_listing_of_nothing_but_stale_registrations_is_still_not_found(tmp_pat
         resolve_project(home, root)
     assert "no project is registered" in str(raised.value)
     assert str(root) in str(raised.value)
-
 
 def test_a_git_repository_no_project_file_names_is_not_found(tmp_path: Path) -> None:
     """The second absence, with its own message: a repository, simply not a registered one."""
@@ -667,12 +605,10 @@ def test_a_git_repository_no_project_file_names_is_not_found(tmp_path: Path) -> 
     assert str(unregistered) in str(raised.value)
     assert "agl init" in str(raised.value)
 
-
 def test_an_installation_with_no_projects_directory_resolves_to_not_found(tmp_path: Path) -> None:
     """Nobody has run `agl init` yet. An empty listing, not a refusal about a missing directory."""
     with pytest.raises(NotFoundError):
         resolve_project(_home(tmp_path), _repo(tmp_path, "myapp"))
-
 
 def test_resolution_outside_any_repository_fails_on_the_walk_and_says_so(tmp_path: Path) -> None:
     home = _home(tmp_path)
@@ -682,7 +618,6 @@ def test_resolution_outside_any_repository_fails_on_the_walk_and_says_so(tmp_pat
     with pytest.raises(NotFoundError) as raised:
         resolve_project(home, outside)
     assert "not inside a git repository" in str(raised.value)
-
 
 def test_a_malformed_project_file_refuses_the_scan_rather_than_being_skipped(
     tmp_path: Path,
@@ -701,7 +636,6 @@ def test_a_malformed_project_file_refuses_the_scan_rather_than_being_skipped(
         resolve_project(home, root)
     assert str(broken) in str(raised.value)
 
-
 def test_a_non_toml_entry_beside_the_project_files_is_not_parsed(tmp_path: Path) -> None:
     """The listing filters on the suffix `home_layout` composes, so a stray file changes nothing."""
     home = _home(tmp_path)
@@ -709,7 +643,6 @@ def test_a_non_toml_entry_beside_the_project_files_is_not_parsed(tmp_path: Path)
     _register(home, "myapp", root)
     _write(project_config(home, ProjectName("myapp")).parent / "notes.txt", "not toml at all [\n")
     assert resolve_project(home, root).name == ProjectName("myapp")
-
 
 def test_the_run_directory_of_a_project_is_not_mistaken_for_a_project_file(tmp_path: Path) -> None:
     """`projects/myapp/` sits beside `projects/myapp.toml`; only one of them is a settings file."""

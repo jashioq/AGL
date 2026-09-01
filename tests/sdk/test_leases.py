@@ -35,9 +35,7 @@ import asyncio
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Final
-
 import pytest
-
 from agl.config import container
 from agl.ports.agent import AgentTask, Claude, Restriction
 from agl.ports.home_layout import RunScope
@@ -79,9 +77,7 @@ _LIVENESS: Final = 30.0
 # written to catch.
 _SERIALIZED: Final = 1.0
 
-
 # --- the instrument: a bundle, a checkout, and journals built by hand over one scope --------------
-
 
 async def _opened(tmp_path: Path) -> tuple[container.FakeServices, Workspace, str]:
     """A fakes bundle, the run's own checkout, and the resolved commit it starts at.
@@ -93,7 +89,6 @@ async def _opened(tmp_path: Path) -> tuple[container.FakeServices, Workspace, st
     harness = container.fakes(TreesRoot(tmp_path / "trees"), files={SEEDED: SEED})
     workspace = await harness.services.workspaces.open(LABEL, None, "main")
     return harness, workspace, await workspace.head()
-
 
 def _journal(harness: container.FakeServices, workspace: Workspace, base: str) -> Journal:
     """One journal over one checkout. Called twice in most tests here, which is the whole point.
@@ -110,9 +105,7 @@ def _journal(harness: container.FakeServices, workspace: Workspace, base: str) -
         base,
     )
 
-
 # --- the lease as a mechanism distinct from the step lock -----------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_a_second_claim_on_one_target_waits_although_the_step_lock_cannot_stop_it(
@@ -157,7 +150,6 @@ async def test_a_second_claim_on_one_target_waits_although_the_step_lock_cannot_
     )
     second.release()
 
-
 @pytest.mark.asyncio
 async def test_one_lock_per_target_is_kept_for_the_life_of_the_run(tmp_path: Path) -> None:
     """"Locks are kept forever and leases are not" - `Leases.__init__`'s comment, as a claim.
@@ -191,7 +183,6 @@ async def test_one_lock_per_target_is_kept_for_the_life_of_the_run(tmp_path: Pat
         f"the lock table holds {sorted(str(scope) for scope in leases._locks)} after two claims on "
         f"one target, and a run has one lock per target it ever lands into"
     )
-
 
 @pytest.mark.asyncio
 async def test_a_released_lease_leaves_the_live_table_and_run_exit_then_says_nothing(
@@ -228,7 +219,6 @@ async def test_a_released_lease_leaves_the_live_table_and_run_exit_then_says_not
     )
     leases.release_all()
 
-
 @pytest.mark.asyncio
 async def test_release_all_gives_back_every_live_lease_and_not_merely_one(tmp_path: Path) -> None:
     """The sweeper - run exit gives back every live lease - all of them, in one call.
@@ -263,7 +253,6 @@ async def test_release_all_gives_back_every_live_lease_and_not_merely_one(tmp_pa
         assert retaken.target == target
         retaken.release()
 
-
 @pytest.mark.asyncio
 async def test_a_lease_on_one_target_does_not_stop_a_claim_into_another(tmp_path: Path) -> None:
     """Why "a human deliberating in one run never blocks another" - the granularity that buys it.
@@ -292,9 +281,7 @@ async def test_a_lease_on_one_target_does_not_stop_a_claim_into_another(tmp_path
     other.release()
     held.release()
 
-
 # --- cancellation between the lease and the step lock ---------------------------------------------
-
 
 class _Pause:
     """A rendezvous a scripted agent parks on, so a test can hold one namespace's step open.
@@ -307,7 +294,6 @@ class _Pause:
         self.started = asyncio.Event()
         self.release = asyncio.Event()
 
-
 @role(model=Claude.SONNET)
 def _role(name: str, instructions: str) -> Role[None]:
     """An effect role: it writes files and commits, and reports nothing.
@@ -317,7 +303,6 @@ def _role(name: str, instructions: str) -> Role[None]:
     """
     return Role(name=name, instructions=instructions, restrictions=set[Restriction]())
 
-
 IMPLEMENT: Final = _role("implement", "implement T-01")
 HOLDING: Final = _role("review", "review the parent's worktree, slowly")
 
@@ -325,7 +310,6 @@ _WRITES: Final[Mapping[str, Mapping[str, bytes]]] = {
     IMPLEMENT.instructions: {LANDED: b"the child's work\n"},
     HOLDING.instructions: {},
 }
-
 
 def _agent(pause: _Pause) -> Agent:
     """Write what this prompt is meant to write, and park if this is the holding role.
@@ -350,7 +334,6 @@ def _agent(pause: _Pause) -> Agent:
         return Reply()
 
     return _one
-
 
 @pytest.mark.asyncio
 async def test_a_landing_cancelled_waiting_for_the_step_lock_gives_the_targets_lease_back(

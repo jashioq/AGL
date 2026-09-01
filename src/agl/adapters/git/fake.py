@@ -1,9 +1,7 @@
-
 from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from pathlib import Path
 from typing import Final
-
 from agl.adapters.git._conflicts import already_holding, collided, unresolved
 from agl.adapters.git._merging import combined, contested
 from agl.adapters.git._patches import differences, patch
@@ -26,9 +24,7 @@ _CLAIMED: Final[set[Path]] = set()
 # `str.isspace()` in Python and all ordinary characters to git, so a message of one is recorded.
 _CLEANED_AWAY: Final = " \t\r\n"
 
-
 class FakeWorkspaceProvider(WorkspaceProvider):
-
     def __init__(self, repository: FakeRepository, trees: TreesRoot) -> None:
         self._repository = repository
         self._trees = trees
@@ -90,9 +86,7 @@ class FakeWorkspaceProvider(WorkspaceProvider):
                 f"{branch!r} from. Nothing was changed"
             ) from absent
 
-
 class _FakeWorkspace(Workspace):
-
     def __init__(self, place: _Place, repository: FakeRepository) -> None:
         self._at = place
         self._repository = repository
@@ -129,9 +123,7 @@ class _FakeWorkspace(Workspace):
         restore(self.path, self._repository.tree_of(at))
         self._repository.move(self._at.branch, at)
 
-
 class FakeHistory(History):
-
     def __init__(self, repository: FakeRepository) -> None:
         self._repository = repository
 
@@ -168,9 +160,7 @@ class FakeHistory(History):
             self._repository.tree_of(self._repository.resolve(head)),
         )
 
-
 class FakeIntegrator(Integrator):
-
     def __init__(self, repository: FakeRepository) -> None:
         self._repository = repository
 
@@ -278,7 +268,6 @@ class FakeIntegrator(Integrator):
                 f"take them away first; nothing here has been changed"
             )
 
-
 @asynccontextmanager
 async def _claimed(directory: Path, label: str) -> AsyncIterator[None]:
     make(directory)
@@ -296,14 +285,11 @@ async def _claimed(directory: Path, label: str) -> AsyncIterator[None]:
     finally:
         _CLAIMED.discard(key)
 
-
 def _still_unresolved(pending: Hold, held: Tree) -> tuple[str, ...]:
     return tuple(path for path in pending.collisions if contested(held.get(path)))
 
-
 def _merged(source: str, target: str) -> str:
     return f"Merge branch '{source}' into {target}"
-
 
 def _check_message(message: str, where: Path) -> None:
     if message.strip(_CLEANED_AWAY) == "":

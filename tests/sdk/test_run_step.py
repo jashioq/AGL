@@ -55,9 +55,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType
 from typing import Final, assert_type
-
 import pytest
-
 from agl.adapters.claude_code.fake import Conversation, Script
 from agl.adapters.filesystem.store import FilesystemStore
 from agl.adapters.git.history import GitHistory
@@ -102,16 +100,13 @@ FEATURE: Final = "src/feature.py"
 
 _NOTHING: Final[Mapping[str, bytes]] = MappingProxyType({})
 
-
 @dataclass(frozen=True)
 class Summary:
     """A reporting payload: one string, which is the whole of what these agents have to say."""
 
     text: str
 
-
 REPORT: Final = reporting_tool("report", "report what you did", Summary)
-
 
 @dataclass(frozen=True)
 class Restatement:
@@ -126,9 +121,7 @@ class Restatement:
 
     text: str
 
-
 RESTATE: Final = reporting_tool(REPORT.name, "report what you did", Restatement)
-
 
 @dataclass(frozen=True)
 class _Asking:
@@ -136,19 +129,15 @@ class _Asking:
 
     question: str
 
-
 _ASK: Final = "ask_the_operator"
 """What a workflow calls its asking tool. Nothing in AGL knows the name, which is the point: the
 framework supplies no asking tool of its own, so this is a string this file chose."""
-
 
 class _Crash(Exception):
     """What an agent dying mid-step looks like from here. Any exception would do - the walk has no
     opinion about which, and lets it out untouched."""
 
-
 # --- the repository, the bundle, and the run -----------------------------------------------------
-
 
 def _git(where: Path, *argv: str) -> str:
     """One git command, for arranging and observing. Never for the thing under test.
@@ -158,7 +147,6 @@ def _git(where: Path, *argv: str) -> str:
     """
     done = subprocess.run(["git", *argv], cwd=where, capture_output=True, text=True, check=True)
     return done.stdout
-
 
 @pytest.fixture
 def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -186,12 +174,10 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     _git(work, "commit", "-q", "-m", "the state a run is cut from")
     return work
 
-
 @pytest.fixture
 def base(repository: Path) -> str:
     """The commit the run is cut from, resolved - the pinned `RunSpec.base_sha` shape of a base."""
     return _git(repository, "rev-parse", "HEAD").strip()
-
 
 def _run(repository: Path, tmp_path: Path, base: str, script: Script | None = None) -> Run[None]:
     """A `Run` over one real repository, one real ledger and one scripted agent.
@@ -220,16 +206,13 @@ def _run(repository: Path, tmp_path: Path, base: str, script: Script | None = No
     )
     return Run(params=None, services=services, scope=SCOPE, base=base)
 
-
 async def _checkout(repository: Path, tmp_path: Path, base: str) -> Workspace:
     """The run's own checkout, reopened - `WorkspaceProvider.open` is idempotent by contract, so
     asking for it after a step hands back exactly what that step left."""
     provider = GitWorkspaceProvider(repository, TreesRoot(tmp_path / "trees"))
     return await provider.open(LABEL, None, base)
 
-
 # --- roles, and the agents that serve them -------------------------------------------------------
-
 
 @role(model=Claude.SONNET)
 def _role(name: str, instructions: str, *, read_only: bool = False) -> Role[Summary]:
@@ -251,12 +234,10 @@ def _role(name: str, instructions: str, *, read_only: bool = False) -> Role[Summ
         tools=(REPORT,),
     )
 
-
 @role(model=Claude.SONNET)
 def _effect(name: str, instructions: str) -> Role[None]:
     """A role with no reporting tool: its result is `null` and its effect is commits."""
     return Role(name=name, instructions=instructions)
-
 
 @role(model=Claude.SONNET)
 def _promising() -> Role[Summary]:
@@ -268,7 +249,6 @@ def _promising() -> Role[Summary]:
     `null`. The section near the bottom of this file is where that is measured and argued.
     """
     return Role(name="audit", instructions="audit the worktree")
-
 
 @role(model=Claude.SONNET)
 def _deciding(*, ask: Tool | None = None) -> Role[Summary]:
@@ -282,7 +262,6 @@ def _deciding(*, ask: Tool | None = None) -> Role[Summary]:
         name="decide", instructions="decide", tools=[REPORT] if ask is None else [REPORT, ask]
     )
 
-
 @role(model=Claude.SONNET)
 def _restating() -> Role[Restatement]:
     """`_role("review", "review", read_only=True)` in every fingerprint term but one: it reports
@@ -293,7 +272,6 @@ def _restating() -> Role[Restatement]:
         restrictions={Restriction.NO_VCS_WRITES},
         tools=(RESTATE,),
     )
-
 
 class _Agent:
     """What the fake was asked and what it was told back, written down.
@@ -313,7 +291,6 @@ class _Agent:
 
         self.asked: list[str] = []
         """Every question the script put to the role's own asking tool, in the order it asked."""
-
 
 def _agent(
     record: _Agent,
@@ -350,9 +327,7 @@ def _agent(
 
     return _script
 
-
 # --- the ledger, read off disk -------------------------------------------------------------------
-
 
 def _entries(tmp_path: Path, step: str) -> list[dict[str, JsonValue]]:
     """Everything recorded under `steps/<step>/`, in filename order. Empty when nothing is.
@@ -367,20 +342,17 @@ def _entries(tmp_path: Path, step: str) -> list[dict[str, JsonValue]]:
     ]
     return found
 
-
 def _one(tmp_path: Path, step: str) -> dict[str, JsonValue]:
     """The one entry `steps/<step>/` holds. Two would mean the step ran twice."""
     entries = _entries(tmp_path, step)
     assert len(entries) == 1, f"steps/{step}/ holds {len(entries)} entries, not one"
     return entries[0]
 
-
 def _text(entry: Mapping[str, JsonValue], key: str) -> str:
     """One string off an entry, narrowed. A parsed file is anything, and mypy is right to say so."""
     value = entry[key]
     assert isinstance(value, str)
     return value
-
 
 def _tree(repository: Path, commit: str) -> list[str]:
     """Every path in the tree a commit names - what "the recorded head holds the file" is asked of.
@@ -390,9 +362,7 @@ def _tree(repository: Path, commit: str) -> list[str]:
     """
     return _git(repository, "ls-tree", "-r", "--name-only", commit).split()
 
-
 # --- three steps, and the second walk that pays for none of them ---------------------------------
-
 
 @pytest.mark.asyncio
 async def test_three_sequential_steps_replay_against_a_second_walk(
@@ -418,7 +388,6 @@ async def test_three_sequential_steps_replay_against_a_second_walk(
     assert replayed == first
     assert len(record.runs) == 3, "a resume paid for agents whose results were on the ledger"
 
-
 async def _three(run: Run[None]) -> list[Summary]:
     """A workflow of three sequential steps - the `fix` shape, with a report on every one."""
     spec = await run.step(_role("spec", "write the spec", read_only=True))
@@ -429,9 +398,7 @@ async def _three(run: Run[None]) -> list[Summary]:
     review = await run.step(_role("review", "review", read_only=True))
     return [spec, built, review]
 
-
 # --- an agent that never reports -----------------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_an_agent_that_never_reports_leaves_no_entry_and_the_step_runs_again(
@@ -464,7 +431,6 @@ async def test_an_agent_that_never_reports_leaves_no_entry_and_the_step_runs_aga
     assert len(record.runs) == 3
     assert len(_entries(tmp_path, "review")) == 1
 
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("stop", "fix"),
@@ -494,9 +460,7 @@ async def test_the_incomplete_message_sends_the_reader_to_the_fix_the_stop_reaso
     assert fix in str(raised.value)
     assert said in str(raised.value), "the one thing the agent did say was dropped from the report"
 
-
 # --- what `commit=` does, and when it does it ----------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_a_step_with_commit_records_a_head_whose_tree_holds_the_agents_file(
@@ -526,7 +490,6 @@ async def test_a_step_with_commit_records_a_head_whose_tree_holds_the_agents_fil
     assert (workspace.path / FEATURE).read_bytes() == b"the callback route\n"
     assert _git(workspace.path, "status", "--porcelain") == ""
 
-
 @pytest.mark.asyncio
 async def test_a_step_without_commit_leaves_the_worktree_byte_identical_to_last_good(
     repository: Path, tmp_path: Path, base: str
@@ -554,7 +517,6 @@ async def test_a_step_without_commit_leaves_the_worktree_byte_identical_to_last_
     assert _git(workspace.path, "rev-parse", "HEAD").strip() == base
     assert _text(_one(tmp_path, "review"), "head") == base
 
-
 @pytest.mark.asyncio
 async def test_changing_only_the_commit_message_does_not_invalidate_the_entry(
     repository: Path, tmp_path: Path, base: str
@@ -577,9 +539,7 @@ async def test_changing_only_the_commit_message_does_not_invalidate_the_entry(
     subject = _git(repository, "log", "-1", "--format=%s", recorded).strip()
     assert subject == "implement T-01"
 
-
 # --- the endings run when a step raises ----------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_the_wipe_runs_when_a_step_raises_and_no_entry_is_written(
@@ -603,7 +563,6 @@ async def test_the_wipe_runs_when_a_step_raises_and_no_entry_is_written(
     assert not (workspace.path / SCRATCH).exists()
     assert _git(workspace.path, "status", "--porcelain") == ""
     assert _entries(tmp_path, "review") == [], "a step that raised was recorded as done"
-
 
 @pytest.mark.asyncio
 async def test_a_step_that_raises_with_commit_commits_anyway_and_still_records_nothing(
@@ -640,7 +599,6 @@ async def test_a_step_that_raises_with_commit_commits_anyway_and_still_records_n
     assert _git(workspace.path, "rev-parse", "HEAD").strip() == base
     assert not (workspace.path / FEATURE).exists()
 
-
 # --- the endings run when a step is cancelled ----------------------------------------------------
 #
 # The raise path above and this one are the same ending through two different doors, and only this
@@ -664,7 +622,6 @@ async def test_a_step_that_raises_with_commit_commits_anyway_and_still_records_n
 #     checkout is opened **before** the step, and every assertion after the cancellation is
 #     synchronous: `Path.exists`, `read_bytes`, and `_git`, which is a blocking `subprocess.run`
 #     and yields to no event loop. Nothing detached can make progress inside them.
-
 
 def _blocks(record: _Agent, running: asyncio.Event, writes: Mapping[str, bytes]) -> Script:
     """An agent that leaves its files behind and then never finishes - a step to cancel.
@@ -691,7 +648,6 @@ def _blocks(record: _Agent, running: asyncio.Event, writes: Mapping[str, bytes])
 
     return _script
 
-
 async def _cancelled[T](task: asyncio.Task[T]) -> None:
     """Cancel until the task is dead, then assert that it died of it.
 
@@ -715,7 +671,6 @@ async def _cancelled[T](task: asyncio.Task[T]) -> None:
         "and then declines to die is a task nothing can stop, which is worse than the leavings the "
         "ending exists to sweep up"
     )
-
 
 @pytest.mark.asyncio
 async def test_a_cancelled_step_still_wipes_the_worktree_and_records_nothing(
@@ -756,7 +711,6 @@ async def test_a_cancelled_step_still_wipes_the_worktree_and_records_nothing(
     assert _entries(tmp_path, "review") == [], "a cancelled step was recorded as done"
     assert run.activity is None, "a cancelled step left its last activity line standing"
 
-
 @pytest.mark.asyncio
 async def test_a_cancelled_step_with_commit_still_commits_and_still_records_nothing(
     repository: Path, tmp_path: Path, base: str
@@ -790,9 +744,7 @@ async def test_a_cancelled_step_with_commit_still_commits_and_still_records_noth
     assert _git(workspace.path, "status", "--porcelain") == ""
     assert _entries(tmp_path, "implement") == []
 
-
 # --- the reporting tool, and the second call -----------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_a_second_call_to_the_reporting_tool_is_refused_and_the_first_payload_stands(
@@ -813,7 +765,6 @@ async def test_a_second_call_to_the_reporting_tool_is_refused_and_the_first_payl
     assert [result.rejected for result in record.results] == [False, True]
     assert "already recorded" in record.results[1].text
     assert _one(tmp_path, "review")["value"] == {"text": "review #0"}
-
 
 @pytest.mark.asyncio
 async def test_a_malformed_payload_is_rejected_back_to_the_agent_and_not_raised(
@@ -840,9 +791,7 @@ async def test_a_malformed_payload_is_rejected_back_to_the_agent_and_not_raised(
     assert "a string" in record.results[0].text
     assert len(record.runs) == 1
 
-
 # --- an effect step ------------------------------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_an_effect_step_records_a_null_value_and_the_commits_are_the_result(
@@ -870,7 +819,6 @@ async def test_an_effect_step_records_a_null_value_and_the_commits_are_the_resul
     assert FEATURE in _tree(repository, _text(entry, "head"))
     assert len(record.runs) == 1
 
-
 # --- a known hole: a role may promise a payload and declare nothing that can produce one ----------
 #
 # **This is open, and the test below exists so that the next person meets the argument rather than
@@ -890,7 +838,6 @@ async def test_an_effect_step_records_a_null_value_and_the_commits_are_the_resul
 # it. It is a different deliverable: it moves a public field on `Role`, rewrites every role
 # declaration in `src/`, `tests/` and any workflow anyone has written, and touches nothing this
 # file's subject does. Until then the hole is here, in one test, with its name on it.
-
 
 @pytest.mark.asyncio
 async def test_a_role_promising_a_payload_with_no_reporting_tool_is_handed_none(
@@ -917,9 +864,7 @@ async def test_a_role_promising_a_payload_with_no_reporting_tool_is_handed_none(
         "capture-less step at `return cast(R, None)` and this hole has moved rather than closed"
     )
 
-
 # --- the role's own asking tool -------------------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_a_roles_asking_tool_reaches_the_runner_and_its_answer_returns(
@@ -950,7 +895,6 @@ async def test_a_roles_asking_tool_reaches_the_runner_and_its_answer_returns(
     assert await run.step(_deciding(ask=asking)) == Summary("decide #0")
     assert record.asked == ["Land it, or keep going?"]
     assert record.results[0].text == "land it", "the answer did not reach the agent that asked"
-
 
 # --- what the agent is actually asked -------------------------------------------------------------
 #
@@ -983,7 +927,6 @@ async def test_a_roles_asking_tool_reaches_the_runner_and_its_answer_returns(
 # the closing paragraph of a prompt against it, and no fingerprint contains it - so respelling it is
 # a change to every prompt in AGL that nothing else in this repository can see.
 
-
 # The fixed heading, with the blank lines that separate it from the prompt above and the block
 # below - the whole of what the framework inserts between an author's text and their step's inputs.
 _HEADING: Final = "\n\n## Inputs\n\n"
@@ -998,14 +941,12 @@ _TEMPLATED: Final = (
     "to. Keep 100% of the diff and write %s wherever you skipped something."
 )
 
-
 @dataclass(frozen=True)
 class Finding:
     """`findings=highs`: a list of the workflow's own dataclasses, passed as one input."""
 
     ticket: str
     severity: int
-
 
 @pytest.mark.asyncio
 async def test_the_inputs_a_step_passes_are_appended_to_what_the_agent_is_asked(
@@ -1027,7 +968,6 @@ async def test_the_inputs_a_step_passes_are_appended_to_what_the_agent_is_asked(
         "the step's inputs were fingerprinted and never shown to the agent, which is the "
         "tickets example paying for a triage of findings it was never handed"
     )
-
 
 @pytest.mark.asyncio
 async def test_a_prompt_carrying_braces_and_percent_signs_reaches_the_agent_byte_identical(
@@ -1053,7 +993,6 @@ async def test_a_prompt_carrying_braces_and_percent_signs_reaches_the_agent_byte
     )
     assert asked == _TEMPLATED + _HEADING + '{"ticket":"T-01"}'
 
-
 @pytest.mark.asyncio
 async def test_a_step_with_no_inputs_is_dispatched_the_roles_instructions_and_nothing_else(
     repository: Path, tmp_path: Path, base: str
@@ -1071,7 +1010,6 @@ async def test_a_step_with_no_inputs_is_dispatched_the_roles_instructions_and_no
     await run.step(_role("review", "review the diff", read_only=True))
 
     assert record.runs == ["review the diff"]
-
 
 @pytest.mark.asyncio
 async def test_the_same_inputs_in_a_different_keyword_order_compose_and_replay_the_same(
@@ -1101,7 +1039,6 @@ async def test_the_same_inputs_in_a_different_keyword_order_compose_and_replay_t
         "is taken over sorted keys, says the two are one step and replays the first one's result"
     )
     assert len(_entries(tmp_path, "triage")) == 1
-
 
 @pytest.mark.asyncio
 async def test_a_dataclass_input_reaches_the_agent_as_its_fields_and_its_type(
@@ -1140,7 +1077,6 @@ async def test_a_dataclass_input_reaches_the_agent_as_its_fields_and_its_type(
         "reached it as something other than the canonical text their fingerprint was taken over"
     )
 
-
 # --- a prompt that came out of a file ------------------------------------------------------------
 #
 # "**`instructions` is prompt text, never a path.** A role holding a filename would
@@ -1152,7 +1088,6 @@ async def test_a_dataclass_input_reaches_the_agent_as_its_fields_and_its_type(
 # claim that sentence is really about, and neither can be made there: a `prompt_file` that answered
 # with the path it was handed would satisfy every type in the codebase, and the only place it shows
 # is in front of an agent - or, worse, in a digest that did not move.
-
 
 @pytest.mark.asyncio
 async def test_a_role_declared_with_prompt_file_asks_the_agent_what_the_file_says(
@@ -1179,7 +1114,6 @@ async def test_a_role_declared_with_prompt_file_asks_the_agent_what_the_file_say
         "look exactly like this from every other angle - it would type-check, it would "
         "fingerprint, and the run would finish"
     )
-
 
 @pytest.mark.asyncio
 async def test_editing_the_prompt_file_re_runs_the_step_and_the_agent_reads_the_new_wording(
@@ -1221,9 +1155,7 @@ async def test_editing_the_prompt_file_re_runs_the_step_and_the_agent_reads_the_
     )
     assert len(_entries(tmp_path, "review")) == 2
 
-
 # --- a reporting tool's payload type is a term too ------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_a_step_reporting_through_another_payload_type_does_not_replay_the_first(
@@ -1262,9 +1194,7 @@ async def test_a_step_reporting_through_another_payload_type_does_not_replay_the
     )
     assert len(_entries(tmp_path, "review")) == 2
 
-
 # --- two roles whose names differ only in case ----------------------------------------------------
-
 
 def _numbered(record: _Agent) -> Script:
     """An agent whose answer says which dispatch it was, so two results cannot look alike.
@@ -1283,7 +1213,6 @@ def _numbered(record: _Agent) -> Script:
 
     return _script
 
-
 def _recorded(tmp_path: Path, *steps: str) -> set[str]:
     """Every entry filename under these step directories, deduplicated - the honest entry count.
 
@@ -1297,7 +1226,6 @@ def _recorded(tmp_path: Path, *steps: str) -> set[str]:
     return {
         path.name for step in steps for path in step_dir(home, SCOPE, StepName(step)).glob("*.json")
     }
-
 
 @pytest.mark.asyncio
 async def test_two_roles_differing_only_in_case_do_not_replay_each_others_entries(
@@ -1342,9 +1270,7 @@ async def test_two_roles_differing_only_in_case_do_not_replay_each_others_entrie
     assert len(record.runs) == 2, "one of the two steps was never dispatched to an agent"
     assert len(_recorded(tmp_path, "Review", "review")) == 2
 
-
 # --- `run.activity` ------------------------------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_activity_is_the_adapters_own_last_line_and_is_gone_when_the_step_ends(
@@ -1389,7 +1315,6 @@ async def test_activity_is_the_adapters_own_last_line_and_is_gone_when_the_step_
         "the last line of a finished step is still there. `None` means nothing is running, "
         "and a view re-invoked every frame will go on reporting a build that ended long ago"
     )
-
 
 @pytest.mark.asyncio
 async def test_a_step_that_raises_leaves_no_activity_behind_and_a_replayed_one_reports_none(
@@ -1443,9 +1368,7 @@ async def test_a_step_that_raises_leaves_no_activity_behind_and_a_replayed_one_r
         "nothing to report - and activity is never persisted, so nothing could have come back"
     )
 
-
 # --- two steps arriving at an unopened namespace at once -----------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_two_gathered_steps_open_one_checkout_and_take_two_addresses(
@@ -1476,9 +1399,7 @@ async def test_two_gathered_steps_open_one_checkout_and_take_two_addresses(
         "the same address and the second clobbered the first"
     )
 
-
 # --- what a step refuses before it provisions anything -------------------------------------------
-
 
 def test_a_step_name_that_could_not_be_a_path_segment_is_refused_at_the_declaration() -> None:
     """Names are opaque strings, "validated on the way in" - filesystem- and ref-safe.
@@ -1490,7 +1411,6 @@ def test_a_step_name_that_could_not_be_a_path_segment_is_refused_at_the_declarat
     """
     with pytest.raises(InputError, match="step name"):
         _role("../escape", "review", read_only=True)
-
 
 @pytest.mark.asyncio
 async def test_the_step_refuses_the_same_name_again_before_it_provisions_anything(

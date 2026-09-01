@@ -124,13 +124,10 @@ a `False`.
 
 from collections.abc import Iterator
 from typing import Final
-
 import pytest
-
 from agl.ports.errors import NotFoundError
 from agl.ports.history import History
 from agl.ports.workspace import WorkspaceProvider
-
 from ._history_changes import HistoryChangeContract
 from ._workspace_files import (
     ALPHA,
@@ -177,7 +174,6 @@ ABSENT_ID: Final = "dead" * 10
 # caller wrote, and a line feed, which is what git adds.
 PADDED_MESSAGE: Final = "implement fix \t \n"
 TRIMMED_MESSAGE: Final = "implement fix"
-
 
 class HistoryContract(HistoryChangeContract):
     """The suite. Seven questions about one repository's past, and nothing that changes it.

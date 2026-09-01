@@ -1,4 +1,3 @@
-
 import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -6,12 +5,10 @@ from datetime import UTC, datetime, timedelta
 from math import isfinite
 from types import MappingProxyType
 from typing import Final
-
 from agl.ports.errors import InputError, InternalError
 from agl.ports.ids import RunLabel
 
 __all__ = ["JsonValue", "RunSpec", "WireShape", "checked_text", "wire_moment"]
-
 
 type JsonValue = None | bool | int | float | str | list[JsonValue] | dict[str, JsonValue]
 
@@ -36,10 +33,8 @@ _STORE_REFUSES: Final = (
     "it handed over"
 )
 
-
 @dataclass(frozen=True, slots=True)
 class WireShape:
-
     keys: tuple[str, ...]
 
     document: str
@@ -100,7 +95,6 @@ class WireShape:
         utc = moment.astimezone(UTC)
         return utc - timedelta(microseconds=utc.microsecond)
 
-
 _WIRE: Final = WireShape(
     keys=_WIRE_KEYS,
     document="run.json",
@@ -110,7 +104,6 @@ _WIRE: Final = WireShape(
     moment_name="created_at",
 )
 
-
 def wire_moment(moment: datetime) -> str:
     """One moment as a record spells it, which is the only spelling AGL writes down.
 
@@ -119,10 +112,8 @@ def wire_moment(moment: datetime) -> str:
     """
     return format(moment, _WIRE_TIME)
 
-
 @dataclass(frozen=True, slots=True)
 class RunSpec:
-
     workflow: str
 
     workflow_version: str
@@ -200,7 +191,6 @@ class RunSpec:
             created_at=created_at,
         )
 
-
 def _check_sha(value: str) -> None:
     if len(value) not in _SHA_LENGTHS or not _SHA_CHARACTERS.issuperset(value):
         raise InternalError(
@@ -209,12 +199,10 @@ def _check_sha(value: str) -> None:
             f"stops being unique as the repository grows and so pins nothing"
         )
 
-
 def _checked_params(params: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
     return {
         _checked_key(key): _checked_json(value, f"params.{key}") for key, value in params.items()
     }
-
 
 def _checked_key(key: object) -> str:
     if not isinstance(key, str):
@@ -223,7 +211,6 @@ def _checked_key(key: object) -> str:
             f"strings - writing this record would silently rename it"
         )
     return checked_text(key, f"the param key {key!r}")
-
 
 def checked_text(value: str, where: str, *, cost: str = _STORE_REFUSES) -> str:
     """`value` itself, if it is text AGL can write down - which is every `str` but one kind.
@@ -241,7 +228,6 @@ def checked_text(value: str, where: str, *, cost: str = _STORE_REFUSES) -> str:
                 f"UTF-8 has no encoding for one at all, {cost}"
             )
     return value
-
 
 def _checked_json(value: object, where: str) -> JsonValue:
     if value is None or isinstance(value, bool | int):

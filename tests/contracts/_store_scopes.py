@@ -16,9 +16,7 @@ here interrupts one; it *is* explicitly required to tolerate absence, so that is
 """
 
 import pytest
-
 from agl.ports.store import Store
-
 from ._store_documents import (
     CHILD,
     FOREIGN_RUN,
@@ -31,7 +29,6 @@ from ._store_documents import (
     entry,
     record,
 )
-
 
 class StoreScopeContract:
     """What `namespaces` reports and what `remove` takes, which are two sides of one address.

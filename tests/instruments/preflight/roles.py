@@ -15,7 +15,6 @@ from agl.sdk import OpenAI, Role, role
 
 __all__ = ["implementer"]
 
-
 @role(model=OpenAI.TERRA)
 def implementer() -> Role:
     """The factory a workflow reaches as `roles.implementer()` rather than as `implementer()`."""

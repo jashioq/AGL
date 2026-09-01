@@ -58,9 +58,11 @@ the gates catch what a machine can catch, and you are here for what it cannot.
 4. **Was a gate silenced rather than satisfied?** A deleted assertion, a loosened type, a new
    ignore comment, a weakened contract test. Any of these is high severity whatever else is true of
    the change, because a suite edited to go green stops being evidence.
-5. **Does it match the code around it?** This project argues its decisions in docstrings; a change
-   that contradicts the docstring beside it, or that adds a member with no argument for why it
-   exists, is a finding.
+5. **Does it match the code around it?** This project argues its decisions in its tests, in
+   `ARCHITECTURE.md` and in the few inline `#` comments beside the code, not in its docstrings,
+   where a block describes a function's parameters and nothing else. A change that contradicts a
+   test, an import contract or the comment above the line it edits is a finding, and so is a new
+   member that nothing anywhere argues for.
 
 Do not report style preferences that no gate enforces, and do not report the same defect twice
 under two headings.

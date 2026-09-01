@@ -1,7 +1,5 @@
-
 import json
 from collections.abc import Mapping
-
 from agl.adapters.filesystem._documents import (
     _ENCODING,
     _encoded,
@@ -15,12 +13,9 @@ from agl.ports.store import Store
 
 __all__ = ["MemoryStore"]
 
-
 type _EntryAddress = tuple[RunScope, StepName, str]
 
-
 class MemoryStore(Store):
-
     def __init__(self) -> None:
         self._records: dict[RunScope, bytes] = {}
         self._entries: dict[_EntryAddress, bytes] = {}
@@ -58,14 +53,12 @@ class MemoryStore(Store):
         for address in [address for address in self._entries if _within(address[0], scope)]:
             del self._entries[address]
 
-
 def _within(address: RunScope, scope: RunScope) -> bool:
     return (
         address.project == scope.project
         and address.label == scope.label
         and address.namespaces[: len(scope.namespaces)] == scope.namespaces
     )
-
 
 def _decoded(payload: bytes | None) -> dict[str, JsonValue] | None:
     if payload is None:

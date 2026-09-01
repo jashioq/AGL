@@ -82,9 +82,7 @@ from dataclasses import dataclass, replace
 from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Final
-
 import pytest
-
 from agl import api
 from agl.config import container, registry
 from agl.ports.agent import (
@@ -133,20 +131,17 @@ EVERYTHING: Final = frozenset(Capability)
 # serve `fix`'s implementer is the one that cannot call a tool, which is this one.
 CANNOT_CALL: Final = EVERYTHING - {Capability.TOOL_CALLING}
 
-
 @dataclass(frozen=True)
 class _Found:
     """The smallest reporting payload there is: one field, so a schema can be derived from it."""
 
     summary: str
 
-
 @dataclass(frozen=True)
 class _Asked:
     """The payload an asking tool would carry. One field, because nothing here is ever asked."""
 
     question: str
-
 
 def _asking() -> Tool:
     """An asking tool, reduced to the one thing this file needs of it: that it exists.
@@ -161,7 +156,6 @@ def _asking() -> Tool:
 
     return tool("ask_the_operator", "ask the person running this task", _Asked, answered)
 
-
 # --- the roles, as the `@role(model=…)` factories a role is declared by --------------------------
 #
 # Six of them, and the fact that they are bound *in this module* is the whole of what
@@ -169,7 +163,6 @@ def _asking() -> Tool:
 # namespace is the registry. So this block is also the declaration the availability tests are about
 # - two distinct models over six factories, which is what "once per model, not once per role" needs
 # to be able to tell apart.
-
 
 @role(model=Claude.OPUS)
 def implementer(*, ask: Tool | None = None) -> Role:
@@ -185,13 +178,11 @@ def implementer(*, ask: Tool | None = None) -> Role:
         name="implement", instructions="implement it", tools=() if ask is None else (ask,)
     )
 
-
 @role(model=OpenAI.SOL)
 def reviewer() -> Role:
     """A second provider in one run, which is the port's motivating case and the reason dedup is
     testable: two models in this namespace, so a run asks twice however many factories name them."""
     return Role(name="review", instructions="review it")
-
 
 @role(model=Claude.OPUS)
 def repairer() -> Role:
@@ -199,7 +190,6 @@ def repairer() -> Role:
     asks about it, which is exactly what "once per distinct model, not once per role" has to
     distinguish."""
     return Role(name="repair", instructions="repair it")
-
 
 @role(model=Claude.OPUS)
 def builder() -> Role:
@@ -209,7 +199,6 @@ def builder() -> Role:
         instructions="run the build until it passes",
         requires={Capability.SHELL},
     )
-
 
 @role(model=Claude.OPUS)
 def reporter() -> Role[_Found]:
@@ -222,13 +211,11 @@ def reporter() -> Role[_Found]:
         tools=[reporting_tool("report_findings", "report what the review found", _Found)],
     )
 
-
 # --- what each workflow did, recorded at module level because the workflows have to be there -----
 #
 # `entered` is `instruments/preflight/`'s list, shared with the three workflow modules over there:
 # every test that reads it asks one question - did this run reach its workflow, or was it refused
 # first - and the answer must not depend on which module the workflow happens to be written in.
-
 
 @workflow(version="1.1")
 async def two_providers(run: Run[NoParams]) -> None:
@@ -238,7 +225,6 @@ async def two_providers(run: Run[NoParams]) -> None:
     anything, and a workflow with a body would put a second reason in every assertion below.
     """
     entered.append("two_providers")
-
 
 @workflow(version="1.1")
 async def replacing(run: Run[NoParams]) -> None:
@@ -262,11 +248,9 @@ async def replacing(run: Run[NoParams]) -> None:
         )
     )
 
-
 def _point(name: str, target: str) -> EntryPoint:
     """The `probe = "agl.workflows.probe:probe"` entry point, pointed here or at an instrument."""
     return EntryPoint(name=name, value=target, group=registry.GROUP)
-
 
 POINTS: Final = (
     _point("two_providers", f"{__name__}:two_providers"),
@@ -279,9 +263,7 @@ POINTS: Final = (
     _point("qualified", "instruments.preflight.qualified:qualified"),
 )
 
-
 # --- the runner this file drives preflight with --------------------------------------------------
-
 
 class _Stub(AgentRunner):
     """An `AgentRunner` that answers whatever a test needs and writes down what it was asked.
@@ -328,7 +310,6 @@ class _Stub(AgentRunner):
         self.ran.append(task)
         return AgentOutcome(stop_reason=StopReason.COMPLETED, text="")
 
-
 class _Untouched(WorkspaceProvider):
     """A provider that refuses to have been reached. Every member is a tripwire.
 
@@ -355,11 +336,9 @@ class _Untouched(WorkspaceProvider):
             "turns is the last thing that can happen while the run has left nothing behind"
         )
 
-
 def _fakes(tmp_path: Path) -> container.FakeServices:
     """End-to-end on fakes alone: one repository seeded with a file, one store, one frozen clock."""
     return container.fakes(TreesRoot(tmp_path / "trees"), files={"src/a.txt": b"one\n"})
-
 
 async def _start(
     harness: container.FakeServices, name: str, *, agents: AgentRunner, opens: bool = True
@@ -374,14 +353,11 @@ async def _start(
         services = replace(services, workspaces=_Untouched())
     await api.run(services, PROJECT, name, LABEL, (), points=POINTS)
 
-
 async def _no_record(harness: container.FakeServices) -> bool:
     """Whether this run left nothing under `AGL_HOME` - half of what "second zero" means."""
     return await harness.services.store.read_record(SCOPE) is None
 
-
 # --- half one: availability, over the models the workflow's module names -------------------------
-
 
 @pytest.mark.asyncio
 async def test_a_role_whose_harness_is_missing_fails_at_second_zero(tmp_path: Path) -> None:
@@ -412,7 +388,6 @@ async def test_a_role_whose_harness_is_missing_fails_at_second_zero(tmp_path: Pa
     assert await _no_record(harness), "a run refused at preflight left a record to be cleared"
     assert entered == [], "the workflow ran although its backend was never ready"
 
-
 @pytest.mark.asyncio
 async def test_check_ready_is_asked_once_per_model_and_not_once_per_role(tmp_path: Path) -> None:
     """The first check, over *distinct models*. Six factories in this module, two models, two
@@ -432,7 +407,6 @@ async def test_check_ready_is_asked_once_per_model_and_not_once_per_role(tmp_pat
     await _start(harness, "two_providers", agents=stub)
 
     assert stub.asked_ready == [Claude.OPUS, OpenAI.SOL]
-
 
 @pytest.mark.asyncio
 async def test_a_workflow_whose_module_names_no_role_asks_no_backend_anything(
@@ -459,7 +433,6 @@ async def test_a_workflow_whose_module_names_no_role_asks_no_backend_anything(
     assert (stub.asked_ready, stub.asked_offers) == ([], [])
     assert entered == ["unstaffed"]
 
-
 @pytest.mark.asyncio
 async def test_a_factory_written_below_the_workflow_is_still_found(tmp_path: Path) -> None:
     """The scan happens at preflight, not at decoration, and this is the difference between them.
@@ -481,7 +454,6 @@ async def test_a_factory_written_below_the_workflow_is_still_found(tmp_path: Pat
 
     assert stub.asked_ready == [Claude.HAIKU]
     assert entered == ["late"]
-
 
 @pytest.mark.asyncio
 async def test_a_role_reached_through_a_module_is_refused_at_second_zero(tmp_path: Path) -> None:
@@ -517,7 +489,6 @@ async def test_a_role_reached_through_a_module_is_refused_at_second_zero(tmp_pat
     assert await _no_record(harness), "a run refused at preflight left a record to be cleared"
     assert entered == [], "the workflow ran although its backend was never ready"
 
-
 @pytest.mark.asyncio
 async def test_a_module_qualified_workflow_passes_on_the_model_reached_through_the_module(
     tmp_path: Path,
@@ -546,9 +517,7 @@ async def test_a_module_qualified_workflow_passes_on_the_model_reached_through_t
     assert [task.model for task in stub.ran] == [OpenAI.TERRA]
     assert entered == ["qualified"]
 
-
 # --- half one: the over-approximation, which is documented behaviour -----------------------------
-
 
 @pytest.mark.asyncio
 async def test_a_role_imported_and_never_used_still_demands_its_provider(tmp_path: Path) -> None:
@@ -572,7 +541,6 @@ async def test_a_role_imported_and_never_used_still_demands_its_provider(tmp_pat
 
     assert stub.asked_ready == [OpenAI.SOL], "an imported-but-unused role stopped being demanded"
     assert entered == ["unused"]
-
 
 @pytest.mark.asyncio
 async def test_the_refusal_names_the_factory_and_the_modules_the_model_came_from(
@@ -608,7 +576,6 @@ async def test_the_refusal_names_the_factory_and_the_modules_the_model_came_from
     assert "imported" in said, "the refusal does not name the known cause of a false demand"
     assert await _no_record(harness)
 
-
 @pytest.mark.asyncio
 async def test_preflight_asks_whether_a_backend_is_ready_and_never_what_it_can_do(
     tmp_path: Path,
@@ -642,13 +609,11 @@ async def test_preflight_asks_whether_a_backend_is_ready_and_never_what_it_can_d
     assert passing.asked_ready == [Claude.OPUS, OpenAI.SOL]
     assert passing.asked_offers == [], "containment ran at second zero, where it cannot"
 
-
 # --- half two: containment, over the role a step is actually handed ------------------------------
 #
 # The four suites below measured the same claims through `api.run` once. What moved is the
 # moment and not the claim: same class, same exit code, same sentence, one `run.step` later. The
 # module docstring lists them and says what they stopped being able to assert.
-
 
 @pytest.mark.asyncio
 async def test_a_role_requiring_what_its_backend_lacks_is_refused_with_the_member_named(
@@ -684,7 +649,6 @@ async def test_a_role_requiring_what_its_backend_lacks_is_refused_with_the_membe
     assert "shell" in str(caught.value)
     assert stub.ran == []
 
-
 @pytest.mark.asyncio
 async def test_a_missing_tool_calling_says_that_tools_put_it_there(tmp_path: Path) -> None:
     """The third check, which is the second check plus one clause in the message.
@@ -710,7 +674,6 @@ async def test_a_missing_tool_calling_says_that_tools_put_it_there(tmp_path: Pat
     assert "tool_calling" in said
     assert "tools" in said
 
-
 @pytest.mark.asyncio
 async def test_a_role_that_typed_the_member_itself_gets_no_extra_clause(tmp_path: Path) -> None:
     """The clause above is about a *declaration*, not about the member, which keeps it honest.
@@ -731,7 +694,6 @@ async def test_a_role_that_typed_the_member_itself_gets_no_extra_clause(tmp_path
 
     assert "declares `tools`" not in str(caught.value)
     assert "folds it in" not in str(caught.value)
-
 
 @pytest.mark.asyncio
 async def test_a_role_built_inside_a_workflow_is_checked_at_the_step_it_is_handed_to(
@@ -781,7 +743,6 @@ async def test_a_role_built_inside_a_workflow_is_checked_at_the_step_it_is_hande
     assert stub.ran == [], "the role reached the adapter although it could not be served"
     assert not await _no_record(harness), "preflight passed, so this run exists and can be cleared"
 
-
 async def _direct(harness: container.FakeServices, agents: AgentRunner) -> Run[None]:
     """A `Run` built the way a great many tests build one: directly, never through `api.run`.
 
@@ -799,7 +760,6 @@ async def _direct(harness: container.FakeServices, agents: AgentRunner) -> Run[N
         scope=SCOPE,
         base=await history.resolve(await history.default_ref()),
     )
-
 
 @pytest.mark.asyncio
 async def test_the_step_time_check_costs_one_capabilities_call_per_model_per_run(
@@ -834,7 +794,6 @@ async def test_the_step_time_check_costs_one_capabilities_call_per_model_per_run
     assert stub.asked_offers == [Claude.OPUS, OpenAI.SOL]
     assert len(stub.ran) == 4
 
-
 @pytest.mark.asyncio
 async def test_check_ready_is_not_repeated_at_the_step(tmp_path: Path) -> None:
     """The other half of what half two is: containment only, and never a second `check_ready`.
@@ -852,7 +811,6 @@ async def test_check_ready_is_not_repeated_at_the_step(tmp_path: Path) -> None:
 
     assert stub.asked_ready == []
     assert len(stub.ran) == 1
-
 
 @pytest.mark.asyncio
 async def test_a_step_is_refused_before_its_checkout_is_provisioned(tmp_path: Path) -> None:
@@ -874,9 +832,7 @@ async def test_a_step_is_refused_before_its_checkout_is_provisioned(tmp_path: Pa
     assert not (tmp_path / "trees" / str(LABEL)).exists()
     assert stub.ran == []
 
-
 # --- the module's own surface --------------------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_check_takes_a_runner_and_a_workflow_function_and_nothing_else() -> None:

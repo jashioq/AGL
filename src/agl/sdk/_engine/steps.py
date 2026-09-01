@@ -1,8 +1,6 @@
-
 import asyncio
 from collections.abc import Mapping
 from typing import Final, cast
-
 from agl.ports.agent import AgentOutcome, AgentTask, StopReason, Tool, ToolResult
 from agl.ports.home_layout import RunScope
 from agl.ports.ids import Namespace, StepName
@@ -18,9 +16,7 @@ __all__ = ["Steps"]
 
 _INPUTS_HEADING: Final = "## Inputs"
 
-
 class Steps:
-
     def __init__(
         self,
         services: Services,
@@ -121,9 +117,7 @@ class Steps:
                 )
             return self._opened
 
-
 class _Capture[P]:
-
     def __init__(self, declaration: ReportingTool[P]) -> None:
         self._declaration = declaration
         self._payload: dict[str, JsonValue] | None = None
@@ -162,16 +156,13 @@ class _Capture[P]:
     def read(self, value: object) -> P:
         return self._declaration.read(value)
 
-
 def _composed(instructions: str, inputs: Mapping[str, object]) -> str:
     if not inputs:
         return instructions
     return "\n\n".join((instructions, _INPUTS_HEADING, canonical_json(inputs)))
 
-
 def _namespace_of(scope: RunScope) -> Namespace | None:
     return scope.namespaces[-1] if scope.namespaces else None
-
 
 def _unreported(tool: str, outcome: AgentOutcome) -> str:
     return (
@@ -179,7 +170,6 @@ def _unreported(tool: str, outcome: AgentOutcome) -> str:
         f"nothing was recorded and it will run again on the next attempt. {_because(outcome)} It "
         f"said this instead of reporting: {outcome.text!r}"
     )
-
 
 def _because(outcome: AgentOutcome) -> str:
     if outcome.stop_reason is StopReason.LIMIT:

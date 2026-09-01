@@ -56,9 +56,7 @@ from importlib.metadata import EntryPoint
 from pathlib import Path
 from types import TracebackType
 from typing import Final, Self, cast
-
 import pytest
-
 from agl import api
 from agl.config import container, registry
 from agl.ports import terminal as ports_terminal
@@ -82,14 +80,11 @@ SCOPE: Final = RunScope(PROJECT, LABEL)
 # spent against a repository - `test_run_step.py` is where a base is real.
 BASE: Final = "4a91c07f2b3e8d15c6a0f31d8e2b47c9a6013f5e"
 
-
 @dataclass(frozen=True)
 class NoParams:
     """A workflow that takes nothing, and still has a params class to derive no flags from."""
 
-
 # --- the views these tests show ------------------------------------------------------------------
-
 
 def board(lines: list[str]) -> Screen:
     """The board, reduced to what a wiring test can assert: a table of one cell per line.
@@ -103,15 +98,12 @@ def board(lines: list[str]) -> Screen:
     """
     return Screen(Rows([ports_terminal.Row(Text(line)) for line in lines]))
 
-
 def cells(screen: Screen[object]) -> list[str]:
     """The text of a `board` screen, row by row - what "reflects the mutation" reads as here."""
     assert isinstance(screen.body, Rows)
     return [cell.value for row in screen.body.rows for cell in row.cells]
 
-
 # --- a recording terminal, for the one claim the headless one cannot answer -----------------------
-
 
 class _Recording(Terminal):
     """A `Terminal` that keeps what `show` was handed and draws none of it.
@@ -174,7 +166,6 @@ class _Recording(Terminal):
         view, params = self.shown[-1]
         return view(**params)
 
-
 # --- workflows, reached through hand-constructed entry points -------------------------------------
 
 # What each workflow saw, at module level because the workflows have to be: `EntryPoint.load`
@@ -183,34 +174,27 @@ answers: Final[list[object]] = []
 terminals: Final[list[Terminal]] = []
 live: Final[list[str]] = []
 
-
 @workflow(version="1")
 async def showing(run: Run[NoParams]) -> None:
     """Shows one passive board and returns, which is the whole of what `api.run` has to allow."""
     terminals.append(run.terminal)
     answers.append(await run.terminal.show(board, lines=live))
 
-
 def _point(name: str, attribute: str) -> EntryPoint:
     """The `probe = "agl.workflows.probe:probe"` entry point, pointed at this module instead."""
     return EntryPoint(name=name, value=f"{__name__}:{attribute}", group=registry.GROUP)
 
-
 POINTS: Final = (_point("showing", "showing"),)
-
 
 def _fakes(tmp_path: Path) -> container.FakeServices:
     """End-to-end on fakes alone: no network, no git, no process, and a `HeadlessTerminal`."""
     return container.fakes(TreesRoot(tmp_path / "trees"), files={"src/a.txt": b"one\n"})
 
-
 def _run(services: container.Services) -> Run[None]:
     """A root `Run` on a bundle, with no repository behind it - nothing here takes a step."""
     return Run(params=None, services=services, scope=SCOPE, base=BASE)
 
-
 # --- run.terminal is the bundle's terminal --------------------------------------------------------
-
 
 def test_run_terminal_is_the_object_in_the_bundle(tmp_path: Path) -> None:
     """Identity, which is the only form of this claim worth making.
@@ -225,7 +209,6 @@ def test_run_terminal_is_the_object_in_the_bundle(tmp_path: Path) -> None:
 
     assert _run(harness.services).terminal is harness.services.terminal
     assert _run(harness.services).terminal is harness.terminal
-
 
 def test_a_child_worktree_reaches_the_same_terminal_as_its_parent(tmp_path: Path) -> None:
     """The single answerer, asserted as the structural fact it is.
@@ -249,7 +232,6 @@ def test_a_child_worktree_reaches_the_same_terminal_as_its_parent(tmp_path: Path
     assert grandchild.terminal is parent.terminal
     assert grandchild.terminal is harness.terminal
 
-
 def test_two_sibling_worktrees_share_one_terminal(tmp_path: Path) -> None:
     """The other shape of the same claim, and the one the terminal's queues are actually about.
 
@@ -261,7 +243,6 @@ def test_two_sibling_worktrees_share_one_terminal(tmp_path: Path) -> None:
     parent = _run(_fakes(tmp_path).services)
 
     assert parent.worktree("T-01").terminal is parent.worktree("T-02").terminal
-
 
 def test_the_terminal_is_a_read_and_not_a_field(tmp_path: Path) -> None:
     """A property over `services.terminal`, which is what makes the two unable to disagree.
@@ -281,9 +262,7 @@ def test_the_terminal_is_a_read_and_not_a_field(tmp_path: Path) -> None:
     assert replace(run, services=other.services).terminal is other.terminal
     assert run.terminal is harness.terminal
 
-
 # --- api.run opens the context, and closes it -----------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_a_workflow_can_show_a_screen_through_api_run(tmp_path: Path) -> None:
@@ -312,7 +291,6 @@ async def test_a_workflow_can_show_a_screen_through_api_run(tmp_path: Path) -> N
     assert terminals == [harness.terminal]
     assert terminals[0] is harness.terminal
 
-
 @pytest.mark.asyncio
 async def test_the_terminal_is_shut_again_when_api_run_returns(tmp_path: Path) -> None:
     """The other half: a context opened and never left satisfies the test above and nothing else.
@@ -333,7 +311,6 @@ async def test_the_terminal_is_shut_again_when_api_run_returns(tmp_path: Path) -
 
     assert "not inside its context" in str(caught.value)
 
-
 @pytest.mark.asyncio
 async def test_the_terminal_is_entered_once_around_the_workflow(tmp_path: Path) -> None:
     """Once, which every implementation requires - a second `__aenter__` is refused by each.
@@ -349,7 +326,6 @@ async def test_the_terminal_is_entered_once_around_the_workflow(tmp_path: Path) 
     await api.run(services, PROJECT, "showing", LABEL, (), points=POINTS)
 
     assert recorder.entered == 1
-
 
 @pytest.mark.asyncio
 async def test_a_workflow_can_show_a_screen_through_api_resume(tmp_path: Path) -> None:
@@ -374,7 +350,6 @@ async def test_a_workflow_can_show_a_screen_through_api_resume(tmp_path: Path) -
     assert answers == [None]
     assert terminals == [harness.terminal]
 
-
 @pytest.mark.asyncio
 async def test_the_terminal_is_entered_once_around_a_resumed_workflow(tmp_path: Path) -> None:
     """Once for the resume too, which a raise cannot say and a count can.
@@ -397,7 +372,6 @@ async def test_the_terminal_is_entered_once_around_a_resumed_workflow(tmp_path: 
 
     assert recorder.entered == 1
 
-
 class _Refusing(WorkspaceProvider):
     """A provider that provisions nothing, so that `api.run` fails on its last line before the
     workflow. `tests/test_api.py` carries the same stub for the same one failure `container.fakes()`
@@ -416,12 +390,10 @@ class _Refusing(WorkspaceProvider):
     def hold(self, label: RunLabel) -> AbstractAsyncContextManager[None]:
         return _granted()
 
-
 @asynccontextmanager
 async def _granted() -> AsyncIterator[None]:
     """A run claim nothing contends for - what `hold` is when the test is about something else."""
     yield
-
 
 @pytest.mark.asyncio
 async def test_a_run_that_fails_before_the_workflow_never_opens_the_terminal(
@@ -448,9 +420,7 @@ async def test_a_run_that_fails_before_the_workflow_never_opens_the_terminal(
 
     assert recorder.entered == 0
 
-
 # --- what reaches the terminal is the view and its arguments -------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_show_registers_the_view_and_its_arguments_rather_than_a_screen(
@@ -490,9 +460,7 @@ async def test_show_registers_the_view_and_its_arguments_rather_than_a_screen(
     live.append("T-02 review")
     assert cells(recorder.redraw()) == ["T-01 implement", "T-02 review"]
 
-
 # --- the two facades -----------------------------------------------------------------------------
-
 
 def test_the_terminal_facade_re_exports_the_ports_objects_themselves() -> None:
     """Identity, name by name. `sdk/terminal.py` is a pure re-export facade, holding no logic.
@@ -504,7 +472,6 @@ def test_the_terminal_facade_re_exports_the_ports_objects_themselves() -> None:
     """
     for name in ports_terminal.__all__:
         assert getattr(sdk_terminal, name) is getattr(ports_terminal, name)
-
 
 def test_the_terminal_facade_re_exports_the_whole_of_its_ports_surface() -> None:
     """Every name, not a chosen subset - which is the part of "no logic" that can rot quietly.
@@ -522,7 +489,6 @@ def test_the_terminal_facade_re_exports_the_whole_of_its_ports_surface() -> None
     a *part* of its port module, which is what the next test's own docstring is about.
     """
     assert sdk_terminal.__all__ == ports_terminal.__all__
-
 
 def test_the_facades_declare_nothing_of_their_own() -> None:
     """No alias, no wrapper, no subclass, no helper. `tests/sdk/test_services.py` asks `vars()` the

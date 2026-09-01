@@ -1,10 +1,8 @@
-
 import argparse
 import asyncio
 from collections.abc import Iterable, Sequence
 from importlib.metadata import EntryPoint
 from typing import Final
-
 from agl import api
 from agl.cli.commands import Registered, _said
 from agl.ports.ids import RunLabel
@@ -28,7 +26,6 @@ _NOTHING_TO_REPORT: Final = 0
 # `argparse` has no public spelling for what `add_subparsers` returns, and the alternative is
 # `Any`, which is the one thing `mypy --strict` is here to keep out of the seam.
 type _Commands = argparse._SubParsersAction[RefusingParser]
-
 
 def declare(commands: _Commands) -> RefusingParser:
     parser = commands.add_parser(
@@ -62,7 +59,6 @@ def declare(commands: _Commands) -> RefusingParser:
     )
     return parser
 
-
 def execute(
     registered: Registered,
     parsed: argparse.Namespace,
@@ -86,7 +82,6 @@ def execute(
     )
     print(f"run {str(label)!r} finished")
     return _NOTHING_TO_REPORT
-
 
 def _perhaps(parsed: argparse.Namespace, dest: str) -> str | None:
     value = getattr(parsed, dest)

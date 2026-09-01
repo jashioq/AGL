@@ -47,9 +47,7 @@ import sys
 from collections.abc import Awaitable, Mapping
 from pathlib import Path
 from typing import Final, cast
-
 import pytest
-
 from agl.adapters.claude_code.fake import Conversation, FakeAgentRunner, unscripted
 from agl.adapters.claude_code.runner import ClaudeCodeRunner
 from agl.ports.agent import (
@@ -68,7 +66,6 @@ from agl.ports.errors import InputError
 from agl.ports.run import JsonValue
 from contracts._agent_tasks import task, workspace
 from contracts.agent import AgentContract
-
 
 class TestFakeAgentRunner(AgentContract):
     """The port in full, three times over - once per model this runner serves.
@@ -98,7 +95,6 @@ class TestFakeAgentRunner(AgentContract):
         makes the real adapter's suite name `Claude.HAIKU` does not apply.
         """
         return cast(ModelId, request.param)
-
 
 # --- Helpers: one tool and the tasks it goes into -----------------------------------------------
 
@@ -144,7 +140,6 @@ RICH_SCHEMA: Final[Mapping[str, JsonValue]] = {
     "additionalProperties": False,
 }
 
-
 class Recorded:
     """One tool, what it was handed, and the shared order the calls across several arrived in.
 
@@ -188,7 +183,6 @@ class Recorded:
             return ToolResult(text=f"{self.tool.name} did not accept that.", rejected=True)
         return ToolResult(text=f"{self.tool.name} accepted that.")
 
-
 class Answering:
     """An asking tool answering from a fixed list, repeating the last one once it runs out.
 
@@ -211,14 +205,11 @@ class Answering:
         self.asked.append(payload)
         return ToolResult(text=self._answers[min(len(self.asked), len(self._answers)) - 1])
 
-
 def anything(where: Path, *, tools: tuple[Tool, ...] = ()) -> AgentTask:
     """A task whose instructions nothing in this repository has ever handed this runner."""
     return task(where, Claude.SONNET, "Translate into French: the cat sat on the mat.", tools=tools)
 
-
 # --- The four behaviours a script exists to produce ---------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_an_answer_visibly_changes_what_happens_next_inside_the_same_run(
@@ -265,7 +256,6 @@ async def test_an_answer_visibly_changes_what_happens_next_inside_the_same_run(
         f"called at all, and only one of these two runs was told to land"
     )
 
-
 @pytest.mark.asyncio
 async def test_a_scripted_tool_call_reaches_the_handler_as_the_mapping_it_was_given(
     tmp_path: Path,
@@ -295,7 +285,6 @@ async def test_a_scripted_tool_call_reaches_the_handler_as_the_mapping_it_was_gi
         "what the handler said did not come back to the caller, so a script could never correct "
         "itself: the ToolResult is the framework speaking to the agent, which is the port's rule"
     )
-
 
 @pytest.mark.asyncio
 async def test_a_refused_payload_is_corrected_inside_the_same_conversation(
@@ -334,7 +323,6 @@ async def test_a_refused_payload_is_corrected_inside_the_same_conversation(
     )
     assert outcome.text == "record_note accepted that."
 
-
 @pytest.mark.asyncio
 async def test_a_script_may_answer_with_a_stop_reason_of_none(tmp_path: Path) -> None:
     """`None` means "this backend did not say", and it is the value a consumer most easily invents.
@@ -366,9 +354,7 @@ async def test_a_script_may_answer_with_a_stop_reason_of_none(tmp_path: Path) ->
             "and the empty string is the port's spelling for an agent that said nothing"
         )
 
-
 # --- That the default is honest rather than tuned to the contract suite's prompts ---------------
-
 
 @pytest.mark.asyncio
 async def test_the_default_behaves_the_same_way_whatever_it_is_asked(tmp_path: Path) -> None:
@@ -417,7 +403,6 @@ async def test_the_default_behaves_the_same_way_whatever_it_is_asked(tmp_path: P
     )
     assert "cat sat on the mat" not in transcripts[0][2]
 
-
 @pytest.mark.asyncio
 async def test_the_default_calls_every_tool_it_is_given_and_singles_none_of_them_out(
     tmp_path: Path,
@@ -442,7 +427,6 @@ async def test_the_default_calls_every_tool_it_is_given_and_singles_none_of_them
         f"anything else is this module deciding which tool matters, which is the one thing the "
         f"port says an adapter must never know"
     )
-
 
 @pytest.mark.asyncio
 async def test_the_default_composes_a_payload_out_of_the_tools_own_schema(tmp_path: Path) -> None:
@@ -475,9 +459,7 @@ async def test_the_default_composes_a_payload_out_of_the_tools_own_schema(tmp_pa
     )
     assert isinstance(payload["nested"], Mapping) and isinstance(payload["nested"]["why"], str)
 
-
 # --- That it is not more permissive than the runner it stands in for ----------------------------
-
 
 @pytest.mark.asyncio
 async def test_both_runners_refuse_exactly_the_same_models_in_the_same_way(
@@ -528,7 +510,6 @@ async def test_both_runners_refuse_exactly_the_same_models_in_the_same_way(
                 f"attempted, or preflight is all that stands between a workflow and a dead step"
             )
 
-
 @pytest.mark.asyncio
 async def test_both_runners_report_the_same_capabilities_for_a_served_model() -> None:
     """What preflight admits a run on, and the reason this fake claims two it cannot deliver.
@@ -549,7 +530,6 @@ async def test_both_runners_report_the_same_capabilities_for_a_served_model() ->
             f"the two runners report different capabilities for {str(model)!r}, so a role admitted "
             f"on fakes could be refused in anger, or the other way round"
         )
-
 
 @pytest.mark.asyncio
 async def test_a_task_carrying_every_restriction_runs_and_is_prevented_from_nothing(
@@ -575,7 +555,6 @@ async def test_a_task_carrying_every_restriction_runs_and_is_prevented_from_noth
         )
     )
     assert isinstance(outcome.text, str)
-
 
 @pytest.mark.asyncio
 async def test_a_workspace_that_is_not_there_is_run_in_here_and_would_stop_the_runner(
@@ -625,7 +604,6 @@ async def test_a_workspace_that_is_not_there_is_run_in_here_and_would_stop_the_r
         f"created one would hide the very state this test is about"
     )
 
-
 def test_this_fake_imports_on_a_machine_with_no_vendor_sdk() -> None:
     """The decision in the module's docstring, proved rather than asserted.
 
@@ -663,7 +641,6 @@ def test_this_fake_imports_on_a_machine_with_no_vendor_sdk() -> None:
         f"nothing:\n{finished.stdout}"
     )
 
-
 # --- The exception a session's own caller code can throw ------------------------------------------
 #
 # There were three tests here and there is one. Two were about `Conversation.ask` - a question with
@@ -672,7 +649,6 @@ def test_this_fake_imports_on_a_machine_with_no_vendor_sdk() -> None:
 # question is an ordinary tool call and there is no second kind of caller code for this fake to
 # invoke. What the surviving test asserts about a *tool* handler is what both used to assert
 # between them, and it is the clause `tests/contracts/agent.py` now holds every implementation to.
-
 
 @pytest.mark.asyncio
 async def test_a_tool_handler_that_raises_ends_the_run_with_its_own_exception(
@@ -736,7 +712,6 @@ async def test_a_tool_handler_that_raises_ends_the_run_with_its_own_exception(
         f"already failed, in a run that is about to raise"
     )
 
-
 @pytest.mark.asyncio
 async def test_a_script_cannot_call_a_tool_the_task_never_declared(tmp_path: Path) -> None:
     """A real session registers exactly `task.tools`, so a call to anything else is not a move.
@@ -757,7 +732,6 @@ async def test_a_script_cannot_call_a_tool_the_task_never_declared(tmp_path: Pat
             anything(workspace(tmp_path), tools=(notes.tool,))
         )
     assert notes.received == [], "and the tool that was declared was not called instead"
-
 
 @pytest.mark.asyncio
 async def test_a_payload_no_model_could_have_produced_never_reaches_a_handler(
@@ -782,7 +756,6 @@ async def test_a_payload_no_model_could_have_produced_never_reaches_a_handler(
             anything(workspace(tmp_path), tools=(notes.tool,))
         )
     assert notes.received == [], "the handler was handed it anyway, which is the whole of the bug"
-
 
 @pytest.mark.asyncio
 async def test_a_scripts_activity_line_arrives_untouched_and_a_reporter_that_raises_is_not_hidden(
@@ -813,7 +786,6 @@ async def test_a_scripts_activity_line_arrives_untouched_and_a_reporter_that_rai
     with pytest.raises(RuntimeError, match="this reporter is broken"):
         await FakeAgentRunner(reports).run(anything(workspace(tmp_path)), on_activity=breaks)
 
-
 @pytest.mark.asyncio
 async def test_the_default_is_a_function_a_script_can_delegate_to(tmp_path: Path) -> None:
     """`unscripted` is exported, which is what makes "the usual thing, and then one more" writable.
@@ -834,7 +806,6 @@ async def test_the_default_is_a_function_a_script_can_delegate_to(tmp_path: Path
     assert len(notes.received) == 2, "the default called it once and the script called it again"
     assert outcome.text.endswith("And one more.")
     assert outcome.stop_reason is StopReason.COMPLETED
-
 
 async def _refusal(member: Awaitable[object]) -> str:
     """What a port member did, as one word: the name of what it raised, or `"answered"`.

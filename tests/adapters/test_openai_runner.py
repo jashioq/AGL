@@ -88,9 +88,7 @@ from collections.abc import Awaitable, Iterable, Mapping, Sequence
 from contextlib import suppress
 from pathlib import Path
 from typing import Any, Final, NoReturn
-
 import pytest
-
 from agl.adapters.openai import _tools
 from agl.adapters.openai import runner as runner_module
 from agl.adapters.openai.runner import OpenAiRunner
@@ -263,7 +261,6 @@ def main():
 sys.exit(main())
 '''
 
-
 class Stub:
     """One scripted stand-in for the harness: what it will do, and what it saw.
 
@@ -300,26 +297,21 @@ class Stub:
         assert isinstance(given, list)
         return [str(token) for token in given]
 
-
 def started(**fields: Any) -> dict[str, Any]:
     """A `turn.completed`-shaped stream: the ordinary ending, with whatever else is asked for."""
     return {"type": "turn.completed", "usage": {"input_tokens": 1, "output_tokens": 1}, **fields}
-
 
 def item(kind: str, of: str, **fields: Any) -> dict[str, Any]:
     """One item frame of `kind` carrying an item of type `of`."""
     return {"type": kind, "item": {"id": "i1", "type": of, "status": "completed", **fields}}
 
-
 def said(text: str) -> dict[str, Any]:
     """The frame the agent's closing message arrives on."""
     return item("item.completed", "agent_message", text=text)
 
-
 async def drive(stub: Stub, task: AgentTask, **kwargs: Any) -> Any:
     """Run `task` through the real adapter against the stub, and hand back what `run` returns."""
     return await OpenAiRunner(stub.path).run(task, **kwargs)
-
 
 def task_in(repo: Path, *, tools: tuple[Tool, ...] = (), **fields: Any) -> AgentTask:
     """One ordinary task in `repo`, with restrictions so the sandbox overrides are on the wire."""
@@ -332,14 +324,11 @@ def task_in(repo: Path, *, tools: tuple[Tool, ...] = (), **fields: Any) -> Agent
         **fields,
     )
 
-
 def _cli() -> bool:
     """Whether there is a binary to ask the two free questions of."""
     return shutil.which("codex") is not None
 
-
 # --- The guard this file rests on ---------------------------------------------------------------
-
 
 def test_no_test_in_this_module_can_spend_the_operators_credential() -> None:
     """The Codex half of the repo-wide guard, asserted rather than promised.
@@ -367,9 +356,7 @@ def test_no_test_in_this_module_can_spend_the_operators_credential() -> None:
         f"model would do it with the operator's own subscription and their own allowance"
     )
 
-
 # --- The port in full -----------------------------------------------------------------------
-
 
 class _NeverRuns(OpenAiRunner):
     """The runner the contract suite gets: real, except that `run` skips and always skips.
@@ -395,7 +382,6 @@ class _NeverRuns(OpenAiRunner):
     async def run(self, *args: object, **kwargs: object) -> NoReturn:
         pytest.skip(_SKIPPED)
 
-
 class TestOpenAiRunner(AgentContract):
     """The port in full, against the real adapter: two of its eight tests today, and six deferred.
 
@@ -419,9 +405,7 @@ class TestOpenAiRunner(AgentContract):
         """The cheapest tier this adapter serves, since every deferred test is a one-shot errand."""
         return OpenAI.LUNA
 
-
 # --- The command line it composes ---------------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_the_command_line_carries_every_setting_that_makes_a_session_agls(
@@ -477,7 +461,6 @@ async def test_the_command_line_carries_every_setting_that_makes_a_session_agls(
     assert "--dangerously-bypass-approvals-and-sandbox" not in argv, "the sandbox is the mechanism"
     assert "--approve-for-me" not in argv, "that widens the sandbox that is the whole mechanism"
 
-
 @pytest.mark.asyncio
 async def test_the_workspace_is_the_working_directory_and_is_not_on_the_command_line(
     tmp_path: Path,
@@ -503,7 +486,6 @@ async def test_the_workspace_is_the_working_directory_and_is_not_on_the_command_
         f"directory precisely so that it cannot be, and the flag that would put it there has the "
         f"working directory as its own default, so nothing is bought by using it"
     )
-
 
 @pytest.mark.asyncio
 async def test_the_mcp_server_is_injected_with_a_timeout_a_person_can_answer_inside(
@@ -550,7 +532,6 @@ async def test_the_mcp_server_is_injected_with_a_timeout_a_person_can_answer_ins
             f"asking tool waits on a person, and an approval gate that survives only while nobody "
             f"thinks for a minute is not a gate anybody should be relying on"
         )
-
 
 @pytest.mark.asyncio
 async def test_a_prompt_with_nothing_standing_around_it_is_the_instructions_verbatim(
@@ -605,9 +586,7 @@ async def test_a_prompt_with_nothing_standing_around_it_is_the_instructions_verb
     )
     assert "examine and propose" in composed, "plan_only reached the agent as nothing at all"
 
-
 # --- What the repository contributes, which is source code and nothing else ----------------------
-
 
 def poisoned(root: Path) -> Path:
     """The contract suite's poisoned repository, plus the row its Codex configuration is missing.
@@ -624,7 +603,6 @@ def poisoned(root: Path) -> Path:
         f"---\nname: agl-leak\ndescription: {SKILL_MARKER}\n---\nLeak.\n", encoding="utf-8"
     )
     return repo
-
 
 @pytest.mark.asyncio
 async def test_no_marker_from_a_poisoned_repository_is_in_what_this_adapter_tells_the_agent(
@@ -647,7 +625,6 @@ async def test_no_marker_from_a_poisoned_repository_is_in_what_this_adapter_tell
         f"workspace by the contract suite's own fixture. There are {len(CONFIGURATIONS)} rows in "
         f"that table and none of them is AGL's to read"
     )
-
 
 @pytest.mark.skipif(not _cli(), reason=_NO_CLI)
 @pytest.mark.asyncio
@@ -702,7 +679,6 @@ async def test_the_overrides_this_adapter_emits_load_and_silence_a_poisoned_repo
         f"overrides are the whole of what stands between a checkout and the agent"
     )
 
-
 def _rendered(repo: Path, overrides: Sequence[str]) -> str:
     """The model-visible prompt the harness would compose in `repo`, as text. Free: no model.
 
@@ -724,7 +700,6 @@ def _rendered(repo: Path, overrides: Sequence[str]) -> str:
     )
     return done.stdout
 
-
 # Every directory this package may stand a child in, spelled as the source text `ast.unparse`
 # produces, with what each one is. The **value** and not merely the keyword's presence, for
 # `test_claude_code_runner.py`'s reason on its own siblings: the name is satisfied by the leak.
@@ -743,7 +718,6 @@ CHOSEN: Final[Mapping[str, str]] = {
     "workspace": "the run's own workspace, provisioned by WorkspaceProvider",
     "elsewhere": "a temporary directory of the readiness probe's own",
 }
-
 
 def test_every_child_this_package_starts_is_started_somewhere_this_adapter_chose() -> None:
     """A structural assertion, so that a process added later cannot inherit AGL's own directory.
@@ -802,7 +776,6 @@ def test_every_child_this_package_starts_is_started_somewhere_this_adapter_chose
         f"is no longer checking anything"
     )
 
-
 # --- A value that would parse as a flag -----------------------------------------------------------
 
 MARKER: Final = "AGL-A-SHELL-EVALUATED-THE-PATH"
@@ -811,7 +784,6 @@ MARKER: Final = "AGL-A-SHELL-EVALUATED-THE-PATH"
 # semicolon, a pipeline, quotes, spaces - and `--output=x`, which is the shape that was found
 # making a read-only git port write a file. `/` and NUL are the only bytes a filename cannot hold.
 LOADED_NAME: Final = f"agl $(touch {MARKER}); echo leaked | cat & 'q' \"d\" --output=x tree"
-
 
 @pytest.mark.asyncio
 async def test_a_workspace_whose_name_would_run_a_command_never_runs_it(
@@ -856,7 +828,6 @@ async def test_a_workspace_whose_name_would_run_a_command_never_runs_it(
         f"{str(repo)!r}, whole, including the spaces and the `--output=x`"
     )
 
-
 def test_a_cli_path_that_would_parse_as_a_flag_is_refused_at_construction() -> None:
     """The argv rule on the one value the composition root supplies.
 
@@ -869,7 +840,6 @@ def test_a_cli_path_that_would_parse_as_a_flag_is_refused_at_construction() -> N
     assert "cli_path" in str(refused.value), (
         f"the refusal does not name which value was refused: {refused.value}"
     )
-
 
 @pytest.mark.asyncio
 async def test_a_model_that_would_parse_as_a_flag_is_refused_before_anything_starts(
@@ -898,9 +868,7 @@ async def test_a_model_that_would_parse_as_a_flag_is_refused_before_anything_sta
         "AGL has already spent whatever starting it costs"
     )
 
-
 # --- The stream: every outcome this adapter can reach ---------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_a_completed_turn_is_the_outcome_and_the_last_thing_the_agent_said(
@@ -926,7 +894,6 @@ async def test_a_completed_turn_is_the_outcome_and_the_last_thing_the_agent_said
     assert outcome.stop_reason is StopReason.COMPLETED
     assert outcome.text == "One Python module that greets a name."
 
-
 @pytest.mark.asyncio
 async def test_a_stream_that_never_says_how_it_ended_answers_with_no_stop_reason(
     tmp_path: Path,
@@ -950,14 +917,12 @@ async def test_a_stream_that_never_says_how_it_ended_answers_with_no_stop_reason
     )
     assert outcome.text == "as far as I got"
 
-
 @pytest.mark.asyncio
 async def test_an_agent_that_said_nothing_answers_with_the_empty_string(tmp_path: Path) -> None:
     """`""` and never `None`: the port's only content channel gets no second way to be empty."""
     stub = Stub(tmp_path, steps=[{"say": started()}])
 
     assert (await drive(stub, task_in(workspace(tmp_path)))).text == ""
-
 
 @pytest.mark.asyncio
 async def test_a_failed_turn_is_raised_with_the_harnesss_own_words(tmp_path: Path) -> None:
@@ -984,7 +949,6 @@ async def test_a_failed_turn_is_raised_with_the_harnesss_own_words(tmp_path: Pat
         f"whose message does not name the cause is the same dead end as no message at all"
     )
 
-
 @pytest.mark.asyncio
 async def test_a_top_level_error_event_is_raised_even_when_the_process_exits_cleanly(
     tmp_path: Path,
@@ -1000,7 +964,6 @@ async def test_a_top_level_error_event_is_raised_even_when_the_process_exits_cle
     with pytest.raises(UpstreamUnavailable) as raised:
         await drive(stub, task_in(workspace(tmp_path)))
     assert "the sky fell in" in str(raised.value)
-
 
 @pytest.mark.asyncio
 async def test_a_rejected_command_line_is_our_bug_and_not_a_backend_that_was_busy(
@@ -1019,7 +982,6 @@ async def test_a_rejected_command_line_is_our_bug_and_not_a_backend_that_was_bus
         f"the refusal drops the parser's own complaint: {raised.value}"
     )
 
-
 @pytest.mark.asyncio
 async def test_a_non_zero_exit_with_nothing_on_the_stream_falls_back_to_standard_error(
     tmp_path: Path,
@@ -1036,7 +998,6 @@ async def test_a_non_zero_exit_with_nothing_on_the_stream_falls_back_to_standard
         await drive(stub, task_in(workspace(tmp_path)))
     assert "CODEX_HOME does not exist" in str(raised.value)
 
-
 @pytest.mark.asyncio
 async def test_a_completed_turn_that_exits_non_zero_is_still_a_failure(tmp_path: Path) -> None:
     """Which question the exit status answers, and which one it does not.
@@ -1052,7 +1013,6 @@ async def test_a_completed_turn_that_exits_non_zero_is_still_a_failure(tmp_path:
 
     with pytest.raises(UpstreamUnavailable):
         await drive(stub, task_in(workspace(tmp_path)))
-
 
 @pytest.mark.asyncio
 async def test_a_line_that_is_not_json_is_unreadable_and_a_frame_from_the_future_is_not(
@@ -1087,7 +1047,6 @@ async def test_a_line_that_is_not_json_is_unreadable_and_a_frame_from_the_future
         f"Consume what you recognise, ignore what you do not, and never treat an unknown tag as "
         f"an error"
     )
-
 
 @pytest.mark.asyncio
 async def test_an_event_larger_than_the_read_buffer_is_read_and_one_larger_than_memory_is_not(
@@ -1129,7 +1088,6 @@ async def test_an_event_larger_than_the_read_buffer_is_read_and_one_larger_than_
         "one line of a dashboard and what would be lost otherwise is the whole step"
     )
 
-
 @pytest.mark.asyncio
 async def test_activity_is_the_frames_own_kind_and_the_field_that_kind_is_about(
     tmp_path: Path,
@@ -1170,7 +1128,6 @@ async def test_activity_is_the_frames_own_kind_and_the_field_that_kind_is_about(
         "Calling: agl/record_note",
     ], f"the activity lines were {lines}"
 
-
 @pytest.mark.asyncio
 async def test_an_activity_reporter_that_raises_comes_out_of_this_adapters_run(
     tmp_path: Path,
@@ -1206,9 +1163,7 @@ async def test_an_activity_reporter_that_raises_comes_out_of_this_adapters_run(
         f"around that call by design"
     )
 
-
 # --- Tools, against the adapter's own server, with no harness anywhere ---------------------------
-
 
 @pytest.mark.asyncio
 async def test_a_tool_call_reaches_its_handler_as_a_mapping_and_its_text_goes_back(
@@ -1245,7 +1200,6 @@ async def test_a_tool_call_reaches_its_handler_as_a_mapping_and_its_text_goes_ba
     assert answered["content"][0]["text"] == "Noted. Nothing else is needed from this tool."
     assert answered["isError"] is False
 
-
 @pytest.mark.asyncio
 async def test_a_refused_tool_result_carries_the_mechanisms_own_error_flag(
     tmp_path: Path,
@@ -1273,7 +1227,6 @@ async def test_a_refused_tool_result_carries_the_mechanisms_own_error_flag(
     assert refused["isError"] is True and "not accepted" in refused["content"][0]["text"]
     assert accepted["isError"] is False
     assert len(notes.received) == 2, "both calls reached the handler inside one run"
-
 
 @pytest.mark.asyncio
 async def test_a_call_the_server_cannot_carry_is_refused_back_into_the_conversation(
@@ -1314,7 +1267,6 @@ async def test_a_call_the_server_cannot_carry_is_refused_back_into_the_conversat
     assert notes.received == [], f"a malformed call reached a handler: {notes.received}"
     assert outcome.stop_reason is StopReason.COMPLETED, "and the run itself ended normally"
 
-
 # There were three tests here and there are none. Two were about the `agl_ask` MCP server AGL used
 # to register on every task - a question answered with nobody listening, and a question handler that
 # raised ending the run - and the third was the two-round negotiation through it. The server is
@@ -1322,7 +1274,6 @@ async def test_a_call_the_server_cannot_carry_is_refused_back_into_the_conversat
 # everything else and every clause those tests made is made about a tool above. The round-trip claim
 # is `test_a_refused_tool_result_carries_the_mechanisms_own_error_flag`, which drives two calls
 # through one child and reads both results.
-
 
 @pytest.mark.asyncio
 async def test_a_tool_handler_that_raises_ends_the_run_with_its_own_exception(
@@ -1408,7 +1359,6 @@ async def test_a_tool_handler_that_raises_ends_the_run_with_its_own_exception(
         f"code has failed, no more of it runs"
     )
 
-
 # --- and which of two failures is the one the run is stopped by -----------------------------------
 
 _LATCH_BOUND: Final = 5.0
@@ -1425,7 +1375,6 @@ _EMPTY_SCHEMA: Final[Mapping[str, JsonValue]] = {"type": "object", "properties":
 """What both tools below advertise. Nothing validates it here - `Caller` is handed a payload that
 has already crossed the wire - so it is the smallest object a `Tool` can carry."""
 
-
 async def _answered(call: Awaitable[ToolResult], what: str) -> ToolResult:
     """Take what one `Caller.handled` call was answered with, under a bound that says what stalled.
 
@@ -1441,7 +1390,6 @@ async def _answered(call: Awaitable[ToolResult], what: str) -> ToolResult:
             f"released by an event the other half sets, so a wait that does not end is one half of "
             f"the interleaving never reaching the line that releases the other"
         ) from None
-
 
 @pytest.mark.asyncio
 async def test_the_first_of_two_concurrent_failures_is_the_one_the_caller_latches() -> None:
@@ -1562,7 +1510,6 @@ async def test_the_first_of_two_concurrent_failures_is_the_one_the_caller_latche
         f"refused at the guard without reaching a handler at all"
     )
 
-
 @pytest.mark.asyncio
 async def test_a_tools_schema_reaches_the_model_as_the_workflow_declared_it(
     tmp_path: Path,
@@ -1605,7 +1552,6 @@ async def test_a_tools_schema_reaches_the_model_as_the_workflow_declared_it(
         "over `$id` and `description` to carry a payload type's identity across the port"
     )
 
-
 @pytest.mark.asyncio
 async def test_a_schema_carrying_only_a_type_still_describes_an_object(tmp_path: Path) -> None:
     """`{"type": "object"}` is a legal `payload_schema` and has to survive the crossing.
@@ -1630,9 +1576,7 @@ async def test_a_schema_carrying_only_a_type_still_describes_an_object(tmp_path:
 
     assert advertised["inputSchema"] == {"type": "object", "properties": {}}
 
-
 # --- The two members preflight asks --------------------------------------------------------------
-
 
 def test_capabilities_are_the_ports_own_members_and_not_equivalent_strings() -> None:
     """The suite asserts this too; what it cannot assert is *which* three, and why they are static.
@@ -1652,7 +1596,6 @@ def test_capabilities_are_the_ports_own_members_and_not_equivalent_strings() -> 
         "the port is a question about this backend that somebody has to answer here"
     )
 
-
 def test_a_model_this_adapter_does_not_serve_is_refused_by_both_query_members() -> None:
     """`src/agl/ports/agent.py`: an adapter handed a `ModelId` it does not serve raises
     `InputError` and never silently substitutes.
@@ -1666,7 +1609,6 @@ def test_a_model_this_adapter_does_not_serve_is_refused_by_both_query_members() 
         asyncio.run(OpenAiRunner().capabilities(Claude.OPUS))
     with pytest.raises(InputError):
         asyncio.run(OpenAiRunner().check_ready(Claude.OPUS))
-
 
 @pytest.mark.asyncio
 async def test_check_ready_returns_when_the_cli_says_it_is_logged_in(tmp_path: Path) -> None:
@@ -1687,7 +1629,6 @@ async def test_check_ready_returns_when_the_cli_says_it_is_logged_in(tmp_path: P
         f"whether to spend money cost money"
     )
 
-
 @pytest.mark.asyncio
 async def test_check_ready_refuses_with_the_clis_own_reason_when_it_is_not_logged_in(
     tmp_path: Path,
@@ -1706,7 +1647,6 @@ async def test_check_ready_refuses_with_the_clis_own_reason_when_it_is_not_logge
         f"the refusal does not carry the reason the CLI gave: {raised.value}"
     )
 
-
 @pytest.mark.asyncio
 async def test_check_ready_says_the_cli_is_missing_rather_than_raising_an_os_error(
     tmp_path: Path,
@@ -1719,7 +1659,6 @@ async def test_check_ready_says_the_cli_is_missing_rather_than_raising_an_os_err
     with pytest.raises(UpstreamUnavailable) as raised:
         await OpenAiRunner(tmp_path / "no-such-binary").check_ready(OpenAI.TERRA)
     assert "not installed" in str(raised.value) or "PATH" in str(raised.value)
-
 
 @pytest.mark.skipif(not _cli(), reason=_NO_CLI)
 @pytest.mark.asyncio
@@ -1734,7 +1673,6 @@ async def test_check_ready_refuses_against_the_real_cli_with_no_credential() -> 
     with pytest.raises(UpstreamUnavailable) as raised:
         await OpenAiRunner().check_ready(OpenAI.LUNA)
     assert str(raised.value), "the port asks for a reason a person can act on"
-
 
 # --- The probe that never answers ----------------------------------------------------------------
 
@@ -1765,7 +1703,6 @@ WEDGED_SLEEP: Final = 120.0
 # `tests/adapters/test_shell_verifier.py` allows the build it stops, and for the same reason:
 # delivery is prompt, reaping is when the system gets to it.
 GONE_WITHIN: Final = 5.0
-
 
 @pytest.mark.asyncio
 async def test_a_probe_that_never_answers_is_refused_at_its_deadline_with_nothing_left_running(
@@ -1853,7 +1790,6 @@ async def test_a_probe_that_never_answers_is_refused_at_its_deadline_with_nothin
     finally:
         _put_down((probe, grandchild))
 
-
 def _wedged(where: Path) -> tuple[int, int]:
     """The two pids the wedged stub wrote down, or a failed assertion saying it never hung."""
     assert where.is_file(), (
@@ -1864,7 +1800,6 @@ def _wedged(where: Path) -> tuple[int, int]:
     written = json.loads(where.read_text(encoding="utf-8"))
     probe, grandchild = written
     return int(probe), int(grandchild)
-
 
 async def _still_there(pid: int, seconds: float) -> bool:
     """Is `pid` still running after up to `seconds`? Polls, and answers as soon as it knows.
@@ -1877,7 +1812,6 @@ async def _still_there(pid: int, seconds: float) -> bool:
         await asyncio.sleep(0.05)
     return _there(pid)
 
-
 def _there(pid: int) -> bool:
     """Signal 0: the ordinary way to ask whether a process exists without disturbing it."""
     try:
@@ -1887,7 +1821,6 @@ def _there(pid: int) -> bool:
     except PermissionError:
         return True
     return True
-
 
 def _put_down(pids: Iterable[int]) -> None:
     """Kill whatever is left, so a red run cannot leave a two-minute sleep behind it.

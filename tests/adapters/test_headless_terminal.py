@@ -60,9 +60,7 @@ import weakref
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Final
-
 import pytest
-
 from agl.adapters.rich_terminal.headless import HeadlessTerminal
 from agl.ports.errors import InternalError, UpstreamUnavailable
 from agl.ports.terminal import Choice, Screen, Terminal, Text, TextInput
@@ -108,12 +106,10 @@ LANDED: Final = "one child landed, one still running"
 AGENT: Final = 5
 CONFLICT: Final = 10
 
-
 def dashboard(line: str) -> Screen:
     """A passive screen with one line on it. `Screen` and not `Screen[None]`, which is the spelling
     a workflow author uses and the one PEP 696's default exists for."""
     return Screen(line)
-
 
 def question(label: str) -> Screen[str]:
     """An approval screen: a body to read, a choice to pick and a field to type into.
@@ -130,7 +126,6 @@ def question(label: str) -> Screen[str]:
         ],
     )
 
-
 class Activity:
     """A workflow object a view reads, and something a weak reference can be taken to.
 
@@ -142,7 +137,6 @@ class Activity:
 
     def __init__(self, line: str) -> None:
         self.line = line
-
 
 @dataclass(slots=True)
 class Counting[T]:
@@ -160,7 +154,6 @@ class Counting[T]:
         self.calls += 1
         return self.view(**params)
 
-
 @pytest.fixture
 def terminal() -> HeadlessTerminal:
     """The adapter the module-level tests drive, built and not yet entered.
@@ -169,7 +162,6 @@ def terminal() -> HeadlessTerminal:
     this class's own - its slots - which is deliberately nothing the ABC has.
     """
     return HeadlessTerminal()
-
 
 class TestHeadlessTerminal(HeadlessTerminalContract):
     """The headless half of the port in full: four rules and the lifecycle, and nothing added.
@@ -183,7 +175,6 @@ class TestHeadlessTerminal(HeadlessTerminalContract):
     def terminal(self) -> Terminal:
         """The headless terminal, built and not yet entered. It takes no arguments at all."""
         return HeadlessTerminal()
-
 
 async def test_pending_lists_no_priority_at_all_on_a_terminal_that_refused_every_question(
     terminal: HeadlessTerminal,
@@ -228,7 +219,6 @@ async def test_pending_lists_no_priority_at_all_on_a_terminal_that_refused_every
             "priority appears is open; that `pending.get(p, 0)` is 0 for every p is not, and it is "
             "the whole of what the port's clause exists to make agree between implementations"
         )
-
 
 async def test_a_workflow_loops_worth_of_boards_and_refused_questions_leaves_the_terminal_as_it_was(
     terminal: HeadlessTerminal,
@@ -277,7 +267,6 @@ async def test_a_workflow_loops_worth_of_boards_and_refused_questions_leaves_the
             f"Refusing one is not accepting it, and nothing is ever waiting on a person here"
         )
 
-
 async def test_neither_a_dropped_board_nor_a_refused_question_keeps_hold_of_a_view_or_its_arguments(
     terminal: HeadlessTerminal,
 ) -> None:
@@ -311,7 +300,6 @@ async def test_neither_a_dropped_board_nor_a_refused_question_keeps_hold_of_a_vi
             f"in here is alive for the rest of the run - and the arguments a workflow passes "
             f"are the live objects of every child it is running"
         )
-
 
 async def test_a_view_is_invoked_exactly_once_for_each_kind_of_screen_and_never_again_afterwards(
     terminal: HeadlessTerminal,
@@ -361,7 +349,6 @@ async def test_a_view_is_invoked_exactly_once_for_each_kind_of_screen_and_never_
             f"registration, and this terminal registers nothing because it draws nothing"
         )
 
-
 async def test_a_passive_show_finishes_on_its_first_step_and_a_thousand_of_them_cost_nothing(
     terminal: HeadlessTerminal,
 ) -> None:
@@ -406,7 +393,6 @@ async def test_a_passive_show_finishes_on_its_first_step_and_a_thousand_of_them_
             for _ in range(BOARDS):
                 await term.show(dashboard, line=RUNNING)
 
-
 async def test_an_interactive_show_outside_the_context_is_an_internal_error_and_reaches_no_view(
     terminal: HeadlessTerminal,
 ) -> None:
@@ -449,7 +435,6 @@ async def test_an_interactive_show_outside_the_context_is_an_internal_error_and_
         f"port only promises to invoke while the terminal is open"
     )
 
-
 async def test_entering_a_second_time_is_refused_the_way_the_terminal_that_draws_refuses_it(
     terminal: HeadlessTerminal,
 ) -> None:
@@ -474,7 +459,6 @@ async def test_entering_a_second_time_is_refused_the_way_the_terminal_that_draws
             await term.__aenter__()
 
         await term.show(dashboard, line=RUNNING)
-
 
 async def _refused(
     term: Terminal,
@@ -510,7 +494,6 @@ async def _refused(
         f"is prepared to wait. The screen was shown with {params!r}"
     )
 
-
 async def _shown_and_forgotten(term: Terminal) -> dict[str, weakref.ref[Any]]:
     """Show one screen of each kind, then hand back weak references to everything they were made of.
 
@@ -537,7 +520,6 @@ async def _shown_and_forgotten(term: Terminal) -> dict[str, weakref.ref[Any]]:
         "the view of the board it dropped": weakref.ref(dropped),
         "the view of the question it refused": weakref.ref(turned_away),
     }
-
 
 def _state(terminal: HeadlessTerminal) -> dict[str, str]:
     """Everything this terminal is holding, described: its declared slots and any instance

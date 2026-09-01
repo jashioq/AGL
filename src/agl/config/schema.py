@@ -1,8 +1,6 @@
-
 from dataclasses import dataclass
 from math import isfinite
 from pathlib import Path
-
 from agl.ports.errors import InputError
 from agl.ports.home_layout import AglHome
 from agl.ports.ids import ProjectName
@@ -10,10 +8,8 @@ from agl.ports.tree_layout import TreesRoot
 
 __all__ = ["AgentSettings", "ClaudeSettings", "OpenAiSettings", "Project", "Settings"]
 
-
 @dataclass(frozen=True, slots=True)
 class ClaudeSettings:
-
     enabled: bool
 
     cli_path: Path | None
@@ -21,10 +17,8 @@ class ClaudeSettings:
     def __post_init__(self) -> None:
         _check_cli_path(self.cli_path, "claude")
 
-
 @dataclass(frozen=True, slots=True)
 class OpenAiSettings:
-
     enabled: bool
 
     cli_path: Path | None
@@ -32,25 +26,19 @@ class OpenAiSettings:
     def __post_init__(self) -> None:
         _check_cli_path(self.cli_path, "openai")
 
-
 @dataclass(frozen=True, slots=True)
 class AgentSettings:
-
     claude: ClaudeSettings
     openai: OpenAiSettings
 
-
 @dataclass(frozen=True, slots=True)
 class Settings:
-
     home: AglHome
 
     agents: AgentSettings
 
-
 @dataclass(frozen=True, slots=True)
 class Project:
-
     name: ProjectName
 
     repo: Path
@@ -82,7 +70,6 @@ class Project:
                 f"or less kills every build before it starts; an infinite deadline is a run that "
                 f"hangs on a build nobody is watching"
             )
-
 
 def _check_cli_path(cli_path: Path | None, section: str) -> None:
     if cli_path is not None and not cli_path.is_absolute():

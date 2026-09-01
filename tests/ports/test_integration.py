@@ -15,14 +15,11 @@ a refusal would break exactly the implementation the port exists to allow.
 """
 
 from dataclasses import FrozenInstanceError, fields
-
 import pytest
-
 from agl.ports.errors import InternalError
 from agl.ports.integration import Conflict, IntegrationOutcome
 
 HEAD = "9d0c1c4b0a2f1e6d5c4b3a29187f6e5d4c3b2a19"
-
 
 def test_work_that_landed_reports_where_the_target_is_now() -> None:
     """A head and no conflict: the one shape the framework carries on from."""
@@ -31,14 +28,12 @@ def test_work_that_landed_reports_where_the_target_is_now() -> None:
     assert outcome.head == HEAD
     assert outcome.conflict is None
 
-
 def test_a_landing_that_changed_nothing_still_landed() -> None:
     """Work already contained in the target reports the target's unchanged head - not a conflict,
     and not a third case."""
     before = IntegrationOutcome(head=HEAD)
     assert IntegrationOutcome(head=HEAD) == before
     assert before.conflicted is False
-
 
 def test_work_that_did_not_land_carries_what_stopped_it() -> None:
     """A conflict and no head - the shape that leaves the target held, owing a retry or abort."""
@@ -47,7 +42,6 @@ def test_work_that_did_not_land_carries_what_stopped_it() -> None:
     assert outcome.conflicted is True
     assert outcome.head is None
     assert outcome.conflict is conflict
-
 
 @pytest.mark.parametrize(
     "outcome",
@@ -65,12 +59,10 @@ def test_an_outcome_that_is_not_exactly_one_answer_is_refused(outcome: dict[str,
     with pytest.raises(InternalError):
         IntegrationOutcome(**outcome)  # type: ignore[arg-type]
 
-
 def test_an_empty_head_names_no_state() -> None:
     """Distinct from the invariant above: exactly one answer, and that answer is unreadable."""
     with pytest.raises(InternalError):
         IntegrationOutcome(head="")
-
 
 def test_the_fields_are_the_two_answers_and_nothing_else() -> None:
     """Pinned by hand, because "exactly one of two" is the whole design of this type: a third field
@@ -78,14 +70,12 @@ def test_the_fields_are_the_two_answers_and_nothing_else() -> None:
     assert [field.name for field in fields(IntegrationOutcome)] == ["head", "conflict"]
     assert [field.name for field in fields(Conflict)] == ["paths", "summary"]
 
-
 def test_an_integrator_that_cannot_list_what_collided_says_so_in_the_summary() -> None:
     """The empty tuple is legal and load-bearing: a far side that can only answer "these cannot be
     combined cleanly" is a real implementation, and `()` is how it stays honest."""
     conflict = Conflict(paths=(), summary="the change request cannot be combined cleanly")
     assert conflict.paths == ()
     assert IntegrationOutcome(conflict=conflict).conflicted is True
-
 
 def test_a_conflict_lists_the_paths_in_the_repository_s_own_words() -> None:
     """Repository-relative, forward slashes - `history.FileChange.path`'s convention and type."""
@@ -95,7 +85,6 @@ def test_a_conflict_lists_the_paths_in_the_repository_s_own_words() -> None:
     )
     assert conflict.paths == ("src/agl/ports/integration.py", "README.md")
     assert conflict == Conflict(paths=conflict.paths, summary=conflict.summary)
-
 
 @pytest.mark.parametrize(
     "conflict",
@@ -113,7 +102,6 @@ def test_a_conflict_nobody_could_act_on_is_refused(conflict: dict[str, object]) 
     they are choosing on."""
     with pytest.raises(InternalError):
         Conflict(**conflict)  # type: ignore[arg-type]
-
 
 def test_both_types_are_frozen() -> None:
     """Values: checked once on the way in, and not editable afterwards. An outcome a caller can

@@ -85,7 +85,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
-
 import grimp
 import pytest
 from importlinter import Contract
@@ -126,7 +125,6 @@ CONTRACT_TYPES: Final[Mapping[str, str]] = {
 # of anything the tree could plausibly grow.
 UNDECLARED_MEMBER: Final = "agl.probe_that_no_layer_declares"
 
-
 @dataclass(frozen=True)
 class Probe:
     """One import that does not exist, and what happens to the six contracts when it does.
@@ -154,7 +152,6 @@ class Probe:
     @property
     def shown(self) -> str:
         return f"{self.importer} -> {self.imported}"
-
 
 PROBES: Final[tuple[Probe, ...]] = (
     # Contract 1 makes three separable claims and two of them are probed here: ordering once, and
@@ -259,9 +256,7 @@ PROBES: Final[tuple[Probe, ...]] = (
     ),
 )
 
-
 # --- Reading the real `.importlinter` and building the real contract objects ---------------------
-
 
 def _contract_options() -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """The real config, as `(session options, one options dict per contract)`."""
@@ -273,7 +268,6 @@ def _contract_options() -> tuple[dict[str, Any], list[dict[str, Any]]]:
         f"about an empty set. Check the path at the top of this file."
     )
     return session, contracts
-
 
 @pytest.fixture(scope="module")
 def contracts() -> Mapping[str, Contract]:
@@ -293,7 +287,6 @@ def contracts() -> Mapping[str, Contract]:
         )
     return built
 
-
 @pytest.fixture(scope="module")
 def graph() -> grimp.ImportGraph:
     """`src/agl/` as import-linter sees it, built once. Nothing is ever checked against this
@@ -308,7 +301,6 @@ def graph() -> grimp.ImportGraph:
         f"kept against every fabrication this file can make."
     )
     return built
-
 
 def _verdicts(
     contracts: Mapping[str, Contract], graph: grimp.ImportGraph, probe: Probe | None = None
@@ -328,9 +320,7 @@ def _verdicts(
             broken.add(number)
     return frozenset(broken)
 
-
 # --- The probes ----------------------------------------------------------------------------------
-
 
 def test_every_contract_is_kept_on_the_unmodified_graph(
     contracts: Mapping[str, Contract], graph: grimp.ImportGraph
@@ -348,7 +338,6 @@ def test_every_contract_is_kept_on_the_unmodified_graph(
         f"a contract that starts broken makes its probe pass for no reason. Run "
         f"`.venv/bin/lint-imports` and fix the tree first."
     )
-
 
 @pytest.mark.parametrize("probe", PROBES, ids=lambda probe: f"{probe.contract}:{probe.shown}")
 def test_the_named_contract_breaks_on_the_violation_it_exists_to_catch(
@@ -384,7 +373,6 @@ def test_the_named_contract_breaks_on_the_violation_it_exists_to_catch(
         f"than a silent one. A contract that has stopped catching what it used to catch is the "
         f"reading to rule out first."
     )
-
 
 def test_contract_1_breaks_on_a_top_level_member_no_layer_declares(
     contracts: Mapping[str, Contract], graph: grimp.ImportGraph
@@ -424,9 +412,7 @@ def test_contract_1_breaks_on_a_top_level_member_no_layer_declares(
         f"removed, which silently disables it - an unlisted package is unpoliced by anything."
     )
 
-
 # --- That the six above are the six there are ----------------------------------------------------
-
 
 def test_every_contract_in_the_file_has_a_probe(contracts: Mapping[str, Contract]) -> None:
     """A seventh contract added without a probe is a rule nobody has watched work.
@@ -444,7 +430,6 @@ def test_every_contract_in_the_file_has_a_probe(contracts: Mapping[str, Contract
         f"contract before writing one."
     )
 
-
 def test_no_probe_names_a_contract_the_file_does_not_have(
     contracts: Mapping[str, Contract],
 ) -> None:
@@ -455,7 +440,6 @@ def test_no_probe_names_a_contract_the_file_does_not_have(
         f"contract that is not there tests nothing; either the contract was deleted and this row "
         f"goes with it, or numbers moved and the policy that they do not needs revisiting."
     )
-
 
 def test_each_contract_is_still_the_kind_of_contract_its_probe_assumes() -> None:
     """A number means a rule *and* a kind, and the fabrications are chosen against the kind.

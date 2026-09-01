@@ -136,7 +136,6 @@ from collections.abc import Set as AbstractSet
 from configparser import ConfigParser
 from pathlib import Path
 from typing import Final
-
 import pytest
 
 REPO_ROOT: Final = Path(__file__).resolve().parent.parent
@@ -204,9 +203,7 @@ NOT_A_VENDOR: Final[Mapping[str, str]] = {}
 # Where a requirement string stops being a distribution name: a version, a marker, an extras list.
 _REQUIREMENT_END: Final = frozenset("[<>=!~;(, \t")
 
-
 # --- The three comparisons ----------------------------------------------------------------------
-
 
 def _present(
     package: str,
@@ -225,7 +222,6 @@ def _present(
         name: f"{package}.{name.removesuffix('.py')}" for name in modules if name not in exempt
     }
     return present
-
 
 def port_drift(
     sources: AbstractSet[str],
@@ -253,7 +249,6 @@ def port_drift(
     problems += [_stale_port(entry) for entry in sorted(listed - set(present.values()))]
     return problems
 
-
 def vendor_drift(
     listed: AbstractSet[str],
     vendors: Mapping[str, str],
@@ -271,7 +266,6 @@ def vendor_drift(
     ]
     problems += [_stale_vendor(entry) for entry in sorted(listed - set(vendors.values()))]
     return problems
-
 
 def adapter_drift(
     listed: AbstractSet[str],
@@ -303,9 +297,7 @@ def adapter_drift(
     problems += [_stale_listing(entry) for entry in sorted(listed - on_disk)]
     return problems
 
-
 # --- What each complaint says -------------------------------------------------------------------
-
 
 def _unclassified_port(shown: str, dotted: str) -> str:
     return (
@@ -329,7 +321,6 @@ def _unclassified_port(shown: str, dotted: str) -> str:
         f"not a licence to add a second."
     )
 
-
 def _doubly_listed_port(entry: str) -> str:
     return (
         f"contract 2 of .importlinter names {entry} in both `source_modules` and "
@@ -345,7 +336,6 @@ def _doubly_listed_port(entry: str) -> str:
         f"speaks it is two modules."
     )
 
-
 def _stale_port(entry: str) -> str:
     return (
         f"contract 2 of .importlinter names {entry}, which is not a module under src/agl/ports/.\n"
@@ -358,7 +348,6 @@ def _stale_port(entry: str) -> str:
         f"Resolve it by removing that line under [{PURE_TYPES_SECTION}], or by restoring the "
         f"module it names."
     )
-
 
 def _uncontained_vendor(distribution: str, imported: str) -> str:
     return (
@@ -384,7 +373,6 @@ def _uncontained_vendor(distribution: str, imported: str) -> str:
         f"reason it is not."
     )
 
-
 def _stale_vendor(entry: str) -> str:
     return (
         f"contract 3 of .importlinter forbids {entry}, which no extra in pyproject.toml "
@@ -398,7 +386,6 @@ def _stale_vendor(entry: str) -> str:
         f"Resolve it by removing that line and its `ignore_imports` expressions under "
         f"[{VENDOR_SECTION}], or by restoring the extra in pyproject.toml that declares it."
     )
-
 
 def _unlisted_package(name: str) -> str:
     return (
@@ -418,7 +405,6 @@ def _unlisted_package(name: str) -> str:
         f"adapter is an architecture change: ARCHITECTURE.md changes first, .importlinter second."
     )
 
-
 def _unlisted_module(filename: str) -> str:
     return (
         f"src/agl/adapters/{filename} is neither listed in contract 4 of .importlinter nor "
@@ -437,7 +423,6 @@ def _unlisted_module(filename: str) -> str:
         f"other adapters the way routing.py is."
     )
 
-
 def _stale_listing(entry: str) -> str:
     return (
         f"contract 4 of .importlinter lists {entry}, which is not under src/agl/adapters/.\n"
@@ -450,9 +435,7 @@ def _stale_listing(entry: str) -> str:
         f"restoring the adapter it names."
     )
 
-
 # --- Reading the real config, the real tree and the real project metadata -----------------------
-
 
 def _section(name: str) -> Mapping[str, str]:
     """One section of the real `.importlinter`, parsed."""
@@ -468,7 +451,6 @@ def _section(name: str) -> Mapping[str, str]:
     )
     return parser[name]
 
-
 def _listing(section: str, key: str) -> frozenset[str]:
     """One contract's hand-maintained list, one entry per line."""
     raw = _section(section).get(key)
@@ -479,14 +461,12 @@ def _listing(section: str, key: str) -> frozenset[str]:
     )
     return frozenset(line.strip() for line in raw.splitlines() if line.strip())
 
-
 def _members(directory: Path) -> tuple[frozenset[str], frozenset[str]]:
     """Directory names and top-level `.py` filenames directly under `directory`."""
     children = sorted(directory.iterdir())
     packages = frozenset(p.name for p in children if p.is_dir() and p.name != "__pycache__")
     modules = frozenset(p.name for p in children if p.is_file() and p.suffix == ".py")
     return packages, modules
-
 
 def _distribution(requirement: str) -> str:
     """The distribution name a requirement string starts with - `claude-agent-sdk>=0.2.140`."""
@@ -495,11 +475,9 @@ def _distribution(requirement: str) -> str:
             return requirement[:index].strip()
     return requirement.strip()
 
-
 def _import_name(distribution: str) -> str:
     """The guess. See this file's docstring for what it cannot know."""
     return distribution.strip().lower().replace("-", "_").replace(".", "_")
-
 
 def _declared_vendors() -> dict[str, str]:
     """Every distribution AGL's optional extras declare, by the import name this test expects.
@@ -531,9 +509,7 @@ def _declared_vendors() -> dict[str, str]:
             found[distribution] = VENDOR_IMPORT_NAMES.get(distribution, _import_name(distribution))
     return found
 
-
 # --- The real comparisons ------------------------------------------------------------------------
-
 
 @pytest.mark.parametrize(("section", "expected"), sorted(CONTRACTS.items()))
 def test_each_contract_is_still_the_kind_of_contract_this_file_reads(
@@ -548,7 +524,6 @@ def test_each_contract_is_still_the_kind_of_contract_this_file_reads(
         f"tests/test_contract_firing.py's probe for that number, which pins the same pairing and "
         f"fails beside this one."
     )
-
 
 def test_every_module_under_ports_appears_on_exactly_one_side_of_contract_2() -> None:
     """Every `ports/` module is a pure type or an ABC, and the contract says which."""
@@ -566,7 +541,6 @@ def test_every_module_under_ports_appears_on_exactly_one_side_of_contract_2() ->
     )
     assert not problems, "\n\n".join(problems)
 
-
 def test_every_vendor_sdk_an_extra_declares_is_contained_by_contract_3() -> None:
     """`pyproject.toml` is where a vendor SDK arrives; contract 3 is what confines it."""
     vendors = _declared_vendors()
@@ -576,7 +550,6 @@ def test_every_vendor_sdk_an_extra_declares_is_contained_by_contract_3() -> None
     )
     problems = vendor_drift(_listing(VENDOR_SECTION, "forbidden_modules"), vendors, NOT_A_VENDOR)
     assert not problems, "\n\n".join(problems)
-
 
 def test_every_adapter_appears_in_contract_4() -> None:
     """The tree under `src/agl/adapters/` and contract 4's `modules =` name the same adapters."""
@@ -589,7 +562,6 @@ def test_every_adapter_appears_in_contract_4() -> None:
     problems = adapter_drift(listed, packages, modules, ADAPTER_EXEMPT)
     assert not problems, "\n\n".join(problems)
 
-
 # ---------------------------------------------------------------------------------------------
 # Non-vacuity: the three comparisons on fabricated input, so that a refactor which broke one into
 # always agreeing fails here instead of passing everywhere. Nothing below reads the repository.
@@ -597,7 +569,6 @@ def test_every_adapter_appears_in_contract_4() -> None:
 
 _FABRICATED_INIT_EXEMPT: Final[Mapping[str, str]] = {"__init__.py": "the package's own docstring"}
 _FABRICATED_EXEMPT: Final[Mapping[str, str]] = {"routing.py": "the sanctioned exception"}
-
 
 def test_port_drift_is_silent_when_every_module_is_on_exactly_one_side() -> None:
     """The agreeing case: one pure type, one ABC, and the package root out of it."""
@@ -608,7 +579,6 @@ def test_port_drift_is_silent_when_every_module_is_on_exactly_one_side() -> None
         frozenset({"ids.py", "store.py", "__init__.py"}),
         _FABRICATED_INIT_EXEMPT,
     )
-
 
 def test_port_drift_reports_a_module_on_neither_list() -> None:
     """The failure this half exists for: a `ports/` module nobody classified."""
@@ -624,7 +594,6 @@ def test_port_drift_reports_a_module_on_neither_list() -> None:
     assert "agl.ports.probe" in problems[0]
     assert "neither" in problems[0]
 
-
 def test_port_drift_reports_a_module_claimed_by_both_lists() -> None:
     """Both lists at once is the ring saying it has no inner edge there."""
     problems = port_drift(
@@ -637,7 +606,6 @@ def test_port_drift_reports_a_module_claimed_by_both_lists() -> None:
     assert len(problems) == 1
     assert "agl.ports.ids" in problems[0]
     assert "both" in problems[0]
-
 
 def test_port_drift_reports_a_listing_with_nothing_behind_it() -> None:
     """A forbidden module absent from the graph is dropped in silence by import-linter."""
@@ -652,7 +620,6 @@ def test_port_drift_reports_a_listing_with_nothing_behind_it() -> None:
     assert "agl.ports.gone" in problems[0]
     assert "not a module under src/agl/ports/" in problems[0]
 
-
 def test_vendor_drift_is_silent_when_every_declared_sdk_is_contained() -> None:
     """The agreeing case, including the one distribution whose name is not its import name."""
     assert not vendor_drift(
@@ -660,7 +627,6 @@ def test_vendor_drift_is_silent_when_every_declared_sdk_is_contained() -> None:
         {"claude-agent-sdk": "claude_agent_sdk", "rich": "rich"},
         {},
     )
-
 
 def test_vendor_drift_reports_an_sdk_no_contract_contains() -> None:
     """The failure this half exists for: a third SDK added as an extra and confined nowhere."""
@@ -674,7 +640,6 @@ def test_vendor_drift_reports_an_sdk_no_contract_contains() -> None:
     assert "probe_sdk" in problems[0]
     assert "contained by nothing at all" in problems[0]
 
-
 def test_vendor_drift_accepts_a_distribution_that_is_exempt_with_a_reason() -> None:
     """An extra that is not a vendor SDK is out of the rule, and says why it is."""
     assert not vendor_drift(
@@ -683,14 +648,12 @@ def test_vendor_drift_accepts_a_distribution_that_is_exempt_with_a_reason() -> N
         {"sphinx": "a documentation builder, not an SDK any adapter speaks to"},
     )
 
-
 def test_vendor_drift_reports_a_containment_with_no_dependency_behind_it() -> None:
     """A vendor forbidden but never depended on reads as coverage of an SDK AGL has not got."""
     problems = vendor_drift(frozenset({"rich", "gone_sdk"}), {"rich": "rich"}, {})
     assert len(problems) == 1
     assert "gone_sdk" in problems[0]
     assert "no extra in pyproject.toml declares" in problems[0]
-
 
 def test_adapter_drift_is_silent_when_the_listing_and_the_tree_agree() -> None:
     """The case that makes the failing cases below mean something."""
@@ -700,7 +663,6 @@ def test_adapter_drift_is_silent_when_the_listing_and_the_tree_agree() -> None:
         frozenset({"system_clock.py", "routing.py"}),
         _FABRICATED_EXEMPT,
     )
-
 
 def test_adapter_drift_reports_a_package_missing_from_the_listing() -> None:
     """The failure this half exists for: an adapter package added and never listed."""
@@ -715,7 +677,6 @@ def test_adapter_drift_reports_a_package_missing_from_the_listing() -> None:
     assert f"{ADAPTERS_PACKAGE}.xyz" in problems[0]
     assert "fails open" in problems[0]
 
-
 def test_adapter_drift_reports_a_module_that_is_neither_listed_nor_exempt() -> None:
     """A single-file adapter is a member, not an exception - it is listed or it is explained."""
     problems = adapter_drift(
@@ -729,12 +690,10 @@ def test_adapter_drift_reports_a_module_that_is_neither_listed_nor_exempt() -> N
     assert f"{ADAPTERS_PACKAGE}._process" in problems[0]
     assert "ADAPTER_EXEMPT" in problems[0]
 
-
 def test_adapter_drift_accepts_a_module_that_is_exempt_with_a_reason() -> None:
     """`routing.py` must import other adapters, so it is out of the contract and out of this."""
     exempt_only = frozenset({"routing.py"})
     assert not adapter_drift(frozenset(), frozenset(), exempt_only, _FABRICATED_EXEMPT)
-
 
 def test_adapter_drift_reports_a_listing_with_nothing_behind_it() -> None:
     """A contract naming a deleted adapter reads as coverage and enforces none."""
@@ -747,7 +706,6 @@ def test_adapter_drift_reports_a_listing_with_nothing_behind_it() -> None:
     assert len(problems) == 1
     assert f"{ADAPTERS_PACKAGE}.gone" in problems[0]
     assert "not under src/agl/adapters/" in problems[0]
-
 
 def test_every_comparison_reports_every_disagreement_at_once() -> None:
     """Separate edits are separate complaints in one run, not one discovered at a time.

@@ -86,9 +86,7 @@ from dataclasses import dataclass, replace
 from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Final
-
 import pytest
-
 from agl import api
 from agl.adapters.claude_code.fake import Conversation, FakeAgentRunner, Script
 from agl.adapters.filesystem.store import FilesystemStore
@@ -174,9 +172,7 @@ _SERIALIZED: Final = 1.0
 # lease has them queued on a lock that these turns cannot advance.
 _TURNS: Final = 8
 
-
 # --- the agent, the roles, and what each of them writes -------------------------------------------
-
 
 @dataclass(frozen=True)
 class Summary:
@@ -184,14 +180,11 @@ class Summary:
 
     text: str
 
-
 @dataclass(frozen=True)
 class NoParams:
     """A workflow that takes no flags - `api.run` still parses an empty argv against it."""
 
-
 REPORT: Final = reporting_tool("report", "report what you did", Summary)
-
 
 @role(model=Claude.SONNET)
 def _role(name: str, instructions: str) -> Role[Summary]:
@@ -204,7 +197,6 @@ def _role(name: str, instructions: str) -> Role[Summary]:
         tools=(REPORT,),
     )
 
-
 # Module-level, which is what a `Role` is, and distinct per writer: the script below decides
 # what to write from the instructions it was handed, so two roles sharing a string would be two
 # namespaces writing one file.
@@ -214,7 +206,6 @@ REVIEW: Final = _role("review", "review the target's worktree")
 LOOK_AGAIN: Final = _role("look-again", "review the target's worktree a second time")
 RECORD: Final = _role("record", "record what the run has landed so far")
 BUILDS: Final = {name: _role("implement", f"implement {name}") for name in CHILDREN}
-
 
 def _agent(recorded: list[str] | None = None) -> Script:
     """One agent for every role here: write what this prompt is meant to write, then report.
@@ -240,17 +231,14 @@ def _agent(recorded: list[str] | None = None) -> Script:
 
     return _script
 
-
 def _work(name: str) -> bytes:
     """What child `name`'s agent puts in its own file. Distinct per child, so a target holding two
     of them is holding two different things rather than one written twice."""
     return f"the work {name} did\n".encode()
 
-
 def _file(name: str) -> str:
     """Where child `name`'s work goes - one file per child, none of them shared."""
     return f"src/{name}.py"
-
 
 # Keyed on the prompt, because that is the only thing the port hands a script that says which step
 # this is: `AgentTask` carries no namespace and no step name, deliberately.
@@ -263,9 +251,7 @@ _WRITES: Final[Mapping[str, Mapping[str, bytes]]] = {
     **{role.instructions: {_file(name): _work(name)} for name, role in BUILDS.items()},
 }
 
-
 # --- the all-fakes bundle, for the claims that are about AGL's own concurrency --------------------
-
 
 def _harness(tmp_path: Path, recorded: list[str] | None = None) -> container.FakeServices:
     """The all-fakes bundle: no network, no git, no process, one repository behind all three."""
@@ -277,11 +263,9 @@ def _harness(tmp_path: Path, recorded: list[str] | None = None) -> container.Fak
         claude=_agent(recorded),
     )
 
-
 async def _base_of(history: History) -> str:
     """The pinned commit a run is cut from - `RunSpec.base_sha`'s shape, asked through the port."""
     return await history.resolve(await history.default_ref())
-
 
 async def _tree(
     harness: container.FakeServices,
@@ -304,7 +288,6 @@ async def _tree(
         services = replace(services, integrator=integrator)
     return Run(params=None, services=services, scope=SCOPE, base=await _base_of(services.history))
 
-
 async def _head(harness: container.FakeServices, namespace: Namespace | None) -> str:
     """Where one checkout's line of work is now, asked through the port rather than of a dict.
 
@@ -316,16 +299,13 @@ async def _head(harness: container.FakeServices, namespace: Namespace | None) ->
     opened = await workspaces.open(LABEL, namespace, await _base_of(harness.services.history))
     return await opened.head()
 
-
 def _fake_target(tmp_path: Path) -> Path:
     """`.trees/auth/_base/` - spelled out rather than composed through `tree_layout`, because a test
     that asked the layout where a checkout should be and then looked there would agree with the
     layout whatever either of them said."""
     return tmp_path / "trees" / "auth" / "_base"
 
-
 # --- watching the serialization itself ------------------------------------------------------------
-
 
 class _Watcher:
     """Who was inside a landing, where, and in what order - criterion 1's whole instrument.
@@ -354,7 +334,6 @@ class _Watcher:
         """The tasks that entered an observed section of a landing into `target`, in order."""
         return [task for where, task, _ in self.log if where == str(target)]
 
-
 class _Watched(Integrator):
     """An `Integrator` that says when a landing starts, and otherwise is the one it was given.
 
@@ -377,7 +356,6 @@ class _Watched(Integrator):
 
     async def abort(self, target: Workspace) -> None:
         await self._real.abort(target)
-
 
 class _Gate(Verifier):
     """A `Verifier` that answers a fixed verdict, says where and when it ran, and can leave a mess.
@@ -421,16 +399,13 @@ class _Gate(Verifier):
             passed=self.passed, status=0 if self.passed else 1, output="" if self.passed else RED
         )
 
-
 async def _landed_children(run: Run[None], names: Sequence[str]) -> None:
     """Give each named child a namespace and one commit of its own, before anything lands."""
     for name in names:
         child = run.worktree(name)
         await child.step(BUILDS[name], commit=f"implement {name}")
 
-
 # --- criterion 5: the root has no parent, and the refusal says which kind of refusal it is --------
-
 
 @pytest.mark.asyncio
 async def test_the_root_refuses_to_integrate_with_an_input_error(
@@ -493,9 +468,7 @@ async def test_the_root_refuses_to_integrate_with_an_input_error(
         "`the root has no parent` but something about this run"
     )
 
-
 # --- criterion 1: concurrent children serialize into one `_base` ---------------------------------
-
 
 @pytest.mark.asyncio
 async def test_concurrent_landings_into_one_target_never_overlap(tmp_path: Path) -> None:
@@ -574,9 +547,7 @@ async def test_concurrent_landings_into_one_target_never_overlap(tmp_path: Path)
             f"which is the tree the gate ran in and the one the next step is handed"
         )
 
-
 # --- the lease, past the point the implementer's own suite stops ----------------------------------
-
 
 async def _held(
     tmp_path: Path, *, verifier: Verifier | None = None
@@ -596,7 +567,6 @@ async def _held(
     await blocked.step(COLLIDE, commit="implement T-01")
     await spare.step(BUILDS[CHILDREN[1]], commit="implement T-02")
     return harness, run, blocked, spare
-
 
 @pytest.mark.asyncio
 async def test_a_second_landing_waits_while_the_first_conflict_is_undecided(
@@ -642,7 +612,6 @@ async def test_a_second_landing_waits_while_the_first_conflict_is_undecided(
         await _head(harness, Namespace(CHILDREN[1])), await _head(harness, None)
     )
 
-
 @pytest.mark.asyncio
 async def test_a_step_in_the_target_namespace_waits_while_a_conflict_is_undecided(
     tmp_path: Path,
@@ -685,7 +654,6 @@ async def test_a_step_in_the_target_namespace_waits_while_a_conflict_is_undecide
         "abort gave back was not the step lock the lease took"
     )
 
-
 @pytest.mark.asyncio
 async def test_a_conflict_held_in_one_target_does_not_stop_a_landing_into_another(
     tmp_path: Path,
@@ -725,7 +693,6 @@ async def test_a_conflict_held_in_one_target_does_not_stop_a_landing_into_anothe
     assert stuck.conflicted is True, "the unrelated landing settled somebody else's conflict"
     await stuck.abort()
 
-
 @pytest.mark.asyncio
 async def test_a_nested_landing_advances_the_middle_namespace_so_its_own_landing_carries_it(
     tmp_path: Path,
@@ -763,9 +730,7 @@ async def test_a_nested_landing_advances_the_middle_namespace_so_its_own_landing
     )
     assert (_fake_target(tmp_path) / _file(CHILDREN[0])).read_bytes() == _work(CHILDREN[0])
 
-
 # --- a real repository: the medium criteria 2 and 3 are actually claims about ---------------------
-
 
 @dataclass(frozen=True, slots=True)
 class _World:
@@ -799,12 +764,10 @@ class _World:
         """`.trees/auth/_base/` - the checkout every landing here goes into."""
         return base_worktree(TreesRoot(self.trees), LABEL)
 
-
 # Fixed to the second, so that a commit's object id is a function of its tree, its parents and its
 # message and of nothing else. The replay test at the bottom compares commit *ids* between a run
 # that was killed and one that never was, and a merge commit made a second later is a different one.
 MOMENT: Final = "2026-08-18T09:14:02+00:00"
-
 
 def _git(cwd: Path, *argv: str) -> str:
     """Run git for the fixtures and the assertions.
@@ -817,28 +780,23 @@ def _git(cwd: Path, *argv: str) -> str:
         ["git", *argv], cwd=cwd, capture_output=True, text=True, check=True
     ).stdout
 
-
 def _git_answers(cwd: Path, *argv: str) -> bool:
     """One of git's exit-status questions, asked from out here. 0 is yes and 1 is no."""
     done = subprocess.run(["git", *argv], cwd=cwd, capture_output=True, text=True, check=False)
     assert done.returncode in (0, 1), f"`git {' '.join(argv)}` answered neither yes nor no: {done}"
     return done.returncode == 0
 
-
 def _contains(world: _World, ancestor: str, descendant: str) -> bool:
     """Is `ancestor` in `descendant`'s line of work? git's own answer, not the adapter's."""
     return _git_answers(world.repo, "merge-base", "--is-ancestor", ancestor, descendant)
-
 
 def _tip(world: _World, branch: str) -> str:
     """Where a branch is, read out of the repository the worktrees share."""
     return _git(world.repo, "rev-parse", branch).strip()
 
-
 def _holding(where: Path) -> bool:
     """Is a landing pending in this checkout? `MERGE_HEAD` is the hold and there is nothing else."""
     return _git_answers(where, "rev-parse", "--verify", "--quiet", "MERGE_HEAD")
-
 
 def _read(where: Path) -> bytes | None:
     """What is at `where`, or `None` if nothing is - which is what a wipe having taken it looks
@@ -849,7 +807,6 @@ def _read(where: Path) -> bytes | None:
     replaces the sentence explaining what its absence means with a traceback.
     """
     return where.read_bytes() if where.is_file() else None
-
 
 def _new_world(root: Path) -> _World:
     """A world with one commit in it. Separate from the fixture, because the replay test needs a
@@ -864,7 +821,6 @@ def _new_world(root: Path) -> _World:
     _git(made.repo, "add", "--all")
     _git(made.repo, "commit", "-q", "--no-gpg-sign", "-m", "the state a run is cut from")
     return made
-
 
 @pytest.fixture
 def world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _World:
@@ -888,7 +844,6 @@ def world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _World:
         monkeypatch.setenv(f"GIT_{identity}_EMAIL", "agl@example.invalid")
         monkeypatch.setenv(f"GIT_{identity}_DATE", MOMENT)
     return _new_world(tmp_path / "world")
-
 
 def _real(
     world: _World,
@@ -923,7 +878,6 @@ def _real(
         build=container.FAKE_BUILD,
     )
 
-
 async def _real_run(world: _World, services: Services) -> Run[None]:
     """One root `Run` over a real repository, assembled the way `api.run` assembles one.
 
@@ -935,9 +889,7 @@ async def _real_run(world: _World, services: Services) -> Run[None]:
     await services.workspaces.open(LABEL, None, base)
     return Run(params=None, services=services, scope=SCOPE, base=base)
 
-
 # --- criterion 2: a failing gate leaves the branch unmerged and the tree clean --------------------
-
 
 @pytest.mark.asyncio
 async def test_a_red_gate_leaves_a_real_target_unmerged_and_its_tree_clean(world: _World) -> None:
@@ -1051,9 +1003,7 @@ async def test_a_red_gate_leaves_a_real_target_unmerged_and_its_tree_clean(world
     )
     assert _read(world.target / _file(CHILDREN[1])) == _work(CHILDREN[1])
 
-
 # --- criterion 3: the advance, proven where it destroys work --------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_a_landed_child_survives_the_parents_next_fingerprint_miss(world: _World) -> None:
@@ -1138,9 +1088,7 @@ async def test_a_landed_child_survives_the_parents_next_fingerprint_miss(world: 
         f"reachable only from a branch nobody will push"
     )
 
-
 # --- criterion 1 again, in the medium where an interleaving is not a matter of luck ---------------
-
 
 @pytest.mark.asyncio
 async def test_three_children_land_into_one_real_base_and_all_three_survive(
@@ -1208,9 +1156,7 @@ async def test_three_children_land_into_one_real_base_and_all_three_survive(
         "stays clean while a run lands work"
     )
 
-
 # --- what run exit gives back when the workflow raises rather than returns ------------------------
-
 
 class _Abandoned(Stop):
     """What a workflow raises while a conflict is still on its screen.
@@ -1223,7 +1169,6 @@ class _Abandoned(Stop):
     to `Stop`'s exit status, with a lease release having run on the way out.
     """
 
-
 _STRANDED: list[Run[object]] = []
 """Where the workflow below hands its `Run` tree back to the test that started it.
 
@@ -1231,7 +1176,6 @@ A module-level cell because a workflow function takes a `Run` and returns `None`
 return value and no argument to smuggle one through, which is the shape chosen. The one test
 that reads it clears it first.
 """
-
 
 @workflow(version="1")
 async def raises_mid_conflict(run: Run[NoParams]) -> None:
@@ -1250,7 +1194,6 @@ async def raises_mid_conflict(run: Run[NoParams]) -> None:
         raise AssertionError("this workflow exists to raise while a conflict is unresolved")
     _STRANDED.extend((run, child))
     raise _Abandoned("the workflow gave up while the conflict was still on the screen")
-
 
 @pytest.mark.asyncio
 async def test_a_workflow_that_raises_mid_conflict_gives_back_the_lease_and_the_step_lock(
@@ -1321,9 +1264,7 @@ async def test_a_workflow_that_raises_mid_conflict_gives_back_the_lease_and_the_
     assert again is not None, "a second landing into that target did not complete after run exit"
     await again.abort()
 
-
 # --- a landing that raises, and a landing that is cancelled while queued --------------------------
-
 
 class _Refuses(Integrator):
     """An `Integrator` whose first `land` raises, and which is otherwise the one it was given.
@@ -1352,7 +1293,6 @@ class _Refuses(Integrator):
 
     async def abort(self, target: Workspace) -> None:
         await self._real.abort(target)
-
 
 @pytest.mark.asyncio
 async def test_a_land_that_raises_does_not_strand_the_targets_lease(tmp_path: Path) -> None:
@@ -1387,7 +1327,6 @@ async def test_a_land_that_raises_does_not_strand_the_targets_lease(tmp_path: Pa
     )
     assert said.text == REVIEW.instructions
     assert _read(_fake_target(tmp_path) / _file(CHILDREN[1])) == _work(CHILDREN[1])
-
 
 @pytest.mark.asyncio
 async def test_cancelling_a_queued_landing_does_not_strand_the_target(tmp_path: Path) -> None:
@@ -1424,9 +1363,7 @@ async def test_cancelling_a_queued_landing_does_not_strand_the_target(tmp_path: 
     assert _read(_fake_target(tmp_path) / _file(CHILDREN[1])) == _work(CHILDREN[1])
     assert await asyncio.wait_for(run.step(REVIEW), timeout=_LIVENESS) is not None
 
-
 # --- what the gate does to a landing a person concluded with their own hands ----------------------
-
 
 @pytest.mark.asyncio
 async def test_a_landing_a_person_concluded_by_hand_still_goes_through_the_build_gate(
@@ -1495,9 +1432,7 @@ async def test_a_landing_a_person_concluded_by_hand_still_goes_through_the_build
     )
     await outcome.abort()
 
-
 # --- criterion 4: a resumed run finds a hold it did not take --------------------------------------
-
 
 def _spawn(
     world: _World,
@@ -1539,7 +1474,6 @@ def _spawn(
         check=False,
     )
 
-
 def _records(world: _World) -> list[Mapping[str, object]]:
     """Every line every process in this world wrote, in the order they were written."""
     if not world.log.exists():
@@ -1551,7 +1485,6 @@ def _records(world: _World) -> list[Mapping[str, object]]:
         found.append(parsed)
     return found
 
-
 def _said(records: Sequence[Mapping[str, object]], tag: str, key: str) -> Mapping[str, object]:
     """The one record of `key` that process `tag` wrote. Absent is a failure with the log in it."""
     found = [record[key] for record in records if record.get("tag") == tag and key in record]
@@ -1562,7 +1495,6 @@ def _said(records: Sequence[Mapping[str, object]], tag: str, key: str) -> Mappin
     reported = found[0]
     assert isinstance(reported, dict), f"{key!r} is not an object: {reported!r}"
     return reported
-
 
 def _workers(records: Sequence[Mapping[str, object]], tag: str | None = None) -> list[str]:
     """The prompts every agent invocation was dispatched with, optionally only one process's.
@@ -1577,17 +1509,14 @@ def _workers(records: Sequence[Mapping[str, object]], tag: str | None = None) ->
         if "worker" in record and (tag is None or record.get("tag") == tag)
     ]
 
-
 def _markers(records: Sequence[Mapping[str, object]], tag: str) -> set[str]:
     """Which end-of-process markers one process left: `finally`, `atexit`, both, or neither."""
     return {
         str(record["marker"]) for record in records if "marker" in record and record.get("tag") ==
         tag }
 
-
 # What a process that was allowed to finish leaves behind, and what a killed one does not.
 FINISHED: Final = frozenset({"finally", "atexit"})
-
 
 def _died_holding(world: _World) -> str:
     """Run one process to a conflicted landing and kill it there. The tip is the pre-merge head.
@@ -1617,7 +1546,6 @@ def _died_holding(world: _World) -> str:
         "for a resumed run to find and nothing an `abort` could ever release"
     )
     return _tip(world, run_branch(LABEL))
-
 
 def test_a_second_process_meets_the_hold_the_first_one_died_holding(world: _World) -> None:
     """The recoverable state, followed through two real processes to the end that lands.
@@ -1709,7 +1637,6 @@ def test_a_second_process_meets_the_hold_the_first_one_died_holding(world: _Worl
         f"{_git(world.target, 'status', '--porcelain')}"
     )
 
-
 def test_a_second_process_can_abort_the_hold_the_first_one_died_holding(world: _World) -> None:
     """The other end of the same state: give up, and the target goes back where `land` found it.
 
@@ -1773,9 +1700,7 @@ def test_a_second_process_can_abort_the_hold_the_first_one_died_holding(world: _
         f"{_git(world.target, 'status', '--porcelain')}"
     )
 
-
 # --- the replay question: does an integration survive a kill, and does it land twice? -------------
-
 
 @dataclass(frozen=True, slots=True)
 class _Snapshot:
@@ -1791,7 +1716,6 @@ class _Snapshot:
     entries: Mapping[str, tuple[str, str, str]]
     branches: Mapping[str, str]
     merges: int
-
 
 def _snapshot(world: _World) -> _Snapshot:
     """Read the ledger and the repository back. Opens nothing that AGL owns."""
@@ -1817,7 +1741,6 @@ def _snapshot(world: _World) -> _Snapshot:
         branches,
         int(_git(world.repo, "rev-list", "--count", "--merges", run_branch(LABEL)).strip()),
     )
-
 
 def test_a_run_that_landed_replays_identically_after_being_killed(world: _World) -> None:
     """The contract-test shape, applied to the one thing in a run that is not journalled.
@@ -1895,7 +1818,6 @@ def test_a_run_that_landed_replays_identically_after_being_killed(world: _World)
         "the step after the landing left nothing in the target, so it did not run to its end"
     )
 
-
 # --- two more paths out of an integration, one of them now an invariant ---------------------
 
 @pytest.mark.asyncio
@@ -1972,7 +1894,6 @@ async def test_a_gate_that_raises_inside_retry_settles_the_outcome_and_gives_the
         await outcome.retry()
 
     await outcome.abort()
-
 
 @pytest.mark.asyncio
 async def test_integrating_one_child_twice_lands_it_once_and_says_so_both_times(

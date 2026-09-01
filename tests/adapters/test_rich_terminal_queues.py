@@ -28,9 +28,7 @@ import asyncio
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final
-
 import pytest
-
 from agl.adapters.rich_terminal.queues import Screens
 from agl.ports.errors import InternalError, UpstreamUnavailable
 from agl.ports.terminal import Choice, Row, Rows, Screen, Text, TextInput
@@ -73,7 +71,6 @@ EDITING: Final = "Edit: domain/usecase.kt"
 STANDING: Final = "the option the view was shown with"
 GROWN: Final = "the option that arrived after it"
 
-
 @dataclass(frozen=True, slots=True)
 class Answer:
     """What responding to one of these screens produces: the workflow's own type, in shape.
@@ -87,7 +84,6 @@ class Answer:
     asked: str
     said: str
 
-
 class Exploded(Exception):
     """What a workflow's own `maps` raises in the one test where it does.
 
@@ -95,16 +91,13 @@ class Exploded(Exception):
     whatever it raises reaches the `show` call that registered it, unchanged and unclassified.
     """
 
-
 def dashboard(line: str) -> Screen:
     """A passive screen with one line on it. Empty `responses` is what makes it passive."""
     return Screen(line)
 
-
 def board(rows: Mapping[str, str]) -> Screen:
     """A board, over a mapping the caller keeps a reference to and mutates."""
     return Screen(Rows([Row(name, activity) for name, activity in rows.items()]))
-
 
 def question(label: str) -> Screen[Answer]:
     """An approval screen: a body to read, a choice to pick, and a field to type into.
@@ -121,20 +114,16 @@ def question(label: str) -> Screen[Answer]:
         ],
     )
 
-
 def offer(label: str, options: Sequence[str]) -> Screen[Answer]:
     """An interactive screen whose *responses* come from a live argument rather than its body."""
     return Screen(Text(label), [Choice(option, value=Answer(label, option)) for option in options])
 
-
 def _explode(typed: str) -> Answer:
     raise Exploded(typed)
-
 
 def exploding(label: str) -> Screen[Answer]:
     """A screen whose `maps` raises - a workflow author's bug, reached through a person's answer."""
     return Screen(Text(label), [TextInput("Say more", maps=_explode)])
-
 
 def ask(screens: Screens, label: str, priority: int = AGENT) -> asyncio.Future[Answer]:
     """Queue `question` and hand back what its `show` call would be waiting on.
@@ -144,7 +133,6 @@ def ask(screens: Screens, label: str, priority: int = AGENT) -> asyncio.Future[A
     behind. Every ordering claim below is made against which of these resolves.
     """
     return asyncio.ensure_future(screens.queue(question, priority=priority, label=label))
-
 
 async def resolved(waiting: asyncio.Future[Answer], what: str) -> Answer:
     """Take what a registration was answered with, having first said that it was answered at all.
@@ -162,15 +150,12 @@ async def resolved(waiting: asyncio.Future[Answer], what: str) -> Answer:
     )
     return await waiting
 
-
 def body_of(screens: Screens) -> object:
     """The body of whatever is displayed, or `None` - what a driver would report, in one call."""
     displayed = screens.displayed
     return None if displayed is None else displayed.screen().body
 
-
 # --- The slot ---------------------------------------------------------------------------------
-
 
 async def test_the_slot_is_empty_until_something_is_held() -> None:
     """A terminal that has been shown nothing is showing nothing, and owes nobody an answer."""
@@ -180,7 +165,6 @@ async def test_the_slot_is_empty_until_something_is_held() -> None:
     assert screens.current is None
     assert screens.displayed is None
     assert dict(screens.pending) == {}
-
 
 async def test_holding_a_second_view_replaces_the_first_and_the_first_never_comes_back() -> None:
     """Size one, replaced on write. Ordering a dashboard is meaningless, so there is no ordering.
@@ -203,7 +187,6 @@ async def test_holding_a_second_view_replaces_the_first_and_the_first_never_come
             "on write: a workflow that re-shows a board to change which view is on screen would "
             "find the old one returning"
         )
-
 
 async def test_the_slot_is_written_under_a_question_and_is_where_the_queues_end() -> None:
     """The slot needing no extra machinery, from all three sides at once.
@@ -234,7 +217,6 @@ async def test_the_slot_is_written_under_a_question_and_is_where_the_queues_end(
         "arrived rather than the one written under it. The slot is a register, not a snapshot"
     )
 
-
 async def test_a_passive_registration_registers_no_priority_at_all() -> None:
     """The side taken on the suite's gap #5, asserted so that it is a decision and not a drift.
 
@@ -259,7 +241,6 @@ async def test_a_passive_registration_registers_no_priority_at_all() -> None:
     screens.answer(APPROVE)
     await resolved(owed, "the question that was current")
 
-
 async def test_the_slot_registers_the_view_and_its_arguments_rather_than_a_screen() -> None:
     """A live argument reaches the display with no second registration, which is why it is a view.
 
@@ -281,9 +262,7 @@ async def test_the_slot_registers_the_view_and_its_arguments_rather_than_a_scree
         "the value the view returned once needs a notification this port does not have"
     )
 
-
 # --- One priority, in the order they arrived ----------------------------------------------------
-
 
 async def test_a_question_is_current_the_moment_it_is_queued_and_resolves_for_nobody_else() -> None:
     """Displacement is immediate in both directions: it takes the screen at once, and it waits."""
@@ -303,7 +282,6 @@ async def test_a_question_is_current_the_moment_it_is_queued_and_resolves_for_no
     screens.answer(APPROVE)
     assert await resolved(owed, "the question that was current") == Answer(EARLY, APPROVED)
 
-
 async def test_questions_at_one_priority_are_current_in_the_order_they_were_asked() -> None:
     """FIFO within a priority, so simultaneous questions from several agents stack and wait.
 
@@ -321,7 +299,6 @@ async def test_questions_at_one_priority_are_current_in_the_order_they_were_aske
         )
         screens.answer(APPROVE)
         assert await resolved(waiting, repr(label)) == Answer(label, APPROVED)
-
 
 async def test_answering_resolves_the_registration_that_was_current_and_no_other() -> None:
     """One answerer, and only the displayed screen can be answered.
@@ -348,9 +325,7 @@ async def test_answering_resolves_the_registration_that_was_current_and_no_other
     screens.answer(APPROVE)
     assert await resolved(late, repr(LATE)) == Answer(LATE, APPROVED)
 
-
 # --- Preemption, and what comes back afterwards -------------------------------------------------
-
 
 async def test_the_highest_priority_takes_the_screen_at_once_and_a_lower_one_does_not_take_it_back(
 ) -> None:
@@ -389,7 +364,6 @@ async def test_the_highest_priority_takes_the_screen_at_once_and_a_lower_one_doe
     screens.answer(APPROVE)
     assert await resolved(urgent, "the conflict") == Answer(URGENT, APPROVED)
 
-
 async def test_a_displaced_question_keeps_its_place_and_the_fallback_is_the_queue_as_it_was() -> (
     None
 ):
@@ -423,9 +397,7 @@ async def test_a_displaced_question_keeps_its_place_and_the_fallback_is_the_queu
     assert screens.current is None
     assert screens.displayed is None
 
-
 # --- Identity is the registration, never the screen ---------------------------------------------
-
 
 async def test_two_identical_registrations_are_two_entries_answered_separately() -> None:
     """Two agents, one question between them, and two answers owed.
@@ -467,7 +439,6 @@ async def test_two_identical_registrations_are_two_entries_answered_separately()
         EARLY, APPROVED
     )
 
-
 async def test_the_frames_of_one_registration_are_one_entry_however_often_the_view_is_invoked(
 ) -> None:
     """One question, many frames, one entry, and one answer that ends it.
@@ -500,7 +471,6 @@ async def test_the_frames_of_one_registration_are_one_entry_however_often_the_vi
     assert await resolved(owed, "the question that was current") == Answer(EARLY, APPROVED)
     assert dict(screens.pending) == {AGENT: 0}, "one answer is the end of one registration"
 
-
 async def test_an_entry_is_the_registration_and_never_the_screen_its_view_returned() -> None:
     """The sharp half: a response that did not exist when the question was queued can be picked.
 
@@ -531,9 +501,7 @@ async def test_an_entry_is_the_registration_and_never_the_screen_its_view_return
         "the function and its arguments - not the value the function returned once"
     )
 
-
 # --- `pending` ----------------------------------------------------------------------------------
-
 
 async def test_pending_counts_what_is_waiting_and_excludes_what_is_displayed() -> None:
     """`pending` as `{5: 2, 10: 0}`, built exactly, because the zero is the specification.
@@ -570,7 +538,6 @@ async def test_pending_counts_what_is_waiting_and_excludes_what_is_displayed() -
         f"empty, and a key that vanishes makes that a different answer on a different terminal"
     )
 
-
 async def test_pending_counts_one_waiting_behind_one_displayed_at_the_same_priority() -> None:
     """The single-priority arithmetic, both states, and the second is the one worth having.
 
@@ -594,7 +561,6 @@ async def test_pending_counts_one_waiting_behind_one_displayed_at_the_same_prior
     assert dict(screens.pending) == {AGENT: 0}, (
         "the queue emptied and the priority it emptied at stopped being reported"
     )
-
 
 async def test_pending_is_a_fresh_mapping_and_the_one_already_taken_does_not_move() -> None:
     """A read of current state, and the mapping it hands back does not change afterwards.
@@ -638,9 +604,7 @@ async def test_pending_is_a_fresh_mapping_and_the_one_already_taken_does_not_mov
     screens.answer(APPROVE)
     await resolved(late, repr(LATE))
 
-
 # --- Answers reach the workflow's own type ------------------------------------------------------
-
 
 async def test_a_choice_answers_with_the_value_it_carries() -> None:
     """`Choice.value` *is* the answer - no key, no id, no index beside it.
@@ -654,7 +618,6 @@ async def test_a_choice_answers_with_the_value_it_carries() -> None:
     screens.answer(APPROVE)
 
     assert await resolved(owed, "the question that was current") == Answer(EARLY, APPROVED)
-
 
 async def test_a_typed_answer_reaches_the_workflow_through_the_screens_own_maps() -> None:
     """The terminal collects a string, hands it over, and never learns what an `Answer` is.
@@ -675,7 +638,6 @@ async def test_a_typed_answer_reaches_the_workflow_through_the_screens_own_maps(
         "answering with the raw string, with the label beside the field, or with anything it built "
         "itself has taken over a mapping that belongs to the workflow"
     )
-
 
 async def test_a_maps_that_raises_fails_the_registration_it_belongs_to_and_not_the_terminal(
 ) -> None:
@@ -705,7 +667,6 @@ async def test_a_maps_that_raises_fails_the_registration_it_belongs_to_and_not_t
     screens.answer(APPROVE)
     assert await resolved(behind, repr(LATE)) == Answer(LATE, APPROVED)
 
-
 async def test_answering_when_nothing_is_being_asked_is_agls_own_ordering_bug() -> None:
     """`InternalError`, and both shapes of "nothing": an empty terminal, and a dashboard.
 
@@ -724,7 +685,6 @@ async def test_answering_when_nothing_is_being_asked_is_agls_own_ordering_bug() 
 
     with pytest.raises(InternalError):
         screens.answer(APPROVE)
-
 
 async def test_answering_a_position_no_response_occupies_leaves_the_question_where_it_was() -> None:
     """The other `InternalError`, and the question is untouched by it.
@@ -748,9 +708,7 @@ async def test_answering_a_position_no_response_occupies_leaves_the_question_whe
     screens.answer(APPROVE)
     assert await resolved(owed, "the question that was current") == Answer(EARLY, APPROVED)
 
-
 # --- Shutting down, and questions nobody is waiting for any more ---------------------------------
-
 
 async def test_closing_unblocks_every_waiter_and_leaves_nothing_displayed() -> None:
     """A question outstanding at shutdown can never be answered, so it fails rather than blocks.
@@ -776,7 +734,6 @@ async def test_closing_unblocks_every_waiter_and_leaves_nothing_displayed() -> N
         f"closing reported {dict(screens.pending)}. Nothing is waiting on a person any more, and a "
         f"priority that was asked for is not un-asked by shutting down"
     )
-
 
 async def test_an_abandoned_question_leaves_its_queue_and_the_next_one_takes_the_screen() -> None:
     """A `show` whose caller was cancelled is owed nothing, and must not hold the screen.

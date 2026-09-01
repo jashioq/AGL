@@ -1,11 +1,9 @@
-
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Final
-
 from claude_agent_sdk import (
     ClaudeSDKError,
     CLIConnectionError,
@@ -15,7 +13,6 @@ from claude_agent_sdk import (
     ResultError,
     ToolUseBlock,
 )
-
 from agl.ports.agent import Claude, ModelId, Restriction
 from agl.ports.errors import AglError, InputError, UpstreamUnavailable, UpstreamUnexpected
 
@@ -28,12 +25,10 @@ __all__ = [
     "unready",
 ]
 
-
 def _bash(*commands: str) -> tuple[str, ...]:
     # The space-star form and not `Bash(x:*)`: the harness classifies a rule ending `:*` as a prefix
     # rule and an unescaped `*` elsewhere as a glob, and matches the two differently.
     return tuple(f"Bash({command} *)" for command in commands)
-
 
 _GIT_WRITES: Final = (
     "git add",
@@ -86,7 +81,6 @@ _GIT_WRITES: Final = (
     "git write-tree",
 )
 
-
 _DENIALS: Final[Mapping[Restriction, tuple[str, ...]]] = MappingProxyType(
     {
         # `EnterWorktree`/`ExitWorktree` are the harness's own git-worktree management: writing to
@@ -103,7 +97,6 @@ _DENIALS: Final[Mapping[Restriction, tuple[str, ...]]] = MappingProxyType(
         Restriction.NO_NETWORK: ("WebFetch", "WebSearch"),
     }
 )
-
 
 _IN_WORDS: Final[Mapping[Restriction, str]] = MappingProxyType(
     {
@@ -127,16 +120,13 @@ _IN_WORDS: Final[Mapping[Restriction, str]] = MappingProxyType(
     }
 )
 
-
 _PREAMBLE: Final = (
     "AGL places the following limits on this task. They hold whatever the tools available to you "
     "appear to allow, they are not negotiable, and working around one is a failed task rather "
     "than a solved one:"
 )
 
-
 _ACTIVITY_LIMIT: Final = 120
-
 
 _MODEL_NAMES: Final[Mapping[ModelId, str]] = MappingProxyType(
     {
@@ -146,14 +136,11 @@ _MODEL_NAMES: Final[Mapping[ModelId, str]] = MappingProxyType(
     }
 )
 
-
 @dataclass(frozen=True, slots=True)
 class Restraint:
-
     denied_tools: tuple[str, ...]
 
     in_words: str
-
 
 def restraint(restrictions: frozenset[Restriction]) -> Restraint:
     denied: list[str] = []
@@ -169,7 +156,6 @@ def restraint(restrictions: frozenset[Restriction]) -> Restraint:
         return Restraint((), "")
     return Restraint(tuple(denied), "\n".join([_PREAMBLE, *spoken]))
 
-
 def model_name(model: ModelId) -> str:
     name = _MODEL_NAMES.get(model)
     if name is None:
@@ -181,7 +167,6 @@ def model_name(model: ModelId) -> str:
             f"question than the one the workflow asked"
         )
     return name
-
 
 def translated(error: ClaudeSDKError) -> AglError:
     if isinstance(error, CLINotFoundError):
@@ -220,7 +205,6 @@ def translated(error: ClaudeSDKError) -> AglError:
         f"promise nothing here can keep for an error it has not seen before"
     )
 
-
 def unready(error: ClaudeSDKError) -> UpstreamUnavailable:
     reported = translated(error)
     if isinstance(reported, UpstreamUnavailable):
@@ -230,11 +214,9 @@ def unready(error: ClaudeSDKError) -> UpstreamUnavailable:
         f"could use: {reported}"
     )
 
-
 def activity(call: ToolUseBlock, workspace: Path) -> str:
     subject = _subject(call.input, workspace)
     return f"{call.name}: {subject}" if subject else call.name
-
 
 def _subject(payload: Mapping[str, Any], workspace: Path) -> str:
     for value in payload.values():
@@ -242,11 +224,9 @@ def _subject(payload: Mapping[str, Any], workspace: Path) -> str:
             return _shortened(_relative(value.strip(), workspace))
     return ""
 
-
 def _relative(text: str, workspace: Path) -> str:
     prefix = f"{workspace}{os.sep}"
     return text[len(prefix) :] if text.startswith(prefix) and len(text) > len(prefix) else text
-
 
 def _shortened(text: str) -> str:
     first, newline, _ = text.partition("\n")
@@ -255,7 +235,6 @@ def _shortened(text: str) -> str:
     if len(line) > _ACTIVITY_LIMIT:
         line, cut = line[:_ACTIVITY_LIMIT].rstrip(), True
     return f"{line}..." if cut else line
-
 
 def _said(error: ClaudeSDKError) -> str:
     said = str(error).strip()

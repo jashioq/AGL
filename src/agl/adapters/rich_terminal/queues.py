@@ -1,22 +1,17 @@
-
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import cast
-
 from agl.ports.errors import InternalError, UpstreamUnavailable
 from agl.ports.terminal import Choice, Response, Screen, TextInput
 
 __all__ = ["Queued", "Registration", "Screens", "View"]
 
-
 type View[T] = Callable[..., Screen[T]]
-
 
 @dataclass(frozen=True, slots=True, eq=False)
 class Registration:
-
     view: View[object]
 
     params: Mapping[str, object]
@@ -24,17 +19,13 @@ class Registration:
     def screen(self) -> Screen[object]:
         return self.view(**self.params)
 
-
 @dataclass(frozen=True, slots=True, eq=False)
 class Queued(Registration):
-
     priority: int
 
     answered: asyncio.Future[object]
 
-
 class Screens:
-
     __slots__ = ("_queues", "_slot")
 
     def __init__(self) -> None:
@@ -117,7 +108,6 @@ class Screens:
         entries = self._queues.get(entry.priority)
         if entries is not None and entry in entries:
             entries.remove(entry)
-
 
 def _given(chosen: Response[object], typed: str) -> object:
     match chosen:

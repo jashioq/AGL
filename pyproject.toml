@@ -113,6 +113,20 @@ ignore = ["N818"]
 # anywhere else is a mistake and still fails.
 "tests/instruments/loopback.py" = ["N815"]
 
+[tool.ruff.lint.isort]
+# The blank-line convention in `CLAUDE.md` asks for one contiguous import block. `no-lines-before`
+# governs the separators *inside* that block - it is what stops `I001` splitting the five sections
+# - and `lines-after-imports` governs the gap *after* it: isort's default of `-1` writes two blank
+# lines before a following `def` or `class`, where the convention wants one, and set against each
+# other the two never converge. Not `ignore = ["I001"]`: the sorting is worth keeping.
+#
+# Nothing is ignored for the rest of that convention, and that is not an omission. `ruff`'s E3
+# blank-line rules - one between top-level definitions, none under a `class` statement, none at the
+# top of a file - are preview-only and not in the select list above, so no rule here objects to any
+# of the three. `tests/test_blank_line_convention.py` is what holds the whole of it.
+no-lines-before = ["future", "standard-library", "third-party", "first-party", "local-folder"]
+lines-after-imports = 1
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "strict"

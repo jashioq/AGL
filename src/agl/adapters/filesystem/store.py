@@ -1,4 +1,3 @@
-
 import json
 import os
 import shutil
@@ -7,7 +6,6 @@ from collections.abc import Mapping
 from contextlib import suppress
 from pathlib import Path
 from typing import Final
-
 from agl.adapters.filesystem._documents import (
     _ENCODING,
     _encoded,
@@ -29,16 +27,13 @@ from agl.ports.store import Store
 
 __all__ = ["FilesystemStore"]
 
-
 _PARTIAL_PREFIX: Final = "partial-"
 
 _INDENT: Final = 2
 
 _PROBE: Final = Namespace("probe")
 
-
 class FilesystemStore(Store):
-
     def __init__(self, home: AglHome) -> None:
         self._home = home
 
@@ -87,10 +82,8 @@ class FilesystemStore(Store):
         except OSError as error:
             raise _translated(error, f"the removal of {_scope_address(scope)}") from error
 
-
 def _worktrees_container(home: AglHome, scope: RunScope) -> Path:
     return scope_dir(home, scope.inside(_PROBE)).parent
-
 
 def _write_atomically(destination: Path, payload: bytes, address: str) -> None:
     try:
@@ -113,7 +106,6 @@ def _write_atomically(destination: Path, payload: bytes, address: str) -> None:
         with suppress(OSError):
             os.unlink(partial)
         raise _translated(error, address) from error
-
 
 def _read(path: Path, address: str) -> dict[str, JsonValue] | None:
     try:
@@ -140,7 +132,6 @@ def _read(path: Path, address: str) -> dict[str, JsonValue] | None:
             f"are JSON objects"
         )
     return document
-
 
 def _translated(error: OSError, address: str) -> AglError:
     # `PermissionError` is `EACCES` and `EPERM`, and nothing of AGL's own.

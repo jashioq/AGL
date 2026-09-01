@@ -1,11 +1,9 @@
-
 import asyncio
 import signal
 import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Final
-
 from agl.adapters.openai._session import _halt, _signal, outcome_of
 from agl.adapters.openai._tools import Caller, Supply
 from agl.adapters.openai.translate import (
@@ -76,9 +74,7 @@ _PLAN_ONLY: Final = (
 
 _CONTEXT_HEADING: Final = "AGL is running this task with the following standing context:"
 
-
 class OpenAiRunner(AgentRunner):
-
     def __init__(self, cli_path: Path | None = None) -> None:
         self._cli = _CLI if cli_path is None else _not_a_flag(str(cli_path), "cli_path")
 
@@ -133,7 +129,6 @@ class OpenAiRunner(AgentRunner):
                 on_activity=on_activity,
             )
 
-
 def _argv(cli: str, slug: str, limits: Sandbox, urls: Mapping[str, str]) -> list[str]:
     return [
         cli,
@@ -147,7 +142,6 @@ def _argv(cli: str, slug: str, limits: Sandbox, urls: Mapping[str, str]) -> list
         *_supplied(urls),
         _FROM_STDIN,
     ]
-
 
 def _supplied(urls: Mapping[str, str]) -> list[str]:
     return [
@@ -164,7 +158,6 @@ def _supplied(urls: Mapping[str, str]) -> list[str]:
         )
     ]
 
-
 def _prompt(task: AgentTask, limits: Sandbox) -> str:
     standing = [
         f"{_CONTEXT_HEADING}\n\n{task.context}" if task.context else "",
@@ -172,7 +165,6 @@ def _prompt(task: AgentTask, limits: Sandbox) -> str:
         _PLAN_ONLY if task.plan_only else "",
     ]
     return "\n\n".join([*(part for part in standing if part), task.instructions])
-
 
 def _not_a_flag(value: str, what: str) -> str:
     if value.startswith("-"):

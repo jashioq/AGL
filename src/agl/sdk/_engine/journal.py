@@ -1,4 +1,3 @@
-
 import asyncio
 import dataclasses
 import json
@@ -8,7 +7,6 @@ from datetime import datetime
 from hashlib import sha256
 from math import isfinite
 from typing import Final
-
 from agl.ports.agent import ModelId, Restriction, Tool
 from agl.ports.clock import Clock
 from agl.ports.errors import InputError, InternalError
@@ -27,7 +25,6 @@ __all__ = [
     "read_entry",
     "write_entry",
 ]
-
 
 _SEPARATORS: Final = (",", ":")
 
@@ -57,10 +54,8 @@ _STORED_RESULT: Final = (
     "worker handed it over"
 )
 
-
 def canonical_json(value: object) -> str:
     return _dumps(_canonical(value, "value"))
-
 
 def base_of(
     *,
@@ -93,13 +88,10 @@ def base_of(
     }
     return sha256(_dumps(fingerprinted).encode("utf-8")).hexdigest()
 
-
 def _counter_key(scope: RunScope, step: StepName, base: str) -> tuple[RunScope, str, str]:
     return (scope, step.collision_key, base)
 
-
 class Fingerprints:
-
     def __init__(self) -> None:
         self._counts: dict[tuple[RunScope, str, str], int] = {}
 
@@ -111,10 +103,8 @@ class Fingerprints:
         key = _counter_key(scope, step, base)
         self._counts[key] = self._counts.get(key, 0) + 1
 
-
 @dataclasses.dataclass(frozen=True, slots=True)
 class Entry:
-
     fingerprint: str
 
     value: JsonValue
@@ -155,7 +145,6 @@ class Entry:
             at=at,
         )
 
-
 async def read_entry(store: Store, scope: RunScope, step: StepName, digest: str) -> Entry | None:
     document = await store.read_entry(scope, step, digest)
     if document is None:
@@ -165,15 +154,12 @@ async def read_entry(store: Store, scope: RunScope, step: StepName, digest: str)
         return None
     return entry
 
-
 async def write_entry(
     store: Store, scope: RunScope, step: StepName, digest: str, entry: Entry
 ) -> None:
     await store.write_entry(scope, step, digest, entry.to_json())
 
-
 class Journal:
-
     def __init__(
         self,
         store: Store,
@@ -288,13 +274,11 @@ class Journal:
         else:
             await self._workspace.restore(self._last_good)
 
-
 def _dumps(value: JsonValue) -> str:
     # `ensure_ascii=True` writes an astral character and the surrogate pair encoding it as the same
     # text - `json.dumps(chr(0x1F600))` and `json.dumps(chr(0xD83D) + chr(0xDE00))` are
     # byte-identical - which is why `_checked_text` refuses surrogates: one input to one digest.
     return json.dumps(value, sort_keys=True, separators=_SEPARATORS, ensure_ascii=True)
-
 
 def _canonical(value: object, where: str) -> JsonValue:
     # `bool` and `int` together and first: a `bool` is an `int`, so an int-only branch that coerced
@@ -341,7 +325,6 @@ def _canonical(value: object, where: str) -> JsonValue:
         f"a number, a bool or None"
     )
 
-
 def _checked_key(key: object, where: str) -> str:
     if not isinstance(key, str):
         raise InputError(
@@ -358,10 +341,8 @@ def _checked_key(key: object, where: str) -> str:
         )
     return _checked_text(key, f"the key {key!r} in {where}")
 
-
 def _checked_text(value: str, where: str) -> str:
     return checked_text(value, where, cost=_FINGERPRINT_COLLIDES)
-
 
 def _stored_key(key: object, where: str) -> str:
     if not isinstance(key, str):
@@ -372,7 +353,6 @@ def _stored_key(key: object, where: str) -> str:
             f"Refused here, where the caller still knows a worker handed it over"
         )
     return key
-
 
 def _check_result(value: object, where: str) -> None:
     if isinstance(value, str):

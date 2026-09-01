@@ -1,16 +1,12 @@
-
 from collections.abc import Iterator
-
 from agl.ports.errors import EXIT_CODES, AglError, InternalError, exit_code_for
 
 __all__ = ["EXIT_CODES", "exit_code_for", "exit_status", "leaves"]
-
 
 def exit_status(error: Exception) -> int:
     # `BaseExceptionGroup` refuses an empty sequence at construction, so this set cannot be empty.
     agreed, *disagreeing = {_resolved(leaf) for leaf in leaves(error)}
     return exit_code_for(InternalError) if disagreeing else agreed
-
 
 def leaves(error: Exception) -> Iterator[Exception]:
     if not isinstance(error, ExceptionGroup):
@@ -18,7 +14,6 @@ def leaves(error: Exception) -> Iterator[Exception]:
         return
     for held in error.exceptions:
         yield from leaves(held)
-
 
 def _resolved(leaf: Exception) -> int:
     if isinstance(leaf, AglError):

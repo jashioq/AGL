@@ -87,7 +87,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
 from typing import Final
-
 from agl.adapters.filesystem.store import FilesystemStore
 from agl.adapters.git.workspace import GitWorkspaceProvider
 from agl.adapters.system_clock import SystemClock
@@ -103,9 +102,7 @@ from agl.sdk._engine.journal import Fingerprints, Journal
 
 __all__ = ["Config", "PROGRAMMES", "Programme", "SIBLINGS", "driver_path", "main"]
 
-
 # --- what a role is made of ----------------------------------------------------------------------
-
 
 @dataclass(frozen=True)
 class Budget:
@@ -121,7 +118,6 @@ class Budget:
 
     tokens: int
 
-
 @dataclass(frozen=True)
 class Ceiling:
     """`Budget`'s twin: the same one field, the same value, a different type.
@@ -133,7 +129,6 @@ class Ceiling:
     """
 
     tokens: int
-
 
 @dataclass(frozen=True)
 class Constraint:
@@ -164,7 +159,6 @@ class Constraint:
     tags: frozenset[str]
     budget: Budget | Ceiling
 
-
 @dataclass(frozen=True)
 class Requirement:
     """`Constraint`'s twin - identical field names in identical order, and a different type.
@@ -180,12 +174,10 @@ class Requirement:
     tags: frozenset[str]
     budget: Budget | Ceiling
 
-
 async def _unused(payload: Mapping[str, JsonValue]) -> ToolResult:
     """No agent runs in this instrument, so no tool handler is ever called. A `Tool` needs one all
     the same, and `base_of` must keep it out of the fingerprint - `test_journal.py` pins that."""
     return ToolResult(text="")
-
 
 # All four members, the term `tests/sdk/test_journal.py`'s *sort every set* needs. A role declaring
 # `frozenset(Restriction)` is the same role tomorrow, and a journal that iterated it rather than
@@ -239,9 +231,7 @@ RENESTED: Final = tuple(
 # decide who got `n = 0` and both would re-run forever on resume.
 SIBLINGS: Final = ("T-01", "T-02")
 
-
 # --- the configuration one child process is handed -----------------------------------------------
-
 
 @dataclass(frozen=True, slots=True)
 class Config:
@@ -316,16 +306,13 @@ class Config:
             tag=_text(data, "tag"),
         )
 
-
 def _text(data: Mapping[str, object], key: str) -> str:
     value = data[key]
     if not isinstance(value, str):
         raise SystemExit(f"replay: {key!r} is a string, not a {type(value).__name__}")
     return value
 
-
 # --- the programme runner ------------------------------------------------------------------------
-
 
 class _Programme:
     """One process's journals, its kill counter, and the log the parent counts workers from.
@@ -487,7 +474,6 @@ class _Programme:
             handle.flush()
             os.fsync(handle.fileno())
 
-
 # --- the programmes ------------------------------------------------------------------------------
 
 # The one prompt edit the `edited` variant makes, and the step it lands on. `decompose` is
@@ -500,13 +486,11 @@ EDIT: Final = " Group them by area, smallest first."
 # The `reworded` variant's wording change, appended to every `commit=` message and to nothing else.
 REWORD: Final = ": add the oauth callback route"
 
-
 def _instructions(config: Config, step: str, text: str) -> str:
     """A step's prompt, with the `edited` variant's edit applied to exactly one step."""
     if config.variant == "edited" and step == EDITED_STEP:
         return text + EDIT
     return text
-
 
 def _constraints(config: Config) -> list[Constraint | Requirement]:
     """The dataclass inputs, under the types this variant declares.
@@ -523,7 +507,6 @@ def _constraints(config: Config) -> list[Constraint | Requirement]:
         return list(RENESTED)
     return list(CONSTRAINTS)
 
-
 def _message(config: Config, text: str) -> str:
     """A step's commit message, with variant `reworded`'s rewording applied to all of them.
 
@@ -532,7 +515,6 @@ def _message(config: Config, text: str) -> str:
     programme run twice, differing only here, must not run a single worker the second time.
     """
     return text + REWORD if config.variant == "reworded" else text
-
 
 async def _core(run: _Programme) -> None:
     """Five steps, two namespaces, both endings, and one value-carrying edge per step.
@@ -604,7 +586,6 @@ async def _core(run: _Programme) -> None:
         value={"done": True, "from": built},
     )
 
-
 async def _retry(run: _Programme) -> None:
     """Why the counter exists: three identical calls in one namespace, `n = 0, 1, 2`.
 
@@ -622,7 +603,6 @@ async def _retry(run: _Programme) -> None:
             inputs={"request": "add oauth", "constraints": _constraints(run.config)},
             value={"attempt": attempt},
         )
-
 
 async def _siblings(run: _Programme) -> None:
     """Why the counter is keyed per namespace: one root step, then two children under one
@@ -683,7 +663,6 @@ async def _siblings(run: _Programme) -> None:
 
     await asyncio.gather(*(_sibling(position) for position in range(len(order))))
 
-
 class Refused(Exception):
     """What a worker that fails looks like from the journal's side.
 
@@ -693,12 +672,10 @@ class Refused(Exception):
     so nothing on the ledger says it ever ran.
     """
 
-
 def _refuses(_: JsonValue) -> None:
     """The failing worker's body. Runs after the `worker` line is already on the log, deliberately:
     the agent was called and the call was paid for, and only the recording did not happen."""
     raise Refused("the agent refused the task")
-
 
 # The crash programme's two calls, which are two labels at **one** address. The step name, the
 # instructions and the inputs are shared between them by construction below, because the retry only
@@ -706,7 +683,6 @@ def _refuses(_: JsonValue) -> None:
 # `base` and a different address, and the counter would never have been asked the question.
 CRASHED: Final = "implement#raised"
 RETRIED: Final = "implement#retried"
-
 
 async def _crash(run: _Programme) -> None:
     """A step that raises and is retried **inside one run** - the reason for advancing on write.
@@ -759,7 +735,6 @@ async def _crash(run: _Programme) -> None:
             value={"built": "T-01"},
         )
 
-
 @dataclass(frozen=True, slots=True)
 class Programme:
     """One runnable programme and the worker labels a complete run of it produces, in order.
@@ -777,7 +752,6 @@ class Programme:
     run: Callable[[_Programme], Awaitable[None]]
     labels: tuple[str, ...]
 
-
 PROGRAMMES: Final[Mapping[str, Programme]] = MappingProxyType(
     {
         "core": Programme(
@@ -791,14 +765,11 @@ PROGRAMMES: Final[Mapping[str, Programme]] = MappingProxyType(
     }
 )
 
-
 # --- the entry point -----------------------------------------------------------------------------
-
 
 def driver_path() -> Path:
     """This file, absolutely - what the parent hands `sys.executable` to start a child."""
     return Path(__file__).resolve()
-
 
 async def _drive(config: Config) -> None:
     """Build the three ports the replay loop touches, then walk the programme.
@@ -818,7 +789,6 @@ async def _drive(config: Config) -> None:
     )
     run.at_start()
     await programme.run(run)
-
 
 def main(argv: Sequence[str]) -> int:
     """Run one programme, and leave a marker behind if the process was allowed to finish.
@@ -840,7 +810,6 @@ def main(argv: Sequence[str]) -> int:
         run_marker("finally")
     return 0
 
-
 def _marker(config: Config) -> Callable[[str], None]:
     """A one-argument writer for the two end-of-process markers, bound to this run's log."""
 
@@ -852,7 +821,6 @@ def _marker(config: Config) -> Callable[[str], None]:
             os.fsync(handle.fileno())
 
     return _write
-
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv))

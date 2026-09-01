@@ -72,9 +72,7 @@ test harness's and not the authoring surface's. Recorded here, unpaid, as the ot
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Final
-
 import pytest
-
 from agl import testing
 from agl.ports.run import JsonValue
 from agl.sdk import (
@@ -108,7 +106,6 @@ and a view's purity rule names sorting as the first thing it may not do. Ids tha
 different order are what makes the exact-`Screen` comparisons below able to notice a board that
 sorted them anyway."""
 
-
 def _runs(where: Path, activities: Mapping[str, str | None]) -> dict[str, Run[SplitParams]]:
     """The live dict the workflow hands its board: one child `Run` per chunk id, at an activity.
 
@@ -133,9 +130,7 @@ def _runs(where: Path, activities: Mapping[str, str | None]) -> dict[str, Run[Sp
         testing.reports(children[chunk_id], activity)
     return children
 
-
 # --- the plan a planner reports ------------------------------------------------------------------
-
 
 MALFORMED: Final = (
     ("chunk 1", "SPACE"),
@@ -152,7 +147,6 @@ has already spent. The reason fragment is asserted along with the refusal becaus
 did not name the character and the position is one nothing can act on - and the model is the thing
 being asked to act on it."""
 
-
 def _reported(*ids: str) -> dict[str, JsonValue]:
     """A `report_chunks` payload naming `ids`: the JSON a model sends, not a `Chunks`.
 
@@ -163,7 +157,6 @@ def _reported(*ids: str) -> dict[str, JsonValue]:
     """
     items: list[JsonValue] = [{"id": one, "work": "do the thing", "files": []} for one in ids]
     return {"items": items}
-
 
 @pytest.mark.parametrize(("bad", "because"), MALFORMED)
 def test_an_id_the_framework_would_refuse_as_a_worktree_is_refused_in_the_tool_call(
@@ -201,7 +194,6 @@ def test_an_id_the_framework_would_refuse_as_a_worktree_is_refused_in_the_tool_c
         f"so this text is the only place a model that guessed wrong is told what it may write"
     )
 
-
 def test_two_ids_that_are_two_refs_to_git_and_one_directory_are_refused_together() -> None:
     """The rule that needs the whole plan in view, and is therefore on `Chunks` and not `Chunk`.
 
@@ -234,7 +226,6 @@ def test_two_ids_that_are_two_refs_to_git_and_one_directory_are_refused_together
         "filesystem the two children share one checkout"
     )
 
-
 def test_a_plan_with_no_chunks_in_it_is_refused_because_the_run_would_report_success() -> None:
     """The refusal with no framework behind it, which is what makes it the sharpest of the three.
 
@@ -261,7 +252,6 @@ def test_a_plan_with_no_chunks_in_it_is_refused_because_the_run_would_report_suc
         f"to divide is a plan with one chunk in it, and a model told only that its answer was "
         f"refused has no way to know that is an answer"
     )
-
 
 def test_a_well_formed_plan_is_accepted_and_reads_back_as_the_chunks_it_reported() -> None:
     """The other half of the three above, and the reason they are worth having.
@@ -293,9 +283,7 @@ def test_a_well_formed_plan_is_accepted_and_reads_back_as_the_chunks_it_reported
         "lost a file list is a run that divides the job differently from the way it was divided"
     )
 
-
 # --- the board ---------------------------------------------------------------------------------
-
 
 def test_the_board_is_a_row_per_chunk_with_the_line_that_chunks_agent_last_reported(
     tmp_path: Path,
@@ -324,7 +312,6 @@ def test_the_board_is_a_row_per_chunk_with_the_line_that_chunks_agent_last_repor
         )
     )
 
-
 def test_the_board_reads_every_activity_again_on_every_frame(tmp_path: Path) -> None:
     """The property the whole design rests on, and the one a board handed values passes by never
     changing at all.
@@ -349,7 +336,6 @@ def test_the_board_reads_every_activity_again_on_every_frame(tmp_path: Path) -> 
     assert first != second
     assert second == views.board(CHUNKS, runs)
 
-
 def test_a_chunk_with_no_run_behind_it_gets_the_cell_an_idle_one_gets(tmp_path: Path) -> None:
     """A view may be composed before every child exists, so the workflow guards its own lookups
     with `runs.get(id)`.
@@ -367,7 +353,6 @@ def test_a_chunk_with_no_run_behind_it_gets_the_cell_an_idle_one_gets(tmp_path: 
         Rows([Row("parser", "Edit: src/parse.py"), Row("api", ""), Row("docs", "")])
     )
 
-
 def test_the_board_is_passive_so_showing_it_never_waits_for_anybody(tmp_path: Path) -> None:
     """What the terminal dispatches on is whether `responses` is empty, and nothing at run time can
     see the `-> Screen` annotation. A board that grew a response would be queued as a question
@@ -377,9 +362,7 @@ def test_the_board_is_passive_so_showing_it_never_waits_for_anybody(tmp_path: Pa
 
     assert views.board(CHUNKS, runs).responses == ()
 
-
 # --- the conflict screen -----------------------------------------------------------------------
-
 
 COLLIDED: Final = Conflict(
     ("src/api.py", "src/__init__.py"),
@@ -391,7 +374,6 @@ COLLIDED: Final = Conflict(
 The summary names the **source** branch, which is `agl/_work/<label>/<id>` - which is where a person
 at this screen reads which chunk it is about, and why the view is not given the `Chunk` as a third
 parameter."""
-
 
 def test_the_screen_for_work_that_would_not_combine_is_the_conflict_and_the_two_verbs() -> None:
     """The ordinary conflict, whole: what stopped it, which files, and the two ways out.
@@ -407,7 +389,6 @@ def test_the_screen_for_work_that_would_not_combine_is_the_conflict_and_the_two_
     )
 
     assert views.conflict(COLLIDED, None) == expected
-
 
 def test_each_response_produces_the_value_the_workflow_branches_on() -> None:
     """The call site is `if await run.terminal.show(views.conflict, ...)`, so what this screen
@@ -425,7 +406,6 @@ def test_each_response_produces_the_value_the_workflow_branches_on() -> None:
     assert retry.value is True
     assert give_up.value is False
 
-
 def test_a_conflict_that_cannot_name_the_colliding_files_shows_only_its_summary() -> None:
     """`Conflict.paths` is explicit that `()` means "I cannot tell you which" and never "nothing
     collided" - an integrator whose far side answers only "these will not combine cleanly" is a real
@@ -437,7 +417,6 @@ def test_a_conflict_that_cannot_name_the_colliding_files_shows_only_its_summary(
         Rows([Row(unnamed.summary)]),
         [Choice(RETRY, value=True), Choice(ABORT, value=False)],
     )
-
 
 def test_a_red_gate_puts_the_builds_own_output_on_the_screen() -> None:
     """The other kind of conflict: the work combined, and then the build gate said no.
@@ -466,7 +445,6 @@ def test_a_red_gate_puts_the_builds_own_output_on_the_screen() -> None:
         [Choice(RETRY, value=True), Choice(ABORT, value=False)],
     )
 
-
 def test_a_gate_that_printed_nothing_shows_its_status_and_stops_there() -> None:
     """Empty output is legal - `VerifierOutcome.output` says passing builds routinely print nothing,
     and a build killed for memory can print nothing on its way out. The heading still goes up,
@@ -484,7 +462,6 @@ def test_a_gate_that_printed_nothing_shows_its_status_and_stops_there() -> None:
         ),
         [Choice(RETRY, value=True), Choice(ABORT, value=False)],
     )
-
 
 def test_a_long_build_log_is_shown_from_its_end_in_whole_lines() -> None:
     """The bound, asserted by what it is for rather than by restating its arithmetic.
@@ -513,7 +490,6 @@ def test_a_long_build_log_is_shown_from_its_end_in_whole_lines() -> None:
         "a row of the build log is not a line the build printed, so the slice that bounds the log "
         "cut a line in half and the half was rendered as a whole one"
     )
-
 
 def test_two_frames_of_one_unchanged_conflict_are_equal() -> None:
     """What lets the terminal write this screen once and then leave a person alone to read it.

@@ -49,9 +49,7 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Final
-
 import pytest
-
 from agl.adapters.git.integrator import GitIntegrator
 from agl.adapters.git.workspace import GitWorkspaceProvider
 from agl.ports.errors import InternalError, UpstreamError
@@ -249,7 +247,6 @@ async def main() -> None:
 asyncio.run(main())
 """
 
-
 def _git(where: Path, *argv: str) -> str:
     """Run git for the fixtures and the assertions. Synchronous on purpose: this is arrangement and
     observation, not the thing under test, and a test that built its situation through the adapter
@@ -257,13 +254,11 @@ def _git(where: Path, *argv: str) -> str:
     done = subprocess.run(["git", *argv], cwd=where, capture_output=True, text=True, check=True)
     return done.stdout
 
-
 def _git_answers(where: Path, *argv: str) -> bool:
     """One of git's exit-status questions, asked from out here. 0 is yes and 1 is no."""
     done = subprocess.run(["git", *argv], cwd=where, capture_output=True, text=True, check=False)
     assert done.returncode in (0, 1), f"`git {' '.join(argv)}` answered neither yes nor no: {done}"
     return done.returncode == 0
-
 
 def _apart(where: Path, script: str, situation: dict[str, str]) -> subprocess.CompletedProcess[str]:
     """Run one of the scripts above in a real interpreter of its own, and hand back what it did.
@@ -280,11 +275,9 @@ def _apart(where: Path, script: str, situation: dict[str, str]) -> subprocess.Co
         check=False,
     )
 
-
 def _body(marker: str) -> str:
     """A file's contents, derived from `marker` so that two versions differ on every line."""
     return "".join(f"{marker}: line {index} of {_LINES}.\n" for index in range(_LINES))
-
 
 def _write(workspace: Workspace, name: str, text: str) -> None:
     """Put `text` at a repository-relative, forward-slash separated `name` inside `workspace`.
@@ -296,12 +289,10 @@ def _write(workspace: Workspace, name: str, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
-
 def _read(workspace: Workspace, name: str) -> str | None:
     """What is at `name`, or `None` if nothing is - which is what "it was removed" looks like."""
     path = workspace.path.joinpath(*name.split("/"))
     return path.read_text(encoding="utf-8") if path.is_file() else None
-
 
 def _hooked(repository: Path, where: Path, root: Path) -> Path:
     """Give `repository` a hooks directory of its own, prove git runs what is in it, and hand back
@@ -344,7 +335,6 @@ def _hooked(repository: Path, where: Path, root: Path) -> Path:
     marker.unlink()
     return marker
 
-
 class _Renamed(Workspace):
     """One real workspace under a branch name of this test's choosing.
 
@@ -375,7 +365,6 @@ class _Renamed(Workspace):
     async def restore(self, head: str) -> None:
         await self._real.restore(head)
 
-
 @pytest.fixture
 def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A real repository with two commits, on `main`, and no configuration from this machine.
@@ -404,30 +393,25 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         _git(work, "commit", "-q", "-m", which)
     return work
 
-
 @pytest.fixture
 def trees(tmp_path: Path) -> TreesRoot:
     """The trees root, beside the repository and empty. Absolute, which is all `TreesRoot` asks."""
     return TreesRoot(tmp_path / "trees")
-
 
 @pytest.fixture
 def integrator(repository: Path) -> Integrator:
     """The integrator the module-level tests drive. The contract suite has its own, on the class."""
     return GitIntegrator(repository)
 
-
 @pytest.fixture
 def provider(repository: Path, trees: TreesRoot) -> WorkspaceProvider:
     """The provider making the workspaces those tests land between - over the same repository."""
     return GitWorkspaceProvider(repository, trees)
 
-
 @pytest.fixture
 def base(repository: Path) -> str:
     """The commit a run is cut from, resolved - the pinned `RunSpec.base_sha` shape of a base."""
     return _git(repository, "rev-parse", "HEAD").strip()
-
 
 class TestGitIntegrator(IntegratorContract):
     """The port in full, against real git.
@@ -452,7 +436,6 @@ class TestGitIntegrator(IntegratorContract):
     def base(self, repository: Path) -> str:
         """A resolved commit id, which is the shape a run's own workspace is cut from."""
         return _git(repository, "rev-parse", "HEAD").strip()
-
 
 async def _collide(
     integrator: Integrator, provider: WorkspaceProvider, base: str
@@ -482,9 +465,7 @@ async def _collide(
     )
     return target, sibling, settled
 
-
 # --- The hold, across three processes and a killed one ------------------------------------------
-
 
 async def test_a_hold_taken_by_a_process_that_dies_is_found_and_released_by_later_ones(
     repository: Path, trees: TreesRoot, base: str, provider: WorkspaceProvider
@@ -567,7 +548,6 @@ async def test_a_hold_taken_by_a_process_that_dies_is_found_and_released_by_late
     )
     with pytest.raises(InternalError):
         await integrator.retry(target)
-
 
 async def test_a_resumed_run_landing_into_an_inherited_hold_is_told_so_rather_than_exit_70(
     repository: Path, trees: TreesRoot, base: str, provider: WorkspaceProvider
@@ -673,9 +653,7 @@ async def test_a_resumed_run_landing_into_an_inherited_hold_is_told_so_rather_th
     with pytest.raises(InternalError):
         await integrator.retry(target)
 
-
 # --- The half of `retry` the contract suite cannot reach ----------------------------------------
-
 
 async def test_a_retry_lands_once_the_collision_is_resolved_in_the_held_target(
     integrator: Integrator, provider: WorkspaceProvider, base: str, repository: Path, tmp_path: Path
@@ -737,9 +715,7 @@ async def test_a_retry_lands_once_the_collision_is_resolved_in_the_held_target(
     with pytest.raises(InternalError):
         await integrator.retry(target)
 
-
 # --- What `Conflict.paths` names, and what it does not -------------------------------------------
-
 
 async def test_the_conflict_names_the_files_that_collided_and_only_those(
     integrator: Integrator, provider: WorkspaceProvider, base: str
@@ -785,9 +761,7 @@ async def test_the_conflict_names_the_files_that_collided_and_only_those(
     )
     await integrator.abort(target)
 
-
 # --- The repository the user is working in -------------------------------------------------------
-
 
 async def test_the_user_s_own_checkout_is_untouched_by_every_verb_on_this_port(
     integrator: Integrator, provider: WorkspaceProvider, base: str, repository: Path
@@ -832,9 +806,7 @@ async def test_the_user_s_own_checkout_is_untouched_by_every_verb_on_this_port(
         "and have no way to know the shape of"
     )
 
-
 # --- Two decisions nothing else would notice -----------------------------------------------------
-
 
 async def test_a_person_s_own_merge_configuration_cannot_decide_what_a_landing_contains(
     integrator: Integrator, provider: WorkspaceProvider, base: str, repository: Path
@@ -874,7 +846,6 @@ async def test_a_person_s_own_merge_configuration_cannot_decide_what_a_landing_c
         "the landing reported success and the child's work is not in the target. A merge strategy "
         "the repository chose decided what a landing contains, and it chose to contain nothing"
     )
-
 
 async def test_a_resolution_recorded_on_this_machine_does_not_resolve_a_landing(
     integrator: Integrator, provider: WorkspaceProvider, base: str, repository: Path
@@ -932,7 +903,6 @@ async def test_a_resolution_recorded_on_this_machine_does_not_resolve_a_landing(
     )
     await integrator.abort(target)
     assert await target.head() == settled, "and the release puts it back where the landing did"
-
 
 async def test_a_landing_is_a_merge_commit_and_runs_no_program_a_person_configured(
     integrator: Integrator, provider: WorkspaceProvider, base: str, repository: Path, tmp_path: Path
@@ -993,7 +963,6 @@ async def test_a_landing_is_a_merge_commit_and_runs_no_program_a_person_configur
         f"git fast-forwarded, and the head the run recorded is a commit the child made"
     )
     assert _read(target, MINE) == mine, "and the child's work is in the target either way"
-
 
 async def test_a_branch_name_spelled_like_a_git_option_is_a_value_and_never_an_option(
     integrator: Integrator, provider: WorkspaceProvider, base: str, repository: Path, tmp_path: Path

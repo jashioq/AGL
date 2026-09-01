@@ -1,16 +1,12 @@
-
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
-
 from agl.ports.home_layout import RunScope
 from agl.ports.ids import Namespace, StepName
 from agl.ports.run import JsonValue
 
 __all__ = ["Store"]
 
-
 class Store(ABC):
-
     @abstractmethod
     async def read_record(self, scope: RunScope) -> dict[str, JsonValue] | None:
         """What this run was asked to do, as it was written down.

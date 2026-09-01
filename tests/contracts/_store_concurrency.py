@@ -48,14 +48,11 @@ failing a rule nobody wrote down.
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Final
-
 import pytest
-
 from agl.ports.home_layout import RunScope
 from agl.ports.ids import StepName
 from agl.ports.run import JsonValue
 from agl.ports.store import Store
-
 from ._store_documents import (
     CHILD,
     FOREIGN_RUN,
@@ -94,14 +91,12 @@ _NOTHING: Final = "nothing recorded"
 # write produces one kind per prefix length, and thirty of them teach nothing the first three did.
 _LISTED: Final = 3
 
-
 def _woven(marker: str) -> dict[str, JsonValue]:
     """A big entry whose every field agrees with every other about which write produced it."""
     rows: list[JsonValue] = [
         {"index": index, "marker": marker, "filler": marker * _FILLER} for index in range(_ROWS)
     ]
     return entry(marker, value={"marker": marker, "rows": rows})
-
 
 def _mixture(document: Mapping[str, JsonValue], markers: Sequence[str]) -> str:
     """What was seen, in a sentence: a short document is a prefix, a two-marker one is a blend."""
@@ -116,7 +111,6 @@ def _mixture(document: Mapping[str, JsonValue], markers: Sequence[str]) -> str:
     length = len(rows) if isinstance(rows, list) else 0
     return f"neither whole value: {length} of {_ROWS} rows, per marker {counted}"
 
-
 def _classify(
     document: Mapping[str, JsonValue] | None, whole: Mapping[str, Mapping[str, JsonValue]]
 ) -> str:
@@ -128,18 +122,15 @@ def _classify(
             return marker
     return _mixture(document, tuple(whole))
 
-
 async def _write(store: Store, address: _Address, document: Mapping[str, JsonValue]) -> None:
     """`write_entry` with the address as one value, because these tests carry it around as one."""
     scope, step, name = address
     await store.write_entry(scope, step, name, document)
 
-
 async def _read(store: Store, address: _Address) -> dict[str, JsonValue] | None:
     """`read_entry`, addressed the same way."""
     scope, step, name = address
     return await store.read_entry(scope, step, name)
-
 
 async def _observe(
     store: Store,
@@ -162,7 +153,6 @@ async def _observe(
         seen.append((_classify(document, whole), before or writing.is_set()))
         await asyncio.sleep(0)
 
-
 def _raise_first_failure(readers: Sequence[asyncio.Task[None]]) -> None:
     """A reader only finishes early by raising, so surface that instead of waiting on it."""
     for reader in readers:
@@ -170,7 +160,6 @@ def _raise_first_failure(readers: Sequence[asyncio.Task[None]]) -> None:
             failure = reader.exception()
             if failure is not None:
                 raise failure
-
 
 async def _observations(
     store: Store,
@@ -212,7 +201,6 @@ async def _observations(
     assert seen, "no read landed beside the write, so this test observed nothing"
     return seen
 
-
 def _report(seen: Sequence[tuple[str, bool]], strange: set[str]) -> str:
     """The one failure message these tests share, because they fail for the one reason.
 
@@ -227,7 +215,6 @@ def _report(seen: Sequence[tuple[str, bool]], strange: set[str]) -> str:
         f"{len(seen)} reads landed beside the write, {sum(flag for _, flag in seen)} of them "
         f"while it was in flight, and some saw what a reader may never see: {listed}{rest}"
     )
-
 
 async def _contend(store: Store, number: int) -> None:
     """One round of two writers at one address, watched by readers throughout.
@@ -254,7 +241,6 @@ async def _contend(store: Store, number: int) -> None:
         f"round {number} left an address that two writers wrote to holding {settled}, and one "
         f"of the two whole values is the only thing it may hold"
     )
-
 
 class StoreConcurrencyContract:
     """Three clauses: a reader beside a write, two writers at one address, and writes apart.

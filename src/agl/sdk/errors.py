@@ -1,4 +1,3 @@
-
 from agl.ports.errors import (
     AglError,
     ConflictError,

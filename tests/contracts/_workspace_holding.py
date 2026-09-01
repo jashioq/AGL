@@ -54,12 +54,9 @@ this one, and the `provider` fixture these tests take is declared there.
 """
 
 import pytest
-
 from agl.ports.errors import ConflictError
 from agl.ports.workspace import WorkspaceProvider
-
 from ._workspace_files import LABEL, SECOND_LABEL
-
 
 class WorkspaceHoldingContract:
     """`hold`: one claim per run, refused while it is held, and let go of however the body ends.

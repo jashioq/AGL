@@ -17,11 +17,9 @@ process - which is the same seam the two source modules are split on.
 """
 
 import pytest
-
 from agl.adapters.git._changes import changes
 from agl.ports.errors import UpstreamUnexpected
 from agl.ports.history import ChangeKind, FileChange
-
 
 def test_every_status_git_spells_becomes_one_kind_or_is_refused_outright() -> None:
     """The mapping, the two readings inside it, and the letters that get no reading at all.
@@ -58,7 +56,6 @@ def test_every_status_git_spells_becomes_one_kind_or_is_refused_outright() -> No
         with pytest.raises(UpstreamUnexpected):
             changes(f"{refused}\0one/file.txt\0")
 
-
 def test_a_stream_of_records_comes_back_as_the_changes_it_holds() -> None:
     """One flat stream, and a status that says how many paths belong to it.
 
@@ -77,7 +74,6 @@ def test_a_stream_of_records_comes_back_as_the_changes_it_holds() -> None:
         "a stream holding four records, one of them a rename with two names in it, did not come "
         "back as those four changes"
     )
-
 
 def test_a_record_that_runs_out_or_holds_no_name_is_refused_rather_than_shortened() -> None:
     """A changed file this adapter quietly dropped is a file a review step never sees.

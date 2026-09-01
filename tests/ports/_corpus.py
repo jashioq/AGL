@@ -28,7 +28,6 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import ModuleType
 from typing import Final
-
 from agl.ports.errors import InputError
 from agl.ports.ids import Namespace, ProjectName, RunLabel, StepName
 
@@ -78,13 +77,11 @@ _BOUNDARY: Final = [
     "-a", "a-", ".a", "a.", "-", ".", "..", "a..b", "a.lockb", "ab.lock", "ab.LOCK", "",
 ]  # fmt: skip
 
-
 def _fuzz(count: int) -> list[str]:
     """Pseudo-random names from a fixed seed, so a failure reproduces without a seed to copy."""
     rng = random.Random(_SEED)
     alphabet = [*"abzAZ09._-", *"/\\~^:?*[ @{}$;|&`", "\x00", "\t", "\xa0", "\xe9", "\U0001f34c"]
     return ["".join(rng.choices(alphabet, k=rng.randint(1, 12))) for _ in range(count)]
-
 
 def _permitted_fuzz(count: int) -> list[str]:
     """The other half: drawn only from characters the allowlist permits, so most are accepted.
@@ -99,7 +96,6 @@ def _permitted_fuzz(count: int) -> list[str]:
     rng = random.Random(_SEED + 1)
     return ["".join(rng.choices([*"abzAZ09._-"], k=rng.randint(1, 12))) for _ in range(count)]
 
-
 def _structured() -> list[str]:
     """The stated-coverage half: every ASCII codepoint, then every trap in every position."""
     values = [chr(code) for code in range(0x80)] + _NON_ASCII + _LAYOUT_WORDS
@@ -109,7 +105,6 @@ def _structured() -> list[str]:
     for name in ("CON", "NUL", "COM1", "LPT9"):
         values += [name, name.lower(), f"{name}.toml", f"{name}x", f"x{name}", f"{name}-1"]
     return values + ["COM0", "CONS", "CONSOLE", "NULL", "v1.0+build", "fix(auth)", "under_score"]
-
 
 def _accepted(values: Sequence[str]) -> list[str]:
     """The subset every one of the four types takes.
@@ -130,7 +125,6 @@ def _accepted(values: Sequence[str]) -> list[str]:
             continue
         kept.append(value)
     return kept
-
 
 STRUCTURED: Final = _structured()
 CORPUS: Final = list(dict.fromkeys([*STRUCTURED, *_fuzz(2000), *_permitted_fuzz(600)]))
@@ -158,11 +152,9 @@ _IMPURE_ATTRIBUTES: Final = frozenset(
 # `home_layout` and `Path.home()` is not: one is a name, the other an attribute.
 _IMPURE_NAMES: Final = frozenset({"__import__", "compile", "eval", "exec", "input", "open"})
 
-
 def _parsed(module: ModuleType) -> ast.Module:
     assert module.__file__ is not None
     return ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
-
 
 def impurities(module: ModuleType) -> set[str]:
     """Everything the module's *code* says that would touch the world. Parsed, so prose is safe."""
@@ -174,7 +166,6 @@ def impurities(module: ModuleType) -> set[str]:
             found.add(node.id)
     return found
 
-
 def imported_modules(module: ModuleType) -> set[str]:
     """What the module imports, by name, from its own source."""
     found: set[str] = set()
@@ -184,7 +175,6 @@ def imported_modules(module: ModuleType) -> set[str]:
         elif isinstance(node, ast.ImportFrom) and node.module is not None:
             found.add(node.module)
     return found
-
 
 def git_rejects(refnames: Sequence[str]) -> list[str]:
     """The refnames real git turns down. Parallel because each one costs a process."""

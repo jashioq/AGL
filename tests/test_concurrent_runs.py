@@ -114,9 +114,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Final
-
 import pytest
-
 from agl import testing
 from agl.adapters.git.history import GitHistory
 from agl.adapters.git.integrator import GitIntegrator
@@ -193,9 +191,7 @@ trades away is how long a broken build takes to say so. Generous, because a boun
 fire on a loaded machine would report a flake as a deadlock, and seven `git worktree add`s of a
 source tree is the one thing here that is genuinely slow."""
 
-
 # --- git, for arranging and for observing. Never for the thing under test -------------------------
-
 
 def _git(where: Path, *argv: str) -> str:
     """One git command, for arranging and observing. `tests/test_api.py`'s helper and its argument:
@@ -203,7 +199,6 @@ def _git(where: Path, *argv: str) -> str:
     behaviour it is about to check."""
     done = subprocess.run(["git", *argv], cwd=where, capture_output=True, text=True, check=True)
     return done.stdout
-
 
 def _refused(where: Path, *argv: str) -> str:
     """One git command that must fail, and what git said about it. The mirror of `_git`.
@@ -219,7 +214,6 @@ def _refused(where: Path, *argv: str) -> str:
     )
     return done.stderr
 
-
 def _worktrees(repository: Path) -> frozenset[Path]:
     """Every checkout git has registered against this repository, resolved.
 
@@ -233,11 +227,9 @@ def _worktrees(repository: Path) -> frozenset[Path]:
         Path(line[len(at) :]).resolve() for line in listing.splitlines() if line.startswith(at)
     )
 
-
 def _tree(repository: Path, branch: str) -> frozenset[str]:
     """Every path a branch's tip holds, read out of the repository rather than off a checkout."""
     return frozenset(_git(repository, "ls-tree", "-r", "--name-only", branch).split())
-
 
 def _committed(work: Path, path: str, message: str) -> None:
     """One file, added and committed on whatever `work` currently has checked out."""
@@ -246,7 +238,6 @@ def _committed(work: Path, path: str, message: str) -> None:
     place.write_bytes(f"{path}\n".encode())
     _git(work, "add", path)
     _git(work, "commit", "-q", "-m", message)
-
 
 @pytest.fixture
 def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -282,9 +273,7 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     _committed(work, MARKERS[GAMMA], f"work only {TRUNK} carries")
     return work
 
-
 # --- the agents, and the one moment all three runs are provably live ------------------------------
-
 
 @dataclass(frozen=True, slots=True)
 class _Sample:
@@ -299,7 +288,6 @@ class _Sample:
     head: str
     """`git rev-parse --abbrev-ref HEAD` in `repo/`. The user is still on the branch they were."""
 
-
 @dataclass(slots=True)
 class _Watch:
     """Which agents were dispatched, which of them got through, and what they saw. One per test.
@@ -312,7 +300,6 @@ class _Watch:
     entered: list[str] = field(default_factory=list[str])
     left: list[str] = field(default_factory=list[str])
     samples: list[_Sample] = field(default_factory=list[_Sample])
-
 
 async def _rendezvous(who: str, watch: _Watch, barrier: asyncio.Barrier, repository: Path) -> None:
     """Wait for every implementer of every run, then look at the directory AGL promised not to
@@ -331,7 +318,6 @@ async def _rendezvous(who: str, watch: _Watch, barrier: asyncio.Barrier, reposit
         )
     )
 
-
 def _work(label: str, name: str) -> str:
     """Where one agent of one run writes. Named after the run, which is the whole instrument.
 
@@ -339,7 +325,6 @@ def _work(label: str, name: str) -> str:
     a branch says which *run's* agent put it there and not merely which chunk did.
     """
     return f"src/{label}-{name}.py"
-
 
 def _wrote(task: testing.AgentTask, label: str, name: str) -> None:
     """Put this agent's work into the checkout it was handed.
@@ -352,7 +337,6 @@ def _wrote(task: testing.AgentTask, label: str, name: str) -> None:
     place = task.workspace / _work(label, name)
     place.parent.mkdir(parents=True, exist_ok=True)
     place.write_bytes(f"{label}/{name}\n".encode())
-
 
 def _whose(task: testing.AgentTask) -> str:
     """Which chunk this dispatch is for, read off the prompt the framework composed.
@@ -370,7 +354,6 @@ def _whose(task: testing.AgentTask) -> str:
         f"an implementer was dispatched with no chunk of this plan in its inputs:\n"
         f"{task.instructions!r}"
     )
-
 
 def _splitting(
     label: str, watch: _Watch, barrier: asyncio.Barrier, repository: Path
@@ -398,7 +381,6 @@ def _splitting(
 
     return agent
 
-
 def _planned(label: str) -> dict[str, JsonValue]:
     """This run's plan, as the call a planner makes: the JSON a model sends, not a `Chunks`.
 
@@ -412,7 +394,6 @@ def _planned(label: str) -> dict[str, JsonValue]:
             for chunk in PLAN
         ]
     }
-
 
 def _fixing(
     label: str, watch: _Watch, barrier: asyncio.Barrier, repository: Path
@@ -442,9 +423,7 @@ def _fixing(
 
     return agent
 
-
 # --- one bundle per run, over one repository and one trees root -----------------------------------
-
 
 def _over(
     repository: Path, trees: TreesRoot, label: str, agent: testing.Agent
@@ -470,7 +449,6 @@ def _over(
         label=label,
     )
 
-
 async def _base_sha(harness: testing.Harness) -> str:
     """The commit this run was pinned to, out of its own `run.json`.
 
@@ -483,7 +461,6 @@ async def _base_sha(harness: testing.Harness) -> str:
     pinned = record["base_sha"]
     assert isinstance(pinned, str), "run.json holds something that is not a string at 'base_sha'"
     return pinned
-
 
 async def _ended(started: list[asyncio.Task[None]], watch: _Watch) -> None:
     """Wait for all three runs under `_LIVENESS`, and make the expiry the failure.
@@ -517,7 +494,6 @@ async def _ended(started: list[asyncio.Task[None]], watch: _Watch) -> None:
             f"millisecond `flock` around `worktree add` and `prune` - so a rendezvous that cannot "
             f"be reached means something is held across a step, a landing or a whole run."
         )
-
 
 @pytest.mark.asyncio
 async def test_three_runs_on_one_repository_overlap_and_leave_three_independent_branches(

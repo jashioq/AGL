@@ -61,9 +61,7 @@ import subprocess
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Final
-
 import pytest
-
 from agl.adapters.filesystem.store import FilesystemStore
 from agl.adapters.git.history import GitHistory
 from agl.adapters.git.workspace import GitWorkspaceProvider
@@ -110,16 +108,13 @@ _LIVENESS: Final = 30.0
 # this file's own real-git tests already cost.
 _SERIALIZED: Final = 2.0
 
-
 @dataclass(frozen=True)
 class Summary:
     """A reporting payload: one string, which is the whole of what these agents have to say."""
 
     text: str
 
-
 REPORT: Final = reporting_tool("report", "report what you did", Summary)
-
 
 @role(model=Claude.SONNET)
 def _role(name: str, instructions: str, *, read_only: bool = False) -> Role[Summary]:
@@ -136,7 +131,6 @@ def _role(name: str, instructions: str, *, read_only: bool = False) -> Role[Summ
         tools=(REPORT,),
     )
 
-
 # Module-level, which is what a `Role` is - "a module-level value shared across steps and across
 # concurrent runs" - and load-bearing for every "identical `base`" claim below: two children
 # calling `step(IMPLEMENT)` with no inputs are hashing the same object's fields - and, since the
@@ -146,15 +140,12 @@ PLAN: Final = _role("plan", "plan the ticket", read_only=True)
 IMPLEMENT: Final = _role("implement", "implement the ticket")
 REVIEW: Final = _role("review", "review the worktree", read_only=True)
 
-
 # --- the repository, the bundle, and the run -----------------------------------------------------
-
 
 def _git(where: Path, *argv: str) -> str:
     """One git command, for arranging and observing. Never for the thing under test."""
     done = subprocess.run(["git", *argv], cwd=where, capture_output=True, text=True, check=True)
     return done.stdout
-
 
 @pytest.fixture
 def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -180,12 +171,10 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     _git(work, "commit", "-q", "-m", "the state a run is cut from")
     return work
 
-
 @pytest.fixture
 def base(repository: Path) -> str:
     """The commit the run is cut from, resolved - the pinned `RunSpec.base_sha` shape of a base."""
     return _git(repository, "rev-parse", "HEAD").strip()
-
 
 def _run(repository: Path, tmp_path: Path, base: str, agent: Agent) -> Run[None]:
     """A `Run` over one real repository, one real ledger, one real history and one scripted agent.
@@ -210,7 +199,6 @@ def _run(repository: Path, tmp_path: Path, base: str, agent: Agent) -> Run[None]
     )
     return Run(params=None, services=services, scope=SCOPE, base=base)
 
-
 # --- the ledger and the trees root, read off disk ------------------------------------------------
 #
 # Spelled out rather than composed through `home_layout` or `tree_layout`, for `test_run_worktree.
@@ -218,11 +206,9 @@ def _run(repository: Path, tmp_path: Path, base: str, agent: Agent) -> Run[None]
 # agree with the layout whatever either of them said, and "two children wrote two files at two
 # paths" is a claim about two literal shapes on disk.
 
-
 def _run_dir(tmp_path: Path) -> Path:
     """`<home>/projects/myapp/runs/auth/` - depth zero, the run itself."""
     return tmp_path / "home" / "projects" / "myapp" / "runs" / "auth"
-
 
 def _steps_dir(tmp_path: Path, step: str, *namespaces: str) -> Path:
     """`<run>/worktrees/<n>/.../steps/<step>/` - the layout, written out rather than computed."""
@@ -231,11 +217,9 @@ def _steps_dir(tmp_path: Path, step: str, *namespaces: str) -> Path:
         where = where / "worktrees" / namespace
     return where / "steps" / step
 
-
 def _entries(tmp_path: Path, step: str, *namespaces: str) -> list[Path]:
     """Every entry file recorded for one step in one namespace, in filename order."""
     return sorted(_steps_dir(tmp_path, step, *namespaces).glob("*.json"))
-
 
 def _only(tmp_path: Path, step: str, *namespaces: str) -> Path:
     """The one entry file that step left there. Two would mean it ran twice."""
@@ -243,12 +227,10 @@ def _only(tmp_path: Path, step: str, *namespaces: str) -> Path:
     assert len(found) == 1, f"{_steps_dir(tmp_path, step, *namespaces)} holds {len(found)} entries"
     return found[0]
 
-
 def _read(entry: Path) -> dict[str, JsonValue]:
     """One entry file, parsed. `json.loads` answers `Any`, and mypy is right to insist."""
     parsed: dict[str, JsonValue] = json.loads(entry.read_text(encoding="utf-8"))
     return parsed
-
 
 def _field(entry: Path, key: str) -> str:
     """One string off one entry file, narrowed."""
@@ -256,14 +238,11 @@ def _field(entry: Path, key: str) -> str:
     assert isinstance(value, str), f"{entry}'s {key} is {value!r}, which is not a string"
     return value
 
-
 def _trees_dir(tmp_path: Path) -> Path:
     """`.trees/auth/` - every checkout belonging to this run, and nothing else."""
     return tmp_path / "trees" / "auth"
 
-
 # --- the agents: one that must meet another, and one that must wait its turn ----------------------
-
 
 class _Dispatches:
     """Which namespace's agent was dispatched, and which of them got all the way through.
@@ -276,7 +255,6 @@ class _Dispatches:
     def __init__(self) -> None:
         self.entered: list[str] = []
         self.left: list[str] = []
-
 
 def _rendezvous(record: _Dispatches, barrier: asyncio.Barrier) -> Agent:
     """An agent that cannot finish until another agent has started.
@@ -305,7 +283,6 @@ def _rendezvous(record: _Dispatches, barrier: asyncio.Barrier) -> Agent:
 
     return _agent
 
-
 def _alone(record: _Dispatches) -> Agent:
     """The same agent with nobody to meet: a barrier of one party is passed by whoever reaches it.
 
@@ -316,7 +293,6 @@ def _alone(record: _Dispatches) -> Agent:
     at a time wants.
     """
     return _rendezvous(record, asyncio.Barrier(1))
-
 
 class _Relay:
     """Two siblings dispatched at once and **completed** in an order the test chooses.
@@ -375,9 +351,7 @@ class _Relay:
         if position + 1 < len(self.order):
             self._gates[self.order[position + 1]].set()
 
-
 # --- two children that genuinely overlap ---------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_two_children_neither_of_which_can_finish_until_the_other_starts_both_finish(
@@ -451,9 +425,7 @@ async def test_two_children_neither_of_which_can_finish_until_the_other_starts_b
             f"and every commit either of them makes carries the other's edits"
         )
 
-
 # --- and the mirror: within one namespace they still serialize ------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_the_rendezvous_two_children_pass_is_one_two_steps_of_a_namespace_cannot_reach(
@@ -502,9 +474,7 @@ async def test_the_rendezvous_two_children_pass_is_one_two_steps_of_a_namespace_
         "produced"
     )
 
-
 # --- the replay of the concurrent case ------------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_two_siblings_at_one_head_replay_when_the_second_walk_completes_them_the_other_way(
@@ -583,7 +553,6 @@ async def test_two_siblings_at_one_head_replay_when_the_second_walk_completes_th
                 f"walk never wrote to"
             )
 
-
 async def _walk(run: Run[None], relay: _Relay) -> dict[str, Summary]:
     """One walk of the two-sibling programme, in `relay`'s order, with both checkouts pre-opened.
 
@@ -604,9 +573,7 @@ async def _walk(run: Run[None], relay: _Relay) -> dict[str, Summary]:
         done = await asyncio.gather(*(_sibling(name) for name in relay.order))
     return dict(done)
 
-
 # --- the chain is not the worktree ----------------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_a_head_advanced_behind_the_frameworks_back_does_not_move_the_chain(

@@ -49,9 +49,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import FrozenInstanceError, dataclass, replace
 from pathlib import Path
 from typing import Final, assert_type, cast
-
 import pytest
-
 from agl.ports.agent import (
     Capability,
     Claude,
@@ -76,12 +74,10 @@ _IMPLEMENT: Final = "Implement the ticket. Run the tests until they pass."
 # written out so that "the text arrived" and "a path arrived" cannot be confused for each other.
 _DECOMPOSE: Final = "Propose tickets, ask for approval, revise until approved, then report.\n"
 
-
 @dataclass(frozen=True)
 class Finding:
     file: str
     severity: str
-
 
 @dataclass(frozen=True)
 class Findings:
@@ -93,13 +89,11 @@ class Findings:
     def high(self) -> list[Finding]:
         return [found for found in self.findings if found.severity == "high"]
 
-
 @dataclass(frozen=True)
 class Tickets:
     """A second payload type, so the wrong explicit parameter has something to be wrong with."""
 
     ids: list[str]
-
 
 REPORT: Final = reporting_tool("report_findings", "report what the review found", Findings)
 REPORT_TICKETS: Final = reporting_tool("report_tickets", "report the tickets you propose", Tickets)
@@ -109,11 +103,9 @@ _ONE_HIGH: Final[Mapping[str, JsonValue]] = {
     "findings": [{"file": "a.py", "severity": "high"}],
 }
 
-
 async def _never_called(payload: Mapping[str, JsonValue]) -> ToolResult:
     """Nothing in this suite runs an agent, so no handler here is ever invoked."""
     return ToolResult(text="")
-
 
 def _plain(name: str) -> Tool:
     """An ordinary `Tool` - the kind a role offers beside its reporting tool, and the kind an
@@ -124,7 +116,6 @@ def _plain(name: str) -> Tool:
         payload_schema={"type": "object", "properties": {}},
         handler=_never_called,
     )
-
 
 def _reporting_of[P](role: Role[P]) -> ReportingTool[P] | None:
     """The scan `Run.step` makes to decide which of the two step kinds this is.
@@ -139,7 +130,6 @@ def _reporting_of[P](role: Role[P]) -> ReportingTool[P] | None:
             return declared
     return None
 
-
 async def _step[P](role: Role[P], payload: Mapping[str, JsonValue] | None = None) -> P:
     """A stand-in for `Run.step`, carrying `Role[P]`'s parameter through the way that method
     must. Nothing here is the journal; the point is what mypy makes of the result.
@@ -153,7 +143,6 @@ async def _step[P](role: Role[P], payload: Mapping[str, JsonValue] | None = None
     if reporting is None:
         return cast("P", None)
     return reporting.read(payload if payload is not None else {})
-
 
 def _base[P](built: Role[P], *, model: ModelId | None = None) -> str:
     """One step's base fingerprint, built from the four terms taken off a role.
@@ -190,7 +179,6 @@ def _base[P](built: Role[P], *, model: ModelId | None = None) -> str:
         head=_HEAD,
     )
 
-
 def _review() -> Role[Findings]:
     """The `Role` both factories below return, so that the only thing that differs between them is
     the model their decorator binds - which is what makes the model term measurable at all."""
@@ -202,31 +190,26 @@ def _review() -> Role[Findings]:
         requires={Capability.SHELL},
     )
 
-
 @role(model=OpenAI.SOL)
 def reviewer() -> Role[Findings]:
     """A reporting role, declared the one way a role is declared."""
     return _review()
-
 
 @role(model=Claude.OPUS)
 def _reviewer_on_claude() -> Role[Findings]:
     """`reviewer()` with one term different, and that term is on the decorator: the model."""
     return _review()
 
-
 @role(model=Claude.OPUS)
 def implementer() -> Role:
     """An effect role: no reporting tool, so its result is `null`."""
     return Role(name="implement", instructions=_IMPLEMENT, requires={Capability.SHELL})
-
 
 REVIEWER: Final = reviewer()
 IMPLEMENTER: Final = implementer()
 """The two roles this suite measures, built once. A `Role` is what a factory returns and what a
 step is handed, so a suite about `Role` holds values rather than factories - and the section on
 `@role` below is where the factories themselves are measured."""
-
 
 @role(model=OpenAI.LUNA)
 def _unservable() -> Role:
@@ -238,7 +221,6 @@ def _unservable() -> Role:
     requires at the first step it is handed to."""
     return Role(name="review", instructions=_REVIEW, requires=frozenset(Capability))
 
-
 @role(model=Claude.HAIKU)
 def _never_called_factory() -> Role:
     """A factory whose body would fail the suite if anything ever ran it.
@@ -247,7 +229,6 @@ def _never_called_factory() -> Role:
     promise: the two attributes below are read off this object, and the `raise` is what would say
     so if reading one had cost a call."""
     raise AssertionError("a factory was invoked to read the `(name, model)` it carries")
-
 
 # --- `@role(model=…)`: what the decorator registers, and where the model lives --------------------
 #
@@ -259,14 +240,12 @@ def _never_called_factory() -> Role:
 # whose parameter list is wider than the author wrote gives a call site knobs the author never
 # offered.
 
-
 def test_the_factory_binds_the_model_its_decorator_names() -> None:
     """One declaration, not two: `model=` appears on the decorator and nowhere in the `Role(...)`
     the function returns, and the value that comes back has it all the same."""
     assert reviewer().model is OpenAI.SOL
     assert implementer().model is Claude.OPUS
     assert _reviewer_on_claude().model is Claude.OPUS
-
 
 def test_the_name_and_the_model_are_readable_without_invoking_the_factory() -> None:
     """The whole provider check, and the sentence it rests on: preflight "collects providers
@@ -289,7 +268,6 @@ def test_the_name_and_the_model_are_readable_without_invoking_the_factory() -> N
     assert implementer.name == "implementer"
     assert implementer().name == "implement"
 
-
 def test_a_role_that_never_went_through_a_factory_refuses_to_name_a_model() -> None:
     """The loud half of "the model lives on the decorator". A bare `Role(...)` is a legal value -
     `__post_init__` has nothing to object to - right up until something asks what runs it, and
@@ -306,7 +284,6 @@ def test_a_role_that_never_went_through_a_factory_refuses_to_name_a_model() -> N
     assert "@role(model=" in str(refusal.value)
     assert "review" in str(refusal.value)
 
-
 def test_replace_on_a_built_role_carries_the_model_across() -> None:
     """`_model` is an `init` field rather than `init=False`, and this is the difference: `replace`
     copies init fields and re-defaults the rest, so a role that went through a factory and then
@@ -314,7 +291,6 @@ def test_replace_on_a_built_role_carries_the_model_across() -> None:
     dropped and the refusal would arrive at the step instead of at the line."""
     assert replace(REVIEWER, name="second_opinion").model is OpenAI.SOL
     assert replace(REVIEWER, tools=()).model is OpenAI.SOL
-
 
 def test_the_override_surface_is_the_factorys_own_parameter_list() -> None:
     """A rejected member, measured as a type error rather than as an argument.
@@ -335,14 +311,12 @@ def test_the_override_surface_is_the_factorys_own_parameter_list() -> None:
     with pytest.raises(TypeError):
         replace(REVIEWER, model=Claude.HAIKU)  # type: ignore[call-arg]
 
-
 def test_two_calls_of_one_factory_are_equal_values_and_not_one_value() -> None:
     """A factory builds a fresh frozen `Role` per call, which is what makes an override surface a
     surface: `implementer(...)` cannot be handed the object a previous call produced, so nothing a
     call site does can reach a role another call site is using."""
     assert reviewer() == reviewer()
     assert reviewer() is not reviewer()
-
 
 def test_the_factory_keeps_the_declarations_name_and_docstring() -> None:
     """`update_wrapper`, for the ordinary reason: the argument an author writes under a role
@@ -353,7 +327,6 @@ def test_the_factory_keeps_the_declarations_name_and_docstring() -> None:
     assert "effect role" in implementer.__doc__
     assert implementer.__module__ == __name__
 
-
 # --- the name, which is the address and not a term ------------------------------------------------
 #
 # `run.step` carries no `name=`, so the entry path is `steps/<role name>/` and the role is the
@@ -362,13 +335,11 @@ def test_the_factory_keeps_the_declarations_name_and_docstring() -> None:
 # at the step; and it reaches no digest, so renaming a role moves its ledger without moving one
 # fingerprint inside it.
 
-
 def test_a_role_carries_the_name_its_entries_are_recorded_under() -> None:
     """"A `name=` on `run.step`" is a rejected member, because "the role already carries
     one". So this field is where the address is written, and it is written once."""
     assert REVIEWER.name == "review"
     assert IMPLEMENTER.name == "implement"
-
 
 @pytest.mark.parametrize("unusable", ["", "   ", "has a space", "steps/review", "..", "con"])
 def test_a_name_that_cannot_be_a_path_segment_is_refused_where_it_is_written(
@@ -381,7 +352,6 @@ def test_a_name_that_cannot_be_a_path_segment_is_refused_where_it_is_written(
     with pytest.raises(InputError) as refusal:
         Role(name=unusable, instructions=_REVIEW)
     assert "step name" in str(refusal.value)
-
 
 def test_the_name_is_the_address_and_reaches_no_fingerprint() -> None:
     """The division of labour this rests on: the name says *which directory*, and the digest is
@@ -396,9 +366,7 @@ def test_the_name_is_the_address_and_reaches_no_fingerprint() -> None:
     assert renamed.name != REVIEWER.name
     assert _base(renamed) == _base(REVIEWER)
 
-
 # --- the four terms, and what the declaration normalises them to ---------------------------------
-
 
 def test_a_role_holds_the_declared_terms_and_nothing_else() -> None:
     """"Instructions + restrictions + tools + required capabilities", plus the name its steps are
@@ -409,7 +377,6 @@ def test_a_role_holds_the_declared_terms_and_nothing_else() -> None:
     with pytest.raises(AttributeError):
         object.__getattribute__(REVIEWER, "__dict__")
 
-
 def test_the_declared_sets_are_stored_as_frozensets() -> None:
     """Declared as `AbstractSet` so that `{Restriction.NO_SHELL}` is the spelling an author writes,
     and normalised on the way in to what `AgentTask.restrictions` takes."""
@@ -419,7 +386,6 @@ def test_the_declared_sets_are_stored_as_frozensets() -> None:
         {Restriction.NO_VCS_WRITES, Restriction.NO_FILE_WRITES}
     )
 
-
 def test_a_mutable_set_handed_in_cannot_be_edited_afterwards() -> None:
     """The copy `frozenset()` makes is the point: a caller that kept the set it passed cannot add a
     restriction to a role already in use by a step that has run."""
@@ -427,7 +393,6 @@ def test_a_mutable_set_handed_in_cannot_be_edited_afterwards() -> None:
     role = Role(name="review", instructions=_REVIEW, restrictions=declared)
     declared.add(Restriction.NO_NETWORK)
     assert role.restrictions == frozenset({Restriction.NO_SHELL})
-
 
 def test_the_tools_become_a_tuple_in_declaration_order() -> None:
     """`AgentTask.tools` is "in declaration order", and `base_of` reads the sequence as given
@@ -440,7 +405,6 @@ def test_the_tools_become_a_tuple_in_declaration_order() -> None:
     assert isinstance(role.tools, tuple)
     assert [declared.name for declared in role.tools] == ["grep_notes", "read_spec", REPORT.name]
 
-
 def test_reordering_two_tools_moves_the_steps_fingerprint() -> None:
     """Not asserted as a good thing - asserted as the behaviour `test_journal.py` specifies under
     what a tool contributes, so that a later change to it is a decision somebody makes rather than
@@ -449,12 +413,10 @@ def test_reordering_two_tools_moves_the_steps_fingerprint() -> None:
     the_other = Role(name="review", instructions=_REVIEW, tools=[_plain("b"), _plain("a")])
     assert _base(one_way, model=Claude.SONNET) != _base(the_other, model=Claude.SONNET)
 
-
 def test_an_effect_role_declares_no_tools_and_that_is_ordinary() -> None:
     """An effect step: no reporting tool, result `null`, and the effect is commits."""
     assert IMPLEMENTER.tools == ()
     assert _reporting_of(IMPLEMENTER) is None
-
 
 def test_a_role_is_frozen() -> None:
     """It is declared once and used by many steps - every child worktree is handed the same
@@ -470,16 +432,13 @@ def test_a_role_is_frozen() -> None:
     with pytest.raises(AttributeError):
         REVIEWER.model = Claude.HAIKU  # type: ignore[misc]
 
-
 def test_two_providers_in_one_workflow_is_the_ordinary_case() -> None:
     """`src/agl/ports/agent.py`'s requirement, in the shape an author writes it: the model is
     named per role, beside the prompt, and nothing here holds an opinion about which adapter
     serves it."""
     assert REVIEWER.model.provider != IMPLEMENTER.model.provider
 
-
 # --- instructions are the prompt, not a path to it -----------------------------------------------
-
 
 def test_a_role_stores_its_instructions_verbatim_and_opens_nothing() -> None:
     """`instructions="prompts/decompose.md"` read as shorthand: what a role holds is the
@@ -490,7 +449,6 @@ def test_a_role_stores_its_instructions_verbatim_and_opens_nothing() -> None:
     role = Role(name="review", instructions=looks_like_a_path)
     assert role.instructions == looks_like_a_path
 
-
 def test_editing_the_prompt_moves_the_steps_fingerprint() -> None:
     """Why the role is in the digest at all: halt, edit the prompt, resume, and
     you must not replay what the old wording produced. This is what a role holding a *filename*
@@ -499,7 +457,6 @@ def test_editing_the_prompt_moves_the_steps_fingerprint() -> None:
     edited = replace(REVIEWER, instructions=_REVIEW + " Check the tests too.")
     assert _base(REVIEWER) != _base(edited)
 
-
 @pytest.mark.parametrize("blank", ["", "   ", "\n\t"])
 def test_blank_instructions_are_refused_where_they_are_written(blank: str) -> None:
     """`AgentTask` refuses an empty prompt at the dispatch, which is after the journal missed and
@@ -507,7 +464,6 @@ def test_blank_instructions_are_refused_where_they_are_written(blank: str) -> No
     with pytest.raises(InputError) as refusal:
         Role(name="review", instructions=blank)
     assert "instructions" in str(refusal.value)
-
 
 # --- `prompt_file`, which is how the text gets there ---------------------------------------------
 #
@@ -522,11 +478,9 @@ def test_blank_instructions_are_refused_where_they_are_written(blank: str) -> No
 # factory still resolves against the module the factory was *written* in and not the one that
 # called it.
 
-
 def _declared(where: Path) -> Role[None]:
     """A role whose prompt is a file - the ordinary shape, with the path already absolute."""
     return Role(name="review", instructions=prompt_file(where))
-
 
 def test_a_role_declared_with_prompt_file_holds_the_text_and_not_the_path(tmp_path: Path) -> None:
     """The point of the whole function: `Role.instructions` is still a `str` of prompt, so the
@@ -541,14 +495,12 @@ def test_a_role_declared_with_prompt_file_holds_the_text_and_not_the_path(tmp_pa
     assert role.instructions == _REVIEW
     assert str(where) not in role.instructions
 
-
 def test_the_text_is_handed_back_exactly_as_it_was_written(tmp_path: Path) -> None:
     """Verbatim, trailing newline and all. Trimming would be this function editing the author's
     prompt, and a whitespace rule two people could remember differently is a moved digest."""
     where = tmp_path / "review.md"
     where.write_text(f"  {_REVIEW}\n\n", encoding="utf-8")
     assert prompt_file(where) == f"  {_REVIEW}\n\n"
-
 
 def test_editing_the_prompt_file_moves_the_steps_fingerprint(tmp_path: Path) -> None:
     """The named failure, closed: "a role holding a filename would fingerprint the filename, so
@@ -562,7 +514,6 @@ def test_editing_the_prompt_file_moves_the_steps_fingerprint(tmp_path: Path) -> 
     after = replace(REVIEWER, instructions=prompt_file(where))
 
     assert _base(before) != _base(after)
-
 
 def test_a_relative_prompt_path_is_read_from_beside_the_module_that_declared_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -601,7 +552,6 @@ def test_a_relative_prompt_path_is_read_from_beside_the_module_that_declared_it(
         # importing the same name would otherwise be handed this one's module.
         for name in ("tickets.roles", "tickets"):
             sys.modules.pop(name, None)
-
 
 def test_a_factory_resolves_its_prompt_inside_its_own_package_when_called_from_elsewhere(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -646,7 +596,6 @@ def test_a_factory_resolves_its_prompt_inside_its_own_package_when_called_from_e
         for name in ("stories.roles", "stories"):
             sys.modules.pop(name, None)
 
-
 def test_a_factory_reads_its_prompt_file_on_every_call(tmp_path: Path) -> None:
     """"Declaration time" is each call now, and this is the difference from a module-level `Role`.
 
@@ -673,7 +622,6 @@ def test_a_factory_reads_its_prompt_file_on_every_call(tmp_path: Path) -> None:
     assert after.instructions.endswith("Check the tests too.")
     assert _base(before) != _base(after)
 
-
 def test_a_missing_prompt_file_is_refused_at_the_declaration_naming_the_path(
     tmp_path: Path,
 ) -> None:
@@ -685,14 +633,12 @@ def test_a_missing_prompt_file_is_refused_at_the_declaration_naming_the_path(
         prompt_file(where)
     assert str(where) in str(refusal.value)
 
-
 def test_a_directory_where_a_prompt_belongs_is_refused(tmp_path: Path) -> None:
     """`read_text` on one raises `IsADirectoryError` on this platform and `PermissionError` on
     another, so it is caught by name and answered in this module's words either way."""
     with pytest.raises(InputError) as refusal:
         prompt_file(tmp_path)
     assert str(tmp_path) in str(refusal.value)
-
 
 @pytest.mark.parametrize("blank", ["", "   ", "\n\t\n"])
 def test_an_empty_prompt_file_is_refused_where_the_role_is_declared(
@@ -707,7 +653,6 @@ def test_an_empty_prompt_file_is_refused_where_the_role_is_declared(
         prompt_file(where)
     assert str(where) in str(refusal.value)
 
-
 def test_a_prompt_that_is_not_utf_8_is_refused_rather_than_read_with_holes_in_it(
     tmp_path: Path,
 ) -> None:
@@ -718,7 +663,6 @@ def test_a_prompt_that_is_not_utf_8_is_refused_rather_than_read_with_holes_in_it
     with pytest.raises(InputError) as refusal:
         prompt_file(where)
     assert "UTF-8" in str(refusal.value)
-
 
 def test_a_caller_with_no_file_is_told_to_pass_an_absolute_path(tmp_path: Path) -> None:
     """A REPL, an `exec`, a frozen import: there is no module directory, so there is nothing for a
@@ -741,9 +685,7 @@ def test_a_caller_with_no_file_is_told_to_pass_an_absolute_path(tmp_path: Path) 
     exec("read = prompt_file(where)", namespace)
     assert namespace["read"] == _DECOMPOSE
 
-
 # --- rule one: at most one reporting tool --------------------------------------------------------
-
 
 def test_a_second_reporting_tool_is_refused_naming_both() -> None:
     """A reporting step's result is *that tool's payload*, singular. With two,
@@ -754,7 +696,6 @@ def test_a_second_reporting_tool_is_refused_naming_both() -> None:
     assert "report_findings" in str(refusal.value)
     assert "report_tickets" in str(refusal.value)
 
-
 def test_one_reporting_tool_beside_plain_tools_is_ordinary() -> None:
     role = Role(
         name="review",
@@ -763,7 +704,6 @@ def test_one_reporting_tool_beside_plain_tools_is_ordinary() -> None:
     found = _reporting_of(role)
     assert found is not None
     assert found.name == "report_findings"
-
 
 def test_a_duplicate_tool_name_is_refused_as_an_agent_task_would_refuse_it() -> None:
     """`AgentTask.__post_init__`'s check, one layer earlier and in its words. A model names the
@@ -790,7 +730,6 @@ def test_a_duplicate_tool_name_is_refused_as_an_agent_task_would_refuse_it() -> 
         )
     assert "read" in str(refusal.value)
 
-
 def test_a_plain_tool_colliding_with_the_reporting_tool_is_refused_too() -> None:
     """The collision that only this layer can see as a collision: downstream the declaration has
     already become an ordinary `Tool`, so the two are indistinguishable by then."""
@@ -801,7 +740,6 @@ def test_a_plain_tool_colliding_with_the_reporting_tool_is_refused_too() -> None
             tools=(_plain(REPORT.name), REPORT),
         )
     assert REPORT.name in str(refusal.value)
-
 
 # --- rule two: what `requires` is, and what it is not ---------------------------------------------
 #
@@ -814,14 +752,12 @@ def test_a_plain_tool_colliding_with_the_reporting_tool_is_refused_too() -> None
 # nobody runs. What survives is the half that was never about questions - `requires` is not a
 # fingerprint term - and it is measured on the fold that is left.
 
-
 def test_the_requirements_do_not_reach_the_fingerprint() -> None:
     """`base_of` takes instructions, model, restrictions and tools, and `requires` is not among
     them - so a capability an author typed, and one `__post_init__` folded in, are alike invisible
     to a digest."""
     demanding = replace(REVIEWER, requires={Capability.FILE_EDIT})
     assert _base(demanding) == _base(REVIEWER)
-
 
 def test_nothing_here_is_checked_against_a_provider() -> None:
     """Preflight needs a runner to ask; nothing in `sdk/` may touch a port. A role that no
@@ -830,7 +766,6 @@ def test_nothing_here_is_checked_against_a_provider() -> None:
     impossible = _unservable()
     assert impossible.requires == frozenset(Capability)
     assert impossible.model is OpenAI.LUNA
-
 
 # --- rule three: tools implies TOOL_CALLING -------------------------------------------------------
 #
@@ -848,7 +783,6 @@ def test_nothing_here_is_checked_against_a_provider() -> None:
 # from 1.1 to 2 for exactly this, and `tests/workflows/test_fix.py` is where that is written down
 # beside the workflow it happened to.
 
-
 def test_declaring_a_reporting_tool_requires_tool_calling() -> None:
     """A role that offers a tool needs a backend able to call one, and there is no role for which
     that is false. Forgetting to say so used to be accepted here and refused at preflight - far
@@ -856,18 +790,15 @@ def test_declaring_a_reporting_tool_requires_tool_calling() -> None:
     cannot fire it, so the step ends with no payload and `RoleIncompleteError` at exit 6."""
     assert Capability.TOOL_CALLING in REVIEWER.requires
 
-
 def test_a_plain_tool_implies_it_too_and_not_only_a_reporting_one() -> None:
     """The implication is about `tools`, not about reporting: `AgentTask.tools` holds ordinary
     `Tool`s either way, and a backend that cannot call one has nowhere to put either kind."""
     role = Role(name="review", instructions=_REVIEW, tools=[_plain("read_spec")])
     assert role.requires == frozenset({Capability.TOOL_CALLING})
 
-
 def test_tool_calling_is_added_beside_the_ones_the_author_declared() -> None:
     """Folded in, not substituted for. `REVIEWER` typed `requires={SHELL}` and keeps it."""
     assert REVIEWER.requires == frozenset({Capability.SHELL, Capability.TOOL_CALLING})
-
 
 def test_declaring_tool_calling_as_well_as_the_tool_changes_nothing() -> None:
     """A set, so saying it twice says it once. An author who prefers to write it stays right."""
@@ -879,7 +810,6 @@ def test_declaring_tool_calling_as_well_as_the_tool_changes_nothing() -> None:
     )
     implied = Role(name="review", instructions=_REVIEW, tools=[REPORT])
     assert stated.requires == implied.requires == frozenset({Capability.TOOL_CALLING})
-
 
 def test_the_tool_calling_implication_runs_one_way_only() -> None:
     """`requires={TOOL_CALLING}` with no tools is left exactly as written - the prompt may tell the
@@ -893,12 +823,10 @@ def test_the_tool_calling_implication_runs_one_way_only() -> None:
     assert role.tools == ()
     assert role.requires == frozenset({Capability.TOOL_CALLING})
 
-
 def test_a_role_with_no_tools_requires_nothing_it_was_not_given() -> None:
     """An effect step's role, which is the other step kind: no tools, result `null`."""
     assert IMPLEMENTER.tools == ()
     assert Capability.TOOL_CALLING not in IMPLEMENTER.requires
-
 
 def test_folding_tool_calling_in_moves_no_digest_although_its_trigger_is_a_term() -> None:
     """The fold rides for free; the tool it rides behind does not. Two halves, measured apart.
@@ -929,9 +857,7 @@ def test_folding_tool_calling_in_moves_no_digest_although_its_trigger_is_a_term(
         "nothing about the fold riding behind them"
     )
 
-
 # --- the type chain the SDK promises -------------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_a_reporting_roles_payload_type_survives_into_a_variable() -> None:
@@ -942,7 +868,6 @@ async def test_a_reporting_roles_payload_type_survives_into_a_variable() -> None
     assert_type(findings, Findings)
     assert [found.file for found in findings.high()] == ["a.py"]
 
-
 @pytest.mark.asyncio
 async def test_an_effect_roles_result_is_none() -> None:
     """"Result is `null`; the effect is commits." `None` rather than `object` because that is
@@ -950,14 +875,12 @@ async def test_an_effect_roles_result_is_none() -> None:
     assert_type(IMPLEMENTER, Role[None])
     assert_type(await _step(IMPLEMENTER), None)
 
-
 def test_the_reporting_tool_is_found_at_its_payload_type_by_an_ordinary_scan() -> None:
     """Which is why `Role` carries no accessor for it. If the `isinstance` did not narrow to
     `ReportingTool[P]`, leaving one out would be a landmine for `Run.step` rather than a choice."""
     assert_type(_reporting_of(REVIEWER), ReportingTool[Findings] | None)
     assert_type(_reporting_of(IMPLEMENTER), ReportingTool[None] | None)
     assert (_reporting_of(REVIEWER), _reporting_of(IMPLEMENTER)) == (REPORT, None)
-
 
 def test_the_shapes_that_infer_p_from_the_declared_tools() -> None:
     """Measured, not assumed. A homogeneous list, an empty one, a list of plain tools, and a tuple
@@ -987,7 +910,6 @@ def test_the_shapes_that_infer_p_from_the_declared_tools() -> None:
 
     assert [role.instructions for role in (only_reporting, mixed_tuple)] == [_REVIEW, _REVIEW]
 
-
 def test_a_mixed_list_display_does_not_infer_p_and_says_so_at_the_declaration() -> None:
     """The one shape that does not solve: mypy must choose a single item type for a list before it
     can solve `P`, and the join of two unrelated classes is `object`, so the default stands and the
@@ -1004,7 +926,6 @@ def test_a_mixed_list_display_does_not_infer_p_and_says_so_at_the_declaration() 
     found = _reporting_of(mixed_list)
     assert_type(found, ReportingTool[None] | None)  # only the static type went to the default
     assert found is not None and found.name == REPORT.name  # the value itself is exactly right
-
 
 def test_the_explicit_parameter_is_the_fallback_and_it_is_checked() -> None:
     """Both directions. Naming the right parameter recovers the mixed-list spelling at its real
@@ -1023,7 +944,6 @@ def test_the_explicit_parameter_is_the_fallback_and_it_is_checked() -> None:
     )
     assert wrong.instructions == _REVIEW
 
-
 def test_a_bare_role_annotation_is_legal_under_disallow_any_generics() -> None:
     """The reason the parameter has a default at all, and `Run[P = object]`'s reason before it: a
     workflow that never reads a step's result should not have to spell the parameter."""
@@ -1031,9 +951,7 @@ def test_a_bare_role_annotation_is_legal_under_disallow_any_generics() -> None:
     assert_type(roles[0], Role[None])
     assert roles[0] is IMPLEMENTER
 
-
 # --- RoleIncompleteError -------------------------------------------------------------------------
-
 
 def test_role_incomplete_resolves_to_six_through_exit_code_for() -> None:
     """`UpstreamUnexpected`: it answered something we don't understand. The far side worked; our
@@ -1041,13 +959,11 @@ def test_role_incomplete_resolves_to_six_through_exit_code_for() -> None:
     assert exit_code_for(RoleIncompleteError) == 6
     assert exit_code_for(RoleIncompleteError("the reviewer never called report_findings")) == 6
 
-
 def test_it_gets_that_code_by_inheritance_and_appears_in_no_table() -> None:
     """The pair is the mechanism, and neither half is the claim on its own: a table entry would
     make the code survive a broken MRO walk, and absence alone would survive it resolving to 70."""
     assert RoleIncompleteError not in EXIT_CODES
     assert issubclass(RoleIncompleteError, UpstreamError)
-
 
 def test_a_workflow_catching_upstream_errors_catches_it() -> None:
     """Which is the whole point of it descending from that branch rather than standing alone: a
@@ -1057,7 +973,6 @@ def test_a_workflow_catching_upstream_errors_catches_it() -> None:
     with pytest.raises(AglError):
         raise RoleIncompleteError("the reviewer never called report_findings")
 
-
 def test_it_carries_a_message_and_nothing_else() -> None:
     """`_engine/steps.py` builds the message, out of `AgentOutcome.stop_reason` and
     `AgentOutcome.text`; this module supplies the name and the exit code and holds no vocabulary
@@ -1065,9 +980,7 @@ def test_it_carries_a_message_and_nothing_else() -> None:
     raised = RoleIncompleteError("report_findings was never called; the agent ran out of turns")
     assert "report_findings" in str(raised)
 
-
 # --- the terms a role contributes to a step's fingerprint ----------------------------------------
-
 
 def test_the_four_terms_of_a_role_are_the_four_base_of_takes() -> None:
     """Not a restatement of `base_of`: the measurement is that a role's own fields are exactly what
@@ -1076,7 +989,6 @@ def test_the_four_terms_of_a_role_are_the_four_base_of_takes() -> None:
     assert _base(REVIEWER) != _base(_reviewer_on_claude())
     assert _base(REVIEWER) != _base(replace(REVIEWER, restrictions=frozenset()))
     assert _base(REVIEWER) != _base(replace(REVIEWER, tools=()))
-
 
 def test_a_roles_reporting_tool_reaches_the_digest_through_its_derived_schema() -> None:
     """The cascade, one link out from `tests/sdk/test_tools.py`: change what the agent
@@ -1096,14 +1008,12 @@ def test_a_roles_reporting_tool_reaches_the_digest_through_its_derived_schema() 
     )
     assert _base(REVIEWER) != _base(widened, model=REVIEWER.model)
 
-
 def test_a_roles_declared_schema_is_json_the_way_an_adapter_needs_it() -> None:
     """A role is handed straight to `AgentTask` and on to a vendor, so what it carries has to be
     writable. The proxy wrapping is `ReportingTool`'s; this is the measurement that it survives."""
     found = _reporting_of(REVIEWER)
     assert found is not None
     assert json.loads(json.dumps(dict(found.payload_schema)))["type"] == "object"
-
 
 def test_a_model_id_is_the_only_vendor_word_a_role_carries() -> None:
     """`src/agl/ports/agent.py`'s line: model *names* cross, and vendor syntax, types, exceptions

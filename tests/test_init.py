@@ -30,9 +30,7 @@ records, and assert it was never called.
 
 from pathlib import Path
 from typing import Final
-
 import pytest
-
 from agl import api
 from agl.config import sources
 from agl.config.schema import Settings
@@ -41,7 +39,6 @@ from agl.ports.errors import ConflictError, InputError, NotFoundError, exit_code
 from agl.ports.ids import ProjectName
 
 BUILD: Final = "./gradlew build"
-
 
 def _settings(tmp_path: Path) -> Settings:
     """An installation whose home is under `tmp_path`, resolved through the pure core.
@@ -52,13 +49,11 @@ def _settings(tmp_path: Path) -> Settings:
     """
     return sources.resolve_settings(sources.Overrides(), {"AGL_HOME": str(tmp_path / "home")})
 
-
 def _repo(tmp_path: Path, name: str = "myapp") -> Path:
     """A directory that looks like a working tree, one level below a parent `init` can write in."""
     root = tmp_path.resolve() / "dev" / name
     (root / ".git").mkdir(parents=True)
     return root
-
 
 def _keys(written: Path) -> list[str]:
     """The keys the written file holds, in the order they are printed.
@@ -68,7 +63,6 @@ def _keys(written: Path) -> list[str]:
     is absent and for a file that never had one, which is exactly the difference being asserted.
     """
     return [line.split(" = ")[0] for line in written.read_text(encoding="utf-8").splitlines()]
-
 
 class _Asked:
     """An `Ask` that records. The seam, filled in with something a test can interrogate."""
@@ -81,9 +75,7 @@ class _Asked:
         self.prompts.append(prompt)
         return self.answer
 
-
 # --- what it writes ------------------------------------------------------------------------------
-
 
 def test_the_file_it_writes_is_one_the_reader_and_the_resolver_both_accept(tmp_path: Path) -> None:
     """The round trip, which is the criterion rather than the bytes.
@@ -117,7 +109,6 @@ def test_the_file_it_writes_is_one_the_reader_and_the_resolver_both_accept(tmp_p
     assert resolved.build == BUILD
     assert resolved.build_timeout == sources.DEFAULT_BUILD_TIMEOUT
 
-
 def test_the_timeout_in_the_file_is_what_answers_and_not_the_default_layer(
     tmp_path: Path,
 ) -> None:
@@ -147,7 +138,6 @@ def test_the_timeout_in_the_file_is_what_answers_and_not_the_default_layer(
     assert resolved.build_timeout == 1800.0
     assert resolved.build_timeout != sources.DEFAULT_BUILD_TIMEOUT
 
-
 def test_the_project_is_named_after_the_repositorys_own_directory(tmp_path: Path) -> None:
     """The example file is `repo = ".../myapp"` and `name = "myapp"`, and this is why.
 
@@ -161,7 +151,6 @@ def test_the_project_is_named_after_the_repositorys_own_directory(tmp_path: Path
 
     assert written.name == "other-thing.toml"
     assert read_project(settings.home, ProjectName("other-thing")).repo == repo
-
 
 def test_the_trees_root_is_beside_the_repository_and_never_under_it(tmp_path: Path) -> None:
     """The layout in one path: `<repo's parent>/.agl-trees/<name>`, which is the example.
@@ -180,7 +169,6 @@ def test_the_trees_root_is_beside_the_repository_and_never_under_it(tmp_path: Pa
     assert trees.path == repo.parent / ".agl-trees" / "myapp"
     assert not trees.path.is_relative_to(repo)
 
-
 def test_the_git_root_is_found_from_a_directory_deep_inside_the_repository(tmp_path: Path) -> None:
     """It detects the git root. Nobody runs `agl init` from the top of their tree.
 
@@ -197,9 +185,7 @@ def test_the_git_root_is_found_from_a_directory_deep_inside_the_repository(tmp_p
     assert written.name == "myapp.toml"
     assert read_project(settings.home, ProjectName("myapp")).repo == repo
 
-
 # --- the question, and the seam it travels on ----------------------------------------------------
-
 
 def test_the_build_command_is_asked_for_once_and_the_prompt_says_what_it_is_for(
     tmp_path: Path,
@@ -222,7 +208,6 @@ def test_the_build_command_is_asked_for_once_and_the_prompt_says_what_it_is_for(
     assert "merge gate" in asked.prompts[0]
     assert read_project(settings.home, ProjectName("myapp")).build == BUILD
 
-
 def test_what_the_answer_says_is_stripped_and_stored_as_typed(tmp_path: Path) -> None:
     """A line somebody typed arrives with the whitespace they typed around it, and nothing else.
 
@@ -235,7 +220,6 @@ def test_what_the_answer_says_is_stripped_and_stored_as_typed(tmp_path: Path) ->
     api.init(settings, _repo(tmp_path), _Asked("  make test && ./verify.sh  "))
 
     assert read_project(settings.home, ProjectName("myapp")).build == "make test && ./verify.sh"
-
 
 def test_a_blank_build_command_is_refused_and_nothing_is_written(tmp_path: Path) -> None:
     """`schema.Project` refuses a blank build where the file is read; this is that rule earlier.
@@ -253,9 +237,7 @@ def test_a_blank_build_command_is_refused_and_nothing_is_written(tmp_path: Path)
     assert "merge gate" in str(raised.value)
     assert not (settings.home.path / "projects").exists()
 
-
 # --- the refusals, and the order they are in -----------------------------------------------------
-
 
 def test_a_second_init_in_the_same_repository_is_a_conflict(tmp_path: Path) -> None:
     """`init` runs once per repo, and the second run must not take the first one's file away.
@@ -275,7 +257,6 @@ def test_a_second_init_in_the_same_repository_is_a_conflict(tmp_path: Path) -> N
     assert exit_code_for(raised.value) == 4
     assert read_project(settings.home, ProjectName("myapp")).build == "make"
 
-
 def test_the_conflict_is_refused_before_anybody_is_asked_anything(tmp_path: Path) -> None:
     """The ordering, and it is the half that fails silently.
 
@@ -292,7 +273,6 @@ def test_the_conflict_is_refused_before_anybody_is_asked_anything(tmp_path: Path
         api.init(settings, repo, asked)
 
     assert asked.prompts == [], "a repository that was already registered was asked for a build"
-
 
 def test_a_directory_that_is_in_no_git_repository_is_not_found(tmp_path: Path) -> None:
     """`git_root`'s own refusal, uncaught: exit 3, and the message already says to run this here.
@@ -312,7 +292,6 @@ def test_a_directory_that_is_in_no_git_repository_is_not_found(tmp_path: Path) -
     assert exit_code_for(raised.value) == 3
     assert ".git" in str(raised.value)
     assert asked.prompts == []
-
 
 def test_a_repository_whose_directory_name_is_not_a_usable_project_name_is_refused(
     tmp_path: Path,
@@ -334,7 +313,6 @@ def test_a_repository_whose_directory_name_is_not_a_usable_project_name_is_refus
     assert exit_code_for(raised.value) == 2
     assert "my app" in str(raised.value)
     assert asked.prompts == []
-
 
 def test_a_trees_root_that_only_resolution_shows_to_be_inside_is_refused_before_writing(
     tmp_path: Path,
@@ -366,9 +344,7 @@ def test_a_trees_root_that_only_resolution_shows_to_be_inside_is_refused_before_
     assert asked.prompts == []
     assert not (settings.home.path / "projects").exists()
 
-
 # --- what the signature says ---------------------------------------------------------------------
-
 
 def test_init_is_sync_and_starts_no_event_loop(tmp_path: Path) -> None:
     """`list_workflows`' rule: an operation that awaits nothing is not declared async.

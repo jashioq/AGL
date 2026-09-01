@@ -29,9 +29,7 @@ from dataclasses import dataclass
 from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Final
-
 import pytest
-
 from agl.cli import main
 from agl.cli.commands import run as run_command
 from agl.config import container, registry, sources
@@ -54,7 +52,6 @@ PROJECT: Final = ProjectName("myapp")
 LABEL: Final = RunLabel("auth")
 SCOPE: Final = RunScope(PROJECT, LABEL)
 
-
 @dataclass(frozen=True)
 class FlaggedParams:
     """The example params shape, which `agl run flagged -n auth -r "add oauth" -c 4` fills in."""
@@ -62,13 +59,11 @@ class FlaggedParams:
     request: str = arg("-r", "--request", help="what to build")
     concurrent: int = arg("-c", "--concurrent", default=3)
 
-
 @dataclass(frozen=True)
 class PrefixParams:
     """A flag that is a proper prefix of `--from`: what abbreviation would have eaten."""
 
     fro: str = arg("--fro", help="a workflow's own flag, spelled like nobody else's")
-
 
 @dataclass(frozen=True)
 class RequiredCollisionParams:
@@ -76,13 +71,11 @@ class RequiredCollisionParams:
 
     note: str = arg("-n", "--note", help="a note the workflow cannot run without")
 
-
 @dataclass(frozen=True)
 class DefaultedCollisionParams:
     """The same collision with a default, which is the half that goes quiet. See the docstring."""
 
     note: str = arg("-n", "--note", default="unsaid", help="a note the workflow can do without")
-
 
 # What each workflow was handed. Module level for `EntryPoint.load`'s reason: it imports a module
 # and reads an attribute in it, so a workflow declared inside a test function is unreachable.
@@ -91,43 +84,35 @@ prefixed_with: Final[list[PrefixParams]] = []
 required_with: Final[list[RequiredCollisionParams]] = []
 defaulted_with: Final[list[DefaultedCollisionParams]] = []
 
-
 @workflow(version="1.1")
 async def flagged(run: Run[FlaggedParams]) -> None:
     """Records what it was given, which is the whole of what these tests ask of a workflow."""
     flagged_with.append(run.params)
-
 
 @workflow(version="1.1")
 async def prefixed(run: Run[PrefixParams]) -> None:
     """Records `--fro`, the flag `allow_abbrev=True` would have handed to `--from` instead."""
     prefixed_with.append(run.params)
 
-
 @workflow(version="1.1")
 async def required(run: Run[RequiredCollisionParams]) -> None:
     """Never reached: its `-n` is required and the generic parser took the line's only one."""
     required_with.append(run.params)
-
 
 @workflow(version="1.1")
 async def defaulted(run: Run[DefaultedCollisionParams]) -> None:
     """Reached, and holding its default, because the generic parser answered its `-n` first."""
     defaulted_with.append(run.params)
 
-
 def _point(name: str) -> EntryPoint:
     """A registration line, pointed at this module: a name, a `module:attr`, and a group."""
     return EntryPoint(name=name, value=f"{__name__}:{name}", group=registry.GROUP)
 
-
 POINTS: Final = tuple(_point(name) for name in ("flagged", "prefixed", "required", "defaulted"))
-
 
 def _fakes(tmp_path: Path) -> container.FakeServices:
     """Target #8's deployment, seeded so `History` has a default ref and a commit to resolve."""
     return container.fakes(TreesRoot(tmp_path / "trees"), files={"src/a.txt": b"one\n"})
-
 
 def _main(harness: container.FakeServices, *argv: str) -> int:
     """One `agl` invocation, with this module's workflows in place of what is installed."""
@@ -141,13 +126,11 @@ def _main(harness: container.FakeServices, *argv: str) -> int:
         ),
     )
 
-
 def _record(harness: container.FakeServices) -> dict[str, JsonValue]:
     """The run's record, asserted present: `run.json` is what the generic flags end up in."""
     record = asyncio.run(harness.services.store.read_record(SCOPE))
     assert record is not None, "no run.json was written for this run"
     return record
-
 
 def _run_parser() -> RefusingParser:
     """The `run` subparser alone, built the way `main.parser()` builds it, for inspection."""
@@ -155,9 +138,7 @@ def _run_parser() -> RefusingParser:
     commands = root.add_subparsers(dest="command", required=True, parser_class=RefusingParser)
     return run_command.declare(commands)
 
-
 # --- the generic parser, and what it deliberately does not hold ----------------------------------
-
 
 def test_the_generic_parser_holds_three_arguments_and_no_workflows_flag() -> None:
     """Read off the object: `--max-concurrent` could not be added here by accident.
@@ -174,7 +155,6 @@ def test_the_generic_parser_holds_three_arguments_and_no_workflows_flag() -> Non
     assert options == {"-h", "--help", "-n", "--name", "--from"}
     assert positionals == ["workflow"]
 
-
 def test_abbreviation_is_off_on_the_root_parser_and_on_the_subparser() -> None:
     """The decision, asserted where it is made twice - a subparser does not inherit the flag.
 
@@ -184,7 +164,6 @@ def test_abbreviation_is_off_on_the_root_parser_and_on_the_subparser() -> None:
     """
     assert main.parser().allow_abbrev is False
     assert _run_parser().allow_abbrev is False
-
 
 def test_a_workflows_flags_are_left_in_the_tail_and_never_in_the_namespace() -> None:
     """The composition of the two parsers, in one line of argv: what the generic side keeps, and
@@ -202,7 +181,6 @@ def test_a_workflows_flags_are_left_in_the_tail_and_never_in_the_namespace() -> 
         "command": "run", "workflow": "flagged", "label": "auth", "base_ref": None
     }
     assert tail == ["-r", "add oauth", "-c", "4"]
-
 
 def test_the_command_calls_exactly_one_api_function() -> None:
     """`ARCHITECTURE.md`'s "Commands stay dumb", made mechanical: this module reaches `api` once,
@@ -223,9 +201,7 @@ def test_the_command_calls_exactly_one_api_function() -> None:
 
     assert called == {"run"}
 
-
 # --- a workflow's own flags --------------------------------------------------------------------
-
 
 def test_a_workflows_flags_reach_the_workflow_and_its_record(tmp_path: Path) -> None:
     """One chain, end to end through argv: what was typed, what the workflow was handed, and what
@@ -237,7 +213,6 @@ def test_a_workflows_flags_reach_the_workflow_and_its_record(tmp_path: Path) -> 
 
     assert flagged_with == [FlaggedParams(request="add oauth", concurrent=4)]
     assert _record(harness)["params"] == {"request": "add oauth", "concurrent": 4}
-
 
 def test_the_generic_flags_may_be_written_anywhere_on_the_line(tmp_path: Path) -> None:
     """`-n` before or after a workflow's flags, and the tail keeps its order either way.
@@ -253,7 +228,6 @@ def test_the_generic_flags_may_be_written_anywhere_on_the_line(tmp_path: Path) -
 
     assert flagged_with == [FlaggedParams(request="add oauth", concurrent=4)]
 
-
 def test_a_flag_the_workflow_refuses_exits_two_from_the_workflows_own_parser(
     tmp_path: Path,
 ) -> None:
@@ -265,9 +239,7 @@ def test_a_flag_the_workflow_refuses_exits_two_from_the_workflows_own_parser(
 
     assert asyncio.run(harness.services.store.read_record(SCOPE)) is None
 
-
 # --- `--from`, which is the framework's and not any workflow's -----------------------------------
-
 
 def test_from_is_a_framework_flag_and_lands_in_the_record(tmp_path: Path) -> None:
     """Base ref is a framework-level run parameter, not a workflow param.
@@ -284,7 +256,6 @@ def test_from_is_a_framework_flag_and_lands_in_the_record(tmp_path: Path) -> Non
     assert record["base_ref"] == "main"
     assert record["params"] == {"request": "x", "concurrent": 3}
 
-
 def test_without_from_the_base_ref_is_the_repositorys_and_not_the_clis(tmp_path: Path) -> None:
     """No default is written into `add_argument`, and that is the decision.
 
@@ -298,9 +269,7 @@ def test_without_from_the_base_ref_is_the_repositorys_and_not_the_clis(tmp_path:
 
     assert _record(harness)["base_ref"] == asyncio.run(harness.services.history.default_ref())
 
-
 # --- flag collisions: the decision, and both halves of what it costs ------------------------------
-
 
 def test_a_prefix_of_a_generic_flag_belongs_to_the_workflow_that_declared_it(
     tmp_path: Path,
@@ -319,7 +288,6 @@ def test_a_prefix_of_a_generic_flag_belongs_to_the_workflow_that_declared_it(
     assert prefixed_with == [PrefixParams(fro="mine")]
     assert _record(harness)["base_ref"] != "mine"
 
-
 def test_an_abbreviation_of_a_generic_flag_is_not_a_way_to_spell_it(tmp_path: Path) -> None:
     """The same decision from the user's side: `--fro` is not `--from` for a workflow without it.
 
@@ -329,7 +297,6 @@ def test_an_abbreviation_of_a_generic_flag_is_not_a_way_to_spell_it(tmp_path: Pa
     harness = _fakes(tmp_path)
 
     assert _main(harness, "run", "flagged", "-n", "auth", "-r", "x", "--fro", "main") == 2
-
 
 def test_a_workflow_declaring_a_generic_spelling_is_shadowed_loudly_when_it_is_required(
     tmp_path: Path,
@@ -350,7 +317,6 @@ def test_a_workflow_declaring_a_generic_spelling_is_shadowed_loudly_when_it_is_r
 
     assert required_with == []
 
-
 def test_a_workflow_declaring_a_generic_spelling_keeps_its_default_when_it_has_one(
     tmp_path: Path,
 ) -> None:
@@ -369,9 +335,7 @@ def test_a_workflow_declaring_a_generic_spelling_keeps_its_default_when_it_has_o
     assert defaulted_with == [DefaultedCollisionParams(note="unsaid")]
     assert _record(harness)["label"] == "auth"
 
-
 # --- what the command says when it worked --------------------------------------------------------
-
 
 def test_a_finished_run_is_named_the_way_the_refusal_names_it(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
