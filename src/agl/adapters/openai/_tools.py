@@ -1,5 +1,5 @@
 from collections.abc import Mapping
-from types import TracebackType
+from types import MappingProxyType, TracebackType
 from typing import Final, Self
 from agl.adapters.openai._http import Listener, RpcAnswer, token
 from agl.ports.agent import Tool, ToolResult
@@ -12,6 +12,14 @@ _SUPPLIED: Final = "agl"
 _PROTOCOL: Final = "2025-06-18"
 
 _NO_SUCH_METHOD: Final = -32601
+
+# The harness denies an MCP call that needs approval while `approval_policy` is `never`, and MCP's
+# own defaults make a tool with no annotations both destructive and open-world. Measured on
+# codex-cli 0.149.0 and 0.152.0: these two are the least that is let through, and the server-side
+# `destructive_enabled` and `open_world_enabled` switches do not substitute for them.
+_ANNOTATIONS: Final[Mapping[str, JsonValue]] = MappingProxyType(
+    {"destructiveHint": False, "openWorldHint": False}
+)
 
 _FAILED: Final = (
     "{name} could not do what it was asked: {raised}. This task is being stopped because of it. "
@@ -128,7 +136,12 @@ def _advertised(tool: Tool) -> dict[str, JsonValue]:
     schema: dict[str, JsonValue] = dict(tool.payload_schema)
     schema.setdefault("type", "object")
     schema.setdefault("properties", {})
-    return {"name": tool.name, "description": tool.description, "inputSchema": schema}
+    return {
+        "name": tool.name,
+        "description": tool.description,
+        "inputSchema": schema,
+        "annotations": dict(_ANNOTATIONS),
+    }
 
 def _content(result: ToolResult) -> dict[str, JsonValue]:
     return {

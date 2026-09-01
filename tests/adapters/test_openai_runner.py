@@ -1576,6 +1576,43 @@ async def test_a_schema_carrying_only_a_type_still_describes_an_object(tmp_path:
 
     assert advertised["inputSchema"] == {"type": "object", "properties": {}}
 
+@pytest.mark.asyncio
+async def test_every_advertised_tool_is_marked_neither_destructive_nor_open_world(
+    tmp_path: Path,
+) -> None:
+    """Without these two the harness never calls an AGL tool at all, and says so only to the model.
+
+    `runner.py` runs the harness under `approval_policy="never"`, which denies rather than allows
+    anything needing approval, and MCP's own defaults make an unannotated tool both destructive and
+    open-world. The two together mean a reporting tool is refused before its handler is reached, the
+    step returns nothing, and the only record of why is a sentence in the agent's final message.
+
+    Measured against codex-cli 0.149.0 and 0.152.0, which agree: `readOnlyHint` alone is also
+    accepted, and either hint alone is not. `readOnlyHint` is the wrong claim to make here - a
+    reporting tool is how a step's result is recorded, so it does modify something - which is why
+    the pair is what `_tools.py` sends. Nothing in this suite can reach the harness to check that
+    it still reads them, so what is asserted here is only that AGL sends them.
+    """
+
+    async def here(payload: Mapping[str, JsonValue]) -> ToolResult:
+        return ToolResult(text="here")
+
+    bare = Tool(
+        name="ping", description="Say that you are here.", payload_schema={}, handler=here
+    )
+    stub = Stub(
+        tmp_path, steps=[{"call": {"server": "agl", "list": True}}, {"say": started()}]
+    )
+
+    await drive(stub, task_in(workspace(tmp_path), tools=(bare,)))
+    advertised = stub.seen()["answers"][0]["result"]["tools"][0]
+
+    assert advertised["annotations"] == {"destructiveHint": False, "openWorldHint": False}, (
+        f"the tool reached the harness annotated {advertised.get('annotations')!r}. Under "
+        f"`approval_policy=\"never\"` anything short of both being false is denied, and the denial "
+        f"surfaces as a step that reported nothing rather than as an error"
+    )
+
 # --- The two members preflight asks --------------------------------------------------------------
 
 def test_capabilities_are_the_ports_own_members_and_not_equivalent_strings() -> None:
