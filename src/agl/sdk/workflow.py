@@ -55,16 +55,38 @@ class Run[P = object]:
 
     @property
     def activity(self) -> str | None:
+        """What the agent serving this run is doing, for a view the terminal redraws every frame.
+
+        :return: the adapter's own line, or `None` between steps and on a step replayed from cache
+        """
         return self._steps.activity
 
     @property
     def terminal(self) -> Terminal:
+        """The display this run shows on, and the same object for every run in the tree.
+
+        :return: the terminal the framework opened around the workflow; children share this one
+        """
         return self.services.terminal
 
     async def step[R](self, role: Role[R], *, commit: str | None = None, **inputs: object) -> R:
+        """Run one step against this run's checkout, or replay its entry and pay for nothing.
+
+        :param role: carries the step's name, so two calls on one role are told apart by inputs
+        :param commit: given, commits whatever is dirty; omitted, resets and cleans it all away
+        :param inputs: fingerprint terms, appended to the prompt under a fixed `## Inputs` heading
+        :return: the reporting tool's payload as its dataclass, or `None` for a role declaring none
+        """
         return await self._steps.step(role, commit=commit, inputs=inputs)
 
     def worktree(self, namespace: str, base: Run[object] | str | None = None) -> Run[P]:
+        """Open a child run with a checkout of its own, which is how two agents work at once.
+
+        :param namespace: unique run-wide and not merely among siblings, compared case-insensitively
+        :param base: a run, a ref, or omitted for this run's last recorded head - not its branch tip
+        :return: the child; asking again from here hands back that same object and ignores `base`
+        :raises ConflictError: this name is held elsewhere in the run, and both scopes are named
+        """
         return cast(
             "Run[P]",
             self.worktrees.open(
@@ -73,6 +95,11 @@ class Run[P = object]:
         )
 
     async def integrate(self) -> Integration:
+        """Land this run's work into the worktree of the run that cut it, one landing at a time.
+
+        :return: an outcome holding a lease until `retry` or `abort` settles it, conflicts included
+        :raises InputError: this is the root run, which has no parent and no argument naming one
+        """
         if self._parent is None:
             raise InputError(_unaddressable(self.scope))
         return await _integrate(
@@ -133,10 +160,21 @@ class Workflow[P = object]:
 
     @property
     def params(self) -> type[P]:
+        """The params class, read off the function's first parameter at every read rather than once.
+
+        :return: the class `params.parse` builds from argv; an empty one for a bare `Run`
+        :raises InputError: the annotation is missing, unresolvable, or names anything but a `Run`
+        """
         return cast("type[P]", _declared(self.fn))
 
 
 def workflow[P](*, version: str) -> Callable[[_Function[P]], Workflow[P]]:
+    """Declare an async function to be a workflow, stamping the version a resume compares.
+
+    :param version: recorded on every run this starts, and matched exactly before one is resumed
+    :return: a decorator refusing anything that is not an `async def`, at import time
+    :raises InputError: `version` is empty or only whitespace, so no resume could compare it
+    """
     _check_text("version", version)
 
     def declare(fn: _Function[P]) -> Workflow[P]:

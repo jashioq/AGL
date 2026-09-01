@@ -82,6 +82,11 @@ class Role[P = None]:
 
     @property
     def model(self) -> ModelId:
+        """Which model runs this role, bound by its factory rather than written on the `Role`.
+
+        :return: the model, which is a fingerprint term and decides the provider; never `None`
+        :raises InputError: this `Role` came from a bare `Role(...)` no factory bound a model to
+        """
         if self._model is None:
             raise InputError(
                 f"the role named {self.name!r} has no model, so nothing can say which provider "
@@ -119,6 +124,11 @@ class _RoleDecorator(Protocol):
 
 
 def role(*, model: ModelId) -> _RoleDecorator:
+    """Declare a role factory, naming the model here so preflight can read it without calling it.
+
+    :param model: fingerprinted into every step this role runs, and asked about before step one
+    :return: a decorator binding the model onto each `Role` its function returns
+    """
 
     def decorate[**P, R](declaration: Callable[P, Role[R]]) -> RoleFactory[P, R]:
         return RoleFactory(declaration, model)
@@ -127,6 +137,12 @@ def role(*, model: ModelId) -> _RoleDecorator:
 
 
 def prompt_file(path: str | Path) -> str:
+    """Read a prompt now, at the declaration, so the text and not the filename is fingerprinted.
+
+    :param path: relative resolves against the calling module's directory, not the current one
+    :return: the text exactly as read, untrimmed, because its whitespace is inside the fingerprint
+    :raises InputError: no such file, a directory, unreadable, not UTF-8, or blank once stripped
+    """
     asked = Path(path)
     # `sys._getframe(1)` is the caller of *this* function, so the lookup happens here and not in the
     # helper below: a frame index is a fact about where the line is written.

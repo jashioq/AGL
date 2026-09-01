@@ -19,10 +19,11 @@ unwind" becomes something measured rather than something claimed.
 only across a process boundary, and every one of them fails silently:
 
   * a `frozenset[Restriction]` reaching the canonical text in iteration order rather than sorted
-    (`tests/sdk/test_journal.py`'s rule 2) has a *fixed* order for the life of one interpreter, so
-    a same-process resume computes the digest it wrote and hits;
-  * a dataclass in `**inputs` canonicalised with `repr()` rather than walked field by field
-    (rule 3) carries an object id that does not move while the object is alive, likewise;
+    (`tests/sdk/test_journal.py`'s *sort every set*) has a *fixed* order for the life of one
+    interpreter, so a same-process resume computes the digest it wrote and hits;
+  * a dataclass in `**inputs` canonicalised with `repr()` rather than walked field by field (its
+    *no `repr()` shortcut*) carries an object id that does not move while the object is alive,
+    likewise;
   * `Fingerprints` really being rebuilt from nothing on a resume - `n` is never persisted - is
     trivially true here and merely conventional in a same-process test, which is free to reuse the
     counter object it already had.
@@ -39,8 +40,9 @@ claims a same-process test cannot make are stated here in their end-to-end form.
 programme raises inside a step and retries it within one run, and the second process must hit the
 retry's entry and run nothing at all - which only holds if the crashed attempt claimed no slot. And
 the `retyped` and `renested` variants hand the same field names and the same values under a
-*different type*, and the second process must **re-run** rather than replay - which is rule 6, and
-the one correction whose failure hands back a wrong answer instead of costing a re-run.
+*different type*, and the second process must **re-run** rather than replay - which is the
+qualified type name, and the one correction whose failure hands back a wrong answer instead of
+costing a re-run.
 
 **The workspace is real git, and that is the one place the fake is not good enough.** The git fakes
 keep their commits in memory and re-seed themselves per process, so a commit made before the kill
@@ -108,11 +110,11 @@ __all__ = ["Config", "PROGRAMMES", "Programme", "SIBLINGS", "driver_path", "main
 @dataclass(frozen=True)
 class Budget:
     """A dataclass **nested** inside the one a workflow passes, and the sharpest term in
-    `tests/sdk/test_journal.py`'s rule 6.
+    `tests/sdk/test_journal.py`'s qualified type name.
 
     One integer field, because the value is not the point: the point is that this sits one level
     down. `dataclasses.asdict` recurses, so a type name attached to what `asdict` returned names
-    the outer type and erases this one entirely - which is the half of rule 6 that a walker tagging
+    the outer type and erases this one entirely - which is the half of that rule a walker tagging
     only the top level gets wrong while looking correct. `Ceiling` below is what makes that
     measurable across a process boundary.
     """
@@ -138,23 +140,24 @@ class Constraint:
     """A workflow's own dataclass, passed in `**inputs` exactly as a workflow passes its own types.
 
     Three fields and each is deliberate. `area` is ordinary text. `tags` is a `frozenset[str]`, and
-    it is what makes `tests/sdk/test_journal.py`'s rule 3 falsifiable across processes: the walker
-    hands a frozen dataclass's set field on **as a set**, so it has to sort at that depth too - and
-    the one-line shortcut, `repr()`, renders the set in iteration order, which `PYTHONHASHSEED`
-    randomises. So the `repr` of one of these is a different string in the next process even when
-    nothing about the value changed, which is rule 2's failure arriving through rule 3's door, and
-    it is measured rather than assumed: the parent asserts the two seeds it uses really do render
-    this differently before it believes anything else. `budget` is rule 6's nested term.
+    it is what makes `tests/sdk/test_journal.py`'s *no `repr()` shortcut* falsifiable across
+    processes: the walker hands a frozen dataclass's set field on **as a set**, so it has to sort at
+    that depth too - and the one-line shortcut, `repr()`, renders the set in iteration order, which
+    `PYTHONHASHSEED` randomises. So the `repr` of one of these is a different string in the next
+    process even when nothing about the value changed, which is *sort every set*'s failure arriving
+    through *no `repr()` shortcut*'s door, and it is measured rather than assumed: the parent
+    asserts the two seeds it uses really do render this differently before it believes anything
+    else. `budget` is the qualified type name's nested term.
 
     The default `repr` is kept, rather than `repr=False`'s heap address, because an address is only
     unstable if the allocator happens to move - a real effect, but a weaker lever than a set whose
-    order is randomised by construction. `test_journal.py` takes the address route for rule 3 in
-    isolation; this file wants the term that cannot quietly stop varying.
+    order is randomised by construction. `test_journal.py` takes the address route for *no
+    `repr()` shortcut* in isolation; this file wants the term that cannot quietly stop varying.
 
     `budget` is annotated as either twin so that one declaration carries both variants. The
     annotation is not enforced at runtime and the fingerprint never sees it; what it buys is that
     `renested` swaps a *nested* type while the outer type is held identical, which is the only
-    arrangement in which the nested half of rule 6 can fail on its own.
+    arrangement in which the nested half of the qualified type name can fail on its own.
     """
 
     area: str
@@ -166,11 +169,11 @@ class Constraint:
 class Requirement:
     """`Constraint`'s twin - identical field names in identical order, and a different type.
 
-    Swapped in behind variant `retyped`, the pair `tests/sdk/test_journal.py`'s rule 6 exists for -
-    two structurally identical dataclasses, `Finding` and `Ticket`, which `asdict` renders alike -
-    wearing this file's names. Declared beside `Constraint` rather than derived from it, because two
-    dataclasses are what the rule is about and a factory would leave a reader wondering whether
-    the types really were distinct.
+    Swapped in behind variant `retyped`, the pair `tests/sdk/test_journal.py`'s qualified type
+    name exists for - two structurally identical dataclasses, `Finding` and `Ticket`, which
+    `asdict` renders alike - wearing this file's names. Declared beside `Constraint` rather than
+    derived from it, because two dataclasses are what the rule is about and a factory would leave a
+    reader wondering whether the types really were distinct.
     """
 
     area: str
@@ -184,7 +187,7 @@ async def _unused(payload: Mapping[str, JsonValue]) -> ToolResult:
     return ToolResult(text="")
 
 
-# All four members, the term `tests/sdk/test_journal.py`'s rule 2 needs. A role declaring
+# All four members, the term `tests/sdk/test_journal.py`'s *sort every set* needs. A role declaring
 # `frozenset(Restriction)` is the same role tomorrow, and a journal that iterated it rather than
 # sorting it would compute a different base in the resuming process and re-run every step in
 # silence.
@@ -216,7 +219,7 @@ CONSTRAINTS: Final = tuple(
 )
 
 # Variant `retyped`: the **outer** type swapped, the `Finding`/`Ticket` pair of
-# `tests/sdk/test_journal.py`'s rule 6.
+# `tests/sdk/test_journal.py`'s qualified type name.
 RETYPED: Final = tuple(
     Requirement(area=area, tags=tags, budget=Budget(tokens=tokens))
     for area, tags, tokens in _VALUES
@@ -509,10 +512,10 @@ def _constraints(config: Config) -> list[Constraint | Requirement]:
     """The dataclass inputs, under the types this variant declares.
 
     Three tuples built from one list of values, so the only difference a variant makes here is a
-    type name - the whole of `tests/sdk/test_journal.py`'s rule 6. `retyped` swaps the outer type
-    and `renested` swaps the type one level down while holding the outer one still; the parent
-    asserts that each of them re-runs the step that carries these, because a step that *replayed*
-    would be handing back a result produced from inputs of another type entirely.
+    type name - the whole of `tests/sdk/test_journal.py`'s qualified type name. `retyped` swaps
+    the outer type and `renested` swaps the type one level down while holding the outer one still;
+    the parent asserts that each of them re-runs the step that carries these, because a step that
+    *replayed* would be handing back a result produced from inputs of another type entirely.
     """
     if config.variant == "retyped":
         return list(RETYPED)
@@ -628,8 +631,9 @@ async def _siblings(run: _Programme) -> None:
     Both siblings call `step(implementer, ...)` with the same role, no inputs and the same parent
     head, so their `base` values are identical by construction and only the namespace in the
     counter's key keeps their entries apart. The parent runs the resume with the two **completing**
-    in the opposite order, because `tests/sdk/test_journal.py`'s rule 1 is that the interleaving
-    must not decide who gets `n = 0`, and a test that always interleaves the same way cannot see it.
+    in the opposite order, because `tests/sdk/test_journal.py`'s scoped counter is that the
+    interleaving must not decide who gets `n = 0`, and a test that always interleaves the same way
+    cannot see it.
 
     **The order is a chain and never a timing.** Both `step` calls are started at once and both get
     as far as their worker - counter taken, entry looked up, worktree restored - and then each one

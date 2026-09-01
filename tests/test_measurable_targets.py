@@ -346,8 +346,8 @@ def _contract(number: str) -> Mapping[str, str]:
     assert config.has_section(section), (
         f"there is no contract {number} in {IMPORTLINTER_FILE}. Contract numbers are stable by "
         f"policy - see that file's header - so a renumbering is a change here, to "
-        f"tests/test_contract_listings.py, to tests/test_contract_firing.py, and to every stage "
-        f"brief that cites a number."
+        f"tests/test_contract_listings.py and to tests/test_contract_firing.py, which resolve a "
+        f"number against that file too."
     )
     return dict(config[section])
 

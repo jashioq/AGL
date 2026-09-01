@@ -213,7 +213,7 @@ fi
 # a docstring's table against the code while all eight gates were green. A ceiling that
 # charges for prose is a ceiling pushing in the wrong direction.
 #
-# Note the *attribute* docstring: a bare string statement after a dataclass field, which this repo
+# Note the *attribute* docstring: a bare string statement after a dataclass field, which `tests/`
 # uses everywhere and which `ast.get_docstring` cannot see. The counter walks `ast.Expr` whose value
 # is a string constant, which catches both kinds - a rule worth stating because the obvious
 # implementation misses most of the prose in this codebase and still looks right.
@@ -234,9 +234,10 @@ fi
 # **Blank lines are out, and this is the decision that set the number.** The case for keeping them
 # is the best one on this list: blank lines are the one thing that honestly tracks how much of a
 # screen a module fills, and unlike prose they cannot be argued away. The case against is a
-# measurement. Under `tests/` - the half of this walk that carries prose today, `src/` having none
-# - 4,195 of 12,929 blank lines, 32%, sit directly against a docstring line. They are the blank
-# line PEP 8 asks for *because* a block of prose is there, and this repo puts one there every time.
+# measurement. Under `tests/` - the half of this walk that carries nearly all the prose, `src/`'s
+# docstring layer aside - 4,195 of 12,929 blank lines, 32%, sit directly against a docstring
+# line. They are the blank line PEP 8 asks for *because* a block of prose is there, and this repo
+# puts one there every time.
 # So counting blank lines does not measure bulk independently of prose; it re-charges for the prose
 # at about a third rate, through a line the author did not choose. The rest tracks how many
 # definitions a module has, which the code count already counts.

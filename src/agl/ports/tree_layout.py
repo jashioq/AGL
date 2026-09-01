@@ -39,22 +39,52 @@ class TreesRoot:
 
 
 def run_trees_dir(trees: TreesRoot, label: RunLabel) -> Path:
+    """Every working checkout belonging to one run, and nothing else.
+
+    :param trees: where working checkouts live, which is never where AGL keeps its own state
+    :param label: which run; it is the directory name as it stands, validated by `ids.py`
+    :return: `<trees>/<label>/`, holding the run's own checkout and its children as siblings
+    """
     return _root(trees) / str(label)
 
 
 def base_worktree(trees: TreesRoot, label: RunLabel) -> Path:
+    """The run's own checkout, which is what a run's children are cut from.
+
+    :param trees: where working checkouts live, which is never where AGL keeps its own state
+    :param label: which run; it takes no namespace, and no `Namespace` can spell `_base`
+    :return: `<trees>/<label>/_base/`, on the branch `run_branch` composes
+    """
     return run_trees_dir(trees, label) / _BASE_DIRNAME
 
 
 def worktree_dir(trees: TreesRoot, label: RunLabel, namespace: Namespace) -> Path:
+    """One child checkout, a sibling of the run's own and of every other child.
+
+    :param trees: where working checkouts live, which is never where AGL keeps its own state
+    :param label: which run; every checkout of one run sits directly under its directory
+    :param namespace: names the directory outright; the trees layout is flat, so depth is dropped
+    :return: `<trees>/<label>/<namespace>/`
+    """
     return run_trees_dir(trees, label) / str(namespace)
 
 
 def run_branch(label: RunLabel) -> str:
+    """The branch the run's own checkout is on - the deliverable, and what a user pushes.
+
+    :param label: which run; no root, because a branch is not a path
+    :return: `agl/<label>`
+    """
     return f"{_BRANCH_PREFIX}{_BRANCH_SEPARATOR}{label}"
 
 
 def worktree_branch(label: RunLabel, namespace: Namespace) -> str:
+    """A child checkout's branch, cut from the run's own and kept clear of its name.
+
+    :param label: which run; no root, because a branch is not a path
+    :param namespace: which child; one namespace per run, since depth does not appear here
+    :return: `agl/_work/<label>/<namespace>` - the infix is what lets git hold both refs at once
+    """
     parts = (_BRANCH_PREFIX, _WORK_INFIX, str(label), str(namespace))
     return _BRANCH_SEPARATOR.join(parts)
 

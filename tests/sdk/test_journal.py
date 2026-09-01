@@ -6,8 +6,8 @@ of them raises. So there is no test here of the form "it did not crash": each on
 two computations that must agree, or two that must differ, and the interesting half of the suite is
 the agreements.
 
-**Two of them fail the other way, and those two are the disagreements that matter.** Rule 6 (a
-dataclass contributes its qualified type name) and the surrogate refusal are collisions: two
+**Two of them fail the other way, and those two are the disagreements that matter.** The
+qualified type name (a dataclass contributes its own) and the surrogate refusal are collisions: two
 different inputs reaching one canonical text, an entry found that belongs to neither, and a
 recorded result replayed for a step whose inputs were not those. Nothing re-runs and nothing
 raises; the answer is simply wrong. Both are tested as "these two must differ", which is why the
@@ -15,8 +15,8 @@ raises; the answer is simply wrong. Both are tested as "these two must differ", 
 
 **Two of those agreements cannot be proved inside one interpreter, and are the reason this file
 spawns processes.** A `frozenset`'s iteration order is fixed for the life of a process and one
-object's `id()` never moves while it is alive, so a same-process test of rule 2 (sort every set) or
-rule 3 (no `repr()` shortcut) passes exactly as happily against the bug it exists to catch. Both are
+object's `id()` never moves while it is alive, so a same-process test of sort every set, or of no
+`repr()` shortcut, passes exactly as happily against the bug it exists to catch. Both are
 therefore run in fresh interpreters under `PYTHONHASHSEED` values measured to produce different
 iteration orders, and both carry a **second** assertion: that the thing being varied actually
 varied. Without it, a day when the seeds stop differing is a day these two tests silently stop
@@ -126,7 +126,7 @@ def _take(counter: Fingerprints, scope: RunScope, step: StepName, base: str = _B
 
     `Journal.step` spends `digest` and `claim` a whole step apart - "the counter advances
     when an entry is written, not when a step is called" - and the two tests below this section's
-    heading are the ones about that gap. Everything under "Rule 1" is about the counter's *key*
+    heading are the ones about that gap. Everything under "The scoped counter" is about its *key*
     instead, so it takes the pair together and reads the way one invocation reads.
     """
     digest = counter.digest(scope, step, base)
@@ -170,7 +170,7 @@ def test_a_step_that_claims_nothing_leaves_the_next_call_at_the_same_address() -
     assert after == _digest(_BASE, 1), "an entry was claimed and the next call did not move on"
 
 
-# --- Rule 1: the counter is scoped per (namespace, step name) ----------------------------------
+# --- The scoped counter: the counter's key is (namespace, step name) -----------------------------
 
 
 def test_two_concurrent_siblings_both_get_n_zero_rather_than_racing_for_it() -> None:
@@ -285,7 +285,7 @@ def test_a_digest_is_a_filename_the_layout_will_spend_without_asking_again() -> 
     assert entry.name == f"{digest}.json"
 
 
-# --- Rules 2 and 3, which only a second process can prove ----------------------------------------
+# --- Sort every set, and no `repr()` shortcut, which only a second process can prove -------------
 
 # Measured on this machine while this was written: these six produce several different iteration
 # orders of `frozenset(Restriction)` between them. They are asserted to still differ, below.
@@ -346,7 +346,7 @@ def _under_seeds(script: str) -> list[list[str]]:
 
 
 def test_a_set_of_restrictions_fingerprints_the_same_in_every_process() -> None:
-    """Rule 2, and it cannot be shown here: within one interpreter the order never changes.
+    """Sort every set, and it cannot be shown here: within one interpreter the order never changes.
 
     `Restriction` is a `StrEnum`, `Enum.__hash__` hashes the member name, and `PYTHONHASHSEED`
     randomises that - so a role declaring `frozenset(Restriction)` is the same role tomorrow and a
@@ -368,7 +368,7 @@ def test_a_set_of_restrictions_fingerprints_the_same_in_every_process() -> None:
 
 
 def test_a_dataclass_in_inputs_fingerprints_the_same_in_every_process() -> None:
-    """Rule 3, and the same argument: one object's `id()` does not move while it is alive.
+    """No `repr()` shortcut, same argument: one object's `id()` does not move while it is alive.
 
     The tickets example passes `findings=highs`, a list of the workflow's own dataclasses, and
     `repr()` is the one-line way to make that hashable. `@dataclass(repr=False)` gives these
@@ -389,16 +389,17 @@ def test_a_dataclass_in_inputs_fingerprints_the_same_in_every_process() -> None:
     )
 
 
-# --- Rule 3, in this process: what the refusal has to say ----------------------------------------
+# --- No `repr()` shortcut, in this process: what the refusal has to say --------------------------
 
 
 def test_a_value_the_walker_cannot_take_names_its_type_and_the_path_to_it() -> None:
     """`inputs.findings[0].deadline is a datetime` - the type alone would not be findable.
 
     A value three levels down a list of the workflow's own dataclasses is the shape a workflow
-    actually passes, and rule 6's walker hands a `datetime` field on as the `datetime` it is. It is
-    an `InputError` and not an `InternalError`: this came from a workflow author's `**inputs`, so
-    exit 2 sends them to their own declaration rather than to a bug report about the framework.
+    actually passes, and the type-tagging walker hands a `datetime` field on as the `datetime` it
+    is. It is an `InputError` and not an `InternalError`: this came from a workflow author's
+    `**inputs`, so exit 2 sends them to their own declaration rather than to a bug report about
+    the framework.
     """
 
     @dataclass(frozen=True)
@@ -529,13 +530,13 @@ def test_both_surrogate_checks_in_agl_answer_one_string_with_one_exit_code() -> 
     )
 
 
-# --- Rule 6: a dataclass contributes its qualified type name -------------------------------------
+# --- The qualified type name: a dataclass contributes its own ------------------------------------
 
 # Two pairs of twins, and the pairs differ in where the swap is. `Finding`/`Ticket` are the pair
-# rule 6 names; `Inner`/`Other` exist to be *nested* inside an outer type that does not change,
-# which is the half a tag applied at the top level alone would miss. Every twin is declared with the
-# same field names in the same order and is only ever built with the same values, so the sole
-# difference between the two canonical texts is the one rule 6 puts there.
+# the qualified type name separates; `Inner`/`Other` exist to be *nested* inside an outer type that
+# does not change, which is the half a tag applied at the top level alone would miss. Every twin is
+# declared with the same field names in the same order and is only ever built with the same values,
+# so the sole difference between the two canonical texts is the qualified type name.
 
 
 @dataclass(frozen=True)
@@ -586,7 +587,7 @@ _Elsewhere.__module__ = "another.package"
 
 @dataclass(frozen=True)
 class _Smuggled:
-    """A dataclass whose one field is spelled with rule 6's reserved key.
+    """A dataclass whose one field is spelled with the qualified type name's reserved key.
 
     Legal Python: two trailing underscores mean no name mangling, so this really is a field called
     `__agl_type__`, and unpacking it without a check would overwrite the tag and hand this
@@ -597,7 +598,7 @@ class _Smuggled:
 
 
 def test_two_dataclasses_with_one_shape_are_two_fingerprints() -> None:
-    """Rule 6's own pair, and the one failure in this file that is a false cache **hit**.
+    """The qualified type name's own pair, and the one failure here that is a false cache **hit**.
 
     "`asdict` erases the type, so `Finding("T-01", 3)` and `Ticket("T-01", 3)` fingerprint
     identically and changing an input's type while keeping its shape replays the old result."
@@ -634,11 +635,12 @@ def test_a_nested_dataclass_carries_its_own_type_and_not_only_the_outermost_one(
     `asdict` recurses: it turns `Outer(Inner(1))` into `{"budget": {"tokens": 1}}` before any
     walker sees it, so a type name attached to what `asdict` returned names `Outer` and erases
     `Inner` entirely. The outer type is held identical here on purpose - only the nested one moves,
-    which is exactly the case the top-level-only version of rule 6 replays.
+    which is exactly the case a qualified type name applied at the top level alone replays.
     """
     assert _base(inputs={"plan": Outer(Inner(1))}) != _base(inputs={"plan": Outer(Other(1))})
     # And the same swap wherever the walker has to recurse to reach it: a list, a tuple, a mapping
-    # and a set each have their own branch, and rule 6 has to be reached through all four.
+    # and a set each have their own branch, and the qualified type name has to be reached through
+    # every one of the four.
     for wrap in (list, tuple, frozenset):
         assert _base(inputs={"plan": wrap([Outer(Inner(1))])}) != _base(
             inputs={"plan": wrap([Outer(Other(1))])}
@@ -670,7 +672,7 @@ def test_the_type_name_is_written_under_one_reserved_key_that_nothing_else_may_h
         canonical_json(_Smuggled("test_journal.Inner"))
 
 
-# --- Rule 4: what a tool contributes, and what it must not --------------------------------------
+# --- What a tool contributes, and what it must not -----------------------------------------------
 
 
 def test_a_tool_built_the_ordinary_way_fingerprints_although_json_cannot_take_its_schema() -> None:
@@ -725,7 +727,7 @@ def test_tools_keep_their_declared_order_rather_than_being_sorted_like_a_set() -
     assert _base(tools=(first, second)) != _base(tools=(second, first))
 
 
-# --- Rule 5: what "canonical" means ------------------------------------------------------------
+# --- The canonical text: what "canonical" means --------------------------------------------------
 
 
 def test_insertion_order_is_not_part_of_the_canonical_text() -> None:
@@ -753,9 +755,9 @@ def test_a_non_ascii_value_is_escaped_because_the_escaping_is_a_stored_format_to
     Both spellings parse back to the same value, so every other assertion in this suite holds under
     either one; and the two are different text, so they are different fingerprints. Flip the flag
     and every base ever computed over a single non-ASCII character silently reformats, and every
-    step recorded under one re-runs its agent. That is rule 5's own failure arriving through the
-    one flag rule 5 does not otherwise pin, which is why it gets an assertion of its own rather
-    than being left to the flags in `_dumps`.
+    step recorded under one re-runs its agent. That is the canonical text's own failure arriving
+    through the one flag the rest of this section does not pin, which is why it gets an assertion
+    of its own rather than being left to the flags in `_dumps`.
 
     Why the flag is `True` rather than `False`, and what refusing surrogates has to do with it, is
     argued in `journal.py::_checked_text`; this only holds the answer still.
@@ -781,8 +783,8 @@ def test_a_set_nested_inside_inputs_is_sorted_too_and_not_only_restrictions() ->
     """The shape claim; the cross-process claim is the one made under seeds above.
 
     Sorting only `restrictions` would leave a set that arrived through `**inputs` - including one
-    held in a frozen dataclass's field, which rule 6's walker hands on as the `frozenset` it is -
-    unsorted, which is the identical defect in a place nobody thought to look.
+    held in a frozen dataclass's field, which the type-tagging walker hands on as the `frozenset`
+    it is - unsorted, which is the identical defect in a place nobody thought to look.
     """
     assert canonical_json({"t": {"b", "a"}}) == '{"t":["a","b"]}'
     assert canonical_json({"t": frozenset({"b", "a"})}) == '{"t":["a","b"]}'

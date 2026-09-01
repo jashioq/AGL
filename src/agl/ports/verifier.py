@@ -20,4 +20,10 @@ class Verifier(ABC):
 
     @abstractmethod
     async def verify(self, command: str, workdir: Path) -> VerifierOutcome:
+        """Run the project's build command in a workspace, wait for it, and report what happened.
+
+        :param command: one command line exactly as the user wrote it, operators and all
+        :param workdir: passed as the working directory, never interpolated into `command`
+        :return: the verdict a landing is kept or undone on; a failing build is this, not a raise
+        """
         ...

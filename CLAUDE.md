@@ -12,10 +12,15 @@ mistake is silent. Read it before you add a file.
   when a task names it. Never browse it.
 - **Report ambiguity rather than resolving it silently.** A guess that type-checks is worse than
   a question, because nothing downstream can tell the two apart.
-- **`src/` carries comments again**, under the comment convention below: inline `#` and nothing
-  else. There are no docstrings in `src/` at all, and that is the convention's outcome rather than
-  a gap waiting to be filled. `tests/`, `scripts/check`, `.importlinter` and `pyproject.toml`
-  still hold the reasoning that has no single line of code to sit on.
+- **`src/` carries two kinds of prose and they are there for two different reasons.** Inline `#`
+  everywhere, under the comment convention below, and nothing else — no docstring earns its place
+  as a comment, which is that convention's outcome rather than a gap waiting to be filled. On top
+  of it, and only on the public callables of `sdk/` and `ports/`, a reST docstring under the
+  docstring convention below. That layer is not a comment and is not judged as one: it is there
+  because it renders in an author's IDE at the call site, where no `#` reaches, and it is held to
+  its shape by `tests/test_docstring_fields.py` rather than by a reviewer. `tests/`,
+  `scripts/check`, `.importlinter` and `pyproject.toml` still hold the reasoning that has no single
+  line of code to sit on.
 - Do not commit unless you are asked to.
 
 ## The naming convention
@@ -51,9 +56,10 @@ reasons — holds the casing of classes, functions, arguments, locals and class 
 Ten rules, and one test decides all of them: **if it can be figured out by looking at the code for
 thirty seconds, it does not get a comment.** What is left earns its place only by carrying **a
 fact from outside the file** — vendor behaviour, an OS or protocol guarantee, a measured number, a
-units or lifetime fact the type does not encode. None of it is mechanical; every rule is a
-reviewer's. The calibration, which nobody can rederive cheaply: of the 1,500 entries the strip
-removed, **87 earned a line back** — every one an inline `#`, and no docstring survived C1.
+units or lifetime fact the type does not encode. One of the ten is mechanical —
+`tests/test_named_not_numbered.py` holds C8 — and the other nine are a reviewer's. The calibration,
+which nobody can rederive cheaply: of the 1,500 entries the strip removed, **87 earned a line
+back** — every one an inline `#`, and no docstring survived C1.
 
 - **C1. Say what the code cannot.** The fact from outside the file is the whole of what a comment
   is for; everything else is the thirty-second test's business.
@@ -74,6 +80,64 @@ removed, **87 earned a line back** — every one an inline `#`, and no docstring
 - **C10. State no fact you cannot check, in a place that cannot check it.** A load-bearing
   sentence belongs in a test, an assertion or a type; a comment may summarise a guard and name it,
   but it may not be the guard.
+
+## The docstring convention
+
+Eight rules, and what checks each one is the first thing to know about them.
+**Mechanical:** `tests/test_docstring_fields.py` holds D1 through D7 — the placement, the shape,
+the surface where a block is mandatory, and every disagreement between a field list and the
+signature it sits on. **A reviewer's:** D8 alone, which is the only half that reads a description.
+
+**It exists for one thing no comment can do: it renders in the author's IDE at the call site.**
+PyCharm parses `:param:` natively; VS Code needs `"python.analysis.supportRestructuredText": true`,
+which is what `.vscode/settings.json` in this repository is for, and without it Pylance shows the
+block as raw text. **The convention assumes that setting.** It also inverts C1 deliberately — a
+`:param:` line restates a name from inside the file, which C1 refuses everywhere else, and it is
+allowed to only because the restatement is *structural* and a test compares it against the
+signature on every run. That trade is written out in `tests/test_docstring_fields.py`'s docstring,
+and it is why this is a separate convention rather than a clause in the one above.
+
+```python
+def tool[P](
+    name: str,
+    description: str,
+    payload: type[P],
+    handler: Callable[[P], Awaitable[ToolResult]],
+) -> Tool:
+    """Build a tool an agent can call, validating its payload before the handler sees it.
+
+    :param name: what the agent calls it; must be unique within a role
+    :param description: what the agent is told the tool is for
+    :param payload: dataclass the arguments are built into; its schema is a fingerprint term
+    :param handler: awaited with the built payload once the agent calls the tool
+    :return: a tool ready to go on a role
+    """
+```
+
+- **D1. The block is the first statement inside the body.** A string written *above* the `def` is
+  an expression Python evaluates and throws away: `__doc__` is `None` and no tooltip renders, while
+  the source looks right.
+- **D2. Summary, blank line, fields.** The summary is one line — not one sentence wrapped over two
+  — then a blank line, then the field list.
+- **D3. One `:param name:` per parameter, in the order the signature writes them.** None missing,
+  none extra. `self` and `cls` are not passed by a caller and are not named; a `*flags` is named
+  `flags` and a `**params` is named `params`, the stars being signature syntax.
+- **D4. `:return:` exactly where something comes back.** Never on a `-> None`, and never on a
+  `-> NoReturn`, which does not come back at all and has no value to describe.
+- **D5. No type in the line, and three fields only.** `:param str name:` restates the annotation
+  `mypy --strict` already checks, in a place nothing checks. The three are `:param name:`,
+  `:return:` and `:raises Error:` — the last earns its place because no annotation carries it.
+  `:type:`, `:rtype:` and `:returns:` are not among them.
+- **D6. Every public callable in `sdk/` and `ports/` carries a block**, so a newly added one cannot
+  ship without one. Nothing is exempt and there is no list to add a name to; what keeps an empty
+  walk from passing as a documented tree is the floor `PUBLIC_CALLABLES_TODAY` in
+  `tests/test_docstring_fields.py`. A dunder is out, because a name syntax invokes is never hovered.
+- **D7. Everywhere else in `src/`, C4's one line and no field block.** `adapters/`, `config/`,
+  `cli/`, `workflows/`, `api.py` and `testing.py` take a one-line summary only where the signature
+  does not already say it. `sdk/_engine/` takes nothing at all: nobody hovers it from outside.
+- **D8. The description earns its place** — a constraint, a lifetime, a unit, a consequence — and
+  is never a restatement of the name. This is C1's spirit surviving the inversion, and it is the
+  half no gate reads.
 
 ## The gates
 

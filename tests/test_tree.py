@@ -77,16 +77,17 @@ is written: `agl.*` does not include `agl` itself, adding it changes nothing bec
 adapter with all six contracts still reported kept. That comment ends "Do not drop that gate."
 
 **`explicit_package_bases` is not the enabler it was taken for; it runs the other way.** With the
-twelve deleted, `mypy --strict` passes clean *without* it - 220 source files, no `Duplicate module
-named "fake"` anywhere - because `src/agl/__init__.py` is what `_crawl_up_helper` in
-`mypy/find_sources.py` climbs to, and it names every module below it against `src`. Turning the
-flag on replaces that anchor with `MYPYPATH`, `mypy_path` and the working directory, which makes
-the repo root the base for everything under `tests/`, renames those modules `tests.contracts.store`
-and takes `tests/` off the search path: 68 errors in 29 files, most of them `Cannot find
-implementation or library stub for module named "contracts.store"`. That is precisely the
-resolution `tests/conftest.py`'s first paragraph depends on, broken by the setting proposed to
-protect it. The `Duplicate module named "fake"` the survey reported is real and reproduces only on
-the thirteen-file deletion - the one that takes `src/agl/__init__.py` with it.
+twelve deleted, `mypy --strict` passes clean *without* it - over every `.py` under `src` and
+`tests` bar those twelve, and no `Duplicate module named "fake"` anywhere - because
+`src/agl/__init__.py` is what `_crawl_up_helper` in `mypy/find_sources.py` climbs to, and it names
+every module below it against `src`. Turning the flag on replaces that anchor with `MYPYPATH`,
+`mypy_path` and the working directory, which makes the repo root the base for everything under
+`tests/`, renames those modules `tests.contracts.store` and takes `tests/` off the search path:
+68 errors in 29 files, most of them `Cannot find implementation or library stub for module named
+"contracts.store"`. That is precisely the resolution `tests/conftest.py`'s first paragraph depends
+on, broken by the setting proposed to protect it. The `Duplicate module named "fake"` the survey
+reported is real and reproduces only on the thirteen-file deletion - the one that takes
+`src/agl/__init__.py` with it.
 
 **Packaging was the one question the survey could not settle, and it is not the obstacle.** Two
 wheels built from this tree, before the deletion and after: 114 entries and 102, the difference

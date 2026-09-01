@@ -53,6 +53,11 @@ class WireShape:
     moment_name: str
 
     def check(self, data: Mapping[str, object]) -> None:
+        """Refuse a parsed document whose key set is not this schema's, rather than migrating it.
+
+        :param data: a document read back; a key AGL does not know means another version wrote it
+        :raises InternalError: naming the missing and the unexpected keys, in this shape's nouns
+        """
         missing = [key for key in self.keys if key not in data]
         unknown = sorted(repr(key) for key in data if key not in self.keys)
         if missing or unknown:
@@ -65,6 +70,13 @@ class WireShape:
             )
 
     def text(self, data: Mapping[str, object], key: str) -> str:
+        """One string field off the wire, once `check` has already settled the key set.
+
+        :param data: a document whose keys are this schema's, so presence is not in question here
+        :param key: which field to read; it must be present, which is what `check` has settled
+        :return: the value, narrowed to `str`
+        :raises InternalError: the value is some other type, named in this schema's nouns
+        """
         value = data[key]
         if not isinstance(value, str):
             raise InternalError(
@@ -74,6 +86,12 @@ class WireShape:
         return value
 
     def normalised(self, moment: datetime) -> datetime:
+        """The same instant, at the precision this wire form can actually hold.
+
+        :param moment: refused when naive, before `astimezone` could read the machine's own zone
+        :return: UTC, truncated to whole seconds, which is what the wire spelling carries
+        :raises InternalError: the moment has no timezone, so it denotes no instant at all
+        """
         if moment.tzinfo is None or moment.utcoffset() is None:
             raise InternalError(
                 f"{self.moment_name} {moment!r} has no timezone, and a wall-clock reading with no "
@@ -94,6 +112,11 @@ _WIRE: Final = WireShape(
 
 
 def wire_moment(moment: datetime) -> str:
+    """One moment as a record spells it, which is the only spelling AGL writes down.
+
+    :param moment: normalise it first - the trailing `Z` is a literal and no offset is applied
+    :return: `2026-08-18T09:14:02Z`, whole seconds and no fraction
+    """
     return format(moment, _WIRE_TIME)
 
 
@@ -129,6 +152,10 @@ class RunSpec:
         object.__setattr__(self, "created_at", _WIRE.normalised(self.created_at))
 
     def to_json(self) -> dict[str, JsonValue]:
+        """This record as the object `run.json` holds. Pure, and it writes nothing anywhere.
+
+        :return: a fresh `dict`, its keys spelled out so that renaming a field cannot rename one
+        """
         return {
             "workflow": self.workflow,
             "workflow_version": self.workflow_version,
@@ -142,6 +169,12 @@ class RunSpec:
 
     @classmethod
     def from_json(cls, data: object) -> RunSpec:
+        """A record read back off the wire, held to exactly the standard a constructed one is.
+
+        :param data: `object`, because a parsed file is anything until this has looked at it
+        :return: the record, its fields checked by the constructor rather than a second time here
+        :raises InternalError: for every fault, including ones `ids.py` would call `InputError`
+        """
         if not isinstance(data, Mapping):
             raise InternalError(f"a run record is a JSON object, not a {type(data).__name__}")
         _WIRE.check(data)
@@ -193,6 +226,14 @@ def _checked_key(key: object) -> str:
 
 
 def checked_text(value: str, where: str, *, cost: str = _STORE_REFUSES) -> str:
+    """`value` itself, if it is text AGL can write down - which is every `str` but one kind.
+
+    :param value: refused only for a lone surrogate, which UTF-8 has no encoding for at all
+    :param where: names the value in the refusal, so a reader can place which field it was
+    :param cost: closes the refusal by saying what the check is protecting at this call site
+    :return: the value unchanged
+    :raises InputError: naming the code point and its position, never the character itself
+    """
     for index, character in enumerate(value):
         if unicodedata.category(character) == _SURROGATE:
             raise InputError(

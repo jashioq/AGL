@@ -15,17 +15,17 @@ class Worktrees[R]:
         self._taken: dict[str, _Taken[R]] = {}
 
     def open(
-        self, name: str, *, scope: RunScope, base: str, build: Callable[[RunScope, str], R]
+        self, namespace: str, *, scope: RunScope, base: str, build: Callable[[RunScope, str], R]
     ) -> R:
-        namespace = Namespace(name)
-        key = namespace.collision_key
+        wanted = Namespace(namespace)
+        key = wanted.collision_key
         taken = self._taken.get(key)
         if taken is not None:
-            if taken.scope == scope and taken.namespace == namespace:
+            if taken.scope == scope and taken.namespace == wanted:
                 return taken.child
-            raise ConflictError(_collision(namespace, scope, taken.namespace, taken.scope))
-        child = build(scope.inside(namespace), base)
-        self._taken[key] = _Taken(namespace, scope, child)
+            raise ConflictError(_collision(wanted, scope, taken.namespace, taken.scope))
+        child = build(scope.inside(wanted), base)
+        self._taken[key] = _Taken(wanted, scope, child)
         return child
 
 

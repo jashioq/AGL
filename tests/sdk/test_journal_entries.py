@@ -250,10 +250,10 @@ async def test_two_concurrent_siblings_each_land_their_own_entry(store: Store) -
     """The concurrent case: `T-01` and `T-02` both finish `implement` at the same moment.
 
     Their digests are *identical* - same role, no inputs, same parent head - and their namespaces
-    are not, which is the whole reason the counter is scoped per namespace (rule 1 of
-    `test_journal.py`) and the whole reason each entry gets its own path. Two writes, no lock, no
-    read-modify-write, nothing between them: `asyncio.gather` is as close as one event loop gets to
-    asking for both at once, and both must land whole.
+    are not, which is the whole reason the counter is scoped per namespace
+    (`test_journal.py`'s scoped counter) and the whole reason each entry gets its own path. Two
+    writes, no lock, no read-modify-write, nothing between them: `asyncio.gather` is as close as one
+    event loop gets to asking for both at once, and both must land whole.
     """
     first, second = RUN.inside(Namespace("T-01")), RUN.inside(Namespace("T-02"))
     one, two = _entry(FIRST, value="T-01's work"), _entry(FIRST, value="T-02's work")

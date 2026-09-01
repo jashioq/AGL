@@ -19,10 +19,11 @@ description is a term, which is the standing example of a change that must re-ru
 
 **One test in that half carries a claim the others do not.**
 `test_editing_a_fields_description_changes_the_steps_base` is what makes a `describe()` on a payload
-field worth having: `test_journal.py`'s rule 6 has one open hole, a `__post_init__` being invisible
-to a derived schema, and a rule interpolated into a field's description is not, because it is schema
-and schema is fingerprint. Everything else about `describe()` is convenience; that one is the hole
-being closed, so it is measured against `base_of` and against two payloads built under one name.
+field worth having: `test_journal.py`'s qualified type name has one open hole, a `__post_init__`
+being invisible to a derived schema, and a rule interpolated into a field's description is not,
+because it is schema and schema is fingerprint. Everything else about `describe()` is convenience;
+that one is the hole being closed, so it is measured against `base_of` and against two payloads
+built under one name.
 
 ## Two classes, and the check that exists only because they are two
 
@@ -219,7 +220,8 @@ def test_the_schema_carries_the_two_keys_both_adapters_look_for() -> None:
 def test_the_schema_is_wrapped_the_way_a_tools_is() -> None:
     """`Tool.__post_init__`'s proxy, one layer earlier: a caller that kept a reference cannot edit a
     schema already inside a fingerprint. `json.dumps` refusing it is the whole hazard behind
-    `test_journal.py`'s rule 4, and `base_of` handling it anyway is the rule being kept."""
+    `test_journal.py` on what a tool contributes, and `base_of` handling it anyway is that rule
+    being kept."""
     assert isinstance(REPORT.payload_schema, MappingProxyType)
     with pytest.raises(TypeError):
         json.dumps(REPORT.payload_schema)
@@ -273,8 +275,8 @@ def test_a_payload_with_no_fields_is_a_declaration_and_not_a_refusal() -> None:
 # A gap found and closed late. `sdk/tools.py`'s `_schema_for` refuses an enum field with every
 # other type outside `_SUPPORTED`, and until `describe()` existed there was nowhere in a derived
 # schema to write a vocabulary down: it lived in the tool's description and in the prompt, and was
-# enforced a third time in a `__post_init__` - which `test_journal.py`'s rule 6 says the digest
-# cannot see.
+# enforced a third time in a `__post_init__` - which `test_journal.py`'s qualified type name says
+# the digest cannot see.
 
 
 # A fixed vocabulary, which is the case `sdk/tools.py` refuses an enum in favour of and the one
@@ -680,11 +682,11 @@ def test_editing_a_derived_tools_description_changes_the_steps_base() -> None:
 def test_editing_a_fields_description_changes_the_steps_base() -> None:
     """**The whole point of `describe()`, and the measurement the gap above asked for.**
 
-    The one open hole in `test_journal.py`'s rule 6 is that a `__post_init__` is invisible to a
-    derived schema, so a payload whose vocabulary is enforced in code and named nowhere else
-    changes what converts while moving no digest - and an entry recorded under the old vocabulary
-    stops converting with its fingerprint still matching, which surfaces as `InternalError` out of
-    `read` on a resume.
+    The one open hole in `test_journal.py`'s qualified type name is that a `__post_init__` is
+    invisible to a derived schema, so a payload whose vocabulary is enforced in code and named
+    nowhere else changes what converts while moving no digest - and an entry recorded under the
+    old vocabulary stops converting with its fingerprint still matching, which surfaces as
+    `InternalError` out of `read` on a resume.
     `fix/findings.py` wrote that down as the accepted price of checking `SEVERITIES`.
 
     A field description is data, and data is in the schema, and the schema is in `base_of`. So a
@@ -701,7 +703,8 @@ def test_editing_a_fields_description_changes_the_steps_base() -> None:
     `test_reordering_two_fields_costs_no_agent_run`'s arrangement and is load-bearing here for the
     mirror-image reason. A payload type contributes its qualified name to the schema as `title`, so
     two `class` statements would already differ before a word of the description changed, and this
-    test would be green while measuring rule 6 instead of the thing `describe()` opened.
+    test would be green while measuring the qualified type name instead of the thing `describe()`
+    opened.
     """
     one = make_dataclass(
         "Payload", [("severity", str, describe(f"one of {', '.join(_VOCABULARY)}"))], frozen=True
@@ -751,7 +754,7 @@ def test_editing_the_payload_dataclass_changes_the_steps_base() -> None:
 
 
 def test_two_payload_types_of_one_shape_are_two_schemas_and_two_fingerprints() -> None:
-    """The second half of `test_journal.py`'s rule 6, and a leak found and closed during the build.
+    """The second half of the qualified type name, and a leak found and closed during the build.
 
     Structurally identical payload types used to derive a byte-identical schema, so swapping
     `Findings` for a `Review` of the same shape left the fingerprint where it was and the old entry
@@ -782,8 +785,9 @@ def test_two_payload_types_of_one_shape_are_two_schemas_and_two_fingerprints() -
 
 
 def test_a_nested_payload_types_name_is_a_term_too_and_not_only_the_outermost() -> None:
-    """The depth, which is the whole of the implementation - `test_journal.py`'s rule 6 as
-    `journal._canonical` keeps it, word for word, one walker over an input and one over a payload.
+    """The depth, which is the whole of the implementation - `test_journal.py`'s qualified type
+    name as `journal._canonical` keeps it, word for word, one walker over an input and one over a
+    payload.
 
     A name written once at the top of `payload_schema` would leave `Outer(inner=Inner)` and
     `Outer(inner=Other)` one fingerprint, which is the same false cache hit one level down. The two
@@ -1052,7 +1056,8 @@ def test_a_declaration_is_not_a_tool_and_carries_no_handler() -> None:
 
 
 def test_a_declaration_holds_the_three_terms_a_tool_contributes_to_a_fingerprint() -> None:
-    """`test_journal.py`'s rule 4, and why a declaration without a handler is the honest shape."""
+    """`test_journal.py` on what a tool contributes, and why a declaration without a handler is
+    the honest shape."""
     derived = _tool(REPORT)
     assert (derived.name, derived.description) == (REPORT.name, REPORT.description)
     assert dict(derived.payload_schema) == dict(REPORT.payload_schema)
@@ -1078,7 +1083,7 @@ def test_the_default_factory_case_is_optional_too() -> None:
 
 
 def test_a_sequence_of_declarations_is_ordinary_data() -> None:
-    """Tools keep their declared order and are not sorted (`test_journal.py`'s rule 4), so a `Role`
-    holding two of these is holding a sequence and nothing more."""
+    """Tools keep their declared order and are not sorted (`test_journal.py` on what a tool
+    contributes), so a `Role` holding two of these is holding a sequence and nothing more."""
     declarations: Sequence[ReportingTool[Findings]] = (REPORT,)
     assert [declared.name for declared in declarations] == ["report_findings"]

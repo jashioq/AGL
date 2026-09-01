@@ -25,13 +25,13 @@ that notices:
     without moving HEAD, so the guard is false at exactly the moment the wipe is needed. The test
     asserts on the *call*, not on the outcome, because a read-only step's own ending restore
     removes the leavings either way and would make an outcome-only test pass against the bug.
-  * **The counter taken after a suspension.** `test_journal.py`'s rule 1 makes `n` deterministic
-    for siblings, which occupy different namespaces; it does nothing for two same-name steps in
-    *one* scope, which share a `(scope, step, base)` key. Two tests again, and the reason there
-    are two is worth stating: the `asyncio.gather` test below is the one that failure is written
-    in, and it now catches the serialization too - two overlapping steps take one address and the
-    second clobbers the first - but on its own it cannot say *when* the address was taken. So it
-    is joined by
+  * **The counter taken after a suspension.** `test_journal.py`'s scoped counter makes `n`
+    deterministic for siblings, which occupy different namespaces; it does nothing for two
+    same-name steps in *one* scope, which share a `(scope, step, base)` key. Two tests again, and
+    the reason there are two is worth stating: the `asyncio.gather` test below is the one that
+    failure is written in, and it now catches the serialization too - two overlapping steps take
+    one address and the second clobbers the first - but on its own it cannot say *when* the
+    address was taken. So it is joined by
     `test_the_counter_is_taken_before_the_walk_can_suspend`, which drives one `step` coroutine by
     hand, one send at a time, against dependencies that really do suspend, and asks directly.
   * **Two steps in one namespace overlapping.** "A namespace's workspace is single-threaded".
@@ -872,14 +872,14 @@ async def test_the_counter_is_taken_before_the_walk_can_suspend(tmp_path: Path) 
 async def test_two_same_name_steps_in_one_scope_land_at_the_same_digests_either_way(
     tmp_path: Path,
 ) -> None:
-    """The blind spot in `test_journal.py`'s rule 1, and what closes it.
+    """The blind spot in `test_journal.py`'s scoped counter, and what closes it.
 
     Siblings are deterministic because they occupy different namespaces. Two `step("review", ...)`
     calls in *one* scope with one role and one set of inputs share a `(scope, step, base)` key, so
-    rule 1 separates nothing here at all. What separates them is that they do not overlap: the walk
-    serializes steps within a namespace, so the second call takes its address only after the first
-    has claimed its entry, and the two addresses fall out in the order the coroutines were created
-    - which is the program's own order and is the same on every run.
+    the scope separates nothing here at all. What separates them is that they do not overlap: the
+    walk serializes steps within a namespace, so the second call takes its address only after the
+    first has claimed its entry, and the two addresses fall out in the order the coroutines were
+    created - which is the program's own order and is the same on every run.
 
     The walk is run twice with the workers released in opposite orders, and the two entries must
     hold the same two values at the same two addresses both times. Releasing the *second* worker
@@ -1006,7 +1006,7 @@ async def test_concurrent_siblings_each_write_their_own_entry_and_both_replay(
     thing separating the two entries is the namespace in the counter's key. One `Fingerprints` is
     shared by both journals, which is what makes that key mean anything: a counter per `Journal`
     would give each child its own ledger of counts and would look identical here while being the
-    failure behind `test_journal.py`'s rule 1, with that rule's fix removed.
+    failure behind `test_journal.py`'s scoped counter, with that rule's fix removed.
     """
     harness = container.fakes(TreesRoot(tmp_path / "trees"), files=dict(SEED))
     children = (Namespace("T-01"), Namespace("T-02"))

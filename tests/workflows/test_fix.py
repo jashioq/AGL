@@ -220,8 +220,9 @@ def test_high_findings_survive_the_fingerprint_that_the_repair_step_takes_over_t
     That is the claim worth checking here rather than in a run: it is about the *shape* this module
     chose - a tuple of frozen dataclasses, where the sanctioned example passes a list - and it
     fails as an `InputError` at the step rather than as anything a reader would trace back to this
-    file. The qualified type name in the output is `tests/sdk/test_journal.py`'s rule 6, and it is
-    what stops a `Finding` and a same-shaped type of another name fingerprinting alike.
+    file. The qualified type name in the output is the term `tests/sdk/test_journal.py` pins under
+    that same name, and it is what stops a `Finding` and a same-shaped type of another name
+    fingerprinting alike.
     """
     encoded = canonical_json({"findings": Findings((_finding("high"),)).high()})
 

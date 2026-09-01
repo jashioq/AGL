@@ -323,10 +323,10 @@ class _Relay:
 
     The other half of the evidence, and the half a barrier cannot give. A rendezvous proves the two
     children overlap; it says nothing about which of them finishes first, and `test_journal.py`'s
-    rule 1 is entirely about that: "a per-invocation counter lets the interleaving decide who gets
-    `n = 0`, and the interleaving differs on resume". So the two walks of the replay test below are
-    driven through two of these with opposite orders, and the second walk's interleaving is
-    provably not the first's rather than being whatever git happened to do twice.
+    scoped counter is entirely about that: "a per-invocation counter lets the interleaving decide
+    who gets `n = 0`, and the interleaving differs on resume". So the two walks of the replay test
+    below are driven through two of these with opposite orders, and the second walk's interleaving
+    is provably not the first's rather than being whatever git happened to do twice.
 
     **The gate is inside the agent and the release is at the call site.** Holding the *worker* is
     what makes a held sibling a step genuinely in flight - its counter is taken, its entry has been
@@ -510,7 +510,7 @@ async def test_the_rendezvous_two_children_pass_is_one_two_steps_of_a_namespace_
 async def test_two_siblings_at_one_head_replay_when_the_second_walk_completes_them_the_other_way(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """`test_journal.py`'s rule 1, in the one shape that can fail: two siblings, interleaved twice.
+    """The scoped counter, in the one shape that can fail: two siblings, interleaved twice.
 
     Both children call `step(IMPLEMENT)` with the same role, no inputs and the same
     parent head, so their `base` values are **identical by construction** - and that is asserted

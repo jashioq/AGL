@@ -436,11 +436,11 @@ def test_asking_twice_for_one_name_hands_back_the_same_child_and_the_runs_own_ta
 
     The two identities beneath it are asserted here rather than through behaviour, and the reason is
     worth stating because it is the reason a mutation of either is hard to catch. `Fingerprints`'
-    key already carries the scope (`test_journal.py`'s rule 1), and a child's scope is unique
-    run-wide by the rule two tests up - so a counter built privately per child produces the same
-    digests as the run's own for as long as no two `Run`s share a scope, and the only thing that
-    makes two `Run`s share a scope is a reopen that built a second one. The identity is what the
-    behaviour rests on, so the identity is what is asserted. The namespace table is not in that
+    key already carries the scope (`test_journal.py`'s scoped counter), and a child's scope is
+    unique run-wide by the rule two tests up - so a counter built privately per child produces the
+    same digests as the run's own for as long as no two `Run`s share a scope, and the only thing
+    that makes two `Run`s share a scope is a reopen that built a second one. The identity is what
+    the behaviour rests on, so the identity is what is asserted. The namespace table is not in that
     position - a private one is caught by the collision tests - and is asserted here beside it
     because they are one seam.
     """

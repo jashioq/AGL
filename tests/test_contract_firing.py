@@ -107,11 +107,12 @@ CONTRACT_CLASSES: Final[Mapping[str, type[Contract]]] = {
     "independence": IndependenceContract,
 }
 
-# Contract numbers are stable - `.importlinter`'s header says so, and failure reports cite them by
-# number - and the type is half of what a number means: contract 4 becoming a `forbidden` contract
-# would leave every probe below still running and no longer probing what it says it does. This is
-# where all six numbers are pinned, `tests/test_contract_listings.py` having handed over the four
-# it used to pin when it stopped reading contract 1.
+# Contract numbers are stable - `.importlinter`'s header says so, and a number there is the
+# section id import-linter reads - and the type is half of what a number means: contract 4
+# becoming a `forbidden` contract would leave every probe below still running and no longer
+# probing what it says it does. This is where all six numbers are pinned,
+# `tests/test_contract_listings.py` having handed over the four it used to pin when it stopped
+# reading contract 1.
 CONTRACT_TYPES: Final[Mapping[str, str]] = {
     "1": "layers",
     "2": "forbidden",
@@ -357,7 +358,8 @@ def test_the_named_contract_breaks_on_the_violation_it_exists_to_catch(
     assert probe.contract in contracts, (
         f"there is no contract {probe.contract} in {CONFIG_FILE}. Contract numbers are stable by "
         f"policy - see that file's header - so a renumbering is a change to this file, to "
-        f"tests/test_contract_listings.py, and to every failure report that cites a number."
+        f"tests/test_contract_listings.py and to tests/test_measurable_targets.py's `_contract`, "
+        f"each of which resolves a number against that file too."
     )
     for endpoint in (probe.importer, probe.imported):
         assert endpoint in graph.modules, (

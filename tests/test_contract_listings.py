@@ -147,9 +147,10 @@ PACKAGE_DIR: Final = REPO_ROOT / "src" / "agl"
 PORTS_DIR: Final = PACKAGE_DIR / "ports"
 ADAPTERS_DIR: Final = PACKAGE_DIR / "adapters"
 
-# Contract numbers are stable - `.importlinter`'s own header says so, and failure reports cite them
-# - and each section's `type` is what this file reads its list as. The pairing is asserted below, so
-# a renumbering fails here rather than silently pointing a comparison at the wrong contract.
+# Contract numbers are stable - `.importlinter`'s own header says so, and a number there is the
+# section id import-linter reads - and each section's `type` is what this file reads its list as.
+# The pairing is asserted below, so a renumbering fails here rather than silently pointing a
+# comparison at the wrong contract.
 # Contract 1 is absent because this file no longer reads it; `tests/test_contract_firing.py` pins
 # all six numbers to their types, that being the file that builds a contract object per number.
 PURE_TYPES_SECTION: Final = "importlinter:contract:2"
@@ -461,7 +462,9 @@ def _section(name: str) -> Mapping[str, str]:
     assert name in parser, (
         f"{CONFIG_FILE} has no [{name}] section. Contract numbers are stable by policy - see that "
         f"file's header - so if a contract was renumbered, both the policy and this test need "
-        f"revisiting, and every failure report that cites a contract by number too."
+        f"revisiting, along with tests/test_contract_firing.py and "
+        f"tests/test_measurable_targets.py's `_contract`, which resolve a number against that "
+        f"file too."
     )
     return parser[name]
 
@@ -541,8 +544,9 @@ def test_each_contract_is_still_the_kind_of_contract_this_file_reads(
     assert contract_type == expected, (
         f"[{section}] is a `{contract_type}` contract, not `{expected}`. This test reads that "
         f"section's own list as the set of modules it holds to a rule; if the contract now means "
-        f"something else, this test is guarding the wrong thing - and so is every failure report "
-        f"that cites it by number."
+        f"something else, this test is guarding the wrong thing - and so is "
+        f"tests/test_contract_firing.py's probe for that number, which pins the same pairing and "
+        f"fails beside this one."
     )
 
 

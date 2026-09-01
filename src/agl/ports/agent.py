@@ -37,6 +37,10 @@ class ModelId(StrEnum):
 
     @property
     def provider(self) -> Provider:
+        """Which backend serves this model, read off the prefix before the colon.
+
+        :return: the provider `adapters/routing.py` dispatches on; derived, never stored
+        """
         prefix = self.value.partition(":")[0]
         try:
             return Provider(prefix)
@@ -103,6 +107,12 @@ class Tool:
 
 
 def check_tool_declaration(name: str, description: str) -> None:
+    """Refuse a tool declaration no model could act on, wherever one is being assembled.
+
+    :param name: what a model calls the tool by, and so what it must be able to name
+    :param description: the whole of what a model reads to decide this is the tool it wants
+    :raises InputError: either is empty, and nothing has been attempted
+    """
     if not name:
         raise InputError("a tool with an empty name cannot be named by anything calling it")
     if not description:
@@ -169,10 +179,20 @@ class AgentRunner(ABC):
 
     @abstractmethod
     async def capabilities(self, model: ModelId) -> frozenset[Capability]:
+        """What this backend can do when serving a model, compared against a role at preflight.
+
+        :param model: asked for, because a routing runner cannot answer for every provider at once
+        :return: what it can be asked for at all, which is no promise the next call succeeds
+        """
         ...
 
     @abstractmethod
     async def check_ready(self, model: ModelId) -> None:
+        """Whether this backend can serve this model right now. Answers with nothing, or refuses.
+
+        :param model: preflight asks once per distinct model a workflow declares, before step one
+        :raises UpstreamUnavailable: carrying a reason a person can act on and then start again
+        """
         ...
 
     @abstractmethod
@@ -182,4 +202,10 @@ class AgentRunner(ABC):
         *,
         on_activity: ActivityReporter | None = None,
     ) -> AgentOutcome:
+        """Run the task to its end and report what the agent did.
+
+        :param task: the whole of what is asked, as one value; it carries no callbacks itself
+        :param on_activity: sync, must not block, may never fire; what it raises ends the run
+        :return: the agent's closing message, and why it stopped where the backend said
+        """
         ...

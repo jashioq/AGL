@@ -33,6 +33,11 @@ class _Declared:
 class RefusingParser(argparse.ArgumentParser):
 
     def error(self, message: str) -> NoReturn:
+        """Raise where `argparse` would exit, so a refusal goes through AGL's own exit-code table.
+
+        :param message: argparse's own wording, carried out under this parser's usage line
+        :raises InputError: always - this call has no way out that returns
+        """
         raise InputError(f"{self.format_usage().strip()}\n{message}")
 
 
@@ -41,6 +46,14 @@ def arg[T](*flags: str, default: T, help: str = "") -> T: ...
 @overload
 def arg(*flags: str, help: str = "") -> Any: ...
 def arg(*flags: str, default: Any = MISSING, help: str = "") -> Any:
+    """Declare one field of a params dataclass as a named flag, refused here if it cannot be one.
+
+    :param flags: every spelling this field answers to; at least one, and never a positional
+    :param default: omitted makes the flag required, and a `bool` field must declare `default=False`
+    :param help: the line `agl workflows <workflow>` prints beside the flag; cosmetic elsewhere
+    :return: a `dataclasses.field` carrying the declaration, assigned to the annotated field
+    :raises InputError: no flags, a spelling `argparse` cannot take, or a default of another type
+    """
     if not flags:
         raise InputError(
             "a parameter is declared with at least one flag - `arg('-r', '--request')`. A field "
@@ -63,6 +76,13 @@ def arg(*flags: str, default: Any = MISSING, help: str = "") -> Any:
 
 
 def parser_for(params: type[object], *, prog: str | None = None) -> RefusingParser:
+    """Build the flag parser for a params dataclass, apart from `parse` so it can be inspected.
+
+    :param params: the dataclass; every field must be declared with `arg()` and claim its own flags
+    :param prog: the name the usage line uses, `None` leaving `argparse` to read `sys.argv[0]`
+    :return: a parser that raises instead of exiting, and that registers no `-h` of its own
+    :raises InputError: not a dataclass, a field with no `arg()`, or two fields claiming one flag
+    """
     if not is_dataclass(params):
         raise InputError(f"{named(params)} is not a dataclass of `arg()` fields")
     parser = RefusingParser(prog=prog, add_help=False, allow_abbrev=False)
@@ -91,12 +111,26 @@ def parser_for(params: type[object], *, prog: str | None = None) -> RefusingPars
 
 
 def parse[T](params: type[T], argv: Sequence[str], *, prog: str | None = None) -> T:
+    """Read a workflow's own arguments into its params instance, before any agent has been paid for.
+
+    :param params: the dataclass of `arg()` fields, which is what `Workflow.params` hands over
+    :param argv: this workflow's flags alone - the generic parser has taken its own off the front
+    :param prog: the name the usage line uses; the front door passes `agl run <workflow>`
+    :return: an instance of `params`, each value converted by the type its field declared
+    :raises InputError: a missing required flag, an unrecognised one, or an unconvertible value
+    """
     parsed = parser_for(params, prog=prog).parse_args(argv)
     factory: Callable[..., T] = params
     return factory(**vars(parsed))
 
 
 def to_json(instance: object) -> Mapping[str, JsonValue]:
+    """Write the parameters a run was started with into the shape `run.json` carries them in.
+
+    :param instance: a params instance and never the class; its field names become the keys
+    :return: a read-only mapping, in declaration order, holding the four types `arg()` admits
+    :raises InputError: a value `run.json` cannot hold - a non-finite float, or text UTF-8 refuses
+    """
     if isinstance(instance, type) or not is_dataclass(instance):
         raise InputError(
             f"{named(instance)} is not an instance of a params dataclass: a run record stores "
@@ -110,6 +144,13 @@ def to_json(instance: object) -> Mapping[str, JsonValue]:
 
 
 def from_json[T](params: type[T], data: Mapping[str, JsonValue]) -> T:
+    """Rebuild a resumed run's parameters from its record, refusing rather than converting anything.
+
+    :param params: the class to rebuild into; `api.resume` has already matched `workflow_version`
+    :param data: what `to_json` wrote, read back at the types it stored and never coerced to fit
+    :return: an instance holding the values the first invocation was given
+    :raises InputError: a field the record lacks, a key the class does not declare, or a moved type
+    """
     kind = named(params)
     declared = _field_names(params)
     hints = annotations_of(params)

@@ -442,9 +442,9 @@ def test_the_tools_become_a_tuple_in_declaration_order() -> None:
 
 
 def test_reordering_two_tools_moves_the_steps_fingerprint() -> None:
-    """Not asserted as a good thing - asserted as the behaviour `test_journal.py`'s rule 4
-    specifies, so that a later change to it is a decision somebody makes rather than one that
-    happens."""
+    """Not asserted as a good thing - asserted as the behaviour `test_journal.py` specifies under
+    what a tool contributes, so that a later change to it is a decision somebody makes rather than
+    one that happens."""
     one_way = Role(name="review", instructions=_REVIEW, tools=[_plain("a"), _plain("b")])
     the_other = Role(name="review", instructions=_REVIEW, tools=[_plain("b"), _plain("a")])
     assert _base(one_way, model=Claude.SONNET) != _base(the_other, model=Claude.SONNET)
@@ -924,9 +924,9 @@ def test_folding_tool_calling_in_moves_no_digest_although_its_trigger_is_a_term(
         "differently, so `requires` has become a term and every existing role's digest has moved"
     )
     assert _base(folded) != _base(toolless), (
-        "declaring a tool did not move the digest, so the three tool terms `test_journal.py`'s "
-        "rule 4 names are not reaching `base_of` and this test measures nothing about the fold "
-        "riding behind them"
+        "declaring a tool did not move the digest, so the three tool terms `test_journal.py` "
+        "names under what a tool contributes are not reaching `base_of` and this test measures "
+        "nothing about the fold riding behind them"
     )
 
 

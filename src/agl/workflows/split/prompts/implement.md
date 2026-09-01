@@ -54,9 +54,10 @@ it lands.
 ## How to work
 
 1. **Read before you write.** Read the files your chunk names, and enough of what surrounds them to
-   know what they are for. This project keeps its arguments in docstrings; the docstring next to a
-   thing usually says why it is the way it is, and a change that contradicts one is a change that
-   needs the docstring updated in the same breath.
+   know what they are for. This project keeps its arguments in its tests and in the inline `#`
+   comments beside the code, not in its docstrings, where a block describes a function's
+   parameters and nothing else; a change that contradicts the comment above a line, or the test
+   that covers it, is a change that needs that comment or that test updated in the same breath.
 2. **Write the test first.** Add or extend a test that fails for the reason your chunk describes,
    and run it with the inner-loop command above to watch it fail. A test that passes before your
    change is a test that proves nothing about it.

@@ -258,9 +258,10 @@ def _agent(
     and what every test below except one is now driven on. It is an `async def` returning a `Reply`,
     which `testing.Agent` admits beside the plain `def` and the one-line lambda: `container.fakes`
     awaits what the call produced when there is something to await, so `await barrier.wait()` is a
-    line an author may write here. Until then it could not be, and the whole of section 2 and 3
-    below sat on `container.fakes(claude=...)` with a raw per-provider `Script` instead - for the
-    property `split` exists to demonstrate, through a door that could not express it.
+    line an author may write here. Until then it could not be, and the whole of "one target, one
+    landing at a time" and "the conflict path" below sat on `container.fakes(claude=...)` with a
+    raw per-provider `Script` instead - for the property `split` exists to demonstrate, through a
+    door that could not express it.
 
     `barrier` is the rendezvous: reached **before** anything is written, so no child can finish
     until every other has started. `waits` holds one child back until something outside it has

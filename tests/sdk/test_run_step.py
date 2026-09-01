@@ -118,8 +118,8 @@ class Restatement:
     """`Summary`'s shape under another name, for the payload-identity section near the bottom.
 
     Field for field the same, so the schema derived from it is the same schema but for the one term
-    `test_journal.py`'s rule 6 adds: the qualified type name. A reporting tool declared over it
-    carries `REPORT`'s own name and description too, which leaves the payload *type* as the only
+    `test_journal.py`'s qualified type name adds. A reporting tool declared over it carries
+    `REPORT`'s own name and description too, which leaves the payload *type* as the only
     difference between two otherwise identical roles - and so as the only thing that can move the
     fingerprint.
     """
@@ -1109,8 +1109,8 @@ async def test_a_dataclass_input_reaches_the_agent_as_its_fields_and_its_type(
 ) -> None:
     """The standing `findings=highs`, which is a list of the workflow's own dataclasses.
 
-    The `__agl_type__` tag is asserted rather than tolerated. `test_journal.py`'s rule 6 puts a
-    dataclass's qualified name in the fingerprint at every depth, and this block is the same
+    The `__agl_type__` tag is asserted rather than tolerated. `test_journal.py`'s qualified type
+    name puts a dataclass's own in the fingerprint at every depth, and this block is the same
     canonical text the digest was taken over - so the tag is in front of the agent by construction,
     and the only way it would not be is a second serialiser, free to disagree with the first about
     what these inputs were. It reads as information rather than noise: it is the type the workflow
@@ -1229,14 +1229,14 @@ async def test_editing_the_prompt_file_re_runs_the_step_and_the_agent_reads_the_
 async def test_a_step_reporting_through_another_payload_type_does_not_replay_the_first(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """The second half of `test_journal.py`'s rule 6, at the surface where it costs something.
+    """The second half of the qualified type name, at the surface where it costs something.
 
     Two roles identical in every term a fingerprint takes but one: the reporting tool's payload
     *type*. Same instructions, same model, same restrictions, same tool name and description, and a
-    payload dataclass of exactly the same shape under a different name. Before rule 6 they derived
-    a byte-identical schema, so the second walk found the first's entry and replayed it **into the
-    new type** - nothing raised, nothing failed to parse, and the workflow read a `Restatement` that
-    was recorded as a `Summary`.
+    payload dataclass of exactly the same shape under a different name. Before the type name went
+    in they derived a byte-identical schema, so the second walk found the first's entry and
+    replayed it **into the new type** - nothing raised, nothing failed to parse, and the workflow
+    read a `Restatement` that was recorded as a `Summary`.
 
     The control comes first for the reason it always does: a run where everything re-runs would pass
     the second half of this and mean nothing by it.

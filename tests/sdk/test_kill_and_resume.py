@@ -37,12 +37,12 @@ reproducible instead - fixed identity, fixed author and committer dates, no glob
 **Which assertions here are unfalsifiable inside one process.** Four, and they are the reason this
 file spends processes at all:
 
-  * *Rule 2, sort every set.* A `frozenset[Restriction]`'s iteration order is fixed for the life of
-    one interpreter, so a same-process resume recomputes the digest it wrote and hits whether the
+  * *Sort every set.* A `frozenset[Restriction]`'s iteration order is fixed for the life of one
+    interpreter, so a same-process resume recomputes the digest it wrote and hits whether the
     journal sorted or iterated. The programmes below declare `frozenset(Restriction)` - all four
     members - and the two processes run under **different `PYTHONHASHSEED` values**, which is what
     makes "the worker ran exactly once in total" able to fail.
-  * *Rule 3, walk the fields and never `repr`.* Same argument: an object's id does not move while
+  * *No `repr()` shortcut* - walk the fields. Same argument: an object's id does not move while
     it is alive. The first step of every programme takes a list of the workflow's own dataclasses
     with a `frozenset[str]` field inside, whose `repr` renders in hash order - so the shortcut
     renders differently in the second process and the digest with it.
@@ -60,7 +60,7 @@ written by a process that no longer exists, which is what a replay *is*.
     when a step is called"). The `crash` programme raises inside a step and retries it within one
     run; the second process walks the same calls and must hit the retry's entry without running
     anything. Advance on the call instead and the retry sits one slot past where the resume looks.
-  * *Rule 6, a dataclass contributes its qualified type name.* The `retyped` and `renested`
+  * *The qualified type name*, which a dataclass contributes. The `retyped` and `renested`
     variants pass the same field names and the same values under a different type - the outer one
     and, separately, one nested inside it. The second process must **re-run**. This is the one
     correction whose failure is a false cache hit: an entry found, a recorded value handed back,
@@ -630,11 +630,11 @@ def test_concurrent_siblings_replay_when_the_resume_completes_them_the_other_way
 
     Both children call `step(implementer, ...)` with the same role, no inputs and the same parent
     head, so their `base` values are identical by construction and only the namespace in the
-    counter's key separates them. `test_journal.py`'s rule 1 is that the interleaving must not
-    decide who gets `n = 0` - "the interleaving differs on resume, so each child looks in its own
-    scope for a digest that is not there and **both re-run, forever, silently**" - and a test that
-    always released them in the same order could not see it. So the killed process completes them
-    `T-01` then `T-02` and the resume completes them the other way round.
+    counter's key separates them. `test_journal.py`'s scoped counter is that the interleaving must
+    not decide who gets `n = 0` - "the interleaving differs on resume, so each child looks in its
+    own scope for a digest that is not there and **both re-run, forever, silently**" - and a test
+    that always released them in the same order could not see it. So the killed process completes
+    them `T-01` then `T-02` and the resume completes them the other way round.
     """
     _sweep(
         world,
@@ -820,7 +820,7 @@ def _swapped_types(world: _World, variant: str, what: str) -> None:
 def test_an_input_dataclass_of_another_type_re_runs_the_step_rather_than_replaying_it(
     world: _World,
 ) -> None:
-    """`test_journal.py`'s rule 6, outer half: `Finding("T-01", 3)` and `Ticket("T-01", 3)`.
+    """The qualified type name, outer half: `Finding("T-01", 3)` and `Ticket("T-01", 3)`.
 
     "`asdict` erases the type, so `Finding("T-01", 3)` and `Ticket("T-01", 3)` fingerprint
     identically and changing an input's type while keeping its shape replays the old result." The
@@ -832,7 +832,7 @@ def test_an_input_dataclass_of_another_type_re_runs_the_step_rather_than_replayi
 
 
 def test_a_nested_input_dataclass_of_another_type_re_runs_the_step_too(world: _World) -> None:
-    """The nested half of `test_journal.py`'s rule 6, where the obvious implementation fails.
+    """The nested half of the qualified type name, where the obvious implementation fails.
 
     `dataclasses.asdict` recurses: it turns a nested dataclass into a plain `dict` before any
     walker sees it, so a type name attached to what `asdict` returned names the outer type and
@@ -962,7 +962,8 @@ def test_the_seeds_still_vary_what_the_cross_process_half_rests_on() -> None:
         f"the seeds no longer give one iteration order of frozenset(Restriction) each - they gave "
         f"{restrictions} - so a journal that iterated the set instead of sorting it would compute "
         f"the same digest in both of a sweep's processes and every sweep in this file would pass "
-        f"against rule 2's bug. Pick new seeds: `test_journal.py` lists six that were measured"
+        f"against the bug 'sort every set' is there to catch. Pick new seeds: `test_journal.py` "
+        f"lists six that were measured"
     )
     assert len(set(reprs.values())) == len(seeds), (
         f"the seeds no longer render the dataclass input's frozenset field one way each - they "

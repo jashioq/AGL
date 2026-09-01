@@ -18,7 +18,7 @@ class SplitParams:
     chunks: int = arg("-c", "--chunks", default=3, help="the most chunks to divide it into")
 
 
-@workflow(version="1.1")
+@workflow(version="2")
 async def split(run: Run[SplitParams]) -> None:
     plan = await run.step(planner(), request=run.params.request, chunks=run.params.chunks)
     children = {chunk.id: run.worktree(chunk.id) for chunk in plan.items}

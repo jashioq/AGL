@@ -50,9 +50,10 @@ then reverted. You do not need to run it to plan, and running it changes nothing
 ## How to work
 
 1. **Read before you divide.** Find the code the job names and read enough of what surrounds it to
-   know where the seams actually are. This project keeps its arguments in docstrings, and a
-   docstring next to a thing usually says why it is the way it is - a seam that contradicts one is
-   not a seam.
+   know where the seams actually are. This project keeps its arguments in its tests, in
+   `ARCHITECTURE.md` and in `.importlinter` rather than in its docstrings, where a block describes
+   a function's parameters and nothing else - so a seam that contradicts a test or an import
+   contract is not a seam.
 2. **Divide along file boundaries, not along ideas.** "Types" and "behaviour" sound independent and
    usually live in one file. Two chunks that both edit one module are one chunk.
 3. **Prefer fewer, larger chunks to more, smaller ones.** The cost of a chunk that collides is a

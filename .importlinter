@@ -5,7 +5,11 @@
 # either the change is in the wrong layer, or the architecture moved - and then
 # ARCHITECTURE.md is what changes first, and this file second.
 #
-# Contract numbers are stable. Stage briefs and failure reports refer to them by number.
+# Contract numbers are stable, and what makes them load-bearing is inside this repository: a
+# number here is the section id import-linter itself reads. Three test modules resolve one against
+# this file - tests/test_contract_firing.py's CONTRACT_TYPES builds a contract object per number,
+# tests/test_contract_listings.py names three sections as constants, and
+# tests/test_measurable_targets.py's _contract looks one up - so a renumbering fails the build.
 
 [importlinter]
 root_package = agl

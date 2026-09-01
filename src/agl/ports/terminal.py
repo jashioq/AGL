@@ -91,11 +91,22 @@ class Terminal(ABC):
         priority: int = 0,
         **params: object,
     ) -> T:
+        """Put what `view` returns in front of a person, and hand back what they answered.
+
+        :param view: re-invoked every frame, so it must be pure and cheap; not the `Screen` itself
+        :param priority: where an interactive screen joins the queue; no meaning for a passive one
+        :param params: handed to `view` unchanged on every invocation, so live objects stay live
+        :return: what the chosen response mapped to, or `None` where the screen carries none
+        """
         ...
 
     @property
     @abstractmethod
     def pending(self) -> Mapping[int, int]:
+        """How many screens are queued at each priority, excluding whatever is on screen now.
+
+        :return: a snapshot keyed by every priority asked for, carrying a zero where none waits
+        """
         ...
 
     @abstractmethod

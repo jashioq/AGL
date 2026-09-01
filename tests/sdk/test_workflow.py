@@ -413,8 +413,8 @@ def test_a_run_can_be_handed_the_counter_a_parent_is_already_using(tmp_path: Pat
     namespace in a run counts against one object. `run.worktree()` is what passes it -
     `test_run_worktree.py` asserts that it passes *this* object - and what this asserts is that
     there is a way in at all, because a counter built privately in `__post_init__` would look
-    identical in a run with one namespace, and would be the fix behind `test_journal.py`'s rule 1
-    silently removed the moment a child was cut.
+    identical in a run with one namespace, and would be the fix behind `test_journal.py`'s scoped
+    counter silently removed the moment a child was cut.
     """
     counter = Fingerprints()
     assert _run(NoParams(), tmp_path, fingerprints=counter).fingerprints is counter
