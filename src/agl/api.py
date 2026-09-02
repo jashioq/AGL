@@ -1,23 +1,23 @@
 from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass
 from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Final
 from agl.config import registry, sources, toml_file
 from agl.config.schema import Settings
 from agl.ports.errors import ConflictError, InputError, NotFoundError
-from agl.ports.history import History
 from agl.ports.home_layout import RunScope
 from agl.ports.ids import Namespace, ProjectName, RunLabel
 from agl.ports.run import RunSpec, checked_text
 from agl.ports.store import Store
-from agl.ports.tree_layout import TreesRoot, run_branch
+from agl.ports.tree_layout import BASE_DIRNAME, TreesRoot, run_branch, worktree_branch
 from agl.sdk import params
 from agl.sdk._engine import preflight
 from agl.sdk._engine.integration import Leases
 from agl.sdk._engine.services import Services
 from agl.sdk.workflow import Run, Workflow
 
-__all__ = ["Ask", "clear", "init", "list_workflows", "resume", "run", "workflow_help"]
+__all__ = ["Ask", "Cleared", "clear", "init", "list_workflows", "resume", "run", "workflow_help"]
 
 _TREES_DIRNAME: Final = ".agl-trees"
 
@@ -28,6 +28,14 @@ _BUILD_PROMPT: Final = (
 )
 
 type Ask = Callable[[str], str]
+
+@dataclass(frozen=True, slots=True)
+class Cleared:
+    """A cleared run's branches and the checkouts they were on, by name: none is there now."""
+
+    branches: tuple[str, ...]
+
+    worktrees: tuple[str, ...]
 
 async def run(
     services: Services,
@@ -53,11 +61,10 @@ async def run(
         raise ConflictError(
             f"the branch {branch!r} already exists, so run {str(label)!r} cannot start: AGL would "
             f"attach this run to that line of work and carry on from wherever it got to, with "
-            f"whatever `--from` said ignored. This is what an unfinished run leaves - "
-            f"`clear` keeps a branch whose work is not yet in the base ref, and takes that run's "
-            f"records away with everything else, so there is nothing left here for `agl clear "
-            f"{label} -f` to address. `git log {branch}` is what is on it, `git branch -D "
-            f"{branch}` frees the label, and any other label starts a run of its own."
+            f"whatever `--from` said ignored. AGL did not leave it - `clear` takes a run's own "
+            f"branch away with everything else it held, so a branch by this name with no record "
+            f"beside it is one something else made. `git log {branch}` is what is on it, `git "
+            f"branch -D {branch}` frees the label, and any other label starts a run of its own."
         )
 
     await preflight.check(services.agents, wf.fn)
@@ -106,7 +113,7 @@ async def resume(
             f"{wf.version!r}. A run stamps its workflow's version and AGL refuses a mismatch "
             f"rather than migrating one: every step already on this run's ledger was "
             f"produced by the workflow as it was then. Install {spec.workflow_version!r} to finish "
-            f"this run, or `agl clear {label} -f` and start it again on {wf.version!r}."
+            f"this run, or `agl clear {label}` and start it again on {wf.version!r}."
         )
 
     given = params.from_json(wf.params, spec.params)
@@ -116,32 +123,27 @@ async def resume(
     async with services.workspaces.hold(label):
         await _walk(services, wf, scope, spec, given)
 
-async def clear(
-    services: Services, project: ProjectName, label: RunLabel, *, force: bool = False
-) -> str | None:
+async def clear(services: Services, project: ProjectName, label: RunLabel) -> Cleared:
     scope = RunScope(project, label)
-    record = await services.store.read_record(scope)
-    if record is None:
+    if await services.store.read_record(scope) is None:
         raise NotFoundError(f"run {str(label)!r} does not exist - there is nothing to clear.")
 
+    worktrees: list[str] = []
+    branches: list[str] = []
     async with services.workspaces.hold(label):
         for namespace in await _under(services.store, scope):
             await services.workspaces.remove(label, namespace)
             await services.workspaces.discard(label, namespace)
+            worktrees.append(str(namespace))
+            branches.append(worktree_branch(label, namespace))
 
         await services.workspaces.remove(label, None)
-
-        branch = run_branch(label)
-        kept = (
-            None
-            if force
-            else await _kept(services.history, label, branch, RunSpec.from_json(record).base_ref)
-        )
-        if kept is None:
-            await services.workspaces.discard(label, None)
+        await services.workspaces.discard(label, None)
+        worktrees.append(BASE_DIRNAME)
+        branches.append(run_branch(label))
 
         await services.store.remove(scope)
-        return kept
+        return Cleared(branches=tuple(branches), worktrees=tuple(worktrees))
 
 def init(settings: Settings, cwd: Path, ask: Ask) -> Path:
     root = toml_file.git_root(cwd)
@@ -197,17 +199,6 @@ async def _under(store: Store, scope: RunScope) -> tuple[Namespace, ...]:
         found.append(namespace)
         found.extend(await _under(store, scope.inside(namespace)))
     return tuple(found)
-
-async def _kept(history: History, label: RunLabel, branch: str, base_ref: str) -> str | None:
-    if await history.contains(branch, base_ref):
-        return None
-    return (
-        f"the branch {branch!r} was kept: it is not yet in {base_ref!r}, and everything else this "
-        f"run held has been taken away, its records included. Until that branch goes, `agl run "
-        f"... -n {label}` is refused rather than started from the wrong place - so `git log "
-        f"{branch}` is what is still there, and `git branch -D {branch}` is what frees the label "
-        f"now. `agl clear {label} -f` is what would have deleted it in this call."
-    )
 
 def _points(points: Iterable[EntryPoint] | None) -> Iterable[EntryPoint]:
     return registry.installed() if points is None else points

@@ -736,8 +736,9 @@ async def test_a_run_can_be_started_from_a_ref_other_than_the_default(tmp_path: 
     resolved to, so a run started from somewhere else is a run whose `base_sha` is that branch's
     head. The two heads differ by a commit, which is what makes the assertion unsatisfiable by a
     harness that dropped the argument and resolved the default instead - and `base_ref` is asserted
-    beside it because the record keeps both, the ref for `clear` to ask about and the commit for
-    the resume hours later.
+    beside it because the record keeps both: the commit is what a resume hours later walks on, and
+    the ref is the name the operator typed, kept so that what a run says it started from is what
+    they asked for rather than whatever that name has since moved to.
 
     The second branch is put there through `harness.fakes.repository`, the bundle's own fake, which
     is the only vocabulary there is for "somebody else's work is already on a branch" - the same

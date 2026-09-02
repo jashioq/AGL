@@ -18,10 +18,10 @@ three assumptions; these are the ones a real repository can close:
     of the suite's assertions. Here it is a unified diff, and a `diff.external` in the repository's
     own configuration - an ordinary thing for a person to have - does not replace it with the output
     of some other program.
-  * **`clear`'s actual question** (gap 3). `agl clear` deletes a run's line of work only once the
-    base ref holds it, which in life means *merged*; the suite has no way to land anything, so
-    the ancestry it asserts is the kind that comes from committing in one place. Landing it takes
-    one raw git command from out here.
+  * **The question `contains` is actually asked** (gap 3). `Integration._conclude` puts it to a
+    landing, which in life means *merged*; the suite has no way to land anything, so the ancestry
+    it asserts is the kind that comes from committing in one place. Landing it takes one raw git
+    command from out here.
   * **`UpstreamUnavailable`** (gap 4). "Nothing here can make a repository unreachable, and
     inventing a member that could would be inventing a port." From out here it is a directory.
   * **What `default_ref` actually names** (gap 6). The suite asserts only that it resolves, twice
@@ -361,15 +361,15 @@ async def test_the_patch_is_a_unified_diff_that_the_repositorys_own_configuratio
 async def test_contains_is_true_once_a_line_of_work_has_been_merged_into_the_base(
     history: History, provider: WorkspaceProvider, repository: Path, base: str
 ) -> None:
-    """Gap 3: the shape `clear` actually meets, which the suite has no way to build.
+    """Gap 3: the shape the one consumer actually meets, which the suite has no way to build.
 
-    `agl clear` deletes a run's own line of work only if the base ref already holds it, and in
-    life that means merged. The suite can only commit in one place, so the ancestry it asserts is
-    the kind that comes from committing - a true case, a false case, a reflexive one and a
-    divergence - and
-    it says plainly that "the shape `clear` meets after a successful merge is not built here".
-    Landing it takes one raw git command, and the costs on either side of the answer are why it is
-    worth the command: a retained name is a stale ref, and a deleted one is the entire run.
+    `Integration._conclude` asks whether a landing the `Integrator` reported clean really did put
+    the source's head into the target, and in life that means merged. The suite can only commit in
+    one place, so the ancestry it asserts is the kind that comes from committing - a true case, a
+    false case, a reflexive one and a divergence - and it says plainly that the merged shape is not
+    built there. Landing it takes one raw git command, and what sits on either side of the answer is
+    why it is worth the command: a wrong `False` re-lands and then raises, and a wrong `True`
+    advances the parent's chain to a head its work is not on.
 
     `--no-ff` on purpose. A fast-forward would leave the merged state *equal* to the line of work,
     where an implementation answering on equality rather than on reachability would pass; a merge
@@ -388,8 +388,8 @@ async def test_contains_is_true_once_a_line_of_work_has_been_merged_into_the_bas
 
     assert landed != head, "a --no-ff merge did not make a commit of its own"
     assert await history.contains(head, landed) is True, (
-        "a line of work merged into the base is reported as not contained in it, so `agl clear` "
-        "would keep every run's branch forever - the answer this member exists to give"
+        "a line of work merged into the base is reported as not contained in it, so every landing "
+        "would be made twice and then raise - the answer this member exists to give"
     )
     assert await history.contains(landed, head) is False, (
         "ancestry has a direction, and the merge commit is not inside the work it merged"

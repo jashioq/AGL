@@ -31,7 +31,7 @@ class WorkspaceProvider(ABC):
     async def discard(self, label: RunLabel, namespace: Namespace | None) -> None:
         """Delete the line of work itself, which `remove` does not. Call `remove` first.
 
-        :param label: which run; whether its own line may go is a question for `History.contains`
+        :param label: which run; the same name `open` took, and what goes here does not come back
         :param namespace: which line of work, `None` for the run's own; absence succeeds silently
         """
         ...

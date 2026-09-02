@@ -1231,7 +1231,7 @@ _INVOCATIONS: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
     ("workflows", ("workflows",)),
     ("run", ("run", "probe", "-n", "auth", "-r", "add oauth")),
     ("resume", ("resume", "auth")),
-    ("clear", ("clear", "auth", "-f")),
+    ("clear", ("clear", "auth")),
 )
 
 class _WentOutside(BaseException):

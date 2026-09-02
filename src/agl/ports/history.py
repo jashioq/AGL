@@ -71,7 +71,7 @@ class History(ABC):
 
     @abstractmethod
     async def contains(self, ancestor: str, descendant: str) -> bool:
-        """The one ancestry question AGL asks, before it deletes or keeps: is X already in Y.
+        """The one ancestry question AGL asks, before it settles a landing: is X already in Y.
 
         :param ancestor: the state that must already be accounted for
         :param descendant: the state that must already account for it

@@ -68,11 +68,12 @@ not entitle anybody to believe.
    path `changed_files` named, and that identical states leave nothing to read. A patch in a format
    no reviewer has seen passes all four.
 
-3. **`clear`'s actual question.** `clear` deletes a run's line of work only if it is already
-   contained in the base ref, which in life means *merged*. Landing work is `integration.py`'s,
-   this suite has no way to land anything, and so the ancestry asserted here is the kind that comes
-   from committing in one place - a true case, a false case, a reflexive one and a divergence. The
-   shape `clear` meets after a successful merge is not built here.
+3. **The actual question `contains` is asked.** `Integration._conclude` asks it of a landing - is
+   the source's head in what `land` reported - which in life means *merged*. Landing work is
+   `integration.py`'s, this suite has no way to land anything, and so the ancestry asserted here is
+   the kind that comes from committing in one place - a true case, a false case, a reflexive one
+   and a divergence. The shape the engine meets after a successful merge is not built here, and
+   that is the whole of the gap, there being exactly one consumer and its question being the merge.
 
 4. **`UpstreamUnavailable`.** Nothing here can make a repository unreachable, and inventing a member
    that could would be inventing a port. `NotFoundError` is the one refusal this suite provokes.
@@ -107,10 +108,10 @@ not entitle anybody to believe.
 ## Where the port is silent, and what this suite assumed
 
 **That a state contains itself.** The port asks "is X already in Y", and its one consumer decides
-between tidying up and destroying a run. A run whose workflow committed nothing sits exactly at its
-base: there is nothing to lose and nothing to keep, so `clear` must tidy it, and the only way that
-happens is `contains(head, head)` answering `True`. That is the port's answer, argued from the port,
-and not a fact borrowed from one tool that happens to agree.
+whether a merge it just asked for actually happened. A source that has committed nothing since the
+target last took its work is already in it, so the landing is settled rather than re-attempted, and
+the only way that happens is `contains(head, head)` answering `True`. That is the port's answer,
+argued from the port, and not a fact borrowed from one tool that happens to agree.
 
 **That an empty patch is empty rather than exactly `""`.** Asserted as "nothing to read" after
 stripping, because pinning the string would pin whether a trailing newline belongs to a patch with
@@ -270,7 +271,8 @@ class HistoryContract(HistoryChangeContract):
 
         assert isinstance(ref, str) and ref, (
             f"default_ref answered {ref!r}. It is what `agl run` starts from when the user passes "
-            f"no --from, and it goes into the run's record as `base_ref` for a resume to read"
+            f"no --from, and it goes into the run's record as `base_ref`, the name a run says "
+            f"it started from"
         )
         assert await history.default_ref() == ref, (
             "default_ref answered differently twice in a row. A run asks once, pins what it "
@@ -374,22 +376,22 @@ class HistoryContract(HistoryChangeContract):
     ) -> None:
         """Is X already in Y - a true case, a false case, a reflexive one, and a divergence.
 
-        Asked in one place: `clear` deletes a run's own line of work only if it is already
-        contained in the base ref, and otherwise keeps it and says so. The costs are
-        asymmetric - a retained name is a stale ref, a deleted one is the entire run - so all four
-        answers below decide between "tidy up" and "leave it alone", and an implementation that
-        answers a constant is one that either never tidies or always destroys.
+        Asked in one place: `Integration._conclude` puts it to a landing the `Integrator` has just
+        reported clean - is the source's head in the head that came back - and lands once more if
+        the answer is no, then raises `InternalError`. So all four answers below decide between
+        "settled" and "that merge did not happen", and an implementation answering a constant either
+        never settles a landing or settles one that moved nothing.
 
-        **The reflexive case is the port's answer and not one tool's.** A run whose workflow
-        committed nothing sits exactly at its base: there is nothing to lose, nothing to keep, and
-        `clear` has to tidy it - which happens only if a state is already inside itself. That is
-        the reading, argued from the consumer the port names.
+        **The reflexive case is the port's answer and not one tool's.** A source that has committed
+        nothing since the target last took its work is already inside it, and the landing is done -
+        which holds only if a state is already inside itself. That is the reading, argued from the
+        consumer the port names.
 
-        The divergence is the shape `clear` actually meets. Two children cut from one base, each
-        with work of its own, and neither contains the other: that is the state a run is in before
-        anything is integrated, and answering `True` there is how a `clear` deletes work nobody has
-        landed. `is True` and `is False` rather than truthiness, because a `bool` is what the port
-        answers with and a truthy string would satisfy everything else here.
+        The divergence is the state a landing starts from. Two children cut from one base, each with
+        work of its own, and neither contains the other: answering `True` there is how a merge that
+        never moved anything is recorded as one that did, and the parent's chain advances to a head
+        its work is not on. `is True` and `is False` rather than truthiness, because a `bool` is
+        what the port answers with and a truthy string would satisfy everything else here.
         """
         child = await provider.open(LABEL, CHILD, base)
         sibling = await provider.open(LABEL, SIBLING, base)
@@ -410,24 +412,24 @@ class HistoryContract(HistoryChangeContract):
 
         assert await history.contains(start, first) is True, (
             f"{start!r} is where {first!r} was committed from and contains says it is not part of "
-            f"it. This is `clear`'s question with the answer that lets it tidy up"
+            f"it. This is the question a settled landing has to answer yes"
         )
         assert await history.contains(start, second) is True
         assert await history.contains(first, start) is False, (
             f"contains says the state {first!r} was committed *from* already holds it. Ancestry "
             f"has a direction: an implementation that answers on membership of one repository "
-            f"rather than on reachability would delete a run's work the moment `clear` asked"
+            f"rather than on reachability would settle a landing that moved nothing"
         )
         assert await history.contains(first, second) is False, (
             "two lines of work that diverged from one base contain each other, which is the state "
-            "every run is in before anything is integrated - and answering True there is how a "
-            "`clear` deletes work nobody has landed"
+            "every landing starts from - and answering True there is how a merge that moved "
+            "nothing is concluded as one that landed"
         )
         assert await history.contains(second, first) is False
         assert await history.contains(first, first) is True, (
-            "a state does not contain itself, so a run that committed nothing sits at its base "
-            "with nothing to lose and `clear` keeps its line of work forever rather than tidying "
-            "up. The question is 'is X already in Y', and X is in X"
+            "a state does not contain itself, so a source with nothing new on it is landed, landed "
+            "again and then reported as AGL's own bug. The question is 'is X already in Y', and X "
+            "is in X"
         )
         assert await history.contains(start, start) is True
 

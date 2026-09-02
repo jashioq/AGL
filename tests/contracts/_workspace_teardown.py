@@ -1,11 +1,12 @@
-"""The two teardown verbs, why they are two, and the ordering `clear` calls them in.
+"""The two teardown verbs, why they are two, and the ordering every caller uses.
 
 Split out of `workspace.py` along a line the port draws itself. `remove` takes the isolated place
 back and leaves the line of work it carried; `discard` deletes the line of work itself. They are
-separate because `clear` needs them apart: it takes back every isolated place a run holds
-unconditionally, deletes the child lines of work unconditionally, and deletes the run's own line of
-work **only if** `History` says it is already contained in the base ref. A single teardown verb
-could not express that, and this port holds no policy about which of the two is right when.
+separate because the second cannot be done while the first is outstanding - a branch a checkout is
+sitting on is one `git branch -D` refuses - which is what "call `remove` first" on the port means
+and what an implementation is within its rights to enforce. One verb would bury that ordering
+inside itself, and this port holds no policy about when either half is right: `api.clear` is the
+only caller and it spends both, on every address, every time.
 
 ## How two verbs are told apart from outside
 
@@ -19,10 +20,10 @@ what a *reopen* afterwards hands back, and the port says both halves of it:
   new workspace starts at, with the committed work no longer in it.
 
 An implementation where those two look the same has one teardown verb wearing two names, and
-`clear`'s conditional deletion means nothing.
+nothing outside it can tell whether a run's line of work is still there.
 
-**Tolerance of absence is pinned twice**, because `clear` after a crash is the ordinary case rather
-than the exceptional one, and a teardown that raises on a half-finished setup is a teardown every
+**Tolerance of absence is pinned twice**, because `agl clear` after a crash is the ordinary case
+rather than the exceptional one, and a teardown that raises on a half-finished setup is one every
 caller learns to wrap in a bare `except` - which is how the next bug gets hidden.
 
 `WorkspaceContract` in `workspace.py` inherits this class. Implementers subclass that one, never
@@ -56,12 +57,12 @@ class WorkspaceTeardownContract:
     async def test_remove_takes_the_place_back_and_leaves_the_line_of_work_to_be_cut_again(
         self, provider: WorkspaceProvider, base: str
     ) -> None:
-        """The half `clear` runs unconditionally, and the half that is not destructive.
+        """The half that is not destructive, and the one the other half needs run first.
 
         Both directions are asserted, because either one alone admits a wrong implementation. The
         committed work has to survive - `remove` gives back a checkout that can be cut again from
         a name that still exists, and an implementation that deleted the name here would make
-        `discard` a second word for the same verb and `clear`'s conditional deletion a fiction.
+        `discard` a second word for the same verb and the ordering the port insists on a fiction.
         The *uncommitted* work has to be gone - the isolated place was taken back, and a `remove`
         that left the working tree where it was took nothing back at all.
 
@@ -84,7 +85,7 @@ class WorkspaceTeardownContract:
             f"after a remove, reopening handed back a workspace at {reopened!r} rather "
             f"than at {landed!r}, the head its line of work was committed to. `remove` takes the "
             f"place back and the line of work survives - the verb that deletes the line of work "
-            f"is `discard`, and `clear` calls it only under a condition this one ignores"
+            f"is `discard`, and this one has to leave it something to delete"
         )
         assert read(again, TRACKED) == body("work that outlives its checkout"), (
             "the committed work is not in the reopened checkout, so it was cut from somewhere "
@@ -93,7 +94,7 @@ class WorkspaceTeardownContract:
         assert read(again, SCRATCH) is None, (
             f"{SCRATCH} was never committed and is still there after the place was taken back and "
             f"handed out again. `remove` takes the isolated place back; one that left the working "
-            f"tree exactly as it stood took nothing back, and `clear` frees nothing"
+            f"tree exactly as it stood took nothing back, and freed nothing"
         )
 
     async def test_discard_after_remove_deletes_the_line_of_work_itself(
@@ -137,7 +138,7 @@ class WorkspaceTeardownContract:
     async def test_removing_and_discarding_what_is_not_there_succeeds_and_says_nothing(
         self, provider: WorkspaceProvider, base: str
     ) -> None:
-        """`clear` after a crash is the ordinary case, not the exceptional one.
+        """`agl clear` after a crash is the ordinary case, not the exceptional one.
 
         Both verbs, on both kinds of address - a namespace and the run's own `None` - against a run
         that never provisioned anything, and then both of them twice over one that did. A teardown

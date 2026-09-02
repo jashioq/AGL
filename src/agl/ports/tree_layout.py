@@ -5,6 +5,7 @@ from agl.ports.errors import InputError, InternalError
 from agl.ports.ids import Namespace, RunLabel
 
 __all__ = [
+    "BASE_DIRNAME",
     "TreesRoot",
     "base_worktree",
     "run_branch",
@@ -13,7 +14,9 @@ __all__ = [
     "worktree_dir",
 ]
 
-_BASE_DIRNAME: Final = "_base"
+# Public because a caller with no `TreesRoot` still has to name the run's own checkout - `api.clear`
+# lists what it took away, and the run's own is the entry that has no `Namespace` to be named by.
+BASE_DIRNAME: Final = "_base"
 # Refs are files under `refs/heads/`, so `agl/<label>` and `agl/<label>/<name>` cannot both exist -
 # one would have to be a file and a directory at once - in either creation order. The infix is what
 # keeps them apart, and `git check-ref-format` passes each name on its own and never sees the pair.
@@ -48,7 +51,7 @@ def base_worktree(trees: TreesRoot, label: RunLabel) -> Path:
     :param label: which run; it takes no namespace, and no `Namespace` can spell `_base`
     :return: `<trees>/<label>/_base/`, on the branch `run_branch` composes
     """
-    return run_trees_dir(trees, label) / _BASE_DIRNAME
+    return run_trees_dir(trees, label) / BASE_DIRNAME
 
 def worktree_dir(trees: TreesRoot, label: RunLabel, namespace: Namespace) -> Path:
     """One child checkout, a sibling of the run's own and of every other child.

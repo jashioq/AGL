@@ -171,8 +171,8 @@ async def test_answers_reads_gits_yes_and_no_off_the_exit_status(
     """`merge-base --is-ancestor` is the shape `answers` exists for: 0 is yes and 1 is no.
 
     Both directions, because an implementation that answered a constant would pass one of them -
-    and `History.contains` is the member that decides whether `clear` tidies a run up or destroys
-    it, so a constant there is not a small mistake.
+    and `History.contains` is the member that decides whether a landing happened, so a constant
+    there is not a small mistake.
     """
     (repository / "second.txt").write_text("second\n", encoding="utf-8")
     _git(repository, "add", "second.txt")

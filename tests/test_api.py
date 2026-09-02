@@ -335,18 +335,17 @@ async def test_the_same_label_twice_is_refused_in_the_refusals_own_words(tmp_pat
 
 @pytest.mark.asyncio
 async def test_a_deliverable_branch_that_already_exists_refuses_the_run(tmp_path: Path) -> None:
-    """The refusal, and the defect that sits behind the asymmetry `clear` is argued on.
+    """The refusal, and the silent misdirection underneath it.
 
-    "A retained branch costs a stale ref" is what the `git branch -d` decision is priced on, and
-    the retained side is worse than that: after `clear` keeps `agl/auth`, a later `agl run ... -n
-    auth --from main` takes `WorkspaceProvider.open`'s **attaching** path - the branch is there, so
-    `worktree add <path> <branch>` rather than `add -b <branch> ... <base>` - and the run starts
-    from the old tip with `--from` silently ignored, because `base` is consulted only when
-    provisioning.
+    A branch standing where the store has nothing is the state `WorkspaceProvider.open` takes its
+    **attaching** path in - `worktree add <path> <branch>` rather than `add -b <branch> ... <base>`
+    - so a later `agl run ... -n auth --from main` starts from the old tip with `--from` silently
+    ignored, because `base` is consulted only when provisioning.
 
-    The state is arranged through the repository rather than through a `clear`, which is what makes
-    this a test about `run`: what it needs is a world in which `agl/auth` names something and the
-    store does not, and how it got that way is `tests/test_clear.py`'s question. `--from` is passed
+    Nothing of AGL's leaves that state: a run's record is written before its checkout is cut and
+    taken away after its branches are, so what this arranges through the repository is a branch
+    somebody made by hand or one that outlived the repository AGL was pointed at. Arranging it that
+    way is also what makes this a test about `run` rather than about `clear`. `--from` is passed
     explicitly, because the flag being ignored is the failure this refusal exists to prevent.
 
     Both halves of "leaves nothing behind" are asserted: no record, because a refusal in front of
@@ -362,9 +361,10 @@ async def test_a_deliverable_branch_that_already_exists_refuses_the_run(tmp_path
 
     assert exit_code_for(caught.value) == 4
     assert branch in str(caught.value), "the refusal does not name the branch that is in the way"
-    assert f"agl clear {LABEL} -f" in str(caught.value), (
-        "the refusal does not say how to free the label. `-f` is the spelling that reaches this "
-        "state: the branch is unmerged, which is why `clear` kept it in the first place"
+    assert f"git branch -D {branch}" in str(caught.value), (
+        "the refusal does not say how to free the label. `agl clear` is not the answer and must "
+        "not be offered as one: it takes a run's branch away with everything else it held, so by "
+        "the time a branch stands alone there is no record left for it to address"
     )
     assert await harness.services.store.read_record(SCOPE) is None, (
         "a run refused before `write_record` left a record behind, so an operator now has to clear "
@@ -659,10 +659,11 @@ async def test_the_same_ref_reaching_git_anyway_is_still_one_of_agls_own_errors(
     """The backstop under the check above, asserted through the port rather than around it.
 
     The caller-side check is about the *message*; this is about the guarantee. `History.resolve` is
-    a port anything may call - `api.resume` reads its ref back off a record, `api.clear` asks
-    `contains` about one - and the check in `api.run` guards exactly one of those call sites. So the
-    adapter translates the encode failure itself, and the value that used to escape as a
-    `UnicodeEncodeError` comes back as an `InputError` like every other unusable input.
+    a port member anything may call, and the check in `api.run` guards the one call site in `src/`
+    that does - a call site rather than the member, so a second caller would arrive at the adapter
+    with no check in front of it at all. So the adapter translates the encode failure itself, and
+    the value that used to escape as a `UnicodeEncodeError` comes back as an `InputError` like
+    every other unusable input.
 
     Asserted here as well as in `tests/adapters/test_git_runner.py` because the two files are about
     different things: that one is about `_runner.py`'s mapping, and this is about the seam - the
@@ -741,10 +742,14 @@ def test_every_operation_the_module_declares_is_built() -> None:
 
     `workflow_help` is on `__all__` beside the five verbs `agl` dispatches and is not one of them:
     it is the operation behind `agl workflows <name>`, which extends that grammar, and
-    `cli/commands/workflows.py` is where the deviation is argued.
+    `cli/commands/workflows.py` is where the deviation is argued. `Ask` and `Cleared` are the two
+    entries that are not operations at all - the callable `init` asks its one question through, and
+    the value `clear` answers with - and they are here because a caller annotating either has to be
+    able to name it.
     """
     assert set(api.__all__) == {
         "Ask",
+        "Cleared",
         "clear",
         "init",
         "list_workflows",

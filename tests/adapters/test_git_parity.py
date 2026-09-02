@@ -554,13 +554,13 @@ async def test_a_move_is_a_rename_from_both_and_a_rewritten_move_is_a_pair_from_
 async def test_contains_agrees_including_the_reflexive_case(
     pair: Mapping[str, _Bundle],
 ) -> None:
-    """`agl clear`'s one question, in the four shapes it meets.
+    """`Integration._conclude`'s one question, in the four shapes it meets.
 
-    The costs are asymmetric - a retained name is a stale ref, a deleted one is the entire run - so
-    an implementation answering differently from the other decides differently between tidying up
-    and destroying work. The reflexive case is the port's own reading rather than a fact borrowed
-    from git: a run whose workflow committed nothing sits exactly at its base, and `clear` tidies
-    it only if a state is already inside itself.
+    An implementation answering differently from the other decides differently about whether a merge
+    happened, and the two failures are not symmetric: a wrong `False` re-lands and then raises, a
+    wrong `True` moves the parent's chain to a head its work is not on. The reflexive case is the
+    port's own reading rather than a fact borrowed from git: a source with nothing new on it is
+    already in the target, and the landing settles only if a state is already inside itself.
 
     `is True` and `is False` are not spelled here because the answers are compared as a tuple; the
     contract suite pins the type of each one against each implementation separately.

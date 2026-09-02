@@ -346,19 +346,20 @@ step, because it costs a turn to re-learn a state of the world preflight already
 `tests/sdk/test_preflight.py` asserts the over-approximation as behaviour and measures the two
 halves against each other rather than separately.
 
-**A run's label is held in two places and `clear` gives back only one of them.** `clear` deletes
-`agl/<label>` only when the base ref already contains it, and otherwise keeps it and warns, on an
-asymmetric cost: a retained branch costs a stale name, a deleted one costs the entire run. It
-removes the records either way — they are the enumeration of every namespace it still has to take
-back, which is why they go last — so what is left is a label that reads as free to the `Store` and
-is taken in the repository. `api.run` therefore asks `History.exists(run_branch(label))` as well as
-reading the record, and refuses before it has written anything. Without that check
-`WorkspaceProvider.open` takes its attaching path, because `base` is consulted only when
-provisioning: the new run continues the old branch from its tip with `--from` silently ignored, and
-nothing anywhere says so. What frees the label is deleting the ref, and not `agl clear -f`, which
-by then has no record left to address.
-`tests/test_clear.py::test_a_kept_branch_refuses_the_next_run_until_the_branch_goes` walks the
-whole loop.
+**A run's label is held in two places, and the repository has to be asked as well as the store.**
+`api.run` asks `History.exists(run_branch(label))` beside reading the record, and refuses before it
+has written anything. Without that check `WorkspaceProvider.open` takes its **attaching** path,
+because `base` is consulted only when provisioning: the new run continues that branch from its tip
+with `--from` silently ignored, and nothing anywhere says so. The two questions look like one and
+are not. `clear` takes a run's records and every branch it held away together, and `api.run` writes
+a record before it cuts a checkout, so nothing of AGL's leaves `agl/<label>` standing with nothing
+recorded beside it — which is what makes the check look redundant and is exactly why it is not: what
+it catches is somebody's own `git branch agl/auth`, or a name that outlived the repository AGL was
+pointed at. `git branch -D` is what frees such a label, a second `agl clear` having no record to
+address.
+`tests/test_api.py::test_a_deliverable_branch_that_already_exists_refuses_the_run` pins the refusal,
+and `tests/test_clear.py::test_a_cleared_label_starts_a_fresh_run_because_clear_left_no_branch_behind`
+walks the round trip.
 
 **A view must be pure, and `TextInput.maps` is excluded from comparison because it is.** A view is
 re-invoked every frame and builds a fresh function object each time, and two lambdas are never
@@ -507,6 +508,17 @@ The reasoning is the point — without it these get re-proposed.
   whole of it, and that value becomes `Entry.value`; every other tool answers with a `ToolResult`
   that each adapter turns into content for the model and that reaches no store. One class buries
   that in `handler is None`.
+- **No safe mode on `agl clear`.** It takes the whole run — every checkout, every branch, the run's
+  own included, and the records — whether the work is uncommitted, committed and unlanded, or
+  already in the base ref, and no flag changes that. The obvious alternative is a `git branch -d`
+  gate on the run's own branch, keeping it when `History.contains` says the base ref does not hold
+  it yet, with a `-f` to override. What that buys is a label that reads as free to the `Store` and
+  is taken in the repository; a warning an operator cannot act on, because the same call removed the
+  record any second `agl clear` would need; and a `--force` everybody learns to type by reflex,
+  which is a confirmation nobody reads. The honest ordering is the other way round — `git log
+  agl/<label>` before the verb, and a listing of the branches and the checkouts after it, so what
+  went is on the terminal rather than in a manual. `api.clear` therefore answers with a `Cleared`
+  rather than printing anything, `api.py` starting no output.
 - **No `Integrator.revert()`.** Undoing a landing that succeeded is `Workspace.restore(head)`,
   which already exists; a second spelling would be owed by every integrator.
 - **No auto-generated commit message.** The message is domain vocabulary — `implement T-01` is

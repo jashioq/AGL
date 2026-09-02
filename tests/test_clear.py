@@ -1,10 +1,15 @@
-"""`agl clear <label> [-f]` from the library side: `git branch -d` semantics, and the order.
+"""`agl clear <label>` from the library side: everything the run held, the order, and the listing.
 
-The acceptance criterion is one sentence - "`clear` on an unmerged branch warns and keeps it; `-f`
-deletes" - and both halves are asked of `FakeServices.repository`, which is the shared
-`FakeRepository` behind all three git fakes. "The branch is still there" and "the branch is gone"
-are therefore questions about the same object `api.clear` acted on through the ports, rather than
-about a note some test double took.
+The acceptance criterion is one sentence - "`clear` takes a run away whole, its own branch included,
+whether or not the base ref holds that branch's work" - and it is asked of
+`FakeServices.repository`, which is the shared `FakeRepository` behind all three git fakes. "The
+branch is gone" is therefore a question about the same object `api.clear` acted on through the
+ports, rather than about a note some test double took.
+
+**What `clear` answers with is the operator's only record of what went.** `api.py` starts no output,
+so the listing has to be a value: `Cleared` pairs each checkout with the branch it was on, and
+`cli/commands/clear.py` prints it. Both halves are asserted here, because a `clear` that took
+everything and reported nothing would satisfy every other test in this module.
 
 **Everything is `container.fakes()`** - no network, no git, no process - which is target #8, and it
 is what lets a run with a child and a grandchild in it be built, cleared and asserted in
@@ -31,10 +36,10 @@ its rights to refuse to delete a line of work that something still has open" - a
 one such implementation, so a `clear` written the other way round would raise here. The sequence
 test states it anyway rather than resting on that, because the fake is free to stop being strict.
 
-**`base_ref` and not `base_sha`.** The pin cannot have moved, so a containment question asked about
-it answers "merged" exactly when the run committed nothing - the branch decision inverted. The
-unmerged and merged tests below are the same run with `main` moved between them, so a `clear` that
-asked about `base_sha` would fail the second and pass the first.
+**Nothing is asked about the branch.** The acceptance test is parametrised over the same run with
+`main` moved on top of it and left behind it, and asserts one outcome for both - which is what says
+the containment question is gone rather than merely answering "yes" more often. `clear` reading a
+`RunSpec` at all would show up there.
 
 ## Two locks, and the two tests that are about them
 
@@ -77,6 +82,7 @@ from agl.ports.ids import Namespace, ProjectName, RunLabel, StepName
 from agl.ports.run import JsonValue, RunSpec
 from agl.ports.store import Store
 from agl.ports.tree_layout import (
+    BASE_DIRNAME,
     TreesRoot,
     base_worktree,
     run_branch,
@@ -96,11 +102,9 @@ SCOPE: Final = RunScope(PROJECT, LABEL)
 
 # The run's two lines of work below `_base`, at two depths: `sub-b` is `T-01`'s child in the store
 # and `T-01`'s sibling in the trees root, which is the asymmetry that makes the traversal below a
-# traversal. `_BASE` is the trees layout's own word for the run's own checkout, written out because
-# these tests read the call sequence and `namespace=None` has to appear in it as something.
+# traversal.
 CHILD: Final = Namespace("T-01")
 GRANDCHILD: Final = Namespace("sub-b")
-_BASE: Final = "_base"
 
 # The file the repository is seeded with.
 SEEDED: Final = "src/a.txt"
@@ -210,9 +214,9 @@ async def _start(
     """The first invocation: `agl run <name> -n auth`, with this module's entry points."""
     await api.run(harness.services, PROJECT, name, LABEL, (), points=points)
 
-async def _clear(harness: container.FakeServices, *, force: bool = False) -> str | None:
-    """`agl clear auth [-f]`, and the warning it answers with."""
-    return await api.clear(harness.services, PROJECT, LABEL, force=force)
+async def _clear(harness: container.FakeServices) -> api.Cleared:
+    """`agl clear auth`, and the listing of what it took away."""
+    return await api.clear(harness.services, PROJECT, LABEL)
 
 def _merged(harness: container.FakeServices) -> None:
     """Move the base ref up to the run's own branch: the world in which the work has landed.
@@ -227,94 +231,95 @@ def _merged(harness: container.FakeServices) -> None:
 
 # --- the acceptance criterion ---------------------------------------------------------------------
 
+@pytest.mark.parametrize("landed", [False, True])
 @pytest.mark.asyncio
-async def test_clear_on_an_unmerged_branch_warns_and_keeps_it(tmp_path: Path) -> None:
-    """Half one of the criterion, and the asymmetry: "a retained branch costs a stale ref, a
-    deleted one costs the entire run".
+async def test_clear_deletes_the_runs_own_branch_whether_or_not_the_base_ref_holds_it(
+    tmp_path: Path, landed: bool
+) -> None:
+    """The criterion: one run, the base ref left behind it and then moved on top of it, and the same
+    outcome both times.
 
-    The warning is asserted to *be* the answer rather than to have been printed - `api.clear`
-    returns it, because a library caller and a CLI both have to see it and `api.py` starts no
-    output. Everything else is asserted gone in the same breath: the point of the sentence is that
-    this run was cleared and one name was kept, not that the command declined to do anything.
+    Parametrised rather than written twice, because the claim *is* that the two worlds are one case:
+    a `clear` that asked anything at all would answer differently in them, and the parameter is the
+    only thing that differs. `base_sha` cannot move and `base_ref` can, so the arrangement is also
+    what a containment question would have been asked about - and asserting the same tip of `None`
+    on both sides is what says no such question survives in `api.clear`.
+
+    Everything is asserted gone in one breath, the run's records and its trees directory included:
+    "took the branch as well" is the half that changed and "took everything else" is the half that
+    must not have changed with it.
     """
     harness = _fakes(tmp_path)
     await _start(harness)
     branch = run_branch(LABEL)
     assert harness.repository.tip(branch) != await harness.services.history.resolve("main"), (
-        "the run committed nothing, so its branch is already contained and this test is vacuous"
+        "the run committed nothing, so its branch is contained either way and the parameter is idle"
     )
+    if landed:
+        _merged(harness)
 
-    kept = await _clear(harness)
+    cleared = await _clear(harness)
 
-    assert harness.repository.tip(branch) is not None, (
-        "the run's own branch was deleted although the base ref does not contain it yet. A clear "
-        "deletes `agl/<label>` only if merged into the base ref, and the cost of getting this "
-        "wrong is the entire run"
+    assert harness.repository.tip(branch) is None, (
+        "the run's own branch is still there. `clear` takes a run away whole - what was on that "
+        "branch and nowhere else is gone with it, and a branch left standing is a label that reads "
+        "as free to the `Store` and is taken in the repository"
     )
-    assert kept is not None, "the branch was kept and nothing said so"
-    assert branch in kept and "-f" in kept
+    assert branch in cleared.branches, "the branch was deleted and the listing did not name it"
     assert await harness.services.store.read_record(SCOPE) is None, (
-        "the run's records survived a clear that kept only its branch"
+        "the run's records survived a clear that took its branch"
     )
     assert not run_trees_dir(_trees(tmp_path), LABEL).exists()
 
 @pytest.mark.asyncio
-async def test_force_deletes_the_unmerged_branch(tmp_path: Path) -> None:
-    """Half two: `-f` is `git branch -D`, and it asks nothing at all.
+async def test_a_run_that_committed_nothing_still_has_its_branch_and_records_taken_away(
+    tmp_path: Path,
+) -> None:
+    """The ordinary end of an ordinary run: no step, so the branch sits exactly at its base.
 
-    The same run as above, so the only difference between the two outcomes is the flag - which is
-    what makes this a test about `force` rather than about whichever branch happened to be
-    contained.
-    """
-    harness = _fakes(tmp_path)
-    await _start(harness)
-
-    kept = await _clear(harness, force=True)
-
-    assert harness.repository.tip(run_branch(LABEL)) is None, (
-        "`-f` is `git branch -D` and left the branch standing"
-    )
-    assert kept is None, "a forced clear kept nothing and warned about it anyway"
-
-@pytest.mark.asyncio
-async def test_a_merged_branch_is_deleted_without_force(tmp_path: Path) -> None:
-    """The other side of the containment question, so that the two above are about an *answer*.
-
-    A `clear` that never deleted anything unforced would satisfy the warning test word for word,
-    and a `contains` wired backwards would satisfy this one. They are the same run with the base
-    ref moved on top of the run's branch in between, which is also what makes the choice of ref
-    visible: `base_sha` is the commit the run was cut from and cannot move, so a `clear` asking
-    about the pin would answer "not merged" here and keep the branch.
-    """
-    harness = _fakes(tmp_path)
-    await _start(harness)
-    _merged(harness)
-
-    kept = await _clear(harness)
-
-    assert harness.repository.tip(run_branch(LABEL)) is None, (
-        "the base ref contains this run's work and its branch was kept anyway, which is `git "
-        "branch -d` refusing to tidy up the one case it exists for"
-    )
-    assert kept is None
-
-@pytest.mark.asyncio
-async def test_a_run_that_committed_nothing_is_contained_and_goes_quietly(tmp_path: Path) -> None:
-    """The ordinary end of an ordinary run: nothing was recorded, so nothing is at risk.
-
-    `FakeRepository.contains` is reflexive and `ports/history.py` says both implementations agree
-    there, so a run whose workflow took no step sits exactly at its base and `clear` tidies it with
-    no flag and no warning. Worth its own line because it is the case an operator meets most often
-    and the one a containment check written with a strict "ahead of" would get wrong.
+    Worth its own line because it is the case an operator meets most often, and because it is the
+    one where a `clear` that had quietly kept a rule about what may go would still look right: the
+    branch is contained here whatever question is asked about it.
     """
     harness = _fakes(tmp_path)
     await _start(harness, "quiet")
 
-    kept = await _clear(harness)
+    cleared = await _clear(harness)
 
-    assert kept is None
     assert harness.repository.tip(run_branch(LABEL)) is None
+    assert cleared.branches == (run_branch(LABEL),)
     assert await harness.services.store.read_record(SCOPE) is None
+
+@pytest.mark.asyncio
+async def test_clear_answers_with_every_checkout_and_branch_it_took_away_in_removal_order(
+    tmp_path: Path,
+) -> None:
+    """The listing, over the run with something at every depth, pinned as a value and not as output.
+
+    `Cleared`'s two tuples are positional pairs - the checkout, and the branch it was on - so a
+    listing built out of step with itself would put a child's name beside the run's own branch. The
+    order is the order of the removals rather than a sorting, and `Store.namespaces` promises "the
+    same recorded set in the same order every time", so it is a thing this can assert at all.
+
+    The run's own goes last in both, because it is removed last, and it is the entry with no
+    namespace to be named by. That is the one an operator is looking for, and the one `clear` used
+    to keep.
+    """
+    harness = _fakes(tmp_path)
+    await _start(harness)
+
+    cleared = await _clear(harness)
+
+    assert cleared.worktrees == (str(CHILD), str(GRANDCHILD), BASE_DIRNAME)
+    assert cleared.branches == (
+        worktree_branch(LABEL, CHILD),
+        worktree_branch(LABEL, GRANDCHILD),
+        run_branch(LABEL),
+    )
+    for branch in cleared.branches:
+        assert harness.repository.tip(branch) is None, (
+            f"the listing named {branch!r} as taken away and it is still there"
+        )
 
 # --- the traversal, and the order it happens in ---------------------------------------------------
 
@@ -339,7 +344,7 @@ async def test_every_namespace_at_every_depth_comes_away(tmp_path: Path) -> None
         assert worktree_dir(trees, LABEL, namespace).is_dir(), "the run never cut this checkout"
         assert harness.repository.tip(worktree_branch(LABEL, namespace)) is not None
 
-    await _clear(harness, force=True)
+    await _clear(harness)
 
     for namespace in (CHILD, GRANDCHILD):
         assert not worktree_dir(trees, LABEL, namespace).exists(), (
@@ -446,7 +451,7 @@ class _RecordingStore(Store):
 def _named(namespace: Namespace | None) -> str:
     """How a namespace appears in the call sequence. `None` is the run's own place, which the
     trees layout calls `_base` and which `ids.py` refuses as a `Namespace` in every spelling."""
-    return _BASE if namespace is None else str(namespace)
+    return BASE_DIRNAME if namespace is None else str(namespace)
 
 @pytest.mark.asyncio
 async def test_the_order_is_enumerate_then_the_checkouts_then_the_records(tmp_path: Path) -> None:
@@ -468,8 +473,8 @@ async def test_the_order_is_enumerate_then_the_checkouts_then_the_records(tmp_pa
         `clear` racing a live run refuses before it has taken anything and does not let go until
         the last removal is done - the two halves of the sentence that had no mechanism for years.
 
-    The run is arranged as merged first, so the sequence below is the ordinary unforced path with
-    the containment question answered "yes" - rather than the shorter one `-f` takes.
+    There is one sequence and no longer two: `clear` asks nothing about the run's own branch, so
+    the world the run is arranged in cannot shorten or lengthen this list.
     """
     events: list[str] = []
     harness = _fakes(tmp_path)
@@ -479,7 +484,6 @@ async def test_the_order_is_enumerate_then_the_checkouts_then_the_records(tmp_pa
         store=_RecordingStore(harness.services.store, events),
     )
     await api.run(services, PROJECT, "nesting", LABEL, (), points=POINTS)
-    _merged(harness)
     events.clear()
 
     await api.clear(services, PROJECT, LABEL)
@@ -499,56 +503,45 @@ async def test_the_order_is_enumerate_then_the_checkouts_then_the_records(tmp_pa
         "release",
     ]
 
-# --- what the retained branch now costs, and the claim that makes `clear` refuse -----------------
+# --- the label, given back whole, and the guard that still stands over it -------------------------
 
 @pytest.mark.asyncio
-async def test_a_kept_branch_refuses_the_next_run_until_the_branch_goes(tmp_path: Path) -> None:
-    """The defect, closed end to end: the retained side of the asymmetry, and its real price.
+async def test_a_cleared_label_starts_a_fresh_run_because_clear_left_no_branch_behind(
+    tmp_path: Path,
+) -> None:
+    """The loop, closed end to end, on the run whose work is not in the base ref - which is the one
+    that used to break it.
 
-    "A retained branch costs a stale ref" is what the `git branch -d` decision is argued on, and
-    the retained side is worse than that - a later `agl run ... -n auth --from main` takes `open`'s
-    attaching path and starts from the old tip with `--from` silently ignored, because "`base` is
-    consulted only when provisioning". The fix is `api.run` refusing the label outright, and this
-    is the whole loop: an unmerged clear keeps the branch, the next run under that label is refused
-    rather than misdirected, `-f` deletes it, and the label works again.
+    A run's label is held by the `Store` and by the repository, and `clear` used to give back only
+    the first: the records went, the branch stayed, and the next `agl run ... -n auth` was refused
+    by `api.run`'s `History.exists` rather than started. Refused and not misdirected, which was the
+    point of that guard - `open`'s attaching path would otherwise start from the old tip with
+    `--from` silently ignored - but a label nothing could free, because the second `agl clear auth
+    -f` found no record and answered `NotFoundError`. Both halves come back now, and the second run
+    below is the assertion that they did.
 
-    The last three lines are what make this a test about the branch. Without them a `run` that
-    refused every second invocation for any reason at all would pass, and the sentence being
-    asserted is that the *branch* is what took the label and that removing it gives it back.
-
-    **And what removes it is not `agl clear -f`**, which is worth pinning because both messages
-    used to say so: the same `clear` that keeps the branch removes the run's records, so a second
-    `agl clear auth -f` finds no run and answers `NotFoundError`. That refusal is asserted below,
-    beside the warning that no longer promises otherwise.
+    The `NotFoundError` is asserted immediately after, on the same label: a `clear` is not a thing
+    that can be run twice, and the record going is what says the first one finished rather than
+    half-finished.
     """
     harness = _fakes(tmp_path)
     await _start(harness)
     branch = run_branch(LABEL)
-
-    kept = await _clear(harness)
-
-    assert kept is not None and branch in kept
-    assert f"-n {LABEL}" in kept, (
-        "the warning does not say that the label is now taken. This branch was priced as a stale "
-        "ref; what it actually costs is the next run under this label, and that is what an "
-        "operator has to be able to act on"
+    assert harness.repository.tip(branch) != await harness.services.history.resolve("main"), (
+        "the run committed nothing, so this is not the case the loop used to break on"
     )
+
+    cleared = await _clear(harness)
+
+    assert branch in cleared.branches
+    assert harness.repository.tip(branch) is None
     with pytest.raises(NotFoundError):
-        await _clear(harness, force=True)
+        await _clear(harness)
 
-    with pytest.raises(ConflictError) as caught:
-        await _start(harness)
-    assert exit_code_for(caught.value) == 4
-    assert branch in str(caught.value)
-    assert await harness.services.store.read_record(SCOPE) is None, (
-        "the refused run wrote a record, so the operator now has two things to clear"
-    )
-
-    harness.repository.drop(branch)
     await _start(harness, "quiet")
     assert await harness.services.store.read_record(SCOPE) is not None, (
-        "the label was still refused once the branch it was taken by had gone, so the refusal "
-        "above was about something other than the branch"
+        "the label was still taken after a clear, so `clear` gave back one of its two halves and "
+        "not the other"
     )
 
 @pytest.mark.asyncio
@@ -597,7 +590,7 @@ async def test_a_clear_aimed_at_a_live_run_refuses_and_takes_nothing(tmp_path: P
         "sentence that had no mechanism behind it"
     )
 
-    assert await _clear(harness) is None
+    assert (await _clear(harness)).branches == (run_branch(LABEL),)
     assert await harness.services.store.read_record(SCOPE) is None
 
 @pytest.mark.asyncio
@@ -676,10 +669,10 @@ async def test_clearing_the_same_run_twice_refuses_the_second_time(tmp_path: Pat
     harness = _fakes(tmp_path)
     await _start(harness)
 
-    await _clear(harness, force=True)
+    await _clear(harness)
 
     with pytest.raises(NotFoundError) as caught:
-        await _clear(harness, force=True)
+        await _clear(harness)
     assert exit_code_for(caught.value) == 3
 
 @pytest.mark.asyncio
@@ -694,12 +687,13 @@ async def test_a_run_whose_checkouts_were_never_cut_is_cleared_without_raising(
     over something that is not there, and each has to succeed and say nothing - "a teardown that
     raises on a half-finished setup is a teardown callers learn to wrap in a bare `except`".
 
-    **`-f` is what reaches it**, and that is a consequence worth pinning rather than hiding. The
-    containment question is asked about `agl/auth`, this run never created one, and both `History`
-    implementations raise `NotFoundError` for a ref that names nothing rather than answering "no" -
-    `ports/history.py` argues why that refusal is the right one. So the unforced clear of a run
-    that never provisioned anything reports that its branch is missing, and `-f`, which asks
-    nothing, is the way such a record is taken away.
+    **The branch is among the things that are not there, and that is the half worth pinning.** A
+    `clear` that asked a `History` anything about `agl/auth` could not take this record away at all:
+    both implementations raise `NotFoundError` for a ref that names nothing rather than answering
+    "no", and `ports/history.py` argues why that refusal is the right one - so the question would be
+    put between the checkouts going and the records going, and leave the record standing with
+    nothing left to enumerate. `clear` asks nothing, which is what makes the ordinary call the one
+    that reaches a half-provisioned run.
     """
     harness = _fakes(tmp_path)
     history = harness.services.history
@@ -716,10 +710,9 @@ async def test_a_run_whose_checkouts_were_never_cut_is_cleared_without_raising(
     )
     await harness.services.store.write_record(SCOPE, spec.to_json())
 
-    with pytest.raises(NotFoundError):
-        await _clear(harness)
+    cleared = await _clear(harness)
 
-    assert await _clear(harness, force=True) is None
+    assert cleared.branches == (run_branch(LABEL),)
     assert await harness.services.store.read_record(SCOPE) is None
     assert not run_trees_dir(_trees(tmp_path), LABEL).exists()
 
@@ -738,8 +731,9 @@ async def test_a_clear_over_checkouts_something_already_took_back_succeeds(tmp_p
         await harness.services.workspaces.remove(LABEL, namespace)
         await harness.services.workspaces.discard(LABEL, namespace)
 
-    assert await _clear(harness, force=True) is None
+    cleared = await _clear(harness)
 
+    assert cleared.branches[-1] == run_branch(LABEL)
     assert await harness.services.store.read_record(SCOPE) is None
     assert not run_trees_dir(_trees(tmp_path), LABEL).exists()
 
@@ -785,8 +779,10 @@ def _over(repository: Path, tmp_path: Path) -> container.FakeServices:
     `api.clear` over an actual repository.
 
     Two of nine fields replaced, and both are needed: `workspaces` because the claim is about a git
-    worktree registration and a git ref, and `history` because `clear`'s one question is asked
-    through it and a `FakeHistory` answers about a repository that has never heard of these commits.
+    worktree registration and a git ref, and `history` for the *arrangement* rather than for the
+    clear - `api.run` resolves a ref and asks whether a branch exists before any of this, and a
+    `FakeHistory` answers about a repository that has never heard of these commits. `api.clear`
+    itself asks a `History` nothing at all now.
     The store stays the in-memory one - nothing here is a claim about a file under `AGL_HOME`.
     """
     trees = _trees(tmp_path)
@@ -832,9 +828,9 @@ async def test_a_locked_worktree_is_what_refuses_a_clear(
     `clear`, over the same run, succeeds once the lock is off - so a `clear` that refused for any
     other reason would fail here rather than pass twice.
 
-    `quiet` is the workflow because the branch has to be *deletable* for the refusal to be about the
-    lock: a run that committed nothing sits at its base, so `contains` says yes and `clear` really
-    does try to delete the name.
+    `quiet` is the workflow because it is the shortest run there is, and because it leaves the
+    smallest thing behind for the second half to succeed over. Nothing about what it commits is
+    load-bearing: `clear` tries to delete the name whatever is on it.
     """
     harness = _over(repository, tmp_path)
     await api.run(harness.services, PROJECT, "quiet", LABEL, (), points=POINTS)
@@ -854,7 +850,7 @@ async def test_a_locked_worktree_is_what_refuses_a_clear(
 
     _git(repository, "worktree", "unlock", str(place))
 
-    assert await _clear(harness) is None
+    assert (await _clear(harness)).branches == (run_branch(LABEL),)
     assert not _branch_exists(repository, run_branch(LABEL)), (
         "the clear that was refused only by the lock still did not delete the branch once the lock "
         "was off, so the refusal above was about something else"
