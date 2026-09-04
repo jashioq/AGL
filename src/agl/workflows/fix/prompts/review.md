@@ -26,24 +26,14 @@ are looking for. **If `git log` shows no such commit**, the implementer changed 
 there is nothing to review, and the correct report is an empty findings list. Say so in your final
 message too.
 
-## The project's own commands
+## You do not run the build
 
-These lines are this project's, hand-written here by whoever adapted this workflow to it. They are
-not supplied by the framework and are not read from any configuration file: the build command in
-`config.toml` is the gate that runs when work is merged, and it is deliberately independent of what
-you run here. A fork of this workflow aimed at another project retunes these lines and nothing else.
-
-```
-uv sync --frozen   # install exactly what the lockfile pins, once, before anything else
-./scripts/check    # every gate the project has: tests, types, lint, import contracts
-```
-
-`./scripts/check` takes about three minutes, runs every gate whether or not an earlier one failed,
-and prints a summary that repeats each verdict. Run it once. Running it writes cache directories
-into the worktree, which is expected and harmless - the worktree is discarded either way.
-
-A red gate is a high-severity finding on its own, quoting what failed. A green run is not a review:
-the gates catch what a machine can catch, and you are here for what it cannot.
+Do not install anything, run a test, or run this project's gates. You could not if you tried: this
+session is read-only and the network is closed with it, so those commands fail rather than answer,
+and the turns spent finding that out are turns not spent reading. Verification is covered twice
+over - the agent that made this change ran the project's own tests and gates as it worked, and the
+build command in `config.toml` runs again when this work is merged. What neither of them does is
+read: the gates catch what a machine can catch, and you are here for what it cannot.
 
 ## What to look for, in the order it is worth your time
 

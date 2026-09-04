@@ -108,3 +108,11 @@ class History(ABC):
         :raises NotFoundError: it names no state here, and "no message" would be a lie about one
         """
         ...
+
+    @abstractmethod
+    async def check_committer_identity(self) -> None:
+        """Whether a commit made here could be attributed. Answers with nothing, or refuses.
+
+        :raises UpstreamUnavailable: no committer can be derived here, so `commit_all` would refuse
+        """
+        ...

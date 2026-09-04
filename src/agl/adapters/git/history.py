@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Final
 from agl.adapters.git._changes import changes
 from agl.adapters.git._runner import GitRunner, unreadable
-from agl.ports.errors import NotFoundError
+from agl.ports.errors import NotFoundError, UpstreamUnavailable
 from agl.ports.history import FileChange, History
 
 __all__ = ["GitHistory"]
@@ -108,6 +108,15 @@ class GitHistory(History):
                 timeout=_ASKING,
             )
         ).rstrip()
+
+    async def check_committer_identity(self) -> None:
+        # `git config user.email` is unset in a great many repositories that commit perfectly well,
+        # git deriving a committer from the login name and the hostname; `git var` fails exactly
+        # where `git commit` does, `user.useConfigOnly = true` being what turns that derivation off.
+        # Measured on git 2.50.1 - the two disagree on precisely the case worth catching.
+        await self._git.run(
+            "var", "GIT_COMMITTER_IDENT", refusal=UpstreamUnavailable, timeout=_ASKING
+        )
 
 def _one(answer: str, what: str) -> str:
     stripped = answer.strip()

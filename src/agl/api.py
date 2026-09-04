@@ -67,7 +67,7 @@ async def run(
             f"branch -D {branch}` frees the label, and any other label starts a run of its own."
         )
 
-    await preflight.check(services.agents, wf.fn)
+    await preflight.check(services.agents, services.history, wf.fn)
 
     ref = (
         await services.history.default_ref()
@@ -118,7 +118,7 @@ async def resume(
 
     given = params.from_json(wf.params, spec.params)
 
-    await preflight.check(services.agents, wf.fn)
+    await preflight.check(services.agents, services.history, wf.fn)
 
     async with services.workspaces.hold(label):
         await _walk(services, wf, scope, spec, given)

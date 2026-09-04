@@ -28,6 +28,14 @@ three assumptions; these are the ones a real repository can close:
     the same way, because there is no second source for what the default *is*. This file has one:
     the branch the fixture put HEAD on.
 
+And one thing the suite does not list, because it is not a gap in the suite but a fact about a
+machine. `check_committer_identity` answers with nothing wherever a state can be recorded, which is
+every repository that suite builds, so the arrangement in which it must refuse exists only out here:
+a repository with no `user.*` anywhere and `user.useConfigOnly` on. Both sides of it are below,
+because the positive control is what pins the *probe* rather than the answer - `git config
+user.email` is unset in a repository that commits perfectly well, and a check written on it would
+refuse the ordinary case while agreeing with this one.
+
 The one gap this file does *not* close is the table that keeps git's vocabulary inside the
 adapter - every status letter git spells and what each becomes. That is `test_git_changes.py`'s,
 next to the pure function it asserts and away from the `pytest.mark.asyncio` this module puts on
@@ -449,6 +457,87 @@ async def test_default_ref_is_the_full_ref_of_the_branch_this_repositorys_head_i
         "with a tag and a branch sharing one name, the default resolved to something other than "
         "the branch HEAD is on. Every run pins this as `base_sha` and lives on the pin for hours"
     )
+
+# --- The identity probe: the arrangement only a real machine has, and its control -----------------
+
+def _without_an_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Take away the six environment variables that would answer for the repository's own config.
+
+    The fixture sets `GIT_AUTHOR_*` and `GIT_COMMITTER_*` because `commit_all` invents no identity,
+    and every test above wants them; these two want the case where nothing anywhere answers. They
+    are deleted rather than emptied, an empty `GIT_COMMITTER_EMAIL` being a value git accepts.
+    `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` already point where no file is, which is what stops
+    this machine's own `user.email` deciding either of these tests.
+    """
+    for identity in ("AUTHOR", "COMMITTER"):
+        for part in ("NAME", "EMAIL"):
+            monkeypatch.delenv(f"GIT_{identity}_{part}", raising=False)
+
+def _asked_for(repository: Path, *argv: str) -> int:
+    """Run git for its exit status alone, where `_git` would raise on the one that matters."""
+    return subprocess.run(["git", *argv], cwd=repository, capture_output=True, text=True).returncode
+
+async def test_a_repository_that_can_derive_no_committer_is_refused_in_gits_own_words(
+    history: History, repository: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The case `sdk/_engine/preflight.py` asks this member in order to catch, built for real.
+
+    `user.useConfigOnly = true` turns off the fallback git otherwise makes to the login name and the
+    hostname, so a repository with no `user.*` in any file it reads has no identity at all - and
+    `git commit` refuses with the same exit status and the same words. That is the whole reason the
+    probe is `git var GIT_COMMITTER_IDENT`: it fails exactly where a commit would.
+
+    **`UpstreamUnavailable`, exit 6, and not `NotFoundError`.** Nothing here is missing from the
+    repository; what is missing is a setting on the machine, and the class for a state of the world
+    that clears when the operator changes theirs is the same one a logged-out harness gets. Both of
+    preflight's refusals then leave on one exit code, which is what a script reading it can act on.
+
+    **The message is asserted on the two lines a person runs.** git prints them itself - `git config
+    --global user.email` and `git config --global user.name` - and `_runner.py` hands the whole of
+    what git said through, so preflight has nothing to add but why it asked. A refusal summarised
+    into "no identity" would have taken away the only actionable thing in it.
+    """
+    _without_an_identity(monkeypatch)
+    _git(repository, "config", "user.useConfigOnly", "true")
+
+    with pytest.raises(UpstreamUnavailable) as refused:
+        await history.check_committer_identity()
+
+    said = str(refused.value)
+    assert "user.email" in said and "user.name" in said, (
+        f"the refusal does not name what to set: {said!r}. git prints the two `git config "
+        f"--global` lines itself, and they are the whole of what somebody refused here does next"
+    )
+
+async def test_a_repository_that_commits_perfectly_well_answers_although_user_email_is_unset(
+    history: History, repository: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The control, and the test that decides which probe this member is written on.
+
+    With no `user.*` in any configuration file and no identity in the environment, `git config
+    user.email` exits 1 and `git commit` succeeds: git derives a committer from the login name and
+    the hostname. That is the ordinary state of a machine somebody has never configured git on, and
+    a check written on `git config user.email` would refuse every run made there - a false refusal
+    at second zero, on a repository nothing was ever wrong with.
+
+    So this arrangement is asserted twice over: the member answers with nothing, and a real commit
+    into the same repository goes through. `_git` raises on a non-zero exit, so the commit below is
+    an assertion even though it carries no `assert` - and without it "answers with nothing" would
+    hold for a member that had stopped looking at anything at all.
+    """
+    _without_an_identity(monkeypatch)
+    assert _asked_for(repository, "config", "user.email") != 0, (
+        "this machine's git found a `user.email` for a repository the fixture isolated from every "
+        "configuration file there is, so the two probes cannot disagree here and this test would "
+        "pass whichever of them the member was written on"
+    )
+
+    await history.check_committer_identity()
+
+    attributable = repository / "attributable.txt"
+    attributable.write_text(_body("recorded by nobody in particular"), encoding="utf-8")
+    _git(repository, "add", "attributable.txt")
+    _git(repository, "commit", "-q", "-m", "recorded with no user.email anywhere")
 
 async def test_default_ref_refuses_a_detached_head_in_words_that_say_what_to_do_instead(
     history: History, repository: Path

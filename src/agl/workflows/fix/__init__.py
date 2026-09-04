@@ -10,7 +10,7 @@ __all__ = ["FixParams", "fix"]
 class FixParams:
     request: str = arg("-r", "--request", help="what to fix, in your own words")
 
-@workflow(version="3")
+@workflow(version="4")
 async def fix(run: Run[FixParams]) -> None:
     implement = implementer(ask=asking(run.terminal))
     await run.terminal.show(views.board, run=run, request=run.params.request)

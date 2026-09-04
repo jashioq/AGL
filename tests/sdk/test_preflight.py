@@ -1,7 +1,7 @@
 """Preflight: what a run refuses before it starts, and what a step refuses after it has.
 
 The suite over `sdk/_engine/preflight.py`, over the registry that stands in place of `@workflow`'s
-`roles=`, and over the one line it put into `sdk/_engine/steps.py`. Four properties carry it.
+`roles=`, and over the one line it put into `sdk/_engine/steps.py`. Five properties carry it.
 
 **Nothing here constructs a real adapter, and that is a rule rather than a convenience.**
 `check_ready` on the Claude harness costs a real turn and on the Codex harness spawns a process, so
@@ -14,7 +14,19 @@ criterion is that a role naming a harness that is missing, out of date or logged
 durable exists afterwards. So the refused run is asked two questions the ordering decides: is there
 a record under `AGL_HOME`, and was `WorkspaceProvider.open` reached at all. The second is asked with
 a provider whose every member raises `AssertionError`, because a directory that is not there is also
-what a provider that failed would leave, and only a tripwire tells the two apart.
+what a provider that failed would leave, and only a tripwire tells the two apart. There are two
+refusals of that shape now: the harness one, and a repository that can name no committer, which is
+`History.check_committer_identity` and is measured with the same four assertions - a run whose
+commits git will not make loses a step's turn inside `Journal._ending`, where there is no ledger
+entry for a resume to hit.
+
+**The order the questions are asked in is chosen on what each one costs, and is asserted.** Free
+and local first - the repository - then the backends, cheapest probe leading: `codex login status`
+is a process, and the Claude harness's `check_ready` is a paid turn. `sorted` is stable, so the
+property that used to carry the ordering on its own, binding order in the workflow's module
+namespace, survives as the tie-break between two models whose probes cost the same. The table those
+costs live in is asserted total over `Provider` by a test of its own, since an unranked provider is
+the one that would land on the wrong side of the paid probe with nothing to say so.
 
 **The registry is a module namespace, so several claims are claims about a whole module.** A
 workflow's roles are the `@role(model=…)` factories bound in the module its `def` was executed in,
@@ -94,11 +106,13 @@ from agl.ports.agent import (
     Claude,
     ModelId,
     OpenAI,
+    Provider,
     StopReason,
     Tool,
     ToolResult,
 )
 from agl.ports.errors import DeniedError, UpstreamUnavailable, exit_code_for
+from agl.ports.history import FileChange, History
 from agl.ports.home_layout import RunScope
 from agl.ports.ids import Namespace, ProjectName, RunLabel
 from agl.ports.tree_layout import TreesRoot
@@ -310,6 +324,59 @@ class _Stub(AgentRunner):
         self.ran.append(task)
         return AgentOutcome(stop_reason=StopReason.COMPLETED, text="")
 
+class _Repository(History):
+    """The third port preflight reaches, answering the two questions `api.run` puts to it and no
+    more.
+
+    `exists` is asked about the deliverable branch above preflight and answers `False`, so a run
+    gets as far as the thing under test. `check_committer_identity` is that thing, and
+    `attributable=False` is the arrangement `container.fakes()` cannot build for the reason it
+    cannot build an unready backend: the fake repository attributes a state to nobody, so there is
+    no identity there to be missing.
+
+    Every other member is a tripwire, on `_Untouched`'s argument. `api.run` resolves the base two
+    lines under preflight, so a `default_ref` that answered would let a test claiming the run died
+    at second zero pass over one that got further - and `AssertionError` is not an `AglError`, so
+    it cannot be mistaken for the refusal under test on the way out.
+
+    `refusal` is built once and raised by identity, so a test can assert that the sentence reaching
+    the caller is the adapter's own and that its exception is the cause preflight chained. The text
+    is `adapters/git/history.py`'s shape: `GitRunner` prefixes what git said, and what git says
+    here is the block naming the two `git config --global` lines that fix it.
+    """
+
+    def __init__(self, *, attributable: bool = True) -> None:
+        self.attributable: Final = attributable
+        self.refusal: Final = UpstreamUnavailable(
+            "git refused `git var GIT_COMMITTER_IDENT`: Committer identity unknown - run `git "
+            "config --global user.email` and `git config --global user.name`"
+        )
+
+    async def default_ref(self) -> str:
+        raise AssertionError("preflight refused this run and its base ref was asked for anyway")
+
+    async def resolve(self, ref: str) -> str:
+        raise AssertionError("preflight refused this run and its base was pinned anyway")
+
+    async def exists(self, ref: str) -> bool:
+        return False
+
+    async def contains(self, ancestor: str, descendant: str) -> bool:
+        raise AssertionError("nothing in `api.run` asks about ancestry")
+
+    async def changed_files(self, base: str, head: str) -> tuple[FileChange, ...]:
+        raise AssertionError("nothing in `api.run` asks which files differ")
+
+    async def diff(self, base: str, head: str) -> str:
+        raise AssertionError("nothing in `api.run` reads a patch")
+
+    async def message(self, commit: str) -> str:
+        raise AssertionError("nothing in `api.run` reads what a commit was called")
+
+    async def check_committer_identity(self) -> None:
+        if not self.attributable:
+            raise self.refusal
+
 class _Untouched(WorkspaceProvider):
     """A provider that refuses to have been reached. Every member is a tripwire.
 
@@ -341,14 +408,22 @@ def _fakes(tmp_path: Path) -> container.FakeServices:
     return container.fakes(TreesRoot(tmp_path / "trees"), files={"src/a.txt": b"one\n"})
 
 async def _start(
-    harness: container.FakeServices, name: str, *, agents: AgentRunner, opens: bool = True
+    harness: container.FakeServices,
+    name: str,
+    *,
+    agents: AgentRunner,
+    history: History | None = None,
+    opens: bool = True,
 ) -> None:
-    """One `api.run` with this module's entry points and one substituted port - or two.
+    """One `api.run` with this module's entry points and one substituted port - or three.
 
     `opens=False` swaps the workspace provider for the tripwire, which every test about a run that
-    must not reach the repository passes.
+    must not reach the repository passes. `history=` swaps the repository preflight now asks first,
+    which only the tests about that question need.
     """
     services = replace(harness.services, agents=agents)
+    if history is not None:
+        services = replace(services, history=history)
     if not opens:
         services = replace(services, workspaces=_Untouched())
     await api.run(services, PROJECT, name, LABEL, (), points=POINTS)
@@ -389,6 +464,52 @@ async def test_a_role_whose_harness_is_missing_fails_at_second_zero(tmp_path: Pa
     assert entered == [], "the workflow ran although its backend was never ready"
 
 @pytest.mark.asyncio
+async def test_a_repository_that_can_name_no_committer_fails_at_second_zero(
+    tmp_path: Path,
+) -> None:
+    """**The acceptance criterion for the one failure a resume cannot repair.**
+
+    `Journal._ending` commits the agent's work at the end of every step declaring `commit=`, and
+    `adapters/git/workspace.py`'s `commit_all` invents no identity to do it with. Where git can
+    derive none it refuses *there* - inside the step's ending, after the agent has finished and
+    before the entry is written - so a run record exists, no step entry does, the edits sit
+    uncommitted, and a resume re-dispatches the step it had already paid for. There is nothing on
+    the ledger for it to hit.
+
+    So the question is asked at second zero and it is asked **first**, before any backend: it is
+    free, it is local, and it is the refusal that costs the most to arrive late. `stub.asked_ready`
+    is what pins the ordering - not one probe was spent on a run that could never have committed
+    anything.
+
+    The same four questions as the harness criterion above, because "at second zero" means the same
+    thing here: git's own sentence reaching the caller whole, since it names the two `git config
+    --global` lines that fix it and preflight only adds why AGL asked; its exception as the
+    `__cause__`; exit 6, which is the class for a state of the world that clears when the operator
+    changes theirs; no record under `AGL_HOME` for somebody to `agl clear` before retrying; and the
+    `_Untouched` tripwire rather than a directory listing, because a provider that ran and failed
+    leaves no directory either.
+    """
+    entered.clear()
+    harness = _fakes(tmp_path)
+    stub = _Stub()
+    repository = _Repository(attributable=False)
+
+    with pytest.raises(UpstreamUnavailable) as caught:
+        await _start(
+            harness, "two_providers", agents=stub, history=repository, opens=False
+        )
+
+    assert str(repository.refusal) in str(caught.value), "git's own reason was not passed on"
+    assert caught.value.__cause__ is repository.refusal, "the repository's refusal is not the cause"
+    assert exit_code_for(caught.value) == 6
+    assert stub.asked_ready == [], (
+        "a backend was probed before the free local question that decides whether this run could "
+        "ever have committed anything, and one of those probes costs a turn"
+    )
+    assert await _no_record(harness), "a run refused at preflight left a record to be cleared"
+    assert entered == [], "the workflow ran although nothing it did could have been committed"
+
+@pytest.mark.asyncio
 async def test_check_ready_is_asked_once_per_model_and_not_once_per_role(tmp_path: Path) -> None:
     """The first check, over *distinct models*. Six factories in this module, two models, two
     questions.
@@ -397,16 +518,77 @@ async def test_check_ready_is_asked_once_per_model_and_not_once_per_role(tmp_pat
     so a module with five roles on one model would spend five turns before a line of work had been
     done. Two roles on one model are one question about the state of the world.
 
-    Order is asserted along with the count: a refusal should arrive in the order the author wrote
-    their roles, which is binding order in the module's namespace - a `dict`, and
-    therefore ordered - rather than the order of a list on a decorator.
+    Order is asserted along with the count, and what decides it is what a probe costs: the free one
+    goes first, which is the test below this one. Binding order in the module's namespace - a
+    `dict`, and therefore ordered - is what survives as the tie-break between two models whose
+    probes cost the same, so this module, which declares `Claude.OPUS` first, is nevertheless asked
+    about `OpenAI.SOL` first.
     """
     harness = _fakes(tmp_path)
     stub = _Stub()
 
     await _start(harness, "two_providers", agents=stub)
 
-    assert stub.asked_ready == [Claude.OPUS, OpenAI.SOL]
+    assert stub.asked_ready == [OpenAI.SOL, Claude.OPUS]
+
+@pytest.mark.asyncio
+async def test_the_free_probe_is_asked_first_so_a_refusal_never_costs_a_turn(
+    tmp_path: Path,
+) -> None:
+    """**The order the probes run in is chosen, and it is chosen on what one costs.**
+
+    `adapters/openai/runner.py`'s `check_ready` spawns `codex login status`, which is a local
+    process and free. `adapters/claude_code/runner.py`'s is a real one-turn `query(...)` against
+    the model it is asking about, and is on somebody's bill. Logged into one harness and out of the
+    other - the ordinary state of a machine the day a second vendor is added - a run that probed
+    the paid one first would buy a turn and then be refused for the other, which is the whole of
+    what this ordering is for.
+
+    **Two arrangements, because one of them alone proves nothing.** With both backends refusing,
+    only the free question is asked at all: the turn is never bought, and that is the money claim.
+    With both passing, both are asked and the free one is still first, which is what stops the
+    assertion above passing against a preflight that had merely stopped after its first refusal.
+
+    This module declares `Claude.OPUS` first and `OpenAI.SOL` second, so namespace order and cost
+    order disagree here and the answer says which one won. The tie-break is the test above: `sorted`
+    is stable, so two models of one cost keep the order their author wrote them in.
+    """
+    refusing = _Stub(ready=False)
+
+    with pytest.raises(UpstreamUnavailable):
+        await _start(_fakes(tmp_path), "two_providers", agents=refusing, opens=False)
+
+    assert refusing.asked_ready == [OpenAI.SOL], (
+        "a run that was going to be refused anyway asked the harness that charges for the question "
+        "before the one that does not, and that turn is on somebody's bill"
+    )
+
+    passing = _Stub()
+    await _start(_fakes(tmp_path / "second"), "two_providers", agents=passing)
+
+    assert passing.asked_ready == [OpenAI.SOL, Claude.OPUS], (
+        "with both backends ready the paid probe went first, so the assertion above was about a "
+        "preflight that stops at its first refusal rather than about an order"
+    )
+
+def test_every_provider_is_ranked_so_a_new_one_cannot_land_where_a_default_puts_it() -> None:
+    """The mechanical half of the ordering: the table is total over the enum it is keyed on.
+
+    A ranking read with a `dict.get` default would put a third provider wherever that default sits -
+    silently, and on the wrong side of the paid one half the time. `_PROBE_COST` is indexed rather
+    than got, so an unranked provider is a `KeyError` at the first run instead; this is what makes
+    it a build failure instead, at the moment the member is added and before anybody spends a turn
+    finding out.
+
+    Read off `ports/agent.py`'s enum rather than a list written here, so that a fourth `Provider`
+    widens the claim with the port rather than leaving a hand-copied set quietly narrower.
+    """
+    assert set(preflight._PROBE_COST) == set(Provider), (
+        f"the probe-cost table ranks {sorted(str(member) for member in preflight._PROBE_COST)} and "
+        f"`Provider` has {sorted(str(member) for member in Provider)}. Every provider needs a rank "
+        f"before its backend can be probed in a chosen order, and a new one is exactly the case "
+        f"where getting it wrong costs a turn"
+    )
 
 @pytest.mark.asyncio
 async def test_a_workflow_whose_module_names_no_role_asks_no_backend_anything(
@@ -606,7 +788,7 @@ async def test_preflight_asks_whether_a_backend_is_ready_and_never_what_it_can_d
     passing = _Stub()
     await _start(_fakes(tmp_path / "second"), "two_providers", agents=passing)
 
-    assert passing.asked_ready == [Claude.OPUS, OpenAI.SOL]
+    assert passing.asked_ready == [OpenAI.SOL, Claude.OPUS]
     assert passing.asked_offers == [], "containment ran at second zero, where it cannot"
 
 # --- half two: containment, over the role a step is actually handed ------------------------------
@@ -835,24 +1017,25 @@ async def test_a_step_is_refused_before_its_checkout_is_provisioned(tmp_path: Pa
 # --- the module's own surface --------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_check_takes_a_runner_and_a_workflow_function_and_nothing_else() -> None:
-    """`preflight.check` is callable with one port and one function, which is the signature
+async def test_check_takes_two_ports_and_a_workflow_function_and_never_a_services_bundle() -> None:
+    """`preflight.check` is callable with two ports and one function, which is the signature
     decision.
 
-    It takes an `AgentRunner` and never a `Services`: one port answers both of preflight's
-    questions, the bundle would hand it eight, and a second reader would then be one field access
-    away in the module whose whole job is to refuse before anything has happened. The second
-    argument is the workflow's own `async def` and not a `Workflow` - which this module could not
-    import without a cycle, `sdk/workflow.py` importing `Capabilities` from here - and it is the
-    smallest thing that names the registry, since a function knows the module its `def` ran in. So
-    the composition root passes what it already holds and learns nothing about how a role is found.
+    It takes the ports it asks and never a `Services`: an `AgentRunner`, which answers both of
+    preflight's questions about a backend, and a `History`, which answers the one about the
+    repository. The bundle would hand it eight, and six more readers would then be one field access
+    away in the module whose whole job is to refuse before anything has happened. The last argument
+    is the workflow's own `async def` and not a `Workflow` - which this module could not import
+    without a cycle, `sdk/workflow.py` importing `Capabilities` from here - and it is the smallest
+    thing that names the registry, since a function knows the module its `def` ran in. So the
+    composition root passes what it already holds and learns nothing about how a role is found.
 
     The call below is the whole assertion - it compiles and it runs with no bundle in sight - and
-    the second half of it is that what got walked was this module's namespace: two models, in
-    binding order, and no capability asked about either.
+    the second half of it is that what got walked was this module's namespace: two models, cheapest
+    probe first, and no capability asked about either.
     """
     stub = _Stub()
 
-    await preflight.check(stub, two_providers.fn)
+    await preflight.check(stub, _Repository(), two_providers.fn)
 
-    assert (stub.asked_ready, stub.asked_offers) == ([Claude.OPUS, OpenAI.SOL], [])
+    assert (stub.asked_ready, stub.asked_offers) == ([OpenAI.SOL, Claude.OPUS], [])

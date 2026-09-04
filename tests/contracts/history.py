@@ -23,15 +23,17 @@ the outcome.
 
 `HistoryContract` is one class assembled from two modules, and only this name is public. Its own
 tests are the members that answer *where* - `default_ref`, `resolve`, `exists` and `contains` -
-plus `message`, which answers *what one commit was called*, plus the one refusal they all share.
-`_history_changes` holds `changed_files` and `diff`, the pair the port keeps together, and argues
-there how far a suite may go in asserting what a patch looks like - which is not far - and why
-rename detection is not required.
+plus `message`, which answers *what one commit was called*, plus `check_committer_identity`, which
+is the one member here that asks about now rather than about the past, plus the refusal the
+ref-taking ones share. `_history_changes` holds `changed_files` and `diff`, the pair the port keeps
+together, and argues there how far a suite may go in asserting what a patch looks like - which is
+not far - and why rename detection is not required.
 
 ## Why this suite takes a `WorkspaceProvider`
 
-`History` reads a repository's past and has no member that adds to one, deliberately: seven
-questions and nothing that changes anything. So a suite for it has to get its states from
+`History` has eight members and not one of them adds to a repository, deliberately: seven questions
+about a repository's past, one about whether a commit made in it could be attributed at all, and
+nothing that changes anything. So a suite for it has to get its states from
 somewhere, and across both of these ports there is exactly one way to record a state -
 `Workspace.commit_all`. The alternative is an implementation-supplied fixture handing over a
 prepared history, which is a knob whose whole job would be to be shaped by whoever also writes the
@@ -119,8 +121,8 @@ no hunks in it.
 
 **That `NotFoundError` covers a commit id and not only a ref.** The class docstring says "a ref or a
 commit id that names nothing in this repository" for every member, which is read as binding all of
-them that refuse - which is six of the seven, `exists` being the one whose answer to that case is
-a `False`.
+them that refuse - which is six of the eight: `exists` answers that case with a `False`, and
+`check_committer_identity` takes no ref there could be anything wrong with.
 """
 
 from collections.abc import Iterator
@@ -177,11 +179,12 @@ PADDED_MESSAGE: Final = "implement fix \t \n"
 TRIMMED_MESSAGE: Final = "implement fix"
 
 class HistoryContract(HistoryChangeContract):
-    """The suite. Seven questions about one repository's past, and nothing that changes it.
+    """The suite. Eight members over one repository, and not one of them changes it.
 
     Its own tests are where a run starts (`default_ref`), what that resolved to (`resolve`),
     whether a name is held at all (`exists`), the one ancestry question AGL asks (`contains`), what
-    one commit was called (`message`), and the refusal six of the seven share. The half it inherits
+    one commit was called (`message`), whether a commit made here could be attributed at all
+    (`check_committer_identity`), and the refusal six of the eight share. The half it inherits
     is `_history_changes`, named in this module's docstring.
 
     `pytestmark` is on the class rather than on each method because subclasses inherit it, and
@@ -545,18 +548,51 @@ class HistoryContract(HistoryChangeContract):
             "about the state a name resolves to *now*, which for a line of work is its tip"
         )
 
+    async def test_a_repository_this_suite_can_record_into_can_say_who_recorded_it(
+        self, history: History, provider: WorkspaceProvider, base: str
+    ) -> None:
+        """The one member here that asks about now rather than about the past, and its true case.
+
+        `Journal._ending` commits the agent's work at the end of every step that declares `commit=`,
+        and `Workspace.commit_all` invents no identity to do it with - so an implementation that
+        cannot attribute a commit refuses in a `finally`, after a paid turn and before an entry
+        exists. `sdk/_engine/preflight.py` asks this first, before it asks any backend anything,
+        because it is free and local and because a resume cannot repair the step it protects.
+
+        **The arrangement is the premise and is asserted before the question is put.** A recorded
+        state is proof this repository *can* be committed into, and a repository that can be
+        committed into has an identity by construction - which is what makes a refusal below a
+        defect rather than a fixture that never had one. Every implementation this suite grades is
+        driven over a repository it has just recorded into, so the negative case is not here: it is
+        a fact about a machine's configuration, and `tests/adapters/test_git_history.py` arranges
+        one.
+
+        The call is the assertion. The member answers with nothing or it raises, so there is no
+        value to compare and a `pytest.raises` would be asserting the opposite of the claim.
+        """
+        workspace = await provider.open(LABEL, CHILD, base)
+        write(workspace, ALPHA, body("work that has to be attributable to somebody"))
+        recorded = await record(workspace, "work that has to be attributable to somebody")
+        assert recorded, (
+            "this suite recorded nothing, so the question below would be asked of a repository "
+            "that has never had to name a committer and the answer would prove nothing"
+        )
+
+        await history.check_committer_identity()
+
     async def test_every_method_refuses_a_ref_or_an_id_this_repository_does_not_hold(
         self, history: History, provider: WorkspaceProvider, base: str
     ) -> None:
         """One refusal, from `errors.py`, so that a caller never learns what the thing underneath
         threw.
 
-        The port says it of six of the seven members at once: `NotFoundError` for a ref or a
-        commit id that names nothing in this repository. `exists` is the one exception and is
-        deliberately not in the list below - answering rather than refusing is the whole of what
-        it is for, and the test above is where that is pinned. It matters most for `resolve`, where
-        the user typed something well-formed that this repository does not have and exit 3 is the
-        answer they get - but the other four take ids too, and an implementation that answered a
+        The port says it of six of the eight members at once: `NotFoundError` for a ref or a
+        commit id that names nothing in this repository. `exists` is one of the two exceptions and
+        is deliberately not in the list below - answering rather than refusing is the whole of what
+        it is for, and the test above is where that is pinned; `check_committer_identity` is the
+        other, and takes no ref there could be anything wrong with. It matters most for `resolve`,
+        where the user typed something well-formed that this repository does not have and exit 3 is
+        the answer they get - but the other four take ids too, and an implementation that answered a
         made-up id with an empty diff, with every file in the repository, or with no message at
         all, would be answering a question nobody asked. `changed_files` is the sharp one:
         "nothing differs from a state that does not exist" is a plausible-looking answer and a lie.

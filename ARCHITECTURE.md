@@ -346,6 +346,18 @@ step, because it costs a turn to re-learn a state of the world preflight already
 `tests/sdk/test_preflight.py` asserts the over-approximation as behaviour and measures the two
 halves against each other rather than separately.
 
+**`check` asks more than the backends now, and the order it asks in is chosen on what a question
+costs.** First the repository, through `History.check_committer_identity`: `commit_all` invents no
+identity, so where git can derive none it refuses inside `Journal._ending` — after the agent has
+finished and before the entry is written, which is the one preflight failure a resume cannot
+repair, there being no entry for it to hit. Then the backends, cheapest probe leading, ranked by
+`Provider` inside `preflight.py` rather than by a third member on `AgentRunner`: the OpenAI
+adapter's `check_ready` spawns `codex login status` and the Claude adapter's spends a turn, so a
+machine logged into one and out of the other is refused without buying anything. `sorted` is stable,
+so binding order in the workflow's module namespace still decides between two models whose probes
+cost the same. Both refusals are `UpstreamUnavailable` — a state of the world the operator changes,
+after which the same run works — so both leave on exit 6.
+
 **A run's label is held in two places, and the repository has to be asked as well as the store.**
 `api.run` asks `History.exists(run_branch(label))` beside reading the record, and refuses before it
 has written anything. Without that check `WorkspaceProvider.open` takes its **attaching** path,

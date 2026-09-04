@@ -1,9 +1,10 @@
 import sys
-from collections.abc import Callable
-from types import ModuleType
+from collections.abc import Callable, Mapping
+from types import MappingProxyType, ModuleType
 from typing import Any, Final
-from agl.ports.agent import AgentRunner, Capability, ModelId
+from agl.ports.agent import AgentRunner, Capability, ModelId, Provider
 from agl.ports.errors import DeniedError, InternalError, UpstreamUnavailable
+from agl.ports.history import History
 from agl.sdk.roles import Role, RoleFactory
 
 __all__ = ["Capabilities", "check"]
@@ -15,6 +16,14 @@ _FROM_TOOLS: Final = (
     f"`sdk/roles.py` folds it in at declaration time, so there is no line in the workflow to go "
     f"looking for. Either this role names a model whose backend can call a tool, or it offers none "
     f"- and a role with no tools is an effect step, whose result is `null`"
+)
+
+# `adapters/openai/runner.py`'s `check_ready` spawns one local process and pays nothing;
+# `adapters/claude_code/runner.py`'s spends a turn of the model it asks about - naming that first
+# binary here would fail `scripts/check`'s containment gate. Logged into one harness and out of the
+# other, a run probing the paid one first buys that turn and is then refused for the other.
+_PROBE_COST: Final[Mapping[Provider, int]] = MappingProxyType(
+    {Provider.OPENAI: 0, Provider.CLAUDE: 1}
 )
 
 class Capabilities:
@@ -30,14 +39,23 @@ class Capabilities:
         if missing:
             raise DeniedError(_unmet(step, role, missing, held))
 
-async def check(runner: AgentRunner, declared_by: _Declaration) -> None:
-    for factory in _demanded(_declared_beside(declared_by)):
+async def check(runner: AgentRunner, history: History, declared_by: _Declaration) -> None:
+    try:
+        await history.check_committer_identity()
+    except UpstreamUnavailable as unattributable:
+        raise UpstreamUnavailable(_no_identity(unattributable)) from unattributable
+    # `sorted` is stable, so two models whose probes cost the same are still asked in the order
+    # `_demanded` handed them, which is the order the author wrote their roles in.
+    for factory in sorted(_demanded(_declared_beside(declared_by)), key=_cost_of):
         try:
             await runner.check_ready(factory.model)
         except UpstreamUnavailable as unavailable:
             raise UpstreamUnavailable(
                 _not_ready(unavailable, factory, declared_by.__module__)
             ) from unavailable
+
+def _cost_of(factory: RoleFactory[..., Any]) -> int:
+    return _PROBE_COST[factory.model.provider]
 
 def _declared_beside(declared_by: _Declaration) -> tuple[RoleFactory[..., Any], ...]:
     written_in = sys.modules.get(declared_by.__module__)
@@ -64,6 +82,16 @@ def _demanded(factories: tuple[RoleFactory[..., Any], ...]) -> tuple[RoleFactory
     for factory in factories:
         first.setdefault(factory.model, factory)
     return tuple(first.values())
+
+def _no_identity(refusal: UpstreamUnavailable) -> str:
+    return (
+        f"{refusal} - and AGL asked because it commits the agent's work for it: a step declaring "
+        f"`commit=` ends by recording what the agent changed, through `Workspace.commit_all`, "
+        f"which invents no identity of its own and leaves the question to the repository. A commit "
+        f"git will not make fails at the end of that step, after the agent has finished and before "
+        f"the entry is written - so the turn that produced the work is paid for and lost, and a "
+        f"resume finds no entry and dispatches the step again. Refused here, nothing is spent"
+    )
 
 def _not_ready(
     refusal: UpstreamUnavailable, factory: RoleFactory[..., Any], workflow_module: str

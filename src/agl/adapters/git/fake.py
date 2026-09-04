@@ -154,6 +154,10 @@ class FakeHistory(History):
     async def message(self, commit: str) -> str:
         return self._repository.message_of(self._repository.resolve(commit))
 
+    async def check_committer_identity(self) -> None:
+        # `_snapshots.py` attributes a recorded state to nobody, so there is no identity to miss.
+        return
+
     def _between(self, base: str, head: str) -> tuple[Tree, Tree]:
         return (
             self._repository.tree_of(self._repository.resolve(base)),

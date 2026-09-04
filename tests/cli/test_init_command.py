@@ -15,7 +15,9 @@ the real invocation, `ask`, because the alternative is a suite that blocks on a 
 
 **Nothing patches `builtins.input`.** That is what `Invocation.ask` exists for, and a suite reaching
 past every seam a module has in order to answer one question is exactly what a seam with a signature
-prevents (`api.py` argues the pattern; `cli/main.py` holds the real default).
+prevents (`api.py` argues the pattern; `cli/main.py` holds the real default). The two tests below
+that close stdin are not an exception to that: they replace `sys.stdin`, let the real default stand,
+and a closed stdin is the thing they report on rather than a way past a seam.
 
 **A real `git init` here, and marker directories in the library suite.** `toml_file.git_root` asks
 git nothing, so a `.git` directory is the whole of what it can see and the library tests use one.
@@ -26,6 +28,8 @@ would be measuring the walk rather than the command.
 
 import ast
 import inspect
+import io
+import sys
 from pathlib import Path
 from typing import Final
 import pytest
@@ -33,7 +37,7 @@ from agl.cli import main
 from agl.cli.commands import init as init_command
 from agl.config import sources
 from agl.config.toml_file import read_project
-from agl.ports.errors import NotFoundError
+from agl.ports.errors import InputError, NotFoundError
 from agl.ports.ids import ProjectName
 from agl.sdk.params import RefusingParser
 
@@ -202,6 +206,68 @@ def test_a_trees_root_a_symlink_puts_inside_the_repository_exits_two(
 
     assert "trees_root" in capsys.readouterr().err
     assert not (home / "projects").exists()
+
+def test_init_with_its_stdin_closed_exits_two_rather_than_reporting_a_bug(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`agl init < /dev/null`, and the one test in this file that lets the real `ask` stand.
+
+    `_main` above replaces `ask`, which is right for every case where the question has an answer
+    and wrong for this one: what is being asserted is a fact about the field's *default*. So the
+    invocation below is `_main`'s minus that one substitution, and `sys.stdin` is what the test
+    replaces instead - which is the situation being reported rather than a way past a seam.
+
+    Exit 2 is the user-visible half and the traceback's absence is the other. `input` raises
+    `EOFError`, which is not an `AglError`, so untranslated it reaches `cli/main.py`'s last clause -
+    a traceback and `_OUR_BUG`, telling somebody who pressed Ctrl-D on the first command they ever
+    ran that they had found a bug in AGL. Both are asserted, because a refusal that exited 2 and
+    printed a traceback anyway would still be that.
+    """
+    home = _home(tmp_path, monkeypatch)
+    repo = _repository(tmp_path)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+    resolved = main._compose()
+
+    code = main.main(
+        ("init",),
+        compose=lambda: main.Invocation(
+            registered=resolved.registered, settings=resolved.settings, cwd=repo
+        ),
+    )
+
+    assert code == 2
+    captured = capsys.readouterr().err
+    assert "stdin" in captured
+    assert "Traceback" not in captured
+    assert not home.exists(), "a refused init wrote something anyway"
+
+def test_the_default_ask_turns_a_closed_stdin_into_a_refusal_that_keeps_the_eof(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`Invocation.ask`'s default on its own, for the two halves an exit code cannot show.
+
+    `cli/main.py` is where `input` is named, so it is where the `EOFError` is translated - the rule
+    `ARCHITECTURE.md` states for an adapter, applied one layer up the way `config/toml_file.py`
+    applies it to its own `OSError`. It is not translated in `api.init`, which catches nothing and
+    may not: `tests/test_api_no_except.py` holds that, and a handler there would be the first
+    `except` in a module whose whole property is having none.
+
+    So the refusal quotes the question instead of restating what a build command is for. `_asked`
+    is handed a prompt and does not know which question it asked; `api.init` owns the sentence
+    about an answer that arrived empty. One refusal per thing refused, and no second copy of the
+    question anywhere to fall out of step with `api.py`'s.
+
+    `__cause__` is the other half, and the one nothing else would notice going missing: the exit
+    code, the class and the message are all identical without `raise ... from`, and what goes is
+    the `EOFError` under the refusal on the traceback.
+    """
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+
+    with pytest.raises(InputError) as raised:
+        main._asked("build command: ")
+
+    assert "build command:" in str(raised.value)
+    assert isinstance(raised.value.__cause__, EOFError)
 
 # --- what the command is, read off the module ----------------------------------------------------
 

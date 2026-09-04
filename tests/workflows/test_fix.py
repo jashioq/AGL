@@ -391,17 +391,21 @@ def test_the_request_is_a_required_named_flag_and_there_are_no_positionals() -> 
 def test_the_workflow_declares_its_params_and_its_version_and_no_roles_at_all() -> None:
     """What `@workflow` hands the framework: nothing about roles, no name at all - `fix` is what
     `pyproject.toml`'s entry point calls this workflow, and the decorator holds no second copy of
-    that - and `version="2"` and the function.
+    that - and `version="4"` and the function.
 
-    **The version moved from `1.1` and it is asserted here because that is the only place it can
+    **The version moved from `3` and it is asserted here because that is the only place it can
     be.** `api.resume` compares the installed version against the one stamped in `run.json` and
-    refuses a mismatch rather than migrating, which is the whole of what the number does. `fix`'s
-    implementer gained a tool, `tools` is a fingerprint term, so the implement step's digest moved
-    and the review step's with it - the head it starts from is a term too. Everything after a
-    resume that missed would have been re-bought silently; the bump turns that into a refusal that
-    names the mismatch. `ARCHITECTURE.md`'s "Bump `@workflow(version=…)` when a workflow's shape
-    changes" is the rule, and `test_the_declared_implementer_requires_less_than_the_asking_one_and
-    _says_so` below is where the digest moving is measured rather than asserted.
+    refuses a mismatch rather than migrating, which is the whole of what the number does. What moved
+    this time is `prompts/review.md`, which the reviewer carries as `instructions`, and
+    `instructions` is a term of `base_of`: the recorded review step misses, and the refusal sends
+    the operator to `agl clear` and a fresh run, where every step is bought again. That cost is the
+    intended one. `ARCHITECTURE.md`'s "Bump `@workflow(version=…)` when a workflow's shape changes"
+    did not compel it - no step was inserted, removed or reordered, and the same paragraph says an
+    edit reaching a fingerprint term merely re-runs those steps. This is the stricter choice, taken
+    for the reason the earlier bumps were: without it a resume replays the implement step, re-buys
+    the review under wording nobody compared, and says nothing about either.
+    `test_both_roles_hold_their_prompt_text_and_not_a_path_to_it` above is what makes editing the
+    file reach a digest at all - a role holding the path would move nothing.
 
     `fix.params` is still `FixParams` and the assertion below did not move, but what it asserts did:
     the class is now read off `async def fix(run: Run[FixParams])` rather than off a second copy of
@@ -415,7 +419,7 @@ def test_the_workflow_declares_its_params_and_its_version_and_no_roles_at_all() 
     importing `reviewer` beside its workflow would start passing preflight on a machine with no
     Codex CLI and then die at the review step, which is exactly what preflight exists to
     prevent."""
-    assert fix.version == "3"
+    assert fix.version == "4"
     assert fix.params is FixParams
     bound = {
         name: found.model

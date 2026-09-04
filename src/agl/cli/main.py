@@ -35,6 +35,18 @@ _OUR_BUG: Final = (
     "so nothing above it could report the failure in words. Please report it with the lines above"
 )
 
+def _asked(prompt: str) -> str:
+    try:
+        return input(prompt)
+    # `input` raises `EOFError` on a closed stdin - a Ctrl-D at the prompt, or a command run as
+    # `agl init < /dev/null`.
+    except EOFError as closed:
+        raise InputError(
+            f"stdin was closed before this question could be answered - a Ctrl-D, or a command run "
+            f"with nothing on its input. Nothing has been written, so run it again somewhere the "
+            f"question can be answered: {prompt.strip()}"
+        ) from closed
+
 @dataclass(frozen=True, slots=True)
 class Invocation:
     registered: commands.Registered
@@ -45,7 +57,7 @@ class Invocation:
 
     points: Iterable[EntryPoint] | None = None
 
-    ask: Ask = input
+    ask: Ask = _asked
 
 type Compose = Callable[[], Invocation]
 

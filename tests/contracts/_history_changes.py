@@ -1,9 +1,10 @@
 """"What changed": `changed_files` and `diff`, the pair the port keeps together on purpose.
 
-Split out of `history.py` along a line the port draws itself. Its seven members go three ways.
+Split out of `history.py` along a line the port draws itself. Its eight members go four ways.
 Three answer where a run starts, what that resolved to, and whether one state is already inside
 another; two answer a fact about one name the caller already holds - whether it exists, and what
-its commit says; and these two answer what actually happened between two states. The port pairs
+its commit says; one answers about now rather than about the past, whether a commit made here could
+be attributed at all; and these two answer what actually happened between two states. The port pairs
 this last two explicitly - "one is for deciding, the other is for reading. A review step puts this
 in a prompt; a workflow that wants to know whether a step touched anything under `docs/` uses the
 other and does not parse this."
