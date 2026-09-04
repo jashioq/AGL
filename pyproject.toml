@@ -4,11 +4,41 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agl"
-version = "0.1.0"
+# 0.0.1 and not 0.1.0: the first upload is a name claim rather than a release. A version number on
+# PyPI is spent permanently - yanking a release does not free the number for reuse - so the one
+# that buys the name sits below anything an operator would read as a first version of the software.
+version = "0.0.1"
 description = "A framework for running AI agent workflows against code repositories."
+# This file rendered *is* the body of the PyPI project page; there is no other prose on it.
+readme = "README.md"
 requires-python = ">=3.14"
+# The SPDX expression and not the `{ text = "MIT" }` table, which PEP 639 deprecated. Hatchling has
+# accepted the string form since 1.27 and the build resolves 1.32, so there is no older backend to
+# keep a fallback for.
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Jan", email = "janwylegalaandrzej@gmail.com" }]
+keywords = ["agents", "workflows", "llm", "git", "orchestration"]
+# `Development Status :: 3 - Alpha` is the one entry here that is a judgement rather than a fact,
+# and it is the version above and the README's warning about the surface said a third time.
+# No `License ::` classifier: PEP 639 deprecates that whole family, and `license` above replaces it
+# - a project carrying both is stating the same thing in a live field and a dead one.
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Code Generators",
+    "Topic :: Software Development :: Version Control :: Git",
+]
 # Deliberately empty: AGL's core is stdlib-only (TOML via stdlib `tomllib`).
 dependencies = []
+
+# Both labels point at the repository because there is nowhere else to send anyone yet: no
+# documentation site, and no tracker apart from the repo's own. Two labels rather than one because
+# PyPI lists each by name in its sidebar, so a reader scanning for either finds it.
+[project.urls]
+Homepage = "https://github.com/jashioq/AGL"
+Repository = "https://github.com/jashioq/AGL"
 
 [project.optional-dependencies]
 claude = ["claude-agent-sdk>=0.2.140"]
@@ -64,6 +94,26 @@ dev = [
     "ruff>=0.16.3",
     "import-linter>=2.13",
 ]
+
+# An allowlist, because hatchling's default sdist is "everything git does not ignore" and this
+# repository is not shaped like a package. Measured with this table deleted, that default builds a
+# 1.9 MB archive around a 170 KB wheel: `scratchpad/`'s throwaway working notes, the whole of
+# `tests/`, `reference/`'s read-only extracts, `scripts/`, `CLAUDE.md`, `.vscode/`, `.claude/` and
+# both tool caches - `.grimp_cache/` and `.import_linter_cache/` - all ride along. An upload is
+# irrevocable and the version number cannot be reissued once it is on PyPI, so the failure worth
+# designing against is something shipping that was never meant to leave this machine. As an
+# allowlist, a directory added to the repo tomorrow does not ship until it is named here; as
+# exclusions, it ships until somebody notices.
+#
+# `ARCHITECTURE.md` is in the list rather than left behind with `CLAUDE.md` because `src/`'s
+# comments cite its headings by name, so it is the one document the shipped source refers to.
+#
+# Every pattern is anchored with a leading `/`, and that slash is load-bearing rather than tidy.
+# Hatchling reads these as gitignore patterns, where a bare `README.md` matches at *any* depth: it
+# pulled `reference/README.md` into the archive - one file out of the directory the allowlist was
+# written to keep out. Anchored, each name means the repository root and nothing else.
+[tool.hatch.build.targets.sdist]
+include = ["/src", "/pyproject.toml", "/README.md", "/LICENSE", "/ARCHITECTURE.md"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agl"]
