@@ -40,8 +40,8 @@ than about a class name a test chose to look for.
 **Real git, a real store, a real shell for the gate, and a scripted agent.** The claim is about
 worktrees, refs and a `MERGE_HEAD` on disk; it is not about a model, so the one port that would cost
 money is the fake. `container.real()` is not used because it also builds a Claude runner and a rich
-terminal, one of which wants an extra and neither of which a programme with no vendor in it has any
-use for - which is `replay.py`'s reason, one adapter over.
+terminal, neither of which a programme with no vendor in it has any use for - which is `replay.py`'s
+reason, one adapter over.
 
 **The `Run` is built the way `api.run` builds one**, and not through `api.run`, because `api.run`
 refuses a label that already has a record - a `ConflictError`, exit 4 in `src/agl/ports/errors.py`.

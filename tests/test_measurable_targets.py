@@ -1,18 +1,18 @@
-"""The twelve measurable targets, one assertion each, and the two that resist one.
+"""The twelve measurable targets, one assertion each, and the three that no longer have one.
 
 The twelve were written before the build started and are the project's own definition of done, and
-this file is now where they are recorded, and where each of them is settled. Ten of them hold:
-seven are asserted here (#1, #2, #3, #5, #6, #7, #8) and three are cited to the test that already
-asserts them better than a copy would (#4, #9, #10). One is asserted here in its sharpest form and
-**fails past a boundary this file records rather than hides** (#11). One cannot be asserted at all
-today and says so in as many words (#12).
+this file is now where they are recorded, and where each of them is settled or recorded as not.
+Six are asserted here (#1, #3, #5, #6, #7, #8), one is cited to a test that asserts it better than
+a copy would (#10), one is asserted here in its sharpest form and **fails past a boundary this file
+records rather than hides** (#11), and one cannot be asserted at all today and says so in as many
+words (#12). **Three are settled by nothing** (#2, #4, #9), and `UNSETTLED` is where each says why.
 
 **The governing rule this module was written under.** A target that cannot be asserted mechanically
 is a finding. No target below is softened to make it pass and no proxy is asserted for one. Where a
 target's own words could not be reached, what is written here is the reason and what would have to
 change - the code or the target - and not a neighbouring claim dressed up as the target.
 
-That rule has teeth in three places, and they are the three worth reading first:
+That rule has teeth in four places, and they are the four worth reading first:
 
   * **#8** could have been settled with "a fakes-only test exists for each of the five commands",
     which is true today and is a proxy: it measures what somebody remembered to write rather than
@@ -27,20 +27,29 @@ That rule has teeth in three places, and they are the three worth reading first:
     So a namespace rename moves every fingerprint taken after a landing. That is a finding about
     the target, not a licence to weaken it.
   * **#12** claims tickets (v1.2) requires no framework change. This is v1.1 and tickets does not
-    exist, so the claim is unverifiable today. Nothing here stands in for it. `fix` and `split`
-    requiring no framework change between them is the strongest available evidence and is *not* a
-    substitute; the test below asserts only that tickets is still absent, so the day it arrives this
-    file fails and tells whoever added it to take the measurement.
+    exist, so the claim is unverifiable today. Nothing here stands in for it; the test below
+    asserts only that tickets is still absent from this distribution, and records that a workflow
+    may in future arrive somewhere the tripwire is not watching.
+  * **#2, #4 and #9 settle to nothing**, and that is the rule's hardest case rather than an
+    exception to it. All three were measured against the workflows AGL used to ship, and when those
+    were deleted every one of those measurements became either impossible or vacuous - a walk over
+    a directory that is not there answers `{}` and passes. Keeping any of them would have been a
+    green line standing in for a target, which is the one thing this file exists not to do. So the
+    settlements went and `UNSETTLED` took their place, saying for each whether the *capability* went
+    with the workflow or is still there waiting to be measured again.
 
 ## How to read this file
 
 `SETTLED` is the index: target number to the tests that settle it, each spelled `path::name`. Every
 one of those is resolved against the real file by `test_every_settlement_names_a_test_that_exists`,
-so a citation that rots fails a test rather than quietly becoming prose. Five targets cite a test
-written elsewhere - #3 and #5 alongside an assertion of their own, #4, #9 and #10 instead of one -
-and each of those citations is re-run rather than re-implemented. #4 and #10 are the two that could
-not be improved on here at all: re-writing either would have been a second copy of a claim that is
-already made better, with more apparatus behind it, where it lives.
+so a citation that rots fails a test rather than quietly becoming prose. `UNSETTLED` is the other
+half of the index, keyed by the same numbers: a target may settle to nothing **only** if it is
+written up there, which is what
+`test_every_one_of_the_twelve_targets_carries_a_settlement_or_a_stated_reason` holds. Two targets
+cite a test written elsewhere - #3 alongside assertions of its own, #10 instead of one - and each
+of those citations is re-run rather than re-implemented. #10 could not be improved on here at all:
+re-writing it would have been a second copy of a claim that is already made better, with more
+apparatus behind it, where it lives.
 
 Everything structural is **derived from the tree**, never from a list typed here. The port/suite
 parity of #7 walks `src/agl/ports/` and `tests/contracts/`; the connector mutation of #6 walks
@@ -69,7 +78,7 @@ number the assertion rests on.
 
 ## One module, and it is one of the longest in the repository
 
-773 code lines against `scripts/check`'s 300-line convention, which is among the largest of the 36
+778 code lines against `scripts/check`'s 300-line convention, which is among the largest of the 37
 modules over it and more than half again `tests/test_contract_listings.py`, the file whose rule
 this one applies a floor up. The module size ceiling warns rather than fails, and this is the
 warning answered rather than ignored.
@@ -89,7 +98,7 @@ anything. #8 is the same shape from the other side, its enumeration static and i
 
 What the length actually is: twelve sections, each with the target quoted, the mechanical form
 argued for somebody meeting it for the first time, and a failure message that names the target
-rather than the expression that failed. 148 of those 773 lines are assertion messages, which is this
+rather than the expression that failed. 150 of those 778 lines are assertion messages, which is this
 repository's convention rather than this file's indulgence.
 
 ## The one instrument this file could not build
@@ -114,7 +123,7 @@ import shutil
 import socket
 import subprocess
 import tomllib
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Iterator, Mapping
 from configparser import ConfigParser
 from dataclasses import dataclass, fields
 from importlib.metadata import EntryPoint
@@ -138,18 +147,17 @@ SRC: Final = REPO_ROOT / "src"
 PACKAGE_DIR: Final = SRC / "agl"
 PORTS_DIR: Final = PACKAGE_DIR / "ports"
 ADAPTERS_DIR: Final = PACKAGE_DIR / "adapters"
-WORKFLOWS_DIR: Final = PACKAGE_DIR / "workflows"
 CONTRACTS_DIR: Final = REPO_ROOT / "tests" / "contracts"
 PYPROJECT_FILE: Final = REPO_ROOT / "pyproject.toml"
 IMPORTLINTER_FILE: Final = REPO_ROOT / ".importlinter"
 CHECK_SCRIPT: Final = REPO_ROOT / "scripts" / "check"
 
+# The entry-point group, which outlives every workflow that was ever registered into it: it is what
+# `config/registry.py` scans, and the name is spelled here for the two assertions that read it.
 WORKFLOWS_PACKAGE: Final = "agl.workflows"
 ADAPTERS_PACKAGE: Final = "agl.adapters"
-CONFIG_PACKAGE: Final = "agl.config"
 CONTAINER_MODULE: Final = "agl/config/container.py"
 REGISTRY_MODULE: Final = PACKAGE_DIR / "config" / "registry.py"
-ENTRY_POINT_TABLE: Final = 'entry-points."agl.workflows"'
 
 # Where each of the twelve is settled, spelled `path::name` so that a reader can go straight to the
 # assertion and so that `test_every_settlement_names_a_test_that_exists` can resolve every one of
@@ -160,25 +168,14 @@ HERE: Final = "tests/test_measurable_targets.py"
 CONTRACT_FIRING: Final = "tests/test_contract_firing.py"
 
 SETTLED: Final[Mapping[int, tuple[str, ...]]] = {
-    1: (
-        f"{HERE}::test_nothing_outside_the_workflows_package_imports_a_workflow",
-        f"{HERE}::test_the_registry_dispatches_through_no_name_it_was_handed",
-        f"{HERE}::test_every_workflow_package_is_one_entry_point_line_and_no_more",
-    ),
-    2: (
-        f"{HERE}::test_both_workflows_are_the_size_the_target_records",
-        f"{HERE}::test_the_counting_method_reproduces_the_decomposition_the_target_recorded",
-    ),
+    1: (f"{HERE}::test_the_registry_dispatches_through_no_name_it_was_handed",),
+    2: (),
     3: (
         f"{HERE}::test_only_the_composition_root_names_an_adapter",
         f"{HERE}::test_there_is_one_config_section_per_agent_backend",
-        f"{HERE}::test_no_workflow_reaches_an_adapter_or_the_configuration",
         "tests/config/test_schema.py::test_there_is_one_agent_section_per_provider_member",
     ),
-    4: (
-        "tests/workflows/test_fix.py::"
-        "test_one_run_addresses_two_providers_and_both_preflight_checks_pass",
-    ),
+    4: (),
     5: (
         f"{HERE}::test_vendor_containment_is_a_pair_of_instruments",
         f"{CONTRACT_FIRING}::test_the_named_contract_breaks_on_the_violation_it_exists_to_catch",
@@ -189,10 +186,7 @@ SETTLED: Final[Mapping[int, tuple[str, ...]]] = {
         f"{HERE}::test_every_contract_suite_is_run_by_at_least_two_implementations",
     ),
     8: (f"{HERE}::test_every_declared_command_runs_on_fakes_with_no_way_out",),
-    9: (
-        "tests/test_concurrent_runs.py::"
-        "test_three_runs_on_one_repository_overlap_and_leave_three_independent_branches",
-    ),
+    9: (),
     10: (
         "tests/sdk/test_kill_and_resume.py::"
         "test_the_core_programme_is_identical_however_far_it_got_before_it_was_killed",
@@ -204,6 +198,45 @@ SETTLED: Final[Mapping[int, tuple[str, ...]]] = {
         f"{HERE}::test_a_landing_writes_the_namespace_into_the_history",
     ),
     12: (f"{HERE}::test_target_twelve_is_unverifiable_because_tickets_does_not_exist",),
+}
+
+# Why a target above settles to nothing. A number may carry an empty tuple **only** if it is keyed
+# here, which is what keeps "unsettled" a thing somebody wrote down rather than a tuple that got
+# emptied. Every reason below is the same event - AGL stopped shipping `fix` and `split`, so the
+# tests that measured these three went with the workflows they measured - and each says whether the
+# capability went with them, because that is the difference between a target to resettle and a
+# target to withdraw.
+UNSETTLED: Final[Mapping[int, str]] = {
+    2: (
+        "`fix` is ~8 lines, `split` is ~30. The two workflows this counted are deleted, and with "
+        "them the counting method, its recorded decomposition and the frozen `fix` it was "
+        "calibrated against. Nothing measures a workflow's size today because the distribution "
+        "holds no workflow to measure. The framework half of the claim - that a workflow gets "
+        "replay, a worktree, preflight and exit codes without asking - is untouched and is what a "
+        "later stage would re-measure, against whatever the first workspace workflow turns out to "
+        "be."
+    ),
+    4: (
+        "One run addresses two providers. Was settled by a since-deleted `tests/workflows/"
+        "test_fix.py`, which drove "
+        "the shipped `fix` - Claude implementing, OpenAI reviewing - and read the models off the "
+        "tasks one run produced. **The capability is intact**: `adapters/routing.py` still "
+        "dispatches on `task.model.provider`, `tests/adapters/test_routing.py` still asserts it, "
+        "and `sdk/_engine/preflight.py` still ranks two providers' probes. What was deleted is the "
+        "workflow that demonstrated the two together end to end, so this is a target to resettle "
+        "against a two-provider workflow rather than one to withdraw."
+    ),
+    9: (
+        "Three runs, one repository, concurrently. Was settled by a since-deleted "
+        "`tests/test_concurrent_runs.py`, "
+        "which ran two `split`s and one `fix` over one real repository and asserted three "
+        "independent branches. **The capability is intact**: the `flock` in "
+        "`adapters/git/_trees.py` is what makes it safe, `tests/adapters/test_git_workspace.py` "
+        "provokes it from a second process, and `tests/sdk/test_concurrent_namespaces.py` holds "
+        "the rendezvous argument one layer down. What was deleted is the only test that took the "
+        "claim at the level the target words it - whole runs, not namespaces - so this too is a "
+        "target to resettle."
+    ),
 }
 
 # --- readers: everything structural is derived from the tree, never from a list typed here -----
@@ -288,42 +321,6 @@ def _is_docstring(statement: ast.stmt) -> bool:
         and isinstance(statement.value.value, str)
     )
 
-def _spanned(statement: ast.stmt) -> range:
-    """The lines a statement's own header occupies - decorators in, the body it encloses out.
-
-    A compound statement's `ast.unparse` renders everything inside it, so a function whose body
-    happens to call `terminal.show` would match a test for `terminal.show` on the *function*. What
-    is wanted is the lines the author wrote to open the statement - decorators included, since a
-    decorator is part of the declaration - and this is them.
-
-    A range rather than a string, because #2's counter needs both: `_header` renders these lines to
-    match text in, and the wiring rule below also asks whether a *name* is referenced in them,
-    which is a question about the parsed statement and not about its text.
-    """
-    decorators = [node.lineno for node in getattr(statement, "decorator_list", [])]
-    start = min([statement.lineno, *decorators])
-    body = getattr(statement, "body", None)
-    end = body[0].lineno - 1 if body else (statement.end_lineno or statement.lineno)
-    return range(start, end + 1)
-
-def _header(statement: ast.stmt, lines: Sequence[str]) -> str:
-    """A statement's own source, without the body it encloses - the lines `_spanned` names."""
-    span = _spanned(statement)
-    return "\n".join(lines[span.start - 1 : span.stop - 1])
-
-def _entry_points() -> Mapping[str, str]:
-    """`pyproject.toml`'s `agl.workflows` table: registered name to `module:attribute`.
-
-    Read out of the file rather than off the installed distribution, deliberately. What #1 counts is
-    the *edit* a workflow author makes, and that edit is a line in this table; whether the
-    distribution has been rebuilt since is `tests/config/test_registry.py`'s question and it names
-    the command that answers it.
-    """
-    project = tomllib.loads(PYPROJECT_FILE.read_text())["project"]
-    table = project["entry-points"]["agl.workflows"]
-    assert isinstance(table, dict)
-    return {str(name): str(value) for name, value in table.items()}
-
 def _contract(number: str) -> Mapping[str, str]:
     """One `.importlinter` contract, as the raw text of its keys. Numbers are stable by policy."""
     config = ConfigParser()
@@ -357,40 +354,19 @@ def _shell_constant(name: str) -> str:
 # ================================================================================================
 # Target 1 - adding a workflow touches one new package plus one entry-point line
 # ================================================================================================
-
-def test_nothing_outside_the_workflows_package_imports_a_workflow() -> None:
-    """"No central dispatch to edit", read as a fact about the import graph.
-
-    The target is that a workflow arrives as a package plus one line, with no edit to `cli/`,
-    `api.py`, `sdk/` or `config/`. The mechanical form of that is the absence this asserts: if
-    nothing outside `src/agl/workflows/` names a workflow module, then no module outside it can
-    have been edited to learn about one, whatever anybody remembers about the diff.
-
-    **Verified by entry point, not by dispatch**, which is the half worth stating. `config/
-    registry.py` resolves a name through `importlib.metadata`, so the framework reaches a workflow
-    through a table the *packaging system* holds - and the test for that is the neighbour below,
-    which asks what the resolver is made of rather than who imports whom.
-
-    Parsed and not grepped, because three lines under `src/` outside `src/agl/workflows/` spell
-    `agl.workflows` in a string rather than in an import - `config/registry.py`'s
-    `GROUP: Final = "agl.workflows"`, and the lines in `cli/commands/run.py` and
-    `cli/commands/workflows.py` that name the entry-point group to an operator. None of the three
-    is an import; a text search cannot tell the difference and reports three violations where there
-    are none.
-    """
-    outsiders = {
-        module: names
-        for module, names in _importers(PACKAGE_DIR, WORKFLOWS_PACKAGE, base=SRC).items()
-        if not module.startswith("agl/workflows/")
-    }
-
-    assert not outsiders, (
-        f"{sorted(outsiders)} import a workflow module, and every one of them is outside "
-        f"src/agl/workflows/: {outsiders}. Target #1 is that adding a workflow touches one new "
-        f"package plus one entry-point line, and a framework module that names a workflow is a "
-        f"module the next workflow's author has to edit. Workflows are reached through the "
-        f"`agl.workflows` entry points and through nothing else."
-    )
+#
+# **Two of this target's three assertions went with the shipped workflows and one did not.** Both of
+# the deleted ones were about a tree: that nothing outside `src/agl/workflows/` imported a workflow,
+# and that every package under it was one entry-point line in `pyproject.toml`. Neither can be asked
+# of a distribution that ships no workflow - `rglob` over a directory that is not there answers `[]`
+# and both would have passed on the empty set, which is a green line and not a measurement.
+#
+# What survives is the half that was never about the tree: the resolver. Target #1's own words are
+# "no `importlib`, no `getattr`, no central dispatch to edit", and that is a claim about
+# `config/registry.py`, which is unchanged and still reached through the `agl.workflows` entry-point
+# group. A workflow arriving from anywhere - a package installed beside AGL today, the workspace a
+# later stage adds - reaches the framework through that group and through nothing else, and the
+# assertion below is what holds the resolver to it.
 
 def test_the_registry_dispatches_through_no_name_it_was_handed() -> None:
     """The prohibition, read off the resolver's code and never off its prose.
@@ -456,314 +432,15 @@ def test_the_registry_dispatches_through_no_name_it_was_handed() -> None:
         f"hit here is code."
     )
 
-def test_every_workflow_package_is_one_entry_point_line_and_no_more() -> None:
-    """The other half of #1: one package, one line, and the two lists derived from each other.
-
-    Nothing here is typed twice. The packages come from walking `src/agl/workflows/` and the lines
-    come from parsing `pyproject.toml`, so a workflow package with no registration and a
-    registration naming no package both fail, and a third workflow added later is covered the
-    moment it exists.
-
-    **The value's shape is asserted too**, because "one line" is a claim about what the line says
-    as well as that it exists: `<name> = "agl.workflows.<name>:<name>"` is the registration form,
-    and it is the form that makes the entry point resolvable without a central table. A line
-    pointing somewhere else would be a workflow reached by a route this file has not measured.
-    """
-    packages = sorted(
-        path.name
-        for path in WORKFLOWS_DIR.iterdir()
-        if path.is_dir() and path.name != "__pycache__"
-    )
-    registered = _entry_points()
-
-    assert packages, (
-        f"{WORKFLOWS_DIR} holds no workflow package at all, so this comparison is between two "
-        f"empty lists and would pass against a repository that ships no workflows. That is the "
-        f"failure mode of a mistyped path, not a green build."
-    )
-    assert sorted(registered) == packages, (
-        f"the workflow packages under {WORKFLOWS_DIR} are {packages} and the "
-        f"[project.{ENTRY_POINT_TABLE}] table registers {sorted(registered)}. Target #1 is one "
-        f"package plus one entry-point line: a package with no line is a workflow `agl run` cannot "
-        f"reach, and a line with no package is a registration that fails at load."
-    )
-    for name, value in sorted(registered.items()):
-        assert value == f"{WORKFLOWS_PACKAGE}.{name}:{name}", (
-            f"the entry point {name!r} points at {value!r} rather than at "
-            f"`{WORKFLOWS_PACKAGE}.{name}:{name}`. A registration line names the package's "
-            f"own decorated function, which is what makes the package plus the line the whole of "
-            f"the edit - a value pointing elsewhere is a second convention to keep true."
-        )
-
 # ================================================================================================
 # Target 2 - `fix` is ~8 lines, `split` is ~30
 # ================================================================================================
 #
-# **One counting method, applied to both.** There are two defensible ones and they disagree, so
-# choosing quietly would be choosing the flattering answer. The method here is:
-#
-#     logical statements in the workflow package's `__init__.py`, docstrings and import
-#     statements excluded.
-#
-# It is chosen because it is the one that **reproduces the target's own recorded number**, which
-# says of `fix` "8 logical statements for the workflow specified, plus 4 more to wire one
-# interactive screen (a handler, its body, a `replace` for the asking role, and the board's
-# `show`)", and under this method `fix` is 12 statements of which exactly those 4 are the screen
-# wiring. Any method that cannot reproduce that decomposition is measuring something else.
-#
-# **The decomposition has changed and the floor has not.** The target is quoted above as it was
-# written - "8 ... plus 4 more to wire one interactive screen (a handler, its body, a `replace` for
-# the asking role, and the board's `show`)" - and two of those four are no longer in this package.
-# A question used to be a callback the framework asked through: `fix` wrote an `async def answer`
-# and its one-line body, put it on a role with `on_question=`, and AGL supplied the tool the agent
-# called. A question is now an ordinary tool the *workflow* supplies, and `fix` writes it in
-# `workflows/fix/asking.py` - a payload class, a handler, and a `tool()` call - so what is left in
-# `__init__.py` is the statement that hands the role its tool and the board's `show`.
-#
-# So: **wiring went from 4 to 2, and the floor stayed at 8.** The floor is the number target #2 is
-# about, it is the target's own, and it did not move - the two statements that left were both
-# wiring, and neither was the workflow. The recorded decomposition below is updated to what is
-# true rather than kept at what was recorded, because a count that no longer describes the file is
-# a count nobody can check. What the two numbers now say is: `fix` is 10 logical statements, 2 of
-# them putting a screen in front of a person, 8 of them the workflow the target specified.
-#
-# **That sentence is only worth anything under one rule, and the first rewrite was not one.** A
-# widening is exactly where a count improves because the counter moved, so the rule below is run
-# against `PREVIOUS_FIX` - the `__init__.py` as it stood when the decomposition was recorded - and
-# has to answer 12 and 4 there. The first attempt at the rewrite did not: it matched a statement
-# whose header names `.terminal` and nothing else, which scores the *old* file 2 as well, putting
-# its floor at 10 and **failing this target on the tree the target was written against**. Under
-# that rule the workflow contributed nothing at all to 4 -> 2; the whole of the delta was the
-# rewrite, and the floor read 8 only because the total had dropped by 2 at the same time. So the
-# clause it had dropped is kept: the old rule caught a handler by *name* and caught the statement
-# that handed it over, and both survive with `on_question` generalised to "a nested function that
-# reaches the terminal". What actually moved is then visible in one line - the handler and its body
-# left this file for `asking.py`, and `implementer(ask=asking(run.terminal))` arrived.
-#
-# The statements that left did not vanish - they moved to `workflows/fix/asking.py`, which this
-# method does not count, and which is bigger than the two lines it replaced because it carries the
-# vocabulary two adapters used to carry twice: a schema, a blank-question refusal, an options
-# normalisation, and a sentence for an answer that was empty. That is not hidden by the number and
-# is not meant to be: #2 counts a workflow's `__init__.py`, which is the file an author writes the
-# workflow *in*, and a package growing a module beside it is visible to anybody reading the package.
-# `tests/workflows/test_fix.py` is where that module is measured.
-#
-# The method that was refused, and its numbers, because a reader deserves both: counting only the
-# **decorated function's body** gives `fix` = 8 and `split` = 6. Those are smaller and they are the
-# flattering pair, and they cannot reproduce the target's "8 plus 4" - the whole of `fix`'s body is
-# 8 statements *including* the four the target adds on top, so under that method its arithmetic has
-# nowhere to go.
-#
-# What the chosen method includes beyond the function body is what an author actually writes: the
-# params dataclass and its `arg()` fields, the `@workflow` declaration itself, the `__all__` a
-# package exports, and - in `split` - the module-level `_implement` that is one chunk's half of the
-# workflow. Imports are excluded because an import is not a decision; docstrings are excluded for
-# the reason `scripts/check`'s module size ceiling excludes them, which that gate argues at length.
-
-FIX_PACKAGE: Final = WORKFLOWS_DIR / "fix" / "__init__.py"
-SPLIT_PACKAGE: Final = WORKFLOWS_DIR / "split" / "__init__.py"
-
-# The recorded decomposition of `fix`: the workflow, plus the interactive screen. `FIX_CORE` is the
-# target's own number and has not moved. `FIX_SCREEN_WIRING` was 4 and is 2 - see the section header
-# above for what left and where it went.
-FIX_CORE: Final = 8
-FIX_SCREEN_WIRING: Final = 2
-
-# The target's word for `split`, which is a bound rather than a number: "`split` is ~30".
-SPLIT_CEILING: Final = 30
-
-# `src/agl/workflows/fix/__init__.py` as it stood when target #2's decomposition was recorded. The
-# method's stated criterion is that it reproduces that decomposition, and a criterion nothing runs
-# is how the wiring rule got narrower once already - so the criterion is run, below, against this.
-# Frozen history rather than a copy of anything live: no edit under `src/` can move it, and the day
-# `fix` changes again this still says 12 and 4.
-PREVIOUS_FIX: Final = '''
-from dataclasses import dataclass
-
-from agl.sdk import Answer, Question, Run, arg, workflow
-from agl.workflows.fix import views
-from agl.workflows.fix.roles import implementer, reviewer
-
-__all__ = ["FixParams", "fix"]
-
-
-@dataclass(frozen=True)
-class FixParams:
-
-    request: str = arg("-r", "--request", help="what to fix, in your own words")
-
-
-@workflow(version="1.1")
-async def fix(run: Run[FixParams]) -> None:
-
-    async def answer(question: Question) -> Answer:
-        return await run.terminal.show(views.agent_question, question=question)
-
-    asking = implementer(on_question=answer)
-    await run.terminal.show(views.board, run=run, request=run.params.request)
-    await run.step(asking, request=run.params.request, commit="implement fix")
-    findings = await run.step(reviewer())
-    if findings.high():
-        await run.step(asking, findings=findings.high(), commit="address review findings")
-'''
-
-def _counted(module: Path) -> tuple[int, int]:
-    """A workflow package's statement count, and how many of those are interactive-screen wiring.
-
-    The wiring is identified structurally and not by line number, in three clauses:
-
-      1. a statement whose own **header** names `.terminal` - that is `Run.terminal`, the one member
-         a workflow reaches a person through, so `await run.terminal.show(views.board, ...)`,
-         `if await w.terminal.show(views.conflict, ...)` and `implementer(ask=asking(run.terminal))`
-         all count, the last of them handing a role a tool whose handler shows a screen;
-      2. a **nested** function whose body reaches the terminal - a screen handler written inside the
-         workflow, whose own header names nothing and which clause 1 therefore cannot see;
-      3. a statement whose header **references** such a function - the line that hands the handler
-         over to whatever is going to call it.
-
-    **Clauses 2 and 3 are the old rule generalised, not new machinery, and dropping them is how a
-    counter flatters.** The rule read "names `terminal.show` or `on_question`, or *is* the handler
-    function some `on_question=` keyword points at" - three clauses, the same three - and
-    `on_question` no longer exists, so the middle term had to be rewritten. Rewriting it to
-    `.terminal` and stopping there was tried and refused: `.terminal` alone scores the *previous*
-    `fix` 2 rather than 4, which puts that file's floor at 10 and fails target #2 on the very tree
-    the target was written against - so the whole of the recorded 4 -> 2 would have been the
-    counter moving rather than the workflow. `test_the_counting_method_reproduces_the_
-    decomposition_the_target_recorded` is that check, kept as a test rather than as this paragraph.
-
-    Clause 3 asks the *parsed* statement whether a handler's name is loaded inside `_spanned`'s
-    lines, rather than searching the header's text for it, so a name that occurs as part of a longer
-    word is not a hand-over. Clause 2 is restricted to a nested function because the module-level
-    ones are the workflow itself and `split`'s `_implement`, and a rule that counted a def because
-    something inside it reaches a screen would report the whole workflow as wiring.
-
-    **What it deliberately does not do is follow the wiring out of the package.** `fix`'s asking
-    tool lives in `workflows/fix/asking.py` and nothing here counts it; the section header above
-    says so and says why. A rule that chased imports would be measuring a different thing from the
-    one target #2 recorded, which is the size of the file the workflow is written in.
-
-    `_header` and not `ast.unparse`, because unparsing a compound statement renders its whole body:
-    the `@workflow` declaration would match `.terminal` on account of a call four lines inside it,
-    and the count would then say the workflow function is a screen.
-    """
-    source = module.read_text()
-    lines = source.splitlines()
-    tree = ast.parse(source)
-    statements = [
-        node
-        for node in _statements(tree)
-        if not isinstance(node, ast.Import | ast.ImportFrom)
-    ]
-    handlers = {
-        statement.name
-        for statement in statements
-        if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef)
-        and statement not in tree.body
-        and any(".terminal" in _header(inner, lines) for inner in _statements(statement))
-    }
-
-    def wiring(statement: ast.stmt) -> bool:
-        if getattr(statement, "name", None) in handlers:
-            return True
-        if ".terminal" in _header(statement, lines):
-            return True
-        span = _spanned(statement)
-        return any(
-            isinstance(node, ast.Name) and node.id in handlers and node.lineno in span
-            for node in ast.walk(statement)
-        )
-
-    return len(statements), sum(1 for statement in statements if wiring(statement))
-
-def test_both_workflows_are_the_size_the_target_records() -> None:
-    """#2, under the one method the section header above names, applied to both workflows.
-
-    Three assertions and each is a different claim:
-
-      * **`fix`'s floor is 8.** Take away the statements that wire one interactive screen and what
-        is left is the workflow as specified - the two steps, the branch, and the repair - plus the
-        params and the declaration an author cannot avoid writing. That is the number the target
-        means by "~8 lines", it is the target's own, and it has not moved.
-      * **The screen costs exactly 2**, where the target recorded 4. Two of those four were an
-        `async def` question handler and its body, and they left this package when a question became
-        an ordinary tool a workflow supplies - see the section header for where they went. The
-        screen wiring sits on top of the floor; it does not move it, which is why the floor is
-        unchanged by a change that halved the wiring.
-      * **`split` is under 30.** The target's word for `split` is "~30", so what is asserted is the
-        bound rather than a number, and the measured value is carried into the failure message so
-        that a workflow which grew is reported as a size and not only as a breach.
-
-    **`split` adds concurrency, child worktrees and integration with no framework change between
-    them**, which is the other half of #2's sentence and is settled by #1's assertions rather than
-    by a count: nothing outside `src/agl/workflows/` names either workflow, so whatever `split`
-    needed, it did not get by editing the framework. The record of that is in
-    `src/agl/workflows/split/__init__.py`'s docstring, which reports the one diff it deliberately
-    did not make.
-    """
-    fix_total, fix_wiring = _counted(FIX_PACKAGE)
-    split_total, split_wiring = _counted(SPLIT_PACKAGE)
-
-    assert fix_wiring == FIX_SCREEN_WIRING, (
-        f"{FIX_PACKAGE.parent.name} spends {fix_wiring} statements on interactive-screen wiring "
-        f"and this file records {FIX_SCREEN_WIRING} - the statement that hands the asking role its "
-        f"tool, and the board's `show`. The decomposition is what makes floor a floor: if the "
-        f"wiring count moved, the number left under it is not the specified workflow any more."
-    )
-    assert fix_total - fix_wiring == FIX_CORE, (
-        f"`fix` is {fix_total} logical statements of which {fix_wiring} are screen wiring, leaving "
-        f"{fix_total - fix_wiring} where the target records {FIX_CORE}. Target #2 is that `fix` "
-        f"is ~8 lines and gets fingerprinted replay, a worktree, preflight and exit codes free. "
-        f"The floor is what is being measured; the question wiring sits on top of it."
-    )
-    assert split_total <= SPLIT_CEILING, (
-        f"`split` is {split_total} logical statements against target #2's ~{SPLIT_CEILING}. It is "
-        f"the workflow that adds concurrency, child worktrees and integration, and the claim is "
-        f"that it adds them with no framework change between it and `fix` - a `split` that has "
-        f"outgrown the number is either doing framework work or doing more than one thing. "
-        f"({split_wiring} of those statements are screens.)"
-    )
-
-def test_the_counting_method_reproduces_the_decomposition_the_target_recorded(
-    tmp_path: Path,
-) -> None:
-    """The criterion the counting method was chosen by, run instead of asserted in prose.
-
-    The section header says it in as many words - "it is chosen because it is the one that
-    reproduces the target's own recorded number ... any method that cannot reproduce that
-    decomposition is measuring something else" - and until this test existed that was a sentence
-    nothing checked. It went wrong exactly as an unchecked criterion does. When `on_question` was
-    deleted the wiring rule had to be rewritten, the rewrite dropped two of the old rule's three
-    clauses, and the recorded wiring went from 4 to 2 with the section header attributing the drop
-    to two statements leaving the package. Under the rule that produced the 2, the *previous* file
-    scores 2 as well: the workflow contributed nothing to the delta, and this assertion is what
-    would have said so.
-
-    So the method is run against `PREVIOUS_FIX` and has to answer with the decomposition the target
-    recorded - `FIX_CORE` statements plus the four the target names, of which the four are the
-    wiring. **`FIX_CORE` is on both sides on purpose.** The floor is the number target #2 is about,
-    and what is being asserted is that it is the same floor here and in `fix` today - a rule that
-    moved it under the old file would be a rule reporting a workflow that has not been edited in
-    years as having changed size.
-
-    The historical source is frozen in this module rather than read out of git, because a test that
-    resolves a commit is a test a rebase can delete and this claim is about a file's *content*, not
-    about a repository's history. Nothing under `src/` can drift from it either, which is what makes
-    it safe to keep: it is the past, and the past does not need maintaining.
-    """
-    previous = tmp_path / "__init__.py"
-    previous.write_text(PREVIOUS_FIX)
-
-    total, wiring = _counted(previous)
-
-    assert (total, wiring) == (FIX_CORE + 4, 4), (
-        f"the counting method scores the `fix` that target #2's decomposition was recorded against "
-        f"at {total} statements of which {wiring} are screen wiring, where the target records "
-        f"{FIX_CORE + 4} and 4 - a handler, its body, the statement that puts it on the asking "
-        f"role, and the board's `show`. The method is chosen *because* it reproduces that "
-        f"decomposition, so a rule that cannot is measuring something else, and any number it "
-        f"reports for the workflow as it stands today is a number about the rule rather than about "
-        f"the workflow. Its floor here would be {total - wiring} against the target's {FIX_CORE}."
-    )
+# **Nothing here measures it, and `UNSETTLED` at the top of this file is where that is recorded.**
+# The counting method, the decomposition it reproduced and the frozen `fix` it was calibrated
+# against all went with the two workflows they were about; a counter with nothing to count is not a
+# measurement, and keeping one that scored a string held in this module would have been the proxy
+# this file's governing rule refuses.
 
 # ================================================================================================
 # Target 3 - adding an agent backend touches one adapter package, one container line, one config
@@ -819,53 +496,31 @@ def test_there_is_one_config_section_per_agent_backend() -> None:
         f"configures nothing."
     )
 
-def test_no_workflow_reaches_an_adapter_or_the_configuration() -> None:
-    """No workflow changes: the absence that makes that true whoever adds the next backend.
-
-    A workflow that could name an adapter would be a workflow the next backend might have to edit.
-    Nothing under `src/agl/workflows/` imports `agl.adapters` or `agl.config`, so the third clause
-    of #3 holds structurally rather than by anybody's care.
-
-    `.importlinter`'s contract 6 is the enforcement and `tests/test_contract_firing.py` fabricates
-    both halves of it and watches it fire. This is the measurement beside it, in the vocabulary of
-    the target: what #3 promises is about what an *author* has to touch, and that is a claim about
-    the tree rather than about a config file.
-
-    A workflow naming a **model** - `Claude.OPUS`, `OpenAI.SOL` - is correct and expected, and is
-    not what this measures. Target #5 says so in as many words: those are the sanctioned way for a
-    workflow to express provider choice without naming a harness, and no
-    import of theirs reaches an adapter.
-    """
-    adapters = _importers(WORKFLOWS_DIR, ADAPTERS_PACKAGE, base=SRC)
-    configuration = _importers(WORKFLOWS_DIR, CONFIG_PACKAGE, base=SRC)
-    reaching = {
-        module: adapters.get(module, ()) + configuration.get(module, ())
-        for module in adapters.keys() | configuration.keys()
-    }
-
-    assert not reaching, (
-        f"{sorted(reaching)} import `{ADAPTERS_PACKAGE}` or `{CONFIG_PACKAGE}` from inside "
-        f"src/agl/workflows/: {reaching}. Target #3 promises that adding an agent backend changes "
-        f"no workflow, and a workflow that names an adapter or the configuration is a workflow "
-        f"the next backend can break."
-    )
+# **#3's third clause - that adding a backend changes no workflow - is no longer asserted here.** It
+# was asserted by walking `src/agl/workflows/` for an import of `agl.adapters` or `agl.config`.
+# That walk answers `{}` against a tree with no workflows in it, which is a green line rather than a
+# measurement, so it went with them. The clause itself is not in doubt and is not unmeasured: a
+# workflow now arrives from outside this distribution entirely, so what would have to hold is that
+# the SDK a workflow is written against never obliges it to name an adapter - which is the two
+# assertions above, plus `.importlinter` contract 5 refusing every `agl.* -> agl.adapters` that is
+# not the composition root.
 
 # ================================================================================================
 # Target 4 - one run addresses two providers
 # ================================================================================================
 #
-# **Cited, not re-implemented.** `tests/workflows/test_fix.py::
-# test_one_run_addresses_two_providers_and_both_preflight_checks_pass` is the assertion, and it is
-# better than a copy made here would be: it drives the real `fix` workflow through the real harness
-# and reads the models off the tasks that came out of one run - Claude, OpenAI, Claude - so "two
-# providers" is a fact about the dispatch rather than about a role declaration.
+# **Unsettled, and `UNSETTLED` at the top of this file carries the reason.** This was cited rather
+# than re-implemented, to a test that drove the shipped `fix` end to end - Claude implementing,
+# OpenAI reviewing - and read the models off the tasks one run produced, so "two providers" was a
+# fact about the dispatch rather than about a role declaration. That workflow is gone and the
+# citation with it.
 #
-# **It records its own limit**, which is why it could not be improved on from here. Preflight
-# passing leaves nothing behind: preflight's two checks run before the record is written, so a run
-# with a `run.json` and three entries is a run that passed them and there is no artefact to assert
-# on. That test therefore asks both questions again, explicitly, of the same runner the run used,
-# and says in its docstring that this is the workaround for an invisible half rather than a second
-# measurement of it. Re-asking them here would be a third copy of the same workaround.
+# **What a resettlement would have to do, so nobody re-derives it.** Preflight passing leaves
+# nothing behind - its checks run before the record is written, so a finished run is the only
+# evidence it passed and there is no artefact to assert on. The deleted test worked around that by
+# asking both readiness questions again, explicitly, of the same runner the run had used, and said
+# in its own docstring that this was a workaround for an invisible half rather than a second
+# measurement of it. Any replacement needs the same two halves and the same admission.
 
 # ================================================================================================
 # Target 5 - vendor containment, tested two ways
@@ -886,9 +541,11 @@ def test_vendor_containment_is_a_pair_of_instruments() -> None:
     claude_agent_sdk` and who may spawn the binary, not about who may say a vendor's name.
 
     **What is asserted and what is cited.** Contract 3's *refusal* is fabricated and watched in
-    `tests/test_contract_firing.py` - one vendor's adapter importing the other vendor's SDK, which
-    is the exact failure an `agl[terminal]` install dragging in `agl[claude]` would be - so that
-    citation is the firing half and this is the existence half.
+    `tests/test_contract_firing.py` - the rich terminal's adapter importing the Claude SDK, one
+    vendor's adapter reaching for the other vendor's SDK - so that citation is the firing half and
+    this is the existence half. Both SDKs being unconditional dependencies is what makes that the
+    whole guard: the SDK is installed in every environment there is, so the import the contract
+    refuses is one that would otherwise succeed.
 
     **The gate's refusal is not fabricated here, and that is a limit rather than an oversight.**
     Making it fire would mean writing its grep a third time, and a third copy is free to drift from
@@ -903,8 +560,8 @@ def test_vendor_containment_is_a_pair_of_instruments() -> None:
     assert "claude_agent_sdk" in forbidden, (
         f"`.importlinter` contract 3 forbids {sorted(forbidden)} and `claude_agent_sdk` is not "
         f"among them. That contract is the first of target #5's two instruments: without it a "
-        f"vendor SDK is contained by nothing at all, and an `agl[terminal]` install can drag in "
-        f"`agl[claude]`."
+        f"vendor SDK is contained by nothing at all, and any module in the tree may import it - "
+        f"an SDK `pyproject.toml` installs unconditionally, so the import would simply work."
     )
     assert any(
         expression.strip().startswith("agl.adapters.claude_code") for expression in ignored
@@ -934,12 +591,17 @@ def test_vendor_containment_is_a_pair_of_instruments() -> None:
         f"the same non-vacuity `tests/test_contract_firing.py` takes once for all six contracts."
     )
 
-    extras = tomllib.loads(PYPROJECT_FILE.read_text())["project"]["optional-dependencies"]
-    assert "openai" not in extras, (
-        f"`pyproject.toml` now declares an `openai` extra ({sorted(extras)}). The whole reason "
-        f"target #5 needs two instruments rather than one is that the OpenAI adapter has no Python "
-        f"dependency to contain - it shells out to a binary. An extra here means there is now an "
-        f"import to contain, and contract 3 is where it goes."
+    declared = tomllib.loads(PYPROJECT_FILE.read_text())["project"]["dependencies"]
+    from_openai = [
+        requirement for requirement in declared if requirement.lower().startswith("openai")
+    ]
+    assert not from_openai, (
+        f"`pyproject.toml` declares {from_openai} in [project] dependencies, and every entry there "
+        f"is installed with AGL unconditionally. The whole reason target #5 needs two instruments "
+        f"rather than one is that the OpenAI adapter has no Python dependency to contain - it "
+        f"shells out to a binary, which is why its instrument is a grep over a directory and not a "
+        f"contract over an import. A distribution here means there is now an import to contain, "
+        f"and contract 3 is where it goes."
     )
 
 # ================================================================================================
@@ -960,7 +622,7 @@ def test_vendor_containment_is_a_pair_of_instruments() -> None:
 # **Scope, stated so the verdict is not read for more than it says.** What is mutated is the adapter
 # package and what is measured is the dangling *imports* in `src/`. The port, the config section and
 # the container entry named in the target are deliberate edits an author makes, not references that
-# dangle; `pyproject.toml`'s extras table is outside `src/` and outside this pass. What the pass
+# dangle; `pyproject.toml`'s dependency list is outside `src/` and outside this pass. What the pass
 # answers is the target's own last clause - *nothing else breaks* - and the answer is a set of file
 # paths.
 
@@ -1374,11 +1036,19 @@ def test_every_declared_command_runs_on_fakes_with_no_way_out(
 # Target 9 - three runs, one repo, concurrently
 # ================================================================================================
 #
-# **Cited, not re-implemented.** `tests/test_concurrent_runs.py::
-# test_three_runs_on_one_repository_overlap_and_leave_three_independent_branches` is that whole
-# claim: two `split` runs and one `fix`, different base refs, overlapping in time, and three
-# independent local branches at the end. A copy made here would be the same test with less of the
-# apparatus that proves the runs actually overlapped, which is the hard half of that claim.
+# **Unsettled, and `UNSETTLED` at the top of this file carries the reason.** This was cited rather
+# than re-implemented, to a test that ran two `split`s and one `fix` over one real repository from
+# different base refs and found three independent local branches at the end. Both workflows are
+# gone and that test with them.
+#
+# **What a resettlement would have to do, so nobody re-derives it.** Three runs that finish and
+# leave three ledgers prove nothing, because a framework that ran them strictly in order leaves
+# exactly that. The only arrangement that separates the two is one where **none can finish until
+# all of them have started** - a barrier reached from inside each run's agent, with every await
+# bounded so that the failure is an expiry rather than a hang. That is the apparatus, and it is the
+# hard half of the claim rather than the assertion at the end of it.
+# `tests/sdk/test_concurrent_namespaces.py` holds the same argument one layer down, over namespaces
+# inside one run, and is the nearest thing to a model for it.
 
 # ================================================================================================
 # Target 10 - kill-and-resume is a property test
@@ -1666,37 +1336,51 @@ def test_target_twelve_is_unverifiable_because_tickets_does_not_exist() -> None:
     triage roles, the findings model and the board - so there is nothing to measure and no
     measurement is made.
 
-    **What this test asserts is only that the premise still holds**: no `tickets` package, no
-    `tickets` entry point. It is a tripwire, not evidence. The day tickets arrives, this fails, and
-    what it asks for is the measurement rather than a green line - take the diff, and report whether
-    anything under `src/agl/sdk/`, `src/agl/config/`, `src/agl/cli/`, `src/agl/api.py` or
-    `src/agl/ports/` had to move.
+    **What this test asserts is only that the premise still holds**: this distribution ships no
+    workflow named `tickets`, and no workflow at all. It is a tripwire, not evidence. The day
+    tickets arrives here, this fails, and what it asks for is the measurement rather than a green
+    line - take the diff, and report whether anything under `src/agl/sdk/`, `src/agl/config/`,
+    `src/agl/cli/`, `src/agl/api.py` or `src/agl/ports/` had to move.
 
-    **The strongest available evidence, and why it is not a substitute.** `fix` and `split` are two
+    **The tripwire watches `src/` and a workflow may not arrive there.** AGL ships no workflow now,
+    and the workspace a later stage adds puts them outside this tree entirely - so tickets could be
+    written, run and finished without this test ever firing. That is stated rather than papered
+    over: the premise it guards is "this *distribution* has not grown a workflow", which is worth
+    holding on its own, and whoever adds the workspace should point a second tripwire at wherever a
+    workflow actually lives by then. Reading a green line here as "tickets does not exist anywhere"
+    is the mistake this paragraph exists to stop.
+
+    **The strongest available evidence, and why it is not a substitute.** `fix` and `split` were two
     consumers of genuinely different shape - one worktree and sequential steps against N concurrent
     children each integrated - and they required no framework change between them; that was
-    recorded as its own measurement when `split` was built, and targets #1 and #3 above assert the
-    structural half of it today. That is evidence the framework generalises across two shapes. It
-    is not evidence about a third that does not exist, and the difference matters exactly where
-    tickets differs from both: a workflow-owned scheduler with retries, dynamic work addition and a
-    halt policy asks the SDK questions neither of these two has asked. Anyone reading this in v1.2
-    should treat #12 as open until they have taken the diff.
+    recorded as its own measurement when `split` was built. That is evidence the framework
+    generalises across two shapes. It is not evidence about a third that does not exist, and the
+    difference matters exactly where tickets differs from both: a workflow-owned scheduler with
+    retries, dynamic work addition and a halt policy asks the SDK questions neither of those two
+    ever asked. Anyone reading this in v1.2 should treat #12 as open until they have taken the diff.
     """
-    packages = {
+    packages = sorted(
         path.name
-        for path in WORKFLOWS_DIR.iterdir()
+        for path in PACKAGE_DIR.iterdir()
         if path.is_dir() and path.name != "__pycache__"
-    }
-    registered = set(_entry_points())
+    )
+    groups = tomllib.loads(PYPROJECT_FILE.read_text())["project"].get("entry-points", {})
+    registered = sorted(groups.get(WORKFLOWS_PACKAGE, {}))
 
-    assert "tickets" not in packages | registered, (
-        f"tickets now exists (packages: {sorted(packages)}, registered: {sorted(registered)}), so "
-        f"target #12 is measurable for the first time and is still unmeasured. Take the diff that "
-        f"added it and report whether anything under src/agl/sdk/, src/agl/config/, src/agl/cli/, "
-        f"src/agl/api.py or src/agl/ports/ had to change. If any of it did, the target's own "
-        f"answer applies: the framework was wrong. Then replace this test with that measurement - "
-        f"it was "
-        f"written to be deleted by whoever adds tickets."
+    assert "tickets" not in set(packages) | set(registered), (
+        f"tickets now exists (packages under src/agl/: {packages}, registered in the "
+        f"{WORKFLOWS_PACKAGE} group: {registered}), so target #12 is measurable for the first time "
+        f"and is still unmeasured. Take the diff that added it and report whether anything under "
+        f"src/agl/sdk/, src/agl/config/, src/agl/cli/, src/agl/api.py or src/agl/ports/ had to "
+        f"change. If any of it did, the target's own answer applies: the framework was wrong. Then "
+        f"replace this test with that measurement - it was written to be deleted by whoever adds "
+        f"tickets."
+    )
+    assert not registered, (
+        f"the {WORKFLOWS_PACKAGE} group in pyproject.toml registers {registered}. AGL ships no "
+        f"workflow, so this table is empty by design and a line in it is a workflow this "
+        f"distribution has grown - which is the premise above changing, whatever the new workflow "
+        f"is called."
     )
 
 # ================================================================================================
@@ -1713,22 +1397,42 @@ def _test_names(path: Path) -> set[str]:
         and node.name.startswith("test_")
     }
 
-def test_all_twelve_targets_are_accounted_for() -> None:
+def test_every_one_of_the_twelve_targets_carries_a_settlement_or_a_stated_reason() -> None:
     """There are twelve targets and this file answers for all twelve, by number.
 
     The index is the deliverable as much as the assertions are: a reader should be able to open one
-    file and see where each of the twelve is settled. A missing number would be a target nobody
-    answered for, which is the state this file exists to end.
+    file and see, for each of the twelve, either where it is settled or why it is not. A missing
+    number would be a target nobody answered for, which is the state this file exists to end.
+
+    **An empty tuple used to be refused outright and now costs a reason instead**, which is the
+    same rule under a case that arrived: three targets were settled by tests that measured the
+    workflows AGL shipped, and when those were deleted the settlements went with them. The choice
+    was between a number carrying nothing, a proxy assertion dressed up as the target - which this
+    module's governing rule refuses - and a number carrying the reason it settles to nothing. The
+    third is what `UNSETTLED` is, and this is the assertion that keeps it honest: an empty tuple is
+    legal **only** where a reason is written down, so emptying one is still an edit somebody has to
+    make in two places and defend in prose.
     """
     assert sorted(SETTLED) == list(range(1, 13)), (
         f"`SETTLED` answers for targets {sorted(SETTLED)}. There are twelve, numbered 1 to 12, "
-        f"and a number missing here is a target this file does not account for."
+        f"and a number missing here is a target this file does not account for. The numbering is "
+        f"load-bearing beyond this file: tests/test_named_not_numbered.py exempts a target cited "
+        f"by number only while `SETTLED` is keyed by a run from one, so a hole here turns every "
+        f"`target #N` in the repository into a citation of nothing."
     )
-    empty = [number for number, where in SETTLED.items() if not where]
-    assert not empty, (
-        f"targets {empty} are listed with nothing settling them. A number with an empty tuple is a "
-        f"target recorded as answered and not answered - worse than one left out, because it reads "
-        f"as covered."
+    unexplained = sorted(
+        number for number, where in SETTLED.items() if not where and number not in UNSETTLED
+    )
+    assert not unexplained, (
+        f"targets {unexplained} settle to nothing and `UNSETTLED` says nothing about them. A "
+        f"number with an empty tuple and no reason is a target recorded as answered and not "
+        f"answered - worse than one left out, because it reads as covered."
+    )
+    stale = sorted(number for number, where in SETTLED.items() if where and number in UNSETTLED)
+    assert not stale, (
+        f"targets {stale} carry both a settlement and an entry in `UNSETTLED`. A target that has "
+        f"been resettled keeps its reason only as prose nobody reads against anything - delete the "
+        f"`UNSETTLED` entry when the settlement lands."
     )
 
 @pytest.mark.parametrize(

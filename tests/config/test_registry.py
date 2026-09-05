@@ -10,48 +10,42 @@ succeeds into the wrong type - and at one module path that does not exist. Nothi
 package or a `.dist-info` directory: an entry point is a name, a `module:attr` string and a group,
 and resolving it is the interpreter's job rather than this file's.
 
-The one impure function gets one test, and it asserts the honest thing. The `agl.workflows` group is
-declared in `pyproject.toml` and holds the workflows AGL ships, so what is asserted is that reading
-it returns those names - a skip would assert nothing, and this catches a group name that has drifted
-out of agreement with `pyproject.toml` into something unreadable.
+## Nothing here reads the real group any more, and that is a deletion rather than a gap
 
-## It is the one test in the suite that can fail for a reason outside the repository
+There used to be one impure test: it read `pyproject.toml`'s `agl.workflows` table, compared it
+against what this environment's installed distribution contributes to that group, and then asserted
+the group held `fix` and `split`. **AGL now ships no workflow and declares no table**, so both
+halves are about nothing - the comparison is between two empty lists, and the membership check has
+no member to look for.
 
-`entry_points.txt` is a *build artifact*. An edit to `pyproject.toml`'s table is invisible until the
-distribution is rebuilt, so between that edit and the next `uv pip install -e . --no-deps` the group
-this environment reports and the group this repository declares are two different lists - and
-deleting a workflow, table line and all, is the case that actually happened. Nothing refreshes the
-install: not `scripts/check`, deliberately. A gate that repaired the environment before measuring
-it would be a gate that could no longer report the drift at all, which is the opposite of the
-header's "everything that can say this build is wrong says it here"; the paid-endpoint guard writes
-and deletes a probe file, but that file *is* the measurement rather than a repair of the thing
-being measured. And `scripts/check` is not the only way this test runs - a bare `pytest` would be
-left with the same confusing failure.
-
-So the drift is diagnosed here instead, first, and named for what it is. The test reads the table
-out of `pyproject.toml` and compares it against the entry points this environment attributes to the
-`agl` distribution; a mismatch is reported as a stale install with the one command that fixes it,
-before anything is said about which workflows are registered. That is the actual complaint: not
-that the failure was hard to fix, but that it named the wrong thing - a workflow-registration
-failure, for an environment that had simply not been rebuilt.
+What went with it is worth naming, because it was the only thing in this suite that could fail for
+a reason outside the repository. `entry_points.txt` is a *build artifact*: an edit to
+`pyproject.toml` is invisible until the next `uv pip install -e . --no-deps`, so between the two
+the group this environment reports and the group this repository declares are two different lists.
+That test diagnosed the drift by name, with the command that ends it, before saying anything about
+which workflows were registered - because a reader told "`fix` is missing from the group" goes
+looking in `agl/workflows/` for a package that is sitting right there. **Nothing diagnoses that
+now.** It costs nothing while the table is empty, and the moment a workflow is registered anywhere
+again - by AGL or by a distribution installed beside it - a test of this shape is what keeps a stale
+install from being read as a workflow that failed to register.
 
 Refusals are asserted on their class *and* on the name, the entry-point value or the list of
 alternatives appearing in the message: "it raised" is satisfied by a refusal that leaves the
 operator with nothing to do next.
 """
 
-import tomllib
 from importlib.metadata import EntryPoint
-from pathlib import Path
 from typing import Final
 import pytest
-from agl.config.registry import GROUP, installed, load, names
+from agl.config.registry import GROUP, load, names
 from agl.ports.errors import ConflictError, InputError, NotFoundError
 
 # What a registered workflow looks like from here: a name, a `module:attr` value, and the group.
 # The targets are real objects in this repository, so a load that is supposed to succeed does.
+# Both names are invented. Nothing in this file resolves a name against what is registered anywhere,
+# which is why one of them could go on reading `split` for a while after that workflow was deleted.
 _WORKFLOW: Final = "tickets"
-_OTHER: Final = "split"
+_OTHER: Final = "triage"
 
 def _point(name: str, value: str) -> EntryPoint:
     return EntryPoint(name=name, value=value, group=GROUP)
@@ -74,13 +68,13 @@ def test_names_lists_every_registered_workflow_sorted() -> None:
     """Sorted, so `agl workflows` prints the same list on two machines that scanned differently.
 
     Three names, handed over in reverse of the order asserted, so a `names` that returned its input
-    unchanged fails here. The third is invented, as `tickets` is. It read `noop` until that
-    workflow was deleted, and the deletion cost this case nothing - which is the point worth leaving
-    behind: nothing in this half resolves a name, so what is registered in `pyproject.toml` is not
-    a fact any assertion here rests on.
+    unchanged fails here. All three are invented. Two of them read `noop` and `split` until those
+    workflows were deleted, and neither deletion cost this case anything - which is the point worth
+    leaving behind: nothing in this half resolves a name, so what is registered anywhere is not a
+    fact any assertion here rests on.
     """
     points = (_loadable(_WORKFLOW), _loadable(_OTHER), _loadable("backlog"))
-    assert names(points) == ("backlog", "split", "tickets")
+    assert names(points) == ("backlog", "tickets", "triage")
 
 def test_names_of_an_empty_group_is_empty() -> None:
     assert names(()) == ()
@@ -164,104 +158,3 @@ def test_an_entry_point_that_loads_the_wrong_kind_of_object_is_refused() -> None
     assert value in message
     assert _Workflow.__qualname__ in message
     assert "str" in message
-
-# --- the one impure line ------------------------------------------------------------------------
-
-# This repository's own `pyproject.toml`, and the distribution the build makes out of it. The path
-# is walked up from this file rather than from the working directory, so it is the same file
-# whichever directory `pytest` was started in. The name is read back out of `[project]` below rather
-# than written here twice.
-_PYPROJECT: Final = Path(__file__).resolve().parents[2] / "pyproject.toml"
-
-# The one command that turns a stale editable install into a fresh one. Spelled once, because it
-# goes into two failure messages and a command retyped wrong is a command that did not help.
-_REFRESH: Final = "uv pip install -e . --no-deps"
-
-def _declared() -> tuple[str, ...]:
-    """The workflow names `pyproject.toml`'s own entry-point table holds, read from the file.
-
-    The *source* side of the comparison, and the reason it is read rather than imported: the whole
-    failure being diagnosed is a build artifact that has fallen behind this table, so a reading that
-    went through anything the build produced would agree with the build by construction.
-    """
-    assert _PYPROJECT.is_file(), (
-        f"{_PYPROJECT} is not there, so this test cannot tell what workflows this repository "
-        f"declares. It walks up from this file's own path; a tests/ tree that moved relative to "
-        f"the project root is what breaks it."
-    )
-    parsed = tomllib.loads(_PYPROJECT.read_text(encoding="utf-8"))
-    project = parsed.get("project")
-    assert isinstance(project, dict), f"{_PYPROJECT} has no [project] table"
-    groups = project.get("entry-points")
-    assert isinstance(groups, dict), (
-        f"{_PYPROJECT} declares no [project.entry-points] at all, so AGL registers no workflow and "
-        f"`agl run` can find none. That is where a workflow's one line goes (see agl/config/"
-        f"registry.py) - either the table moved and this test is comparing against nothing, or the "
-        f"shipped workflows have stopped being registered."
-    )
-    table = groups.get(GROUP)
-    assert isinstance(table, dict) and table, (
-        f"{_PYPROJECT} declares no {GROUP} entry points. `GROUP` is spelled in registry.py and in "
-        f"that table and nowhere else, so the two drifting apart is exactly the failure this "
-        f"comparison exists to name."
-    )
-    return tuple(sorted(table))
-
-def _ours() -> tuple[str, ...]:
-    """The names this environment's installed `agl` distribution contributes to the group.
-
-    Filtered by distribution rather than taken whole, so that a workflow registered by some *other*
-    installed package - which is the entire point of an entry-point group - is not read as this
-    repository's install having gone stale.
-    """
-    return tuple(
-        sorted(
-            point.name
-            for point in installed()
-            if point.dist is not None and point.dist.name == "agl"
-        )
-    )
-
-def test_the_real_entry_point_group_is_readable_and_holds_fix_and_split() -> None:
-    """`pyproject.toml` declares `agl.workflows`, and registers `fix` and `split` into it.
-
-    Three artefacts have to agree for this to pass and no two of them are the same thing: the table
-    in `pyproject.toml`, the `entry_points.txt` the build wrote from it, and the group `GROUP` names
-    when `installed()` reads it. It is the only case in this file that touches the installed state
-    of this environment at all - everything above hands `names` and `load` entry points it built
-    itself - so it is also the only one that can catch `GROUP` and `pyproject.toml` drifting apart,
-    or a `pyproject.toml` edited without the editable install being refreshed.
-
-    **The two assertions are in this order because the second one lies about the first.** A stale
-    install is not a workflow that failed to register - it is a build artifact that has not been
-    rebuilt - and a reader told "`fix` is missing from the group" goes looking in `agl/workflows/`
-    for a package that is sitting right there. So the source table and the installed table are
-    compared first, by themselves, and a divergence is reported as what it is with the command that
-    ends it. Only then is the claim about `fix` and `split` made, and by then it can only fail for
-    the reason it is written for: a `pyproject.toml` that has stopped registering them.
-
-    It named `noop` until that workflow and its table line were deleted together. The claim
-    survived the name: what is being asserted is that the group is readable and holds the
-    workflows AGL ships, and `fix` and `split` are those. Membership rather than equality, so a
-    workflow registered later - or by a package installed beside AGL, which is the whole point of
-    an entry-point group - does not fail a test about these two.
-    """
-    declared = _declared()
-    ours = _ours()
-    assert ours == declared, (
-        f"this environment's installed `agl` contributes {list(ours)} to the {GROUP} group and "
-        f"{_PYPROJECT.name} declares {list(declared)}. **Your editable install is stale**, and "
-        f"nothing about the code in this repository is wrong: entry_points.txt is written when the "
-        f"distribution is built and does not see an edit to the table it came from. Run "
-        f"`{_REFRESH}` and this passes. (Nothing refreshes it for you - a gate that repaired the "
-        f"environment before measuring it could no longer report this at all.)"
-    )
-
-    registered = names(installed())
-    missing = sorted({"fix", "split"} - set(registered))
-    assert not missing, (
-        f"the {GROUP} group holds {registered}, and {missing} is missing. The install is not stale "
-        f"- it agrees with {_PYPROJECT.name}, which is asserted above - so {_PYPROJECT.name} has "
-        f"stopped registering a workflow AGL ships. A workflow is a package and one line in that "
-        f"table; put the line back and refresh with `{_REFRESH}`"
-    )

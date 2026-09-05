@@ -43,6 +43,16 @@ IMPORT_STATEMENT='^[[:space:]]*(import|from)\b'
 
 # Gate 8: the environment variables the repo-wide guard owns, the one file allowed to write them,
 # and the path a throwaway probe module is written to and deleted from.
+#
+# Every name on this list is a paid-endpoint variable, and that is what makes sole ownership the
+# right rule for them: a write outside the owner is suspect whatever value it writes. AGL_HOME is
+# deliberately not on it, although tests/conftest.py pins that too. There the danger is the value
+# and not the write - ten test modules name it legitimately, four setting it in the process
+# environment to a temporary directory of their own and nine handing it to config/sources.py's
+# resolve_settings in a literal mapping that never reaches the environment at all, three doing
+# both. That mapping is the same ast.Dict this scan reads as a composed subprocess environment,
+# and no scan keyed on a name can tell a temporary directory from the operator's own. The probe
+# below is where AGL_HOME is held instead.
 GUARDED_VARS="ANTHROPIC_BASE_URL ANTHROPIC_API_KEY OPENAI_BASE_URL OPENAI_API_KEY CODEX_HOME"
 GUARD_OWNER="tests/conftest.py"
 PROBE="tests/test_written_by_scripts_check_and_deleted_again.py"
@@ -448,12 +458,20 @@ fi
 # where Codex would send one - `codex --help` documents no endpoint environment variable, the
 # endpoint is configuration, and proving a redirect works costs a `codex exec`.
 #
+# **The probe's fourth assertion is not about money, and the distinction is the point.** AGL_HOME
+# names AGL's own state directory, and config/sources.py falls back to $HOME/.agl when it is unset
+# - which on a developer's machine is a real directory holding a real project registry. Nothing
+# charges for reading it; what a test picks up there is machine state, so it would pass or fail on
+# whatever happens to be installed and differ between machines. It rides in this gate rather than
+# a new one because it fails in the identical shape - a module added today, protected by default
+# or not - and it is absent from GUARDED_VARS above for the reason given there.
+#
 # (Named, not numbered: gates get inserted, and the numbers move. tests/conftest.py and
 # tests/adapters/test_claude_code_runner.py refer to this one as the paid-endpoint gate.)
 # ---------------------------------------------------------------------------------------------
 
 gate_header 8 "no test module can reach a paid endpoint" \
-    "ast scan of tests/ for writes to the guarded variables, then $VENV_BIN/pytest on a probe module written into tests/ with the real endpoints poisoned"
+    "ast scan of tests/ for writes to the guarded variables, then $VENV_BIN/pytest on a probe module written into tests/ with the real endpoints and the operator AGL home poisoned"
 
 guard_writes="$(
     AGL_GUARDED_VARS="$GUARDED_VARS" AGL_GUARD_OWNER="$GUARD_OWNER" "$VENV_BIN/python" - <<'PY'
@@ -530,7 +548,10 @@ fi
 probe_home="$(mktemp -d)"
 printf '{"note":"a stand-in for the operator credential store, written by scripts/check"}\n' \
     >"$probe_home/auth.json"
-trap 'rm -f "$REPO_ROOT/$PROBE"; rm -rf "$probe_home"' EXIT INT TERM
+probe_agl_home="$(mktemp -d)"
+printf '# a stand-in for the operator AGL home, written by scripts/check\n' \
+    >"$probe_agl_home/config.toml"
+trap 'rm -f "$REPO_ROOT/$PROBE"; rm -rf "$probe_home" "$probe_agl_home"' EXIT INT TERM
 
 cat >"$PROBE" <<'PY'
 """Written by `scripts/check` and deleted again: a module that did not exist when the guard did.
@@ -538,8 +559,9 @@ cat >"$PROBE" <<'PY'
 The claim is that a test file added today inherits the repo-wide paid-endpoint guard without
 asking. Nothing here imports the guard, names its fixture, or opts into anything - so if this
 passes, `tests/conftest.py` reached a module it has never heard of. `scripts/check` runs it with
-the real endpoints poisoned into the environment, which is what makes passing mean the guard
-*overrode* them rather than that this machine happened to be clean.
+the real endpoints and a stand-in for the operator's own AGL home poisoned into the environment,
+which is what makes passing mean the guard *overrode* them rather than that this machine happened
+to be clean.
 """
 
 import ipaddress
@@ -572,18 +594,27 @@ def test_a_module_written_today_inherits_the_paid_endpoint_guard() -> None:
         f"stand-in for the operator's own credential store and the guard did not redirect it, so a "
         f"`codex` started from any newly added test file can read live ChatGPT tokens"
     )
+    agl_home = os.environ.get("AGL_HOME", "")
+    assert agl_home and not (Path(agl_home) / "config.toml").is_file(), (
+        f"AGL_HOME is {agl_home!r} and there is a config.toml in it. Nothing is charged for this "
+        f"one and that is the point: scripts/check poisoned it with a stand-in for the operator's "
+        f"own ~/.agl and the guard did not override it, so any newly added test file reads the "
+        f"settings and the project registry of whoever is running the suite - and unset it is "
+        f"worse, because config/sources.py falls back to $HOME/.agl rather than failing"
+    )
 PY
 
-printf '\nProbe: %s, run with the endpoints poisoned.\n\n' "$PROBE"
+printf '\nProbe: %s, run with the endpoints and the operator AGL home poisoned.\n\n' "$PROBE"
 
 ANTHROPIC_BASE_URL="https://api.anthropic.com" \
     ANTHROPIC_API_KEY= \
     CODEX_HOME="$probe_home" \
+    AGL_HOME="$probe_agl_home" \
     "$VENV_BIN/pytest" "$PROBE" -q -p no:cacheprovider
 probe_status=$?
 
 rm -f "$PROBE"
-rm -rf "$probe_home"
+rm -rf "$probe_home" "$probe_agl_home"
 trap - EXIT INT TERM
 
 if [ "$scan_status" -eq 0 ] && [ "$probe_status" -eq 0 ]; then

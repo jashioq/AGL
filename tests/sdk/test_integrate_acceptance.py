@@ -856,9 +856,8 @@ def _real(
 
     Named adapter by adapter rather than taken from `container.real()`, for
     `instruments/replay.py`'s reason one adapter over: that function also builds a Claude runner and
-    a rich terminal, one of which wants a pip extra and neither of which a run with no vendor in it
-    has any use for. Tests are outside `agl.*`, so contract 5 has nothing to say about naming three
-    git adapters here.
+    a rich terminal, neither of which a run with no vendor in it has any use for. Tests are outside
+    `agl.*`, so contract 5 has nothing to say about naming three git adapters here.
 
     `watcher` wraps the real integrator rather than replacing it, so a test that watches the order
     of two landings is still asserting about the landings that actually happened.

@@ -33,9 +33,10 @@ workflow's roles are the `@role(model=…)` factories bound in the module its `d
 and also the ones bound in any module bound there. This file is *one* namespace, and it holds six
 factories bound directly over two models - the right shape for dedup and ordering, and the wrong
 shape for every claim about what a namespace does not hold or about how a factory reaches it.
-`tests/instruments/preflight/` is where those four live, one module each: no factory at all, a
-factory imported and never used, a factory written below the workflow function, and a factory
-reached only as `roles.implementer()` through a bound module.
+`tests/instruments/preflight/` is where those live, one module each: no factory at all, a factory
+written below the workflow function, and a factory reached only as `roles.implementer()` through a
+bound module. A fourth - a factory imported and never used - went with the shipped workflow whose
+role it imported; the section that used to read it says what is unmeasured in its absence.
 
 **The two halves are tested against each other, not separately.** The interesting case is a role
 that *passes* preflight and must still be refused: `implementer(ask=tool)` is the spelling for a
@@ -269,10 +270,9 @@ def _point(name: str, target: str) -> EntryPoint:
 POINTS: Final = (
     _point("two_providers", f"{__name__}:two_providers"),
     _point("replacing", f"{__name__}:replacing"),
-    # The four whose claim is about a namespace this file cannot have, each in a module of its
-    # own - `tests/instruments/preflight/` says why one file could not hold all four.
+    # The ones whose claim is about a namespace this file cannot have, each in a module of its
+    # own - `tests/instruments/preflight/` says why one file could not hold them all.
     _point("unstaffed", "instruments.preflight.unstaffed:unstaffed"),
-    _point("unused", "instruments.preflight.unused:unused"),
     _point("late", "instruments.preflight.late:late"),
     _point("qualified", "instruments.preflight.qualified:qualified"),
 )
@@ -700,63 +700,29 @@ async def test_a_module_qualified_workflow_passes_on_the_model_reached_through_t
     assert entered == ["qualified"]
 
 # --- half one: the over-approximation, which is documented behaviour -----------------------------
-
-@pytest.mark.asyncio
-async def test_a_role_imported_and_never_used_still_demands_its_provider(tmp_path: Path) -> None:
-    """A known cost, accepted - asserted rather than described.
-
-    `instruments/preflight/unused.py` imports `fix`'s OpenAI `reviewer` and steps with nothing at
-    all, and this run asks OpenAI's backend whether it is ready. That is a demand the run does not
-    need, and it is the price of the registry being a namespace: which of a module's roles a run
-    reaches is decided by the workflow's body, and the body has not run when preflight asks.
-
-    It is pinned because it is **behaviour and not an accident**. A future reader who finds this
-    surprising should find a test saying it was chosen, next to the argument for why erring toward
-    refusing early is the right direction: this failure is loud and one deleted import from being
-    fixed, where an unchecked provider is silent and forty minutes expensive.
-    """
-    entered.clear()
-    harness = _fakes(tmp_path)
-    stub = _Stub()
-
-    await _start(harness, "unused", agents=stub)
-
-    assert stub.asked_ready == [OpenAI.SOL], "an imported-but-unused role stopped being demanded"
-    assert entered == ["unused"]
-
-@pytest.mark.asyncio
-async def test_the_refusal_names_the_factory_and_the_modules_the_model_came_from(
-    tmp_path: Path,
-) -> None:
-    """What the over-approximation owes the one person it inconveniences.
-
-    A `fix`-shaped workflow refused because the Codex CLI is logged out has a fix it can act on. A
-    workflow that never meant to run an OpenAI model at all has, from the adapter's message alone, a
-    provider name and nothing to pull on - the adapter cannot know why AGL asked, because the
-    model came from a namespace scan rather than from a line the author wrote.
-
-    So four things are asserted, and each is a step of the same reader's walk: the factory's own
-    name, so they can find the `@role(model=…)` line; the module it was declared in, so they can
-    find the file; the module it was *bound* in, which is the workflow's own and therefore where the
-    import to delete lives; and the word "imported", because being told that an unused import is a
-    known cause is what turns a provider name into a next move.
-
-    This is the one place `UpstreamUnavailable` no longer passes through untouched, and the test
-    above holds the other half of that bargain: the adapter's sentence is quoted whole and its
-    exception is the cause, so nothing it said is lost to what preflight added.
-    """
-    harness = _fakes(tmp_path)
-    stub = _Stub(ready=False)
-
-    with pytest.raises(UpstreamUnavailable) as caught:
-        await _start(harness, "unused", agents=stub, opens=False)
-
-    said = str(caught.value)
-    assert "reviewer" in said, "the refusal does not name the factory that demanded the model"
-    assert "agl.workflows.fix.roles" in said, "the refusal does not say where it was declared"
-    assert "instruments.preflight.unused" in said, "the refusal does not say where it was seen"
-    assert "imported" in said, "the refusal does not name the known cause of a false demand"
-    assert await _no_record(harness)
+#
+# **Both tests of it are gone, and the behaviour is not.** `instruments/preflight/unused.py` was a
+# workflow module that imported a role it never stepped with, so that a run of it demanded a
+# provider it was never going to use - a false refusal, accepted deliberately because it is loud and
+# one deleted import from being fixed, where an unchecked provider is silent and forty minutes
+# expensive. Two tests read it: that the demand happens at all, and that the refusal names the
+# factory, the module the role was declared in, the module it was *bound* in, and the word
+# "imported", so that the one person it inconveniences has a next move.
+#
+# The role it imported was `fix`'s OpenAI `reviewer`, and `fix` is gone. **The instrument's whole
+# shape was that the role came from an import of another module** - its own docstring said a role
+# declared locally "would leave that line out of the measurement", the import being the thing
+# somebody hitting this has to find and delete. The only other role module here is `roles.py`, whose
+# `OpenAI.TERRA` is reserved: `qualified.py` discriminates on it being named by nothing else this
+# file drives, so spending it here would cost that claim. Rebuilding the instrument therefore means
+# a fifth module holding an `OpenAI.SOL` role of its own, which is new apparatus rather than a
+# repair, and the two tests were deleted instead of rewritten.
+#
+# **What is unmeasured, for whoever restores it.** `sdk/_engine/preflight.py` still scans the
+# namespace one level deep and still over-approximates - `test_a_factory_bound_below_the_workflow_
+# is_still_in_the_namespace_preflight_reads` and the `qualified` case below cover the scan itself -
+# but nothing now asserts that an imported-and-unstepped role demands its provider, and nothing
+# asserts what that refusal has to say. Both come back with the fifth module.
 
 @pytest.mark.asyncio
 async def test_preflight_asks_whether_a_backend_is_ready_and_never_what_it_can_do(

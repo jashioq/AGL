@@ -55,7 +55,7 @@ from instruments.loopback import DUMMY_KEY, REPLY, Loopback
 
 @pytest.fixture(scope="session", autouse=True)
 def loopback(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Loopback]:
-    """Every test in this repository, pointed away from anything that could charge for an answer.
+    """Every test in this repository, pointed away from paid endpoints and the operator's state.
 
     Session-scoped and autouse: the whole point is that a test file written next week is covered by
     a fixture nobody remembered to ask for. One listener for a whole run rather than one per module,
@@ -63,7 +63,7 @@ def loopback(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Loopback]:
     CLI pointed at one while a test reads the other is the failure
     `test_no_test_in_this_module_can_reach_a_paid_endpoint` asserts against by comparing the two.
 
-    Three environment variables, and each is doing separate work:
+    Four environment variables, and each is doing separate work:
 
       * `ANTHROPIC_BASE_URL` sends `claude` at `instruments.loopback`, which opens no outbound
         socket and forwards nothing anywhere - so "free" is a property of the process on the far
@@ -74,16 +74,23 @@ def loopback(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Loopback]:
       * `CODEX_HOME` points the Codex CLI at an empty directory, so the ChatGPT tokens in the
         operator's own `~/.codex/auth.json` are not reachable by anything a test spawns. It does
         **not** redirect Codex's endpoint - see this module's docstring for why that is deliberate.
+      * `AGL_HOME` points AGL's own state directory at an empty one, and it is the only variable
+        here that is not about money: nothing charges for it, and what it keeps out of reach is
+        the operator's machine rather than a paid endpoint. Unset, `config/sources.py`'s
+        `_default_home` falls back to `$HOME/.agl` - which on the machine this was written on
+        exists and holds the real `projects/` registry, so a test reaching `sources.resolve`
+        without pinning it reads that registry, and an `init` run there writes into it.
 
     Hand-rolled around `pytest.MonkeyPatch.context()` because `monkeypatch` is function-scoped and
     cannot be asked for at session scope. The context restores the environment on the way out, which
-    matters for `CODEX_HOME` in particular: leaving it set would point a later process at a
-    directory pytest has since deleted.
+    matters for `CODEX_HOME` and `AGL_HOME` in particular: leaving either set would point a later
+    process at a directory pytest has since deleted.
     """
     with Loopback() as endpoint, pytest.MonkeyPatch.context() as environment:
         environment.setenv("ANTHROPIC_BASE_URL", endpoint.url)
         environment.setenv("ANTHROPIC_API_KEY", DUMMY_KEY)
         environment.setenv("CODEX_HOME", str(tmp_path_factory.mktemp("codex-home-no-credential")))
+        environment.setenv("AGL_HOME", str(tmp_path_factory.mktemp("agl-home-not-the-operators")))
         yield endpoint
 
 @pytest.fixture(autouse=True)

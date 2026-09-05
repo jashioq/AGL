@@ -173,7 +173,7 @@ every gate passed, 1 if any failed, 2 if the `.venv` tooling is missing (`uv syn
 - **tests** — `pytest` over `tests/`.
 - **types** — `mypy --strict src tests`. Both trees, not just `src`.
 - **lint** — `ruff check`. A finding fails the build, and there is no `--fix`.
-- **import contracts** — `lint-imports` over `.importlinter`'s six contracts.
+- **import contracts** — `lint-imports` over `.importlinter`'s five contracts.
 - **Codex CLI binary containment** — the binary's name may appear in no `.py` under `src/`
   outside `agl/adapters/openai/`.
 - **module size ceiling** — **warning only; it never fails the build.** Counts *code* lines

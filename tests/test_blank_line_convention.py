@@ -28,8 +28,8 @@ the body.
 softening; it is the boundary where the rule would otherwise be fighting the lint gate, and the lint
 gate wins. `I001` puts a blank line above a comment inside the import block and puts it straight
 back when it is removed, so a version of this rule that forbade it would make the two gates
-unsatisfiable together. `tests/instruments/preflight/unused.py` and `tests/workflows/test_fix.py`
-are where that shape is written, each comment explaining an import that looks like a mistake.
+unsatisfiable together. The shape appears wherever a comment explains an import that looks like a
+mistake - a deliberately unused one, or one whose module is imported for a side effect.
 `test_the_import_scan_is_silent_on_the_blank_line_isort_puts_above_a_comment` is the case that pins
 it, and `test_the_import_scan_reports_a_bare_blank_line_between_two_imports` is the other side.
 

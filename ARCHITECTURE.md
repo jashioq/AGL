@@ -74,15 +74,20 @@ it — a second caller of `api`.
 
 `sdk` and `adapters` are siblings and may not import each other; so are `cli` and `testing`.
 `config` may import everything under it and nothing above it, and only `config/container.py` may
-name an adapter. `.importlinter` holds six contracts and `lint-imports` enforces them: the layering
+name an adapter. `.importlinter` holds five contracts and `lint-imports` enforces them: the layering
 above, the inner ring (a pure type never imports the ABC that speaks it), vendor containment,
-adapter independence, the composition root, and workflows-build-on-`sdk`-alone.
+adapter independence, and the composition root. A sixth said that a workflow builds on `sdk` alone
+and never imports `agl.adapters` or `agl.config`; it went when AGL stopped shipping workflows, there
+being no `agl.workflows` for it to be a rule about. **It was wholly implied when it existed** — its
+config half by the layering and its adapters half by the composition root, whose `agl.*` source
+covered it — so nothing stopped being enforced, and what was lost is the failure message a workflow
+author would have read.
 
 **One clause cannot be a contract.** "`ports` imports nothing but stdlib" is an *allow* list, and
 every import-linter contract type names what is forbidden or how modules are ordered — saying it
 there means enumerating every distribution that is not the standard library. It is enforced
 instead by `tests/test_ports_stdlib_only.py`, an AST scan over every import under `ports/`. With
-`import pydantic` in `ports/clock.py`, all six contracts still report kept.
+`import pydantic` in `ports/clock.py`, every contract still reports kept.
 
 ## Vendor containment
 
@@ -90,8 +95,10 @@ instead by `tests/test_ports_stdlib_only.py`, an AST scan over every import unde
 `agl.adapters.rich_terminal`; one contract holds both. The OpenAI adapter shells out to the Codex
 CLI binary and has no import to contain, so its *name* is guarded by a grep gate in `scripts/check`
 that fails on any mention in a `.py` under `src/` outside `agl/adapters/openai/`. The asymmetry is
-deliberate: the two SDKs are pip extras, the Codex CLI is installed separately and resolved at
-preflight, and installing one vendor never drags in the other's.
+deliberate: the two SDKs are unconditional base dependencies, present in every install, so the
+contract is the only thing keeping each one to its own adapter package; the Codex CLI is a binary
+installed separately and resolved at preflight, so it has no import statement for a contract to
+hold.
 
 ## The terminal
 
@@ -200,9 +207,9 @@ appearing anywhere, and there is no clause order for a handler to get wrong.
 single-exception group and map its leaf; several leaves whose codes agree take that code; leaves
 that disagree take 70, naming all of them, because a run that failed several different ways is
 genuinely not attributable to one code and a guess would be this module inventing a precedence over
-the table. `leaves` flattens recursively — `split` opens a `TaskGroup` and a chunk may open its
-own — so "a single-leaf group" is a fact about what the run did rather than about how deeply the
-workflow nested its concurrency. Agreement is compared on the resolved *code* and never on the
+the table. `leaves` flattens recursively — a workflow that fans out opens a `TaskGroup` and a child
+may open its own — so "a single-leaf group" is a fact about what the run did rather than about how
+deeply the workflow nested its concurrency. Agreement is compared on the resolved *code* and never on the
 class, which is why `UpstreamUnavailable` beside `UpstreamUnexpected` agrees at 6 with no second
 rule to keep in step with the table. `exit_status` and `leaves` take `Exception` and walk
 `ExceptionGroup`, deliberately not `BaseException` and `BaseExceptionGroup`: a Ctrl-C is the
@@ -224,8 +231,8 @@ ends every step by committing everything or calling `Workspace.restore(last_good
 --hard` then `git clean -ffd`. Tracked edits, untracked files and any commit the agent made itself
 all go, and none of it is on the ledger either: an entry is still written, and the head it records
 is the one the worktree was restored to. Nothing checks the pairing. A step whose role can touch
-the worktree must pass `commit=`; the only two that omit it are `fix`'s reviewer and `split`'s
-planner, and both roles declare `Restriction.NO_FILE_WRITES`.
+the worktree must pass `commit=`. A step that legitimately omits it is one whose role declares
+`Restriction.NO_FILE_WRITES` — a reviewer, a planner — and that pairing is the author's to keep.
 
 **A landing must be handed back to the parent's chain.** `Integration._conclude` in
 `sdk/_engine/integration.py` settles a clean landing with `self._journal.advance(head)`. A child's
@@ -308,9 +315,10 @@ that reported through it misses, and the run re-buys work it already had. Add a 
 vocabulary enforced in code and named nowhere else is invisible to the schema, so an entry recorded
 under the old rules replays under the new ones, or stops converting with its fingerprint still
 matching and surfaces as an `InternalError` out of `ReportingTool.read` on a resume.
-`workflows/fix/findings.py` holds exactly such a `__post_init__` over `SEVERITIES` and takes the
-price; `describe()` is the way out of it, a vocabulary interpolated into a field's description being
-schema and therefore fingerprint. Four tests in `tests/sdk/test_tools.py` pin the pieces.
+A payload whose `__post_init__` enforces a vocabulary — a severity, a status, a set of permitted
+strings — is exactly that case and takes the price; `describe()` is the way out of it, a vocabulary
+interpolated into a field's description being schema and therefore fingerprint. Four tests in
+`tests/sdk/test_tools.py` pin the pieces.
 
 **Everything a step does must land inside its workspace.** A replayed step returns a recorded
 value and never calls the worker, so an effect that is not a file in the checkout — an HTTP POST,
@@ -335,9 +343,9 @@ built at run time by a call or a comprehension, one bound two modules deep, one 
 anything that is not a module — and there `Capabilities.require` at every `run.step` is what still
 runs, over the role the workflow actually handed in. Delete that as a duplicate of preflight's work
 and the failure has nothing to raise: the role a module declares and the role a workflow steps with
-are different values, because `fix` writes `implementer(ask=asking(run.terminal))` inside its own
-function — a tool whose handler closes over a `Run` that did not exist when the module was
-imported — and `Role.__post_init__` folds `TOOL_CALLING` into `requires` behind it. A role
+are different values wherever a workflow writes something like `implementer(ask=asking(run.terminal))`
+inside its own function — a tool whose handler closes over a `Run` that did not exist when the
+module was imported — and `Role.__post_init__` folds `TOOL_CALLING` into `requires` behind it. A role
 reaching a backend that cannot call a tool then ends its step with `RoleIncompleteError` — the
 reporting tool never reaches the model, so the agent cannot fire it — instead of the refusal it was
 owed. `capabilities()` is contracted stable for the duration of a run, which is what makes one
@@ -418,7 +426,9 @@ The reasoning is the point — without it these get re-proposed.
   flagless field where it is written rather than at the parse that would have gone wrong.
 - **`@workflow` takes `version` and nothing else.** `params=`, `name=` and `roles=` each restated
   something the framework could already read, and the copy is the half free to be wrong — `Run` is
-  covariant, so `@workflow(params=FixParams)` over `async def fix(run: Run)` type-checked fine.
+  covariant, so a `@workflow(params=SomeParams)` over an `async def wf(run: Run)` annotated with a
+  *different* params type type-checked fine, the decorator's copy and the signature's disagreeing in
+  silence.
 - **No fan-out or parallelism helper.** The framework never spawns a task for a workflow; steps
   serialise within a namespace, so real concurrency is more worktrees, and a helper would wrap
   `asyncio.TaskGroup` while owning nothing.

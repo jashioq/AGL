@@ -1236,7 +1236,7 @@ async def test_a_call_the_server_cannot_carry_is_refused_back_into_the_conversat
 
     There were three. The middle one was a blank question put to AGL's own asking tool, and it went
     with that tool: what refuses a blank question now is the *workflow's* handler, on this same
-    path, and `tests/workflows/test_fix.py` is where the shipped one is held to it.
+    path, so the assertion belongs to whichever workflow supplies one.
 
     The reject-back-to-the-agent rule decides the shape: by the time a call is wrong there is a
     session in flight holding all
@@ -1522,9 +1522,8 @@ async def test_a_tools_schema_reaches_the_model_as_the_workflow_declared_it(
     There was a second, about the three properties of AGL's own asking tool. That tool is gone and
     the claim went with it in the only direction it could: what an asking tool advertises is now
     derived from a payload dataclass the *workflow* wrote, so it is that workflow's own suite that
-    owes the assertion, and `tests/workflows/test_fix.py` makes it about the shipped one. What is
-    left here is the crossing itself, which is this adapter's - and it carries a workflow's asking
-    tool exactly as it carries any other.
+    owes the assertion. What is left here is the crossing itself, which is this adapter's - and it
+    carries a workflow's asking tool exactly as it carries any other.
     """
     notes = Notes()
     stub = Stub(

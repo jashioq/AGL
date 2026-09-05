@@ -1,11 +1,11 @@
 """Structural test: three contracts in `.importlinter` are lists somebody typed, and this is what
 notices when a list and the thing it is meant to police stop agreeing.
 
-Three of the six contracts are fail-closed and need nothing from this file. Contract 5's source is
-`agl.*`, which re-expands as packages are added, and contract 6's is `agl.workflows`, which
-re-expands as workflows are - so a module introduced at a later stage is covered the moment it
-exists, and its author need do nothing to be policed. **Contract 1 was the fourth guard here and is
-now the third of those**: `containers = agl` plus `exhaustive = True` makes an unlisted child of
+Two of the five contracts are fail-closed and need nothing from this file. Contract 5's source is
+`agl.*`, which re-expands as packages are added, so a module introduced at a later stage is covered
+the moment it exists and its author need do nothing to be policed. **Contract 1 was a
+hand-maintained guard here and is now the second of those**: `containers = agl` plus
+`exhaustive = True` makes an unlisted child of
 `agl` break that contract natively and by name, which is what a hand-maintained comparison in this
 file used to notice. A rule the linter enforces beats a rule a neighbour asserts, so the comparison
 went; `.importlinter`'s own comment on contract 1 records what the rewrite does and does not still
@@ -42,7 +42,7 @@ is whether a contract that *is* listed correctly refuses anything when a violati
 
 Nothing below hardcodes which ports, vendors or adapters exist. Each listing is parsed out
 of the real `.importlinter` and compared against the real thing it polices: `src/agl/` for
-contracts 2 and 4, and `pyproject.toml`'s `[project.optional-dependencies]` for contract 3,
+contracts 2 and 4, and `pyproject.toml`'s `[project] dependencies` for contract 3,
 which is where a vendor SDK actually gets added. A test carrying its own copy of any of those three
 lists would be a *second* hand-maintained list, free to drift from the first, and its agreement
 would mean only that one person updated both at once. Here the two things compared are the artefact
@@ -69,31 +69,32 @@ that the reason travels with the name and a later reader can weigh it instead of
 
 Contract 3 forbids *import* names (`claude_agent_sdk`); `pyproject.toml` declares *distribution*
 names (`claude-agent-sdk`). The rule below is the obvious one - lowercase, with `-` and `.` becoming
-`_` - and it is right for both of today's extras and for most others. It is not a derivation and
-cannot be: a distribution may install a top-level module under any name it likes, which is how
+`_` - and it is right for both of today's dependencies and for most others. It is not a derivation
+and cannot be: a distribution may install a top-level module under any name it likes, which is how
 `pyyaml` becomes `yaml` and `pillow` becomes `PIL`. What the rule guarantees is *noticing* a third
 SDK, not naming it correctly; when it guesses wrong the guard still fires, and
-`VENDOR_IMPORT_NAMES` is where the true name goes. `NOT_A_VENDOR` is the other escape, for an extra
-that is not a vendor SDK at all. Both start empty, and neither pre-authorises anything: an extra
-added at a later stage trips this guard first and is argued about here second.
+`VENDOR_IMPORT_NAMES` is where the true name goes. `NOT_A_VENDOR` is the other escape, for a
+dependency that is not a vendor SDK at all. Both start empty, and neither pre-authorises anything: a
+dependency added at a later stage trips this guard first and is argued about here second.
 
-The extras table is the whole of what this reads, and that is the second limit. A vendor SDK put
-into `[project] dependencies` or spelled out inside a `[dependency-groups]` entry would not be seen
-here. The first is empty by design, AGL's core being stdlib-only, so an SDK there is a design change
-big enough to bring somebody back to this file. The second needs stating more carefully, because
-there is one there: `[dependency-groups] dev` names `agl[all]`, which resolves to both of today's
-vendor SDKs. That is not a hole in this guard and it is not the vendor-containment asymmetry being
-walked back - it is a *self-reference to the extras table below*, so the distributions are still
-declared in exactly one place, still gain a third member only by being written there, and this
-comparison still reads the table they are written in. `pyproject.toml`'s own comment argues why the
-dev group needs them at all. What would be invisible here is a vendor distribution spelled out **by
-name** in a dependency group, bypassing the extras; nothing does that today, and doing it would be
-the design change this paragraph used to describe. What is asserted is that the table where vendor
-SDKs *do* go cannot gain one unnoticed.
+`[project] dependencies` is the whole of what this reads, and that is the second limit. Both of
+today's vendor SDKs are unconditional entries in it, so that list is what an install of AGL gets
+and is where a third one arrives. What would not be seen here is a vendor spelled out inside a
+`[dependency-groups]` entry, a group being the one place a distribution can be named that no
+built distribution carries and no `pip install` resolves; nothing does that today, and doing it
+would be a design change big enough to bring somebody back to this file.
 
-The asymmetry with OpenAI is deliberate and is not a gap here (`ARCHITECTURE.md`'s "Vendor
-containment"): that adapter wraps the Codex CLI binary and has no Python import to contain, so it
-has no extra to declare and is guarded by `scripts/check`'s grep gate instead.
+**Unconditional is not `ARCHITECTURE.md`'s "Vendor containment" walked back, and it is why this
+comparison matters more rather than less.** What contains a vendor is contract 3 and
+`config/container.py` importing each one inside the function that constructs it, and neither of
+those reads package metadata at all. A base dependency is present in *every* install, so a module
+that reaches for a vendor SDK it has no business with will find it there and import it: contract 3
+is then the only thing standing between the two, and a third SDK missing from that contract is
+guarded by nothing whatsoever.
+
+The asymmetry with OpenAI is deliberate and is not a gap here: that adapter wraps the Codex CLI
+binary and has no Python import to contain, so it has no distribution to declare and is guarded by
+`scripts/check`'s grep gate instead.
 
 ## Why each comparison is a function and not three lines inside a test
 
@@ -106,8 +107,8 @@ missing section or a missing list, which is the failure mode of a mistyped path.
 
 ## One module, well past the ceiling
 
-At 449 code lines this file is half again `scripts/check`'s 300-line convention - one of the 36
-modules over that ceiling, seventeen of which are larger - and two ways of splitting it were
+At 452 code lines this file is half again `scripts/check`'s 300-line convention - one of the 37
+modules over that ceiling, eighteen of which are larger - and two ways of splitting it were
 considered and refused rather than overlooked.
 
 Splitting **per contract** would make three guards out of one, and what makes this one guard is
@@ -151,7 +152,7 @@ ADAPTERS_DIR: Final = PACKAGE_DIR / "adapters"
 # The pairing is asserted below, so a renumbering fails here rather than silently pointing a
 # comparison at the wrong contract.
 # Contract 1 is absent because this file no longer reads it; `tests/test_contract_firing.py` pins
-# all six numbers to their types, that being the file that builds a contract object per number.
+# all five numbers to their types, that being the file that builds a contract object per number.
 PURE_TYPES_SECTION: Final = "importlinter:contract:2"
 VENDOR_SECTION: Final = "importlinter:contract:3"
 ADAPTERS_SECTION: Final = "importlinter:contract:4"
@@ -195,9 +196,9 @@ ADAPTER_EXEMPT: Final[Mapping[str, str]] = {
 # stay that way: both of today's SDKs import under the name they ship as.
 VENDOR_IMPORT_NAMES: Final[Mapping[str, str]] = {}
 
-# Optional dependencies that are not vendor SDKs, each with the reason. Empty: every extra AGL has
-# is a vendor, which is the premise this comparison rests on. An extra that breaks that premise is
-# argued about here, not quietly skipped.
+# Declared dependencies that are not vendor SDKs, each with the reason. Empty: every distribution
+# AGL depends on is a vendor, which is the premise this comparison rests on. A dependency that
+# breaks that premise is argued about here, not quietly skipped.
 NOT_A_VENDOR: Final[Mapping[str, str]] = {}
 
 # Where a requirement string stops being a distribution name: a version, a marker, an extras list.
@@ -254,7 +255,7 @@ def vendor_drift(
     vendors: Mapping[str, str],
     exempt: Mapping[str, str],
 ) -> list[str]:
-    """Every disagreement between contract 3's `forbidden_modules` and the extras AGL declares.
+    """Every disagreement between contract 3's `forbidden_modules` and AGL's declared dependencies.
 
     `vendors` maps a distribution name to the import name it is expected to be contained under -
     the mapping this file guesses and the docstring qualifies. Pure, for `port_drift`'s reason.
@@ -351,15 +352,17 @@ def _stale_port(entry: str) -> str:
 
 def _uncontained_vendor(distribution: str, imported: str) -> str:
     return (
-        f"pyproject.toml declares {distribution!r} as an optional dependency, and contract 3 of "
+        f"pyproject.toml names {distribution!r} in [project] dependencies, and contract 3 of "
         f".importlinter does not contain it.\n"
         f"\n"
         f"That contract is what keeps a vendor SDK visible to exactly one adapter package, so that "
-        f"installing one vendor never drags in another's SDK (ARCHITECTURE.md's \"Vendor "
+        f"no module outside that package can reach the SDK at all (ARCHITECTURE.md's \"Vendor "
         f"containment\"). Its `forbidden_modules` is a hand-maintained list of two, and a third "
         f"SDK missing from it is contained by nothing at all: contract 5 governs who may import "
         f"agl.adapters and has no opinion about what an adapter imports from outside, so any "
-        f"module in the tree could import this one with all six contracts still reported kept.\n"
+        f"module in the tree could import this one with every contract still reported kept. "
+        f"That list is unconditional, so this SDK is installed alongside AGL in every environment "
+        f"there is and the import would simply work.\n"
         f"\n"
         f"Resolve it by adding the SDK's *import* name to `forbidden_modules` under "
         f"[{VENDOR_SECTION}], plus one `ignore_imports` expression per module permitted to import "
@@ -375,8 +378,8 @@ def _uncontained_vendor(distribution: str, imported: str) -> str:
 
 def _stale_vendor(entry: str) -> str:
     return (
-        f"contract 3 of .importlinter forbids {entry}, which no extra in pyproject.toml "
-        f"declares.\n"
+        f"contract 3 of .importlinter forbids {entry}, which nothing in pyproject.toml's "
+        f"[project] dependencies declares.\n"
         f"\n"
         f"A vendor contained but never depended on reads as coverage of an SDK AGL does not have, "
         f"and the adapter it was written for is either gone or was never written. import-linter "
@@ -384,7 +387,7 @@ def _stale_vendor(entry: str) -> str:
         f"which is also what lets this contract keep working while the SDKs are uninstalled.\n"
         f"\n"
         f"Resolve it by removing that line and its `ignore_imports` expressions under "
-        f"[{VENDOR_SECTION}], or by restoring the extra in pyproject.toml that declares it."
+        f"[{VENDOR_SECTION}], or by restoring the dependency in pyproject.toml that declares it."
     )
 
 def _unlisted_package(name: str) -> str:
@@ -393,7 +396,7 @@ def _unlisted_package(name: str) -> str:
         f"not list.\n"
         f"\n"
         f"That contract's `modules =` is a hand-maintained list, so it fails open: an adapter "
-        f"missing from it may import any other adapter with all six contracts still reported "
+        f"missing from it may import any other adapter with every contract still reported "
         f"kept. Contract 5 skips the (agl.adapters, agl.adapters) pair as self-overlapping, "
         f"which is exactly why contract 4 exists, so nothing else in the repo would object.\n"
         f"\n"
@@ -411,7 +414,7 @@ def _unlisted_module(filename: str) -> str:
         f"exempted in this test.\n"
         f"\n"
         f"That contract's `modules =` is a hand-maintained list, so it fails open: a module "
-        f"missing from it may import any other adapter with all six contracts still reported "
+        f"missing from it may import any other adapter with every contract still reported "
         f"kept, and nothing else in the repo would object.\n"
         f"\n"
         f"Two ways to resolve it, and they are not interchangeable:\n"
@@ -480,33 +483,33 @@ def _import_name(distribution: str) -> str:
     return distribution.strip().lower().replace("-", "_").replace(".", "_")
 
 def _declared_vendors() -> dict[str, str]:
-    """Every distribution AGL's optional extras declare, by the import name this test expects.
+    """Every distribution `[project] dependencies` names, by the import name this test expects.
 
-    `all = ["agl[claude,terminal]"]` is a self-reference and not a vendor, and is dropped by
-    comparing against the project's own name read from the same file rather than by being named
-    here - a hardcoded `"agl"` would be one more thing free to drift.
+    Nothing is filtered on the way through, and nothing in this list could ask to be. A base
+    dependency is unconditional, so an entry naming AGL itself would say only that installing AGL
+    requires installing AGL - there is no extra for it to pull in, which is the whole of what a
+    self-reference is for. A distribution that turns out not to be a vendor goes in `NOT_A_VENDOR`
+    with the reason, where a reader can weigh it, rather than being dropped where nobody sees it go.
     """
     parsed = tomllib.loads(PYPROJECT_FILE.read_text(encoding="utf-8"))
     project = parsed.get("project")
     assert isinstance(project, dict), (
         f"{PYPROJECT_FILE} has no [project] table, so this test cannot tell which distributions "
-        f"AGL depends on or even what AGL itself is called. Check the path at the top of this file."
+        f"AGL depends on. Check the path at the top of this file."
     )
-    extras = project.get("optional-dependencies")
-    assert isinstance(extras, dict) and extras, (
-        f"{PYPROJECT_FILE} declares no [project.optional-dependencies], which is where a vendor "
-        f"SDK is added (ARCHITECTURE.md's \"Vendor containment\"). Either the table moved and this "
-        f"test is now comparing contract 3 against nothing, or AGL has stopped having vendor "
-        f"extras and contract 3 and this comparison both need revisiting."
+    dependencies = project.get("dependencies")
+    assert isinstance(dependencies, list) and dependencies, (
+        f"{PYPROJECT_FILE} declares no [project] dependencies, which is where a vendor SDK is "
+        f"added (ARCHITECTURE.md's \"Vendor containment\"). Either the list moved and this test is "
+        f"now comparing contract 3 against nothing, or AGL has stopped depending on a vendor SDK "
+        f"at all, in which case contract 3 and this comparison both need revisiting."
     )
-    own = _import_name(str(project.get("name", "")))
     found: dict[str, str] = {}
-    for requirements in extras.values():
-        for requirement in requirements:
-            distribution = _distribution(str(requirement))
-            if not distribution or _import_name(distribution) == own:
-                continue
-            found[distribution] = VENDOR_IMPORT_NAMES.get(distribution, _import_name(distribution))
+    for requirement in dependencies:
+        distribution = _distribution(str(requirement))
+        if not distribution:
+            continue
+        found[distribution] = VENDOR_IMPORT_NAMES.get(distribution, _import_name(distribution))
     return found
 
 # --- The real comparisons ------------------------------------------------------------------------
@@ -541,12 +544,12 @@ def test_every_module_under_ports_appears_on_exactly_one_side_of_contract_2() ->
     )
     assert not problems, "\n\n".join(problems)
 
-def test_every_vendor_sdk_an_extra_declares_is_contained_by_contract_3() -> None:
+def test_every_vendor_sdk_in_project_dependencies_is_contained_by_contract_3() -> None:
     """`pyproject.toml` is where a vendor SDK arrives; contract 3 is what confines it."""
     vendors = _declared_vendors()
     assert vendors, (
-        f"{PYPROJECT_FILE}'s extras declare no distribution other than AGL itself, so this test "
-        f"is comparing contract 3 against an empty set and would pass on any listing at all."
+        f"{PYPROJECT_FILE}'s [project] dependencies yield no distribution name at all, so this "
+        f"test is comparing contract 3 against an empty set and would pass on any listing at all."
     )
     problems = vendor_drift(_listing(VENDOR_SECTION, "forbidden_modules"), vendors, NOT_A_VENDOR)
     assert not problems, "\n\n".join(problems)
@@ -629,7 +632,7 @@ def test_vendor_drift_is_silent_when_every_declared_sdk_is_contained() -> None:
     )
 
 def test_vendor_drift_reports_an_sdk_no_contract_contains() -> None:
-    """The failure this half exists for: a third SDK added as an extra and confined nowhere."""
+    """The failure this half exists for: a third SDK added as a dependency and confined nowhere."""
     problems = vendor_drift(
         frozenset({"rich"}),
         {"rich": "rich", "probe-sdk": "probe_sdk"},
@@ -641,7 +644,7 @@ def test_vendor_drift_reports_an_sdk_no_contract_contains() -> None:
     assert "contained by nothing at all" in problems[0]
 
 def test_vendor_drift_accepts_a_distribution_that_is_exempt_with_a_reason() -> None:
-    """An extra that is not a vendor SDK is out of the rule, and says why it is."""
+    """A dependency that is not a vendor SDK is out of the rule, and says why it is."""
     assert not vendor_drift(
         frozenset({"rich"}),
         {"rich": "rich", "sphinx": "sphinx"},
@@ -653,7 +656,7 @@ def test_vendor_drift_reports_a_containment_with_no_dependency_behind_it() -> No
     problems = vendor_drift(frozenset({"rich", "gone_sdk"}), {"rich": "rich"}, {})
     assert len(problems) == 1
     assert "gone_sdk" in problems[0]
-    assert "no extra in pyproject.toml declares" in problems[0]
+    assert "nothing in pyproject.toml's [project] dependencies declares" in problems[0]
 
 def test_adapter_drift_is_silent_when_the_listing_and_the_tree_agree() -> None:
     """The case that makes the failing cases below mean something."""

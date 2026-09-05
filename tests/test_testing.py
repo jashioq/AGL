@@ -50,15 +50,15 @@ what the count is counted from.
 `container.fakes()` builds a `HeadlessTerminal`, which refuses every `Screen[T]` with
 `UpstreamUnavailable` - correctly, since a workflow needing human input cannot run with nobody
 there. AGL once shipped no second input-capable `Terminal`, so answering a screen meant the real
-`RichTerminal` (the `agl[terminal]` extra) over a `Keys` of the test's own, which here was
+`RichTerminal` over a `Keys` of the test's own, which here was
 `instruments.keyboard.Typing` - a module inside this repository that a workflow author outside it
-does not have, driving a class `.importlinter`'s contract 6 forbids a workflow to touch. That was
+does not have, driving an adapter class a workflow may not reach past the SDK for. That was
 reported as a gap rather than papered over, and closed since: `testing.answering([...])` is a third
 implementation that runs `tests/contracts/terminal.py`'s input-capable half, so the seam is a list
 of gestures rather than a tty.
 
 **Both question tests are written on it**, which is the point rather than a tidy-up: this file is
-what an author can write on a bare `pip install agl`, and a test here that still needed a keyboard
+what an author can write on a `pip install agents-gl`, and a test here that still needed a keyboard
 of AGL's own would be measuring something they cannot have. Everything else in the two was always
 theirs - the screen is a view of theirs, the handler is a closure over their `Run`, and the
 assertion is about their workflow.
@@ -200,8 +200,8 @@ class Question:
     Three fields: the two `Asked` carries, plus the one this workflow pins for itself. It refuses
     nothing, and that is deliberate rather than an omission - every screen here is built out of
     options an agent supplied, so there is no unanswerable question for a `__post_init__` to catch.
-    What a refusal is worth, and what a view rests on it for, is
-    `tests/workflows/test_fix_questions.py`'s to say about the workflow that needs one.
+    What a refusal is worth, and what a view rests on it for, is a claim about the workflow that
+    needs one, so it belongs to that workflow's own suite rather than here.
     """
 
     prompt: str
@@ -431,8 +431,8 @@ async def test_a_scripted_question_reaches_the_workflows_own_screen(tmp_path: Pa
 
     `answering([0])` is the whole of the person here, and a bare `int` is `Press(int)` - so "the
     first response of whatever is on screen" is what this scripts, and which string that is was
-    decided by `approve` out of the agent's own `options`. This once needed the `agl[terminal]`
-    extra and a `Keys` of AGL's own; the module docstring says what that cost.
+    decided by `approve` out of the agent's own `options`. This once needed the real `RichTerminal`
+    and a `Keys` of AGL's own; the module docstring says what that cost.
     """
     seen: list[str] = []
     term = testing.answering([0])

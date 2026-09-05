@@ -607,10 +607,11 @@ async def test_a_workspace_that_is_not_there_is_run_in_here_and_would_stop_the_r
 def test_this_fake_imports_on_a_machine_with_no_vendor_sdk() -> None:
     """The decision in the module's docstring, proved rather than asserted.
 
-    `agl[claude]` is a pip extra, and a fake that could only be imported once the vendor
-    SDK was installed would make `--dry-run` a mode you first install a vendor to reach - on the
-    one machine a fake exists for. So this imports the module in a fresh interpreter in which
-    `claude_agent_sdk` cannot be imported at all.
+    `claude-agent-sdk` is a base dependency and can still be absent - a `--no-deps` install, an
+    uninstall that took it, an image trimmed after the fact - and a fake that could only be
+    imported once the vendor SDK was there would make `--dry-run` a mode you first repair an
+    install to reach, on the one machine a fake exists for. So this imports the module in a fresh
+    interpreter in which `claude_agent_sdk` cannot be imported at all.
 
     The real runner is imported in the same process as the control. Without it a green result would
     be indistinguishable from a probe that never blocked anything, which is the shape

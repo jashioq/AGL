@@ -14,7 +14,7 @@ from agl.cli.commands import resume as resume_command
 from agl.cli.commands import run as run_command
 from agl.cli.commands import workflows as workflows_command
 from agl.cli.exit_codes import exit_status, leaves
-from agl.config import container, sources
+from agl.config import container, distribution, sources
 from agl.config.schema import Settings
 from agl.ports.errors import AglError, InputError, InternalError, Stop
 from agl.ports.ids import ProjectName
@@ -26,6 +26,8 @@ __all__ = ["Compose", "Invocation", "main", "parser"]
 _PROGRAM: Final = "agl"
 
 _COMMAND: Final = "command"
+
+_VERSION: Final = "--version"
 
 _DESCRIPTION: Final = "Run AI agent workflows against a code repository."
 
@@ -84,6 +86,15 @@ def parser() -> RefusingParser:
     # declaring `--fro`, `--nam` or `--hel` would have it eaten, value and all, by `--from`,
     # `--name` or `--help`, and would then be told its required parameter was missing.
     root = RefusingParser(prog=_PROGRAM, description=_DESCRIPTION, allow_abbrev=False)
+    # `argparse`'s own action, for `-h`'s reason: it prints and exits during the scan, before the
+    # required subcommand is looked for, so `agl --version` needs no command after it. A `--version`
+    # typed after one is nobody's flag here and reaches the workflow as tail, like any other.
+    root.add_argument(
+        _VERSION,
+        action="version",
+        version=f"{_PROGRAM} {distribution.installed_version()}",
+        help=f"print the installed {distribution.DISTRIBUTION} version and exit",
+    )
     declared = root.add_subparsers(
         dest=_COMMAND, metavar="<command>", required=True, parser_class=RefusingParser
     )

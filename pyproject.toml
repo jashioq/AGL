@@ -30,8 +30,14 @@ classifiers = [
     "Topic :: Software Development :: Code Generators",
     "Topic :: Software Development :: Version Control :: Git",
 ]
-# Deliberately empty: AGL's core is stdlib-only (TOML via stdlib `tomllib`).
-dependencies = []
+# Both unconditional, and that is not `ARCHITECTURE.md`'s "Vendor containment" being walked back:
+# what contains a vendor is `.importlinter`'s contract 3 and `config/container.py` importing each
+# one inside the function that constructs it, and neither of those reads package metadata. `rich`
+# could not be optional in any case - `container.py`'s real composition root refuses a run outright
+# when it cannot be imported, there being no headless display for `real()` to fall back to.
+# Nothing here for the OpenAI connector: that adapter drives the Codex CLI *binary*, which is
+# installed separately, so there is no distribution for this list to name.
+dependencies = ["claude-agent-sdk>=0.2.140", "rich>=15.0.0"]
 
 # Both labels point at the repository because there is nowhere else to send anyone yet: no
 # documentation site, and no tracker apart from the repo's own. Two labels rather than one because
@@ -40,53 +46,19 @@ dependencies = []
 Homepage = "https://github.com/jashioq/AGL"
 Repository = "https://github.com/jashioq/AGL"
 
-[project.optional-dependencies]
-claude = ["claude-agent-sdk>=0.2.140"]
-terminal = ["rich>=15.0.0"]
-all = ["agl[claude,terminal]"]
-# No `openai` extra by design: the OpenAI adapter wraps the Codex CLI binary, which is
-# installed separately and resolved at runtime preflight, so it has no Python dependency.
-
 [project.scripts]
 agl = "agl.cli.main:main"
 
-# Workflows register themselves here: one line per workflow, and no central table to edit.
-# Both lines below are shipped workflows.
-# An edit here is not seen until the distribution is rebuilt: `entry_points.txt` is a build
-# artifact, and tests/config/test_registry.py reads the real installed group. Refresh with
-# `uv pip install -e . --no-deps` after touching this table - that test compares this table against
-# the installed one first and names that command, so a stale install reports itself as a stale
-# install rather than as a workflow that failed to register.
-[project.entry-points."agl.workflows"]
-fix = "agl.workflows.fix:fix"
-split = "agl.workflows.split:split"
+# No [project.entry-points."agl.workflows"] table: AGL ships no workflow, and the group is left for
+# other distributions to register into. `agl.config.registry` still resolves that group, so an
+# install of AGL alone lists nothing and refuses every `agl run` with "no workflow is installed at
+# all" - which is the state this version means, not a table somebody forgot to fill in.
 
-# What it takes to *work on* AGL, which is not what it takes to install it. A dependency group is
-# never part of the distribution: nothing here reaches a `pip install agl`, no resolver sees it, and
-# adding a line below adds nothing to what an operator gets.
-#
-# `agl[all]` is the second half of that sentence, and it is not the vendor-containment asymmetry
-# (ARCHITECTURE.md, "Vendor containment") being walked back.
-# The extras table above is still the only place a vendor SDK is declared, still the only thing a
-# user installs one through, and `container.py` still imports both vendors inside the function that
-# constructs them so a bare install works without either. What this line says is that a *developer*
-# runs the whole suite, and the whole suite includes the Claude adapter's three test modules, which
-# import `claude_agent_sdk` at module level - so on a clean `uv sync` without it, `pytest` exits 2
-# with three collection errors and zero tests run at all, `mypy --strict` reports 14 errors in 6
-# files, and forcing collection past those three modules leaves four more failing where
-# `container.real()` raises `UpstreamUnavailable` (exit 6). None of that is a fact about the code
-# being tested. `rich` is in the same position and is only accidentally present today: it
-# arrives transitively as `import-linter`'s own dependency, so the composition root builds a
-# `RichTerminal` on a clean environment purely because a lint tool happens to ship the library.
-#
-# Spelled `agl[all]` rather than as the two distributions, so that a vendor's name and its version
-# bound stay written in exactly one place. Two bounds for one SDK drift silently and in the worst
-# direction - a dev environment resolving a version the shipped extra does not admit is a suite that
-# passes against a package no user can get - and a third extra added later arrives here for free,
-# the way a workflow added to the entry-point table above arrives without a central list to edit.
+# What it takes to *work on* AGL, which is not what it takes to install it. A PEP 735 dependency
+# group is not part of a built distribution: nothing below reaches a `pip install agents-gl`, and
+# adding a line here adds nothing to what an operator gets.
 [dependency-groups]
 dev = [
-    "agl[all]",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "pytest-timeout>=2.4.0",

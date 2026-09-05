@@ -702,7 +702,7 @@ def test_this_fake_imports_and_runs_without_reaching_anything_outside_stdlib_and
     `fake.py` imports `translate.model_slug` where `adapters/claude_code/fake.py` could not import
     its own adapter's translation, and the argument is that this adapter's vendor is a *binary*:
     OpenAI support has no Python dependency at all - the vendor is the Codex CLI, resolved at
-    preflight - so there is no extra to be short of and no vendor package for that import to drag
+    preflight - so there is no vendor package to be missing and none for that import to drag
     in. This is that claim measured rather than
     reasoned: a fresh interpreter imports the module and runs a whole task on it, then reports
     every module that arrived in `sys.modules` while it did.

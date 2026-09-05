@@ -22,12 +22,12 @@ socket or runs git, and none of them needs a `.git` anywhere.
 back through the others. Identity would pass against three fakes wired to three repositories the
 day somebody adds a caching layer; a commit that a second fake cannot see would not.
 
-**A missing pip extra is a refusal and not a fallback.** Both extras are installed in this repo's
-virtualenv, so their absence is simulated where it actually bites - `None` in `sys.modules` for the
-adapter module that imports the vendor package, which raises the same `ImportError` subclass a
-genuinely missing extra raises, from the same statement. Those tests are also what pin the deferred
-import: a bundle with the Claude connector disabled builds while that module is unimportable, which
-is only true if nothing on that path imports it.
+**A missing vendor package is a refusal and not a fallback.** Both are base dependencies and are
+installed in this repo's virtualenv, so their absence is simulated where it actually bites - `None`
+in `sys.modules` for the adapter module that imports the vendor package, which raises the same
+`ImportError` subclass a genuinely stripped environment raises, from the same statement. Those
+tests are also what pin the deferred import: a bundle with the Claude connector disabled builds
+while that module is unimportable, which is only true if nothing on that path imports it.
 """
 
 import asyncio
@@ -171,13 +171,14 @@ def test_the_fakes_bundle_builds_and_fills_every_port(tmp_path: Path) -> None:
     harness = container.fakes(TreesRoot(tmp_path / "trees"))
     _ports_are_filled(harness.services)
 
-def test_the_fakes_bundle_needs_no_extra_installed(
+def test_the_fakes_bundle_builds_with_neither_vendor_adapter_module_importable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A bare `pip install agl`, simulated: both extra-bearing adapter modules unimportable.
+    """A stripped environment, simulated: both vendor-bearing adapter modules unimportable.
 
     This is the claim that makes the fakes bundle a deployment rather than a convenience - every
-    command runs on it, and an operator who installed no extras is exactly who runs a `--dry-run`.
+    command runs on it, and an environment a vendor package was taken out of is exactly where a
+    `--dry-run` still has to work.
     """
     monkeypatch.setitem(sys.modules, _CLAUDE_RUNNER, None)
     monkeypatch.setitem(sys.modules, _RICH_TERMINAL, None)
@@ -373,7 +374,7 @@ def _task(workspace: Path, model: ModelId) -> AgentTask:
         tools=(),
     )
 
-def test_a_missing_claude_extra_refuses_and_names_the_pip_install(
+def test_a_missing_claude_package_refuses_and_names_the_reinstall_that_restores_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`UpstreamUnavailable`, because `src/agl/ports/agent.py` settles the class: a missing harness
@@ -381,27 +382,31 @@ def test_a_missing_claude_extra_refuses_and_names_the_pip_install(
 
     The operator's configuration is correct - they enabled a backend they meant to enable - so an
     `InputError` would send them to edit a setting that is already right. What is absent is the
-    harness, and the message says which command installs it.
+    harness, and `claude-agent-sdk` is a base dependency of `agents-gl` rather than an extra
+    anybody could have forgotten - so the message has to name both the package that is gone and
+    the distribution whose reinstall brings it back, or the operator is left hunting an install
+    command that no longer exists.
     """
     monkeypatch.setitem(sys.modules, _CLAUDE_RUNNER, None)
     with pytest.raises(UpstreamUnavailable) as refused:
         container.real(_settings(tmp_path), _project(tmp_path))
-    assert "agl[claude]" in str(refused.value)
+    assert "claude-agent-sdk" in str(refused.value)
+    assert "agents-gl" in str(refused.value)
 
-def test_a_disabled_claude_connector_never_imports_the_adapter_that_needs_the_extra(
+def test_a_disabled_claude_connector_never_imports_the_adapter_that_needs_the_vendor(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The deferred import, pinned by behaviour: unimportable and unreached at the same time.
 
     A module-level import of `ClaudeCodeRunner` would fail this, which is the whole reason that
     import sits inside the function that constructs it. An operator who uses one backend must not
-    be unable to start AGL because the other one's extra is missing.
+    be unable to start AGL because the other one's vendor package is gone.
     """
     monkeypatch.setitem(sys.modules, _CLAUDE_RUNNER, None)
     services = container.real(_settings(tmp_path, claude=False), _project(tmp_path))
     _ports_are_filled(services)
 
-def test_a_missing_terminal_extra_refuses_rather_than_falling_back_to_headless(
+def test_a_missing_terminal_package_refuses_rather_than_falling_back_to_headless(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`ARCHITECTURE.md`'s "Deliberately not built" refuses a `Display` port, so there is no
@@ -409,12 +414,15 @@ def test_a_missing_terminal_extra_refuses_rather_than_falling_back_to_headless(
 
     The fallback is the plausible bug and this is what forbids it: `HeadlessTerminal` would build
     happily and then raise `UpstreamUnavailable` at the first screen carrying a question, turning
-    a missing extra into a failure an hour into a run and nowhere near its cause.
+    a stripped environment into a failure an hour into a run and nowhere near its cause. `rich` is
+    a base dependency of `agents-gl`, so the message names the package that is gone beside the
+    distribution whose reinstall brings it back.
     """
     monkeypatch.setitem(sys.modules, _RICH_TERMINAL, None)
     with pytest.raises(UpstreamUnavailable) as refused:
         container.real(_settings(tmp_path), _project(tmp_path))
-    assert "agl[terminal]" in str(refused.value)
+    assert "rich" in str(refused.value)
+    assert "agents-gl" in str(refused.value)
 
 # --- Substituting through the bundle, and compiling the workflow-facing vocabulary ---------------
 

@@ -1,4 +1,4 @@
-"""Four workflow *modules* for `tests/sdk/test_preflight.py`, because a namespace is the claim.
+"""Three workflow *modules* for `tests/sdk/test_preflight.py`, because a namespace is the claim.
 
 A workflow's roles are the `@role(model=…)` factories bound in the module its `def` was executed
 in, and also those bound in any module bound there. That is one declaration and not two, which is
@@ -9,17 +9,15 @@ namespace. Four of that suite's claims therefore cannot be made inside it:
 models, which is the right shape for the claims about dedup and ordering and the wrong shape for
 every claim about what a namespace does *not* contain, or about how a factory reaches it.
 
-So they live here, as four modules that are each nothing but the thing they are about:
+So they live here, as three modules that are each nothing but the thing they are about:
 
   * `unstaffed` - no role factory at all, so preflight asks no backend anything: what keeps a
     workflow that runs no agent runnable on a machine with no harness.
-  * `unused` - one factory imported and never stepped with, a known cost that was accepted: the
-    run is refused for a provider it was never going to use.
   * `late` - a factory written *below* the workflow function, which is not bound when the decorator
     runs and is bound by the time preflight reads the namespace.
   * `qualified` - a factory reached as `roles.implementer()` after `from . import roles`, so the
     workflow's own namespace binds a **module** and no factory at all. This is the regression that
-    made the scan one level deep necessary, and the one of the four whose failure was silent: the
+    made the scan one level deep necessary, and the one here whose failure was silent: the
     scan found nothing, asked nobody, and the run died at its first step. Its role lives one file
     over in `roles.py`, which is a module and not a fifth workflow - the binding is what is being
     measured, so there has to be something to bind.

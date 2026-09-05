@@ -191,15 +191,13 @@ IRREGULAR_PARTICIPLES: Final = frozenset(
 # `src/` that is not annotated is one of these.
 PROTOCOL_BINDINGS: Final = frozenset({"__all__"})
 
-# The two module-level constants deliberately not `SCREAMING_SNAKE`, by dotted name. Each holds a
-# `ReportingTool` and is spelled the way the model calls the tool, which is the string on the line
-# below it. Keyed whole so that a third arrives as a failure rather than as a coincidence.
-WIRE_NAMED_CONSTANTS: Final = frozenset(
-    {
-        "agl.workflows.fix.findings.report_findings",
-        "agl.workflows.split.chunks.report_chunks",
-    }
-)
+# Module-level constants deliberately not `SCREAMING_SNAKE`, by dotted name. It is empty, and that
+# is the shape of the exemption rather than the absence of one: the two entries it held were the
+# shipped workflows' reporting tools, each spelled the way the model called the tool, and they went
+# with those workflows. A constant holding a `ReportingTool` is the case it exists for - add its
+# dotted name with the reason, and keyed whole so that one arrives as a decision rather than as a
+# coincidence.
+WIRE_NAMED_CONSTANTS: Final[frozenset[str]] = frozenset()
 
 # The floor under a name that is meant to read as a claim. Four is where ten tests already sit, so
 # it fires on the next three-word name; 8 to 14 is the target a reviewer applies and is not here.
@@ -628,10 +626,10 @@ def test_every_module_level_constant_under_src_is_final_and_screaming_snake() ->
                     f"a constant is SCREAMING_SNAKE with one leading underscore where it is "
                     f"private.\n"
                     f"\n"
-                    f"Two bindings are exempt and both are listed in WIRE_NAMED_CONSTANTS at the "
-                    f"top of this file: each holds a `ReportingTool` and is spelled the way the "
-                    f"model calls the tool. If this is a third of those, add its dotted name there "
-                    f"with the reason. Otherwise rename it."
+                    f"The exemption is WIRE_NAMED_CONSTANTS at the top of this file, and it is "
+                    f"empty: it is for a binding that holds a `ReportingTool` and is spelled the "
+                    f"way the model calls the tool. If this is one of those, add its dotted name "
+                    f"there with the reason. Otherwise rename it."
                 )
         for alias in module_type_aliases(text):
             aliases += 1

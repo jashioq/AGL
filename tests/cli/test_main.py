@@ -50,7 +50,7 @@ from pathlib import Path
 from typing import Final
 import pytest
 from agl.cli import main
-from agl.config import container, registry, sources
+from agl.config import container, distribution, registry, sources
 from agl.ports.errors import (
     ConflictError,
     NotFoundError,
@@ -599,6 +599,47 @@ def test_help_still_exits_zero_through_system_exit(tmp_path: Path) -> None:
         with pytest.raises(SystemExit) as caught:
             main.main(argv, compose=_compose(harness))
         assert caught.value.code == 0
+
+def test_the_version_flag_prints_the_installed_version_and_exits_zero_like_help(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--version` is `-h`'s sibling and leaves the same way: `argparse` prints it during the scan
+    and exits, before the required subcommand is looked for.
+
+    So `agl --version` takes no command after it, which is the whole reason this is a parser action
+    rather than a clause in the dispatch - and it is asserted here because a `store_true` flag
+    reading the same way on the command line would exit 2 asking for a subcommand instead.
+
+    The line is compared against `config/distribution.py`'s reader rather than against a version
+    typed here: `pyproject.toml`'s number is spent permanently at a release, and a copy of it in
+    this file would be a second place to change on the day it moves.
+    """
+    harness = _fakes(tmp_path)
+
+    with pytest.raises(SystemExit) as caught:
+        main.main(("--version",), compose=_compose(harness))
+
+    assert caught.value.code == 0
+    captured = capsys.readouterr()
+    assert captured.out == f"agl {distribution.installed_version()}\n"
+    assert captured.err == ""
+
+def test_a_version_flag_after_a_command_is_the_workflows_and_not_agls(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A root flag is only a root flag before the subcommand, and this is what that buys.
+
+    `agl run <workflow>` hands everything it does not understand to the workflow's own parser, and
+    a flag declared on the root parser does not change which arguments those are: `--version` typed
+    after a command is the workflow's to accept or refuse, exactly as it was before this flag
+    existed. `probe` declares none, so it refuses - and the refusal, rather than a version, is what
+    says the flag was never taken off the line.
+    """
+    harness = _fakes(tmp_path)
+
+    assert _main(harness, "run", "probe", "-n", "auth", "--version") == 2
+
+    assert "--version" in capsys.readouterr().err
 
 # --- the composition, and the number this module may not write -----------------------------------
 

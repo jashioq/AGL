@@ -50,8 +50,10 @@ constants, and `tests/test_measurable_targets.py`'s `_contract` resolves one aga
 Renumbering the sixth contract to a seventh was tried: five tests fail and name it.
 
 **Target numbers.** `tests/test_measurable_targets.py`'s `SETTLED` is a `Mapping[int, ...]` keyed by
-target number, and `test_all_twelve_targets_are_accounted_for` pins its key set to `range(1, 13)`.
-Deleting the eighth target's entry was tried: that assertion fails and names the gap in the run.
+target number, and
+`test_every_one_of_the_twelve_targets_carries_a_settlement_or_a_stated_reason` pins its key set to
+`range(1, 13)`. Deleting the eighth target's entry was tried: that assertion fails and names the gap
+in the run.
 
 **Both are repo-wide rather than file-scoped, and that is the reading C8's own words force.** The
 test is "can this be deleted without breaking a build", not "is the citation next to its
@@ -257,7 +259,8 @@ def _target_numbers() -> frozenset[int]:
         f"{TARGETS_FILE} no longer binds {TARGETS_SYMBOL} to a dict literal. That mapping's keys "
         f"are what make a target number an identifier rather than a pointer into prose, so this "
         f"file cannot tell which target numbers are live and the exemption has lost its anchor. "
-        f"See this file's docstring, and test_all_twelve_targets_are_accounted_for."
+        f"See this file's docstring, and "
+        f"test_every_one_of_the_twelve_targets_carries_a_settlement_or_a_stated_reason."
     )
 
 def _bound(node: ast.AnnAssign | ast.Assign) -> frozenset[str]:
@@ -341,7 +344,8 @@ def test_the_target_numbers_this_file_exempts_are_keys_of_the_mapping_that_pins_
     numbers = _target_numbers()
     assert numbers == frozenset(range(1, len(numbers) + 1)), (
         f"{TARGETS_SYMBOL} in {TARGETS_FILE} is keyed {sorted(numbers)}, which is not a run from "
-        f"one. test_all_twelve_targets_are_accounted_for is what normally says so; if it has been "
+        f"one. test_every_one_of_the_twelve_targets_carries_a_settlement_or_a_stated_reason is "
+        f"what normally says so; if it has been "
         f"relaxed, the exemption here is exempting a number nothing pins any more"
     )
 

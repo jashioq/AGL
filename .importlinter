@@ -27,7 +27,7 @@ include_external_packages = True
 #    Fail-closed, and it is `containers` plus `exhaustive = True` that made it so. An earlier
 #    spelling named absolute modules in `layers =`, and this contract then had no opinion about one
 #    it did not mention: a top-level member nobody added below was not at the bottom of the stack
-#    but outside it, free to import anything with all six contracts kept, and a hand-maintained
+#    but outside it, free to import anything with every contract still kept, and a hand-maintained
 #    meta-test in tests/test_contract_listings.py was what noticed. Naming `agl` as the container
 #    makes the layers relative names and lets `exhaustive` require that every child of `agl` is one
 #    of them,
@@ -47,7 +47,7 @@ include_external_packages = True
 #    refused outright, an optional one is skipped. There are none below; adding one is the moment
 #    to ask why.
 [importlinter:contract:1]
-name = Layers flow one way only: {cli, testing} -> api -> config -> workflows -> {sdk, adapters} -> ports, neither pair imports the other, and every top-level member of agl is one of them
+name = Layers flow one way only: {cli, testing} -> api -> config -> {sdk, adapters} -> ports, neither pair imports the other, and every top-level member of agl is one of them
 type = layers
 containers =
     agl
@@ -56,7 +56,6 @@ layers =
     cli | testing
     api
     config
-    workflows
     sdk | adapters
     ports
 
@@ -136,8 +135,8 @@ ignore_imports =
 #    A member here is an adapter, not a directory: agl.adapters.system_clock is a single module
 #    because its port is one method, and it is listed for the same reason every package is. Being
 #    one file makes it no kind of exception - it is an ordinary peer that happens not to need a
-#    directory, and leaving it out would have left it free to import agl.adapters.git with all six
-#    contracts still kept, since contract 5 skips the (agl.adapters, agl.adapters) pair.
+#    directory, and leaving it out would have left it free to import agl.adapters.git with every
+#    contract still kept, since contract 5 skips the (agl.adapters, agl.adapters) pair.
 #    Fails open, like contract 2 and like contract 3's forbidden half, and unlike contracts 1 and
 #    5: this list is hand-maintained, so an adapter added at a later stage is unpoliced until
 #    someone edits it. tests/test_contract_listings.py is what notices - it walks
@@ -187,22 +186,3 @@ ignore_imports =
 # what `.**` matches and is also the only shape a composition root has any use for. If the bare
 # package is ever imported here this contract breaks, and that is the right moment to ask what a
 # module wanted with `agl.adapters` and nothing under it.
-
-
-# 6. A workflow is written against the SDK alone, which is what keeps it portable across
-#    vendors and testable on fakes. Every part of it is already implied - the config half by
-#    contract 1, which puts `agl.workflows` below `agl.config`, and the adapters half by contract
-#    5, whose source `agl.*` includes `agl.workflows` - and both halves are restated here anyway,
-#    so that the failure a workflow author reads names the rule they actually broke rather than a
-#    layer ordering or a composition root they were not thinking about. Nothing here is redundant
-#    coverage: it is the same coverage under the name that explains it. The overlap is exact and is
-#    measured - tests/test_contract_firing.py fabricates each half and records which other contract
-#    breaks with it.
-[importlinter:contract:6]
-name = Workflows build on the sdk alone and never import agl.adapters or agl.config
-type = forbidden
-source_modules =
-    agl.workflows
-forbidden_modules =
-    agl.adapters
-    agl.config

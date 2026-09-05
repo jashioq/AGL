@@ -176,9 +176,14 @@ def _claude(cli_path: Path | None) -> AgentRunner:
     except ImportError as error:
         raise UpstreamUnavailable(
             "the Claude connector is enabled, but its harness cannot be loaded in this "
-            "environment: the adapter needs the claude-agent-sdk package, which arrives with a "
-            "pip extra that is not installed. Install it with `pip install 'agl[claude]'`, or "
-            "turn the connector off - AGL_AGENT_CLAUDE_ENABLED=false, or enabled = false under "
+            "environment: the adapter needs the claude-agent-sdk package and nothing here can "
+            "import it. Every install of AGL carries that package - it is a base dependency of "
+            "the agents-gl distribution and not an extra anybody has to ask for - so this is an "
+            "environment something was taken out of rather than one that was installed short: a "
+            "`--no-deps` install, an uninstall that took it, or an image trimmed after the fact. "
+            "Reinstalling the distribution puts it back - `pip install --force-reinstall "
+            "agents-gl` - and so does installing claude-agent-sdk on its own. Or turn the "
+            "connector off - AGL_AGENT_CLAUDE_ENABLED=false, or enabled = false under "
             "[agent.claude] in the settings file - and run a workflow whose roles name no Claude "
             "model"
         ) from error
@@ -190,9 +195,14 @@ def _terminal() -> Terminal:
     except ImportError as error:
         raise UpstreamUnavailable(
             "AGL cannot build a terminal in this environment: the display adapter needs the rich "
-            "package, which arrives with a pip extra that is not installed. Install it with `pip "
-            "install 'agl[terminal]'`. There is no headless mode to fall back to - a workflow "
-            "shows screens and some of them ask a person a question, so a run started without a "
-            "display would fail at the first one instead of here"
+            "package and nothing here can import it. Every install of AGL carries rich - it is a "
+            "base dependency of the agents-gl distribution and not an extra anybody has to ask "
+            "for - so this is an environment something was taken out of rather than one that was "
+            "installed short: a `--no-deps` install, an uninstall that took it, or an image "
+            "trimmed after the fact. Reinstalling the distribution puts it back - `pip install "
+            "--force-reinstall agents-gl` - and so does installing rich on its own. There is no "
+            "headless mode to fall back to - a workflow shows screens and some of them ask a "
+            "person a question, so a run started without a display would fail at the first one "
+            "instead of here"
         ) from error
     return RichTerminal()

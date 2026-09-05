@@ -1,5 +1,5 @@
 """Structural test: every contract in `.importlinter` refuses the violation it was written to
-refuse. Six contracts, and before this file nothing in this suite had watched one of them say no.
+refuse. Five contracts, and before this file nothing in this suite had watched one of them say no.
 
 `tests/test_contract_listings.py` next door checks that the hand-maintained *listings* inside three
 of the contracts still agree with the tree they police. That is a weaker and different claim: a
@@ -8,31 +8,28 @@ that no longer exists, if an `ignore_imports` expression quietly swallows the wh
 if a later edit turns a `forbidden` contract into one whose `source_modules` and `forbidden_modules`
 overlap - import-linter skips overlapping pairs in silence, which is exactly how contract 2 comes to
 have no opinion about `agl.ports` itself. **A contract nobody has seen break is a contract nobody
-has seen work.** Four of the six were once found failing open by inspection; this file is what
+has seen work.** Four of the five were once found failing open by inspection; this file is what
 would have found them by measurement.
 
 So each probe below fabricates the import that contract exists to catch, and asserts that *that*
 contract, named by its stable number, goes from kept to broken. Both halves matter. "Something
-broke" is satisfied by a fabrication a different contract caught - `agl.workflows -> agl.config`
-breaks contract 1 as well as contract 6, and a probe of 6 that only asked for a failure would pass
-on contract 1's verdict forever, including after somebody deleted contract 6. And "it broke" alone
-is satisfied by a contract that is broken already, so every probe asserts the same contract is
-*kept* on the unmodified graph in the same breath.
+broke" is satisfied by a fabrication a different contract caught - an adapter reaching up to
+`agl.api` would break a layers rule and an independence rule alike if both named it - so a probe
+that only asked for *a* failure would pass on the wrong contract's verdict forever, including after
+somebody deleted the one it is named for. And "it broke" alone is satisfied by a contract that is
+broken already, so every probe asserts the same contract is *kept* on the unmodified graph in the
+same breath.
 
 ## What each probe records, and why it is the whole set rather than one name
 
 `breaks` is every contract the fabrication breaks, not only the one the probe is of. Writing it out
-is what makes the overlaps visible instead of incidental, and two of them are real facts about this
-configuration rather than accidents of the fabrication:
+is what makes the overlaps visible instead of incidental:
 
-  * contract 6 is *wholly* implied - its config half by contract 1, which puts `agl.workflows`
-    below `agl.config`, and its adapters half by contract 5, whose `agl.*` source includes
-    `agl.workflows`. Both probes of it break a second contract, and neither can be written not to.
-    `.importlinter`'s comment on contract 6 says the restatement is for the sake of the message a
-    workflow author reads; these two rows are where that claim is measured rather than asserted.
-  * every other probe breaks exactly one contract, which is a stronger result than it looks. It
-    means each of the other five is load-bearing on its own: delete it and a fabrication that is
-    caught today is caught by nothing.
+  * every probe here breaks exactly one contract, which is a stronger result than it looks. It
+    means each of the five is load-bearing on its own: delete it and a fabrication that is caught
+    today is caught by nothing. A row whose `breaks` holds two numbers is not a defect - it is an
+    overlap somebody had to come here and write down, which is the whole reason the field is a set
+    rather than a boolean.
 
 ## Why a fabricated import and not a fabricated file
 
@@ -109,7 +106,7 @@ CONTRACT_CLASSES: Final[Mapping[str, type[Contract]]] = {
 # Contract numbers are stable - `.importlinter`'s header says so, and a number there is the
 # section id import-linter reads - and the type is half of what a number means: contract 4
 # becoming a `forbidden` contract would leave every probe below still running and no longer
-# probing what it says it does. This is where all six numbers are pinned,
+# probing what it says it does. This is where all five numbers are pinned,
 # `tests/test_contract_listings.py` having handed over the four it used to pin when it stopped
 # reading contract 1.
 CONTRACT_TYPES: Final[Mapping[str, str]] = {
@@ -118,7 +115,6 @@ CONTRACT_TYPES: Final[Mapping[str, str]] = {
     "3": "forbidden",
     "4": "independence",
     "5": "forbidden",
-    "6": "forbidden",
 }
 
 # A top-level name `src/agl/` does not hold, for the exhaustiveness probe. Deliberately not the name
@@ -127,7 +123,7 @@ UNDECLARED_MEMBER: Final = "agl.probe_that_no_layer_declares"
 
 @dataclass(frozen=True)
 class Probe:
-    """One import that does not exist, and what happens to the six contracts when it does.
+    """One import that does not exist, and what happens to the five contracts when it does.
 
     `contract` is the number this probe is *of* - the contract whose failure is the point. `breaks`
     is every number that goes broken, which includes `contract` and is asserted as a set, so a
@@ -181,7 +177,7 @@ PROBES: Final[tuple[Probe, ...]] = (
     # "The dependency rule": "siblings and may not import each other". Contract 1 once had three
     # probes and this was not one of them: the row above was the only independence probe there was,
     # so this pair was enforced by nothing that anything checked. Respelling it `:` left
-    # `lint-imports` at six kept, zero broken, and the whole suite green - which is this file's own
+    # `lint-imports` at five kept, zero broken, and the whole suite green - which is this file's own
     # thesis arriving one row short.
     #
     # **The direction is forced, and a probe the other way round would pass for the wrong reason.**
@@ -209,7 +205,7 @@ PROBES: Final[tuple[Probe, ...]] = (
     # Contract 3 confines each vendor SDK to *its own* adapter, which is a stronger claim than
     # "adapters may import vendors" - so the fabrication is the wrong adapter, not a random module.
     # The rich terminal reaching for the Claude SDK is the exact failure the contract exists to
-    # stop: an `agl[terminal]` install dragging in `agl[claude]`.
+    # stop: both SDKs sit in every install, so nothing else would refuse that import.
     Probe(
         contract="3",
         importer="agl.adapters.rich_terminal.terminal",
@@ -235,24 +231,6 @@ PROBES: Final[tuple[Probe, ...]] = (
         imported="agl.adapters.git.history",
         rule="a module other than agl.config.container naming an adapter",
         breaks=frozenset({"5"}),
-    ),
-    # Contract 6, adapters half. Contract 5 catches it too, because `agl.*` includes `agl.workflows`
-    # - the point of the restatement is the sentence the failure prints, not extra coverage.
-    Probe(
-        contract="6",
-        importer="agl.workflows.split.chunks",
-        imported="agl.adapters.system_clock",
-        rule="a workflow reaching past the SDK to an adapter",
-        breaks=frozenset({"5", "6"}),
-    ),
-    # Contract 6, config half. Contract 1 catches this one, `agl.config` being a layer above
-    # `agl.workflows`, and for the same reason.
-    Probe(
-        contract="6",
-        importer="agl.workflows.fix.roles",
-        imported="agl.config.schema",
-        rule="a workflow reading configuration instead of being handed it",
-        breaks=frozenset({"1", "6"}),
     ),
 )
 
@@ -381,7 +359,7 @@ def test_contract_1_breaks_on_a_top_level_member_no_layer_declares(
 
     `layers =` used to name absolute modules and had no opinion about a module it did not mention,
     so a new top-level package was not at the bottom of the stack but outside it - free to import
-    `agl.ports` and `agl.adapters` directly, and be imported by anything, with all six contracts
+    `agl.ports` and `agl.adapters` directly, and be imported by anything, with every contract
     reported kept. A hand-maintained comparison in `tests/test_contract_listings.py` was what
     noticed. That was replaced with `containers = agl` plus `exhaustive = True`, which is the
     linter saying the same thing natively, and this is that rule under the same discipline as the
@@ -412,7 +390,7 @@ def test_contract_1_breaks_on_a_top_level_member_no_layer_declares(
         f"removed, which silently disables it - an unlisted package is unpoliced by anything."
     )
 
-# --- That the six above are the six there are ----------------------------------------------------
+# --- That the five above are the five there are ---------------------------------------------------
 
 def test_every_contract_in_the_file_has_a_probe(contracts: Mapping[str, Contract]) -> None:
     """A seventh contract added without a probe is a rule nobody has watched work.
