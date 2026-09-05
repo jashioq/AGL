@@ -45,7 +45,7 @@ from agl.adapters.git.workspace import GitWorkspaceProvider
 from agl.config import container, registry, sources
 from agl.ports.agent import AgentOutcome, Claude, StopReason
 from agl.ports.errors import ConflictError, InputError, NotFoundError, exit_code_for
-from agl.ports.home_layout import RunScope
+from agl.ports.home_layout import AglHome, RunScope, workflows_dir
 from agl.ports.ids import Namespace, ProjectName, RunLabel
 from agl.ports.run import JsonValue, RunSpec
 from agl.ports.tree_layout import TreesRoot, base_worktree, run_branch
@@ -685,7 +685,7 @@ def test_list_workflows_is_the_registrys_sorted_names() -> None:
     """`agl workflows`, complete: the command prints this and does nothing more.
     Sorted, so a listing is stable across environments rather than ordered by whatever sequence a
     metadata scan produced, and nothing is imported to answer it."""
-    assert api.list_workflows(points=POINTS) == ("halting", "probe")
+    assert api.list_workflows(points=POINTS).names == ("halting", "probe")
 
 def test_list_workflows_needs_no_bundle_and_no_registered_repository(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -693,15 +693,88 @@ def test_list_workflows_needs_no_bundle_and_no_registered_repository(
     """`list_workflows` takes neither a bundle nor a project, and that is the whole assertion.
 
     Not a stronger version of the test above but a different claim, the composition's half of it:
-    this reads packaging metadata, which is a fact about the installation, so it must answer from a
-    directory that is not a git repository, has no project file naming it, and never built a port.
-    A `Services` parameter it did not read would have made `agl workflows` refuse here with
-    `NotFoundError` - a listing of what is installed, withheld until the operator registers a
-    repository they were not asking about.
+    this reads the workspace, which is a fact about the operator's own home rather than about any
+    repository, so it must answer from a directory that is not a git repository, has no project
+    file naming it, and never built a port. A `Services` parameter it did not read would have made
+    `agl workflows` refuse here with `NotFoundError` - a listing of what the operator has, withheld
+    until they register a repository they were not asking about.
     """
     monkeypatch.chdir(tmp_path)
 
-    assert api.list_workflows(points=POINTS) == ("halting", "probe")
+    assert api.list_workflows(points=POINTS).names == ("halting", "probe")
+
+# --- the workspace, which answers whenever no entry points are handed over -----------------------
+
+def _home(tmp_path: Path) -> AglHome:
+    """An AGL_HOME nothing else can reach, built rather than resolved so no variable is read."""
+    return AglHome(tmp_path / "home")
+
+def _directory(home: AglHome, named: str, pyproject: str) -> None:
+    """One directory under `workspace/workflows/`, holding the project file it is handed."""
+    path = workflows_dir(home) / named
+    path.mkdir(parents=True)
+    (path / "pyproject.toml").write_text(pyproject, encoding="utf-8")
+
+def _declaring(named: str, attribute: str) -> str:
+    """A project file declaring one workflow, pointed at this module so it resolves already."""
+    return (
+        f'[project]\nname = "{named}"\nversion = "0.1.0"\n\n'
+        f'[project.entry-points."{registry.GROUP}"]\n{named} = "{__name__}:{attribute}"\n'
+    )
+
+def test_the_listing_reads_the_workspace_wherever_no_entry_points_were_handed_over(
+    tmp_path: Path,
+) -> None:
+    """`points=` is the escape hatch and the home is the ordinary route, and this drives the latter.
+
+    Both halves of `Listing` in one case, because they are one claim: a directory that declares
+    nothing must not cost the operator the names of the directories that do.
+    """
+    home = _home(tmp_path)
+    _directory(home, "triage", _declaring("triage", "probe"))
+    _directory(home, "half-written", "[project\n")
+
+    listing = api.list_workflows(home=home)
+
+    assert listing.names == ("triage",)
+    assert [entry.directory for entry in listing.broken] == ["half-written"]
+
+@pytest.mark.asyncio
+async def test_a_run_named_after_a_broken_directory_refuses_with_that_directorys_own_reason(
+    tmp_path: Path,
+) -> None:
+    """Exit 2 and what is wrong with the directory, rather than exit 3 and "no workflow by that
+    name": the operator typed the name of the thing they are writing, and `NotFoundError` would
+    send them looking for a workflow to write instead of opening the file that will not parse."""
+    home = _home(tmp_path)
+    _directory(home, "half-written", "[project\n")
+    harness = _fakes(tmp_path)
+
+    with pytest.raises(InputError) as refused:
+        await api.run(harness.services, PROJECT, "half-written", LABEL, (), home=home)
+
+    assert exit_code_for(refused.value) == 2
+    assert "half-written" in str(refused.value)
+
+def test_a_declared_workflow_keeps_the_name_a_broken_directory_happens_to_share(
+    tmp_path: Path,
+) -> None:
+    """A directory's name is not a workflow's name, so a shared one is not two answers to refuse
+    between: the declaration wins, and the broken directory is still named in the listing.
+
+    `_index`'s `ConflictError` is what two *declarations* of one name get. This is not that - the
+    broken directory declares nothing at all, so there is no second workflow for the name to be
+    ambiguous between, and refusing here would cost the operator a workflow that works.
+    """
+    home = _home(tmp_path)
+    _directory(home, "elsewhere", _declaring("triage", "probe"))
+    _directory(home, "triage", "[project\n")
+
+    listing = api.list_workflows(home=home)
+
+    assert listing.names == ("triage",)
+    assert [entry.directory for entry in listing.broken] == ["triage"]
+    assert "usage: agl run triage" in api.workflow_help("triage", home=home)
 
 def test_init_needs_neither_a_bundle_nor_a_registered_repository(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -742,14 +815,15 @@ def test_every_operation_the_module_declares_is_built() -> None:
 
     `workflow_help` is on `__all__` beside the five verbs `agl` dispatches and is not one of them:
     it is the operation behind `agl workflows <name>`, which extends that grammar, and
-    `cli/commands/workflows.py` is where the deviation is argued. `Ask` and `Cleared` are the two
-    entries that are not operations at all - the callable `init` asks its one question through, and
-    the value `clear` answers with - and they are here because a caller annotating either has to be
-    able to name it.
+    `cli/commands/workflows.py` is where the deviation is argued. `Ask`, `Cleared` and `Listing`
+    are the three entries that are not operations at all - the callable `init` asks its one
+    question through, and the two values `clear` and `list_workflows` answer with - and they are
+    here because a caller annotating any of them has to be able to name it.
     """
     assert set(api.__all__) == {
         "Ask",
         "Cleared",
+        "Listing",
         "clear",
         "init",
         "list_workflows",

@@ -27,9 +27,10 @@ That rule has teeth in four places, and they are the four worth reading first:
     So a namespace rename moves every fingerprint taken after a landing. That is a finding about
     the target, not a licence to weaken it.
   * **#12** claims tickets (v1.2) requires no framework change. This is v1.1 and tickets does not
-    exist, so the claim is unverifiable today. Nothing here stands in for it; the test below
-    asserts only that tickets is still absent from this distribution, and records that a workflow
-    may in future arrive somewhere the tripwire is not watching.
+    exist, so the claim is unverifiable today. Nothing here stands in for it; the two tests below
+    assert only that tickets is absent from this tree and that no project file in this repository
+    declares a workflow at all, and both say in their own words that the operator's own workspace
+    - the one place a workflow now comes from - is a place no test here may look.
   * **#2, #4 and #9 settle to nothing**, and that is the rule's hardest case rather than an
     exception to it. All three were measured against the workflows AGL used to ship, and when those
     were deleted every one of those measurements became either impossible or vacuous - a walk over
@@ -45,9 +46,9 @@ one of those is resolved against the real file by `test_every_settlement_names_a
 so a citation that rots fails a test rather than quietly becoming prose. `UNSETTLED` is the other
 half of the index, keyed by the same numbers: a target may settle to nothing **only** if it is
 written up there, which is what
-`test_every_one_of_the_twelve_targets_carries_a_settlement_or_a_stated_reason` holds. Two targets
-cite a test written elsewhere - #3 alongside assertions of its own, #10 instead of one - and each
-of those citations is re-run rather than re-implemented. #10 could not be improved on here at all:
+`test_every_one_of_the_twelve_targets_carries_a_settlement_or_a_stated_reason` holds. Three targets
+cite a test written elsewhere - #1 and #3 alongside assertions of their own, #10 instead of one -
+and each of those citations is re-run rather than re-implemented. #10 could not be improved on here:
 re-writing it would have been a second copy of a claim that is already made better, with more
 apparatus behind it, where it lives.
 
@@ -78,7 +79,7 @@ number the assertion rests on.
 
 ## One module, and it is one of the longest in the repository
 
-778 code lines against `scripts/check`'s 300-line convention, which is among the largest of the 37
+699 code lines against `scripts/check`'s 300-line convention, which is among the largest of the 35
 modules over it and more than half again `tests/test_contract_listings.py`, the file whose rule
 this one applies a floor up. The module size ceiling warns rather than fails, and this is the
 warning answered rather than ignored.
@@ -98,7 +99,7 @@ anything. #8 is the same shape from the other side, its enumeration static and i
 
 What the length actually is: twelve sections, each with the target quoted, the mechanical form
 argued for somebody meeting it for the first time, and a failure message that names the target
-rather than the expression that failed. 150 of those 778 lines are assertion messages, which is this
+rather than the expression that failed. 142 of those 699 lines are assertion messages, which is this
 repository's convention rather than this file's indulgence.
 
 ## The one instrument this file could not build
@@ -168,7 +169,11 @@ HERE: Final = "tests/test_measurable_targets.py"
 CONTRACT_FIRING: Final = "tests/test_contract_firing.py"
 
 SETTLED: Final[Mapping[int, tuple[str, ...]]] = {
-    1: (f"{HERE}::test_the_registry_dispatches_through_no_name_it_was_handed",),
+    1: (
+        f"{HERE}::test_the_registry_dispatches_through_no_name_it_was_handed",
+        "tests/config/test_registry.py::"
+        "test_a_workspace_directory_declaring_one_workflow_yields_that_one_entry_point",
+    ),
     2: (),
     3: (
         f"{HERE}::test_only_the_composition_root_names_an_adapter",
@@ -197,7 +202,11 @@ SETTLED: Final[Mapping[int, tuple[str, ...]]] = {
         f"{HERE}::test_renaming_every_name_moves_no_fingerprint_at_all",
         f"{HERE}::test_a_landing_writes_the_namespace_into_the_history",
     ),
-    12: (f"{HERE}::test_target_twelve_is_unverifiable_because_tickets_does_not_exist",),
+    12: (
+        f"{HERE}::test_target_twelve_is_unverifiable_because_tickets_does_not_exist",
+        f"{HERE}::"
+        f"test_a_workflow_declaration_is_found_where_one_is_planted_and_nowhere_in_this_repository",
+    ),
 }
 
 # Why a target above settles to nothing. A number may carry an empty tuple **only** if it is keyed
@@ -302,16 +311,20 @@ def _own_adapter(relative: str) -> str:
 def _statements(tree: ast.AST) -> Iterator[ast.stmt]:
     """Every statement in `tree`, nested ones included, with docstrings dropped.
 
+    **Each node is asked what it is, rather than each node's `body`, `orelse` and `finalbody` being
+    read.** Those three names do not always hold a list: an `ast.IfExp` and an `ast.Lambda` carry a
+    single expression under them, so a reader that iterated whatever it found there raised
+    `TypeError: 'Name' object is not iterable` on one ternary anywhere in the module being parsed -
+    an error in place of the assertion the caller was written to make. `_nested` in
+    `src/agl/config/registry.py` is written as a ternary so that this stays fixed.
+
     A docstring is an `ast.Expr` over a string constant, and this repository writes attribute
     docstrings too - a bare string after a dataclass field, which `ast.get_docstring` cannot see -
-    so both are dropped by shape rather than by position. What is left is what the module *does*,
-    which is the thing #2 is counting.
+    so both are dropped by shape rather than by position. What is left is what the module *does*.
     """
     for node in ast.walk(tree):
-        for field in ("body", "orelse", "finalbody"):
-            for statement in getattr(node, field, []):
-                if isinstance(statement, ast.stmt) and not _is_docstring(statement):
-                    yield statement
+        if isinstance(node, ast.stmt) and not _is_docstring(node):
+            yield node
 
 def _is_docstring(statement: ast.stmt) -> bool:
     """Whether `statement` is a bare string expression - a docstring of either kind."""
@@ -355,18 +368,29 @@ def _shell_constant(name: str) -> str:
 # Target 1 - adding a workflow touches one new package plus one entry-point line
 # ================================================================================================
 #
-# **Two of this target's three assertions went with the shipped workflows and one did not.** Both of
-# the deleted ones were about a tree: that nothing outside `src/agl/workflows/` imported a workflow,
-# and that every package under it was one entry-point line in `pyproject.toml`. Neither can be asked
-# of a distribution that ships no workflow - `rglob` over a directory that is not there answers `[]`
-# and both would have passed on the empty set, which is a green line and not a measurement.
+# **Two of this target's three assertions went with the shipped workflows, and one of the two has
+# since been asked again elsewhere.** Both of the deleted ones were about a tree: that nothing
+# outside `src/agl/workflows/` imported a workflow, and that every package under it was one
+# entry-point line in `pyproject.toml`. Neither could be asked of a distribution that ships no
+# workflow - `rglob` over a directory that is not there answers `[]` and both would have passed on
+# the empty set, which is a green line and not a measurement.
 #
-# What survives is the half that was never about the tree: the resolver. Target #1's own words are
-# "no `importlib`, no `getattr`, no central dispatch to edit", and that is a claim about
-# `config/registry.py`, which is unchanged and still reached through the `agl.workflows` entry-point
-# group. A workflow arriving from anywhere - a package installed beside AGL today, the workspace a
-# later stage adds - reaches the framework through that group and through nothing else, and the
-# assertion below is what holds the resolver to it.
+# **The entry-point half has a workspace form and is cited rather than copied.** "One new package
+# plus one entry-point line" is now one directory in the operator's workspace holding one
+# declaration in its own project file, and `tests/config/test_registry.py`'s
+# `test_a_workspace_directory_declaring_one_workflow_yields_that_one_entry_point` is that sentence
+# asserted against the walk `agl` actually does. `SETTLED` carries it; re-writing it here would be a
+# second copy of a claim already made where the apparatus for it lives, which is #10's argument
+# applied to a nearer case. The other half has no workspace form: it was about a tree that no longer
+# exists, and a workflow the test wrote into `tmp_path` itself would be a tautology rather than a
+# measurement.
+#
+# What survives here is the half that was never about the tree: the resolver. Target #1's own words
+# are "no `importlib`, no `getattr`, no central dispatch to edit", and that is a claim about
+# `config/registry.py`, which now reads a workflow's own declaration and synthesises an entry point
+# from it rather than asking the installed distributions for one. A workflow reaches the framework
+# through that walk and through nothing else, and the assertion below is what holds the resolver to
+# it.
 
 def test_the_registry_dispatches_through_no_name_it_was_handed() -> None:
     """The prohibition, read off the resolver's code and never off its prose.
@@ -878,7 +902,7 @@ def _eight_role() -> Role:
 async def probe(run: Run[_EightParams]) -> None:
     """One step, so that `agl run` has work to do and `agl resume` has an entry to replay.
 
-    Module-level, because `agl.testing` resolves a workflow the way an installed one is resolved -
+    Module-level, because `agl.testing` resolves a workflow the way a workspace declaration is -
     `<module>:<name>` - and a workflow declared inside a function names no module attribute.
     """
     await run.step(_eight_role(), request=run.params.request)
@@ -1342,13 +1366,15 @@ def test_target_twelve_is_unverifiable_because_tickets_does_not_exist() -> None:
     line - take the diff, and report whether anything under `src/agl/sdk/`, `src/agl/config/`,
     `src/agl/cli/`, `src/agl/api.py` or `src/agl/ports/` had to move.
 
-    **The tripwire watches `src/` and a workflow may not arrive there.** AGL ships no workflow now,
-    and the workspace a later stage adds puts them outside this tree entirely - so tickets could be
+    **This tripwire watches `src/` and a workflow no longer arrives there.** A workflow is a
+    directory in the operator's own workspace now, outside this tree entirely, so tickets could be
     written, run and finished without this test ever firing. That is stated rather than papered
     over: the premise it guards is "this *distribution* has not grown a workflow", which is worth
-    holding on its own, and whoever adds the workspace should point a second tripwire at wherever a
-    workflow actually lives by then. Reading a green line here as "tickets does not exist anywhere"
-    is the mistake this paragraph exists to stop.
+    holding on its own, and the second tripwire below -
+    `test_a_workflow_declaration_is_found_where_one_is_planted_and_nowhere_in_this_repository` - is
+    pointed at the shape a workflow has now rather than at this tree, and writes out the limit both
+    of them share. Reading a green line here as "tickets does not exist anywhere" is the mistake
+    this paragraph exists to stop.
 
     **The strongest available evidence, and why it is not a substitute.** `fix` and `split` were two
     consumers of genuinely different shape - one worktree and sequential steps against N concurrent
@@ -1381,6 +1407,98 @@ def test_target_twelve_is_unverifiable_because_tickets_does_not_exist() -> None:
         f"workflow, so this table is empty by design and a line in it is a workflow this "
         f"distribution has grown - which is the premise above changing, whatever the new workflow "
         f"is called."
+    )
+
+def _declarations(root: Path) -> dict[str, tuple[str, ...]]:
+    """Every project file under `root`, and the workflow names each one declares.
+
+    This is the reading `agl` itself does of a workspace directory: a workflow is a directory
+    holding a `pyproject.toml` whose entry-point table declares it, which is `config/registry.py`'s
+    `_declared`, so a declaration is what a tripwire can look for wherever one has been written.
+
+    Keyed by the path relative to `root`, so a failure names a file to open, and a project file
+    that declares nothing is kept with an empty tuple - which is what lets a caller tell "nothing
+    here declares a workflow" from "no project file was read at all".
+
+    Dot-prefixed directories are pruned rather than walked, and that is what keeps the answer about
+    this repository: `.venv` holds other people's distributions, `.git` holds the history as
+    objects, and the tool caches hold copies of what the walk has already read.
+    """
+    found: dict[str, tuple[str, ...]] = {}
+    for parent, directories, _ in root.walk():
+        directories[:] = [name for name in directories if not name.startswith(".")]
+        path = parent / PYPROJECT_FILE.name
+        if not path.is_file():
+            continue
+        groups = tomllib.loads(path.read_text()).get("project", {}).get("entry-points", {})
+        found[str(path.relative_to(root))] = tuple(sorted(groups.get(WORKFLOWS_PACKAGE, {})))
+    return found
+
+def test_a_workflow_declaration_is_found_where_one_is_planted_and_nowhere_in_this_repository(
+    tmp_path: Path,
+) -> None:
+    """#12's second tripwire, pointed at the shape a workflow has now rather than at `src/`.
+
+    A workflow is no longer a package in this tree, so the scan above cannot see one arriving. What
+    a workflow *is* now is a directory with a project file declaring it, and that shape is the same
+    wherever the directory sits - so this looks for the declaration, over the whole repository.
+
+    **The scan is shown firing before it is believed.** A `tickets` workflow is built under
+    `tmp_path`, in the layout a workspace holds one in, and the same reader that answers about this
+    repository is run over it and must find it by name. Without that half this would be a tripwire
+    nobody has watched fire, which is the defect the test above records about itself and which a
+    second one repeating it would only double.
+
+    **What it catches.** Any workflow declared anywhere in this repository - a template, an
+    example, a fixture, a workspace checked in beside the source - and `tickets` among them. That
+    is strictly more than the package scan above, which a workflow arriving in any directory but
+    `src/agl/` walks straight past.
+
+    **What it does not catch, and this is the whole of the limit.** A `tickets` written in the
+    operator's own workspace, which is where a workflow actually lives and where no test in this
+    repository may look: `tests/conftest.py` pins `AGL_HOME` to a temporary directory precisely so
+    that no test reads the machine it is running on. `config/registry.py` reads workflows from that
+    workspace and from nowhere else, so the one place a workflow can arrive from is the one place
+    this cannot see. A green line here means "nothing in this repository declares a workflow", and
+    it means nothing whatever about the operator's workspace or about tickets existing in the
+    world.
+
+    It answers none of #12's own claim either. Whether tickets required a framework change is still
+    settled by taking the diff, which is what the test above asks whoever adds it to do.
+    """
+    planted = tmp_path / "workspace" / "workflows" / "ticket-directory"
+    planted.mkdir(parents=True)
+    (planted / PYPROJECT_FILE.name).write_text(
+        f'[project]\nname = "planted"\nversion = "0.1.0"\n\n'
+        f'[project.entry-points."{WORKFLOWS_PACKAGE}"]\ntickets = "tickets:tickets"\n',
+        encoding="utf-8",
+    )
+
+    assert list(_declarations(tmp_path).values()) == [("tickets",)], (
+        f"the reader was shown a workspace holding one workflow called tickets and answered "
+        f"{_declarations(tmp_path)}. It is asserted to fire here so that the assertion below means "
+        f"something: a reader that found nothing in a tree with tickets in it would report this "
+        f"repository clean whatever this repository held. The directory is deliberately not called "
+        f"`tickets` either - a workflow's name is the key its declaration writes, not the name of "
+        f"the directory holding it, and that is what is being read."
+    )
+
+    here = _declarations(REPO_ROOT)
+    assert str(PYPROJECT_FILE.relative_to(REPO_ROOT)) in here, (
+        f"the walk of {REPO_ROOT} read {sorted(here)} and AGL's own project file is not among "
+        f"them, so the assertion below is about a tree this did not reach."
+    )
+    declaring = {path: declared for path, declared in here.items() if declared}
+    assert not declaring, (
+        f"project files in this repository declare workflows: {declaring}. Target #12's premise is "
+        f"that tickets does not exist and that this distribution ships no workflow at all, so a "
+        f"declaration here is that premise changing - and if `tickets` is among those names it is "
+        f"changing in the exact way #12 is about. Take the diff that added it and report whether "
+        f"anything under src/agl/sdk/, src/agl/config/, src/agl/cli/, src/agl/api.py or "
+        f"src/agl/ports/ had to move; if any of it did, the target's own answer applies. A "
+        f"template or an example workflow shipped deliberately is the other way this fires, and it "
+        f"is a real change to the premise rather than a false alarm: decide what #12 means then, "
+        f"and rewrite this rather than exempting the path."
     )
 
 # ================================================================================================

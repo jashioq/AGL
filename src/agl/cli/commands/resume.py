@@ -5,6 +5,7 @@ from importlib.metadata import EntryPoint
 from typing import Final
 from agl import api
 from agl.cli.commands import Registered, _said
+from agl.ports.home_layout import AglHome
 from agl.ports.ids import RunLabel
 from agl.sdk.params import RefusingParser
 
@@ -42,10 +43,11 @@ def execute(
     registered: Registered,
     parsed: argparse.Namespace,
     *,
+    home: AglHome,
     points: Iterable[EntryPoint] | None = None,
 ) -> int:
     label = RunLabel(_said(parsed, _LABEL, command=NAME))
     project, services = registered()
-    asyncio.run(api.resume(services, project, label, points=points))
+    asyncio.run(api.resume(services, project, label, home=home, points=points))
     print(f"resume {str(label)!r} finished")
     return _NOTHING_TO_REPORT

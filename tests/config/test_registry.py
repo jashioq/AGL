@@ -32,13 +32,47 @@ install from being read as a workflow that failed to register.
 Refusals are asserted on their class *and* on the name, the entry-point value or the list of
 alternatives appearing in the message: "it raised" is satisfied by a refusal that leaves the
 operator with nothing to do next.
+
+## The second half of this file reads directories, and it still writes no distribution
+
+`discovered` is where the entry points now come from: a walk of `workspace/workflows/` under
+AGL_HOME, one `pyproject.toml` read per directory, one `EntryPoint` synthesised per line of that
+file's entry-point table. The cases below build those directories under `tmp_path` and never under
+the operator's own home - `AglHome` is constructed here rather than resolved, so no assertion in
+this file depends on an environment variable or on what is installed anywhere.
+
+What is still not built is a distribution. A synthesised point's `.dist` is `None` and nothing in
+`src/agl` reads it, so a hand-written TOML table and an installed package produce the same type and
+the same `load()`. The one case that proves it points its value at *this module*, which is already
+importable, so that the claim being tested is the synthesis and not a `sys.path` insertion made
+somewhere else.
+
+**One bad directory may not answer for the others.** `agl workflows` exists to say what is there,
+and a listing that collapses to nothing because one project file will not parse is the worst
+possible answer to that question - the directory the operator is looking at is the one that
+vanishes. So a directory that cannot be read into entry points comes back in `Discovery.broken`,
+under the only name it has left, which is its own; and the assertions below pin both halves at once,
+because "the broken one is reported" and "the others are still listed" are one claim.
+
+## `check_unbroken` resolves a name against those directories, and the declaration wins
+
+A directory's name is the only handle a broken one has, so an operator who types it gets that
+directory's reason rather than `load`'s "no workflow by that name" - which would send them looking
+for a workflow they have not written rather than at the file they have. What that name is *not* is
+a declaration, and the case below named
+`test_a_workflows_name_is_the_key_it_declares_and_not_the_directory_name` is that rule. It decides
+the collision `_index` cannot see: two entry points of one name are two workflows and are refused,
+while a broken directory sharing a declared name is one workflow beside a directory that declares
+nothing at all - so the workflow runs, and the directory is still reported by the listing.
 """
 
 from importlib.metadata import EntryPoint
+from pathlib import Path
 from typing import Final
 import pytest
-from agl.config.registry import GROUP, load, names
+from agl.config.registry import GROUP, Discovery, check_unbroken, discovered, load, names
 from agl.ports.errors import ConflictError, InputError, NotFoundError
+from agl.ports.home_layout import AglHome, workflows_dir
 
 # What a registered workflow looks like from here: a name, a `module:attr` value, and the group.
 # The targets are real objects in this repository, so a load that is supposed to succeed does.
@@ -105,27 +139,43 @@ def test_an_unknown_name_is_not_found_and_the_message_lists_what_is_registered()
     assert _WORKFLOW in message
     assert _OTHER in message
 
-def test_an_unknown_name_in_an_empty_registry_says_nothing_is_installed() -> None:
-    """A different situation from "not that one", and a refusal ending in an empty list is a bug."""
+def test_an_unknown_name_in_an_empty_registry_says_no_workflow_is_declared_at_all() -> None:
+    """A different situation from "not that one", and a refusal ending in an empty list is a bug.
+
+    Nothing declared is not the same answer as nothing installed, and the refusal has to hand the
+    operator somewhere to go: the group it read, and the command that spells out how to declare one.
+    """
     with pytest.raises(NotFoundError) as raised:
         load((), _WORKFLOW, _Workflow)
     message = str(raised.value)
-    assert "no workflow is installed at all" in message
+    assert "no workflow is declared at all" in message
     assert GROUP in message
+    assert "agl workflows" in message
 
-# --- one name, two packages: ConflictError, exit 4 ---------------------------------------------
+# --- one name, two declarations: ConflictError, exit 4 -----------------------------------------
 
-def test_two_packages_registering_one_name_is_refused_on_load() -> None:
-    points = (_loadable(_WORKFLOW), _point(_WORKFLOW, "somewhere.else:tickets"))
+def test_two_declarations_of_one_name_are_refused_on_load_naming_both_values() -> None:
+    """Both values, because they are the whole of what the refusal can be specific about.
+
+    An `EntryPoint` carries a name, a value and a group and no path, so the two directories the
+    declarations were read from are not something `_index` could name even if it wanted to. What it
+    has is the two `<module>:<attribute>` strings, and a refusal that printed one of them would
+    leave the operator hunting the other. `pyproject.toml` is asserted because the fix is an edit
+    to a file: a message that only said the name was ambiguous would satisfy the two above.
+    """
+    held = _loadable(_WORKFLOW)
+    points = (held, _point(_WORKFLOW, "somewhere.else:tickets"))
     with pytest.raises(ConflictError) as raised:
         load(points, _WORKFLOW, _Workflow)
     message = str(raised.value)
     assert _WORKFLOW in message
+    assert held.value in message
     assert "somewhere.else:tickets" in message
+    assert "pyproject.toml" in message
 
-def test_two_packages_registering_one_name_is_refused_when_listing_too() -> None:
+def test_two_declarations_of_one_name_are_refused_while_listing_and_not_only_on_load() -> None:
     """The refusal is raised while indexing, so `agl workflows` refuses rather than printing one
-    row for two installed workflows and letting the operator pick blind."""
+    row for two workflows and letting the operator pick blind."""
     points = (_loadable(_WORKFLOW), _point(_WORKFLOW, "somewhere.else:tickets"))
     with pytest.raises(ConflictError):
         names(points)
@@ -158,3 +208,212 @@ def test_an_entry_point_that_loads_the_wrong_kind_of_object_is_refused() -> None
     assert value in message
     assert _Workflow.__qualname__ in message
     assert "str" in message
+
+# --- the workspace scan: directories on disk, and one bad one that answers only for itself -------
+
+def _home(tmp_path: Path) -> AglHome:
+    """An AGL_HOME nothing else can reach, built rather than resolved so no variable is read."""
+    return AglHome(tmp_path / "home")
+
+def _directory(home: AglHome, named: str, pyproject: str | None = None) -> Path:
+    """One directory under `workspace/workflows/`, holding the project file it is given, if any."""
+    path = workflows_dir(home) / named
+    path.mkdir(parents=True)
+    if pyproject is not None:
+        (path / "pyproject.toml").write_text(pyproject, encoding="utf-8")
+    return path
+
+def _declaring(*declarations: str) -> str:
+    """A project file whose entry-point table holds exactly the lines it was handed."""
+    head = f'[project]\nname = "probe"\nversion = "0.1.0"\n\n[project.entry-points."{GROUP}"]\n'
+    return head + "".join(f"{line}\n" for line in declarations)
+
+def _pointing_here(named: str) -> str:
+    """A declaration whose value resolves to this module, so nothing has to reach `sys.path`."""
+    return f'{named} = "{__name__}:_instance"'
+
+def test_a_workspace_directory_declaring_one_workflow_yields_that_one_entry_point(
+    tmp_path: Path,
+) -> None:
+    home = _home(tmp_path)
+    _directory(home, "triage", _declaring(_pointing_here("triage")))
+    found = discovered(home)
+    assert found.broken == ()
+    assert [(point.name, point.value, point.group) for point in found.points] == [
+        ("triage", f"{__name__}:_instance", GROUP)
+    ]
+
+def test_a_synthesised_entry_point_loads_the_object_its_own_declaration_names(
+    tmp_path: Path,
+) -> None:
+    """The whole of what synthesising one buys: it resolves exactly as an installed one does.
+
+    The declared value names this module, which is importable already, so the assertion is about
+    the point built out of a TOML table and not about anything on `sys.path`.
+    """
+    home = _home(tmp_path)
+    _directory(home, "triage", _declaring(_pointing_here("triage")))
+    (point,) = discovered(home).points
+    assert point.load() is _instance
+
+def test_two_declarations_in_one_directory_both_arrive_as_workflows_of_the_group(
+    tmp_path: Path,
+) -> None:
+    """A directory is one project file and not one workflow, so the table may hold several."""
+    home = _home(tmp_path)
+    _directory(
+        home, "triage", _declaring(_pointing_here(_WORKFLOW), _pointing_here(_OTHER))
+    )
+    assert names(discovered(home).points) == (_WORKFLOW, _OTHER)
+
+def test_a_workflows_name_is_the_key_it_declares_and_not_the_directory_name(
+    tmp_path: Path,
+) -> None:
+    """What `agl run` takes is the left-hand side of the declaration, wherever the file sits."""
+    home = _home(tmp_path)
+    _directory(home, "a-directory-called-something-else", _declaring(_pointing_here(_OTHER)))
+    assert names(discovered(home).points) == (_OTHER,)
+
+def test_a_missing_workflows_directory_is_a_quiet_empty_answer_and_not_an_error(
+    tmp_path: Path,
+) -> None:
+    """No workspace is the ordinary state of a fresh install, and AGL creates nothing to find."""
+    assert discovered(_home(tmp_path)) == Discovery((), ())
+
+def test_a_directory_holding_no_project_file_is_stray_and_is_left_out_entirely(
+    tmp_path: Path,
+) -> None:
+    """The workspace is the operator's own directory: what makes a claim is a project file."""
+    home = _home(tmp_path)
+    _directory(home, "notes")
+    _directory(home, "triage", _declaring(_pointing_here("triage")))
+    found = discovered(home)
+    assert found.broken == ()
+    assert names(found.points) == ("triage",)
+
+def test_a_file_lying_beside_the_workflow_directories_is_not_scanned_as_one(
+    tmp_path: Path,
+) -> None:
+    home = _home(tmp_path)
+    _directory(home, "triage", _declaring(_pointing_here("triage")))
+    (workflows_dir(home) / "README.md").write_text("what is in here\n", encoding="utf-8")
+    found = discovered(home)
+    assert found.broken == ()
+    assert names(found.points) == ("triage",)
+
+def test_one_unparseable_project_file_never_stops_the_other_directories_being_listed(
+    tmp_path: Path,
+) -> None:
+    """The claim `agl workflows` rests on: one broken directory answers for itself and no other."""
+    home = _home(tmp_path)
+    _directory(home, "half-written", '[project\nname = "oops"\n')
+    _directory(home, "triage", _declaring(_pointing_here("triage")))
+    found = discovered(home)
+    assert names(found.points) == ("triage",)
+    assert [entry.directory for entry in found.broken] == ["half-written"]
+
+def test_a_broken_directory_keeps_its_own_name_and_carries_the_path_that_failed(
+    tmp_path: Path,
+) -> None:
+    """Its directory is the only name it has, and the reason has to say which file to open."""
+    home = _home(tmp_path)
+    path = _directory(home, "triage", "[project\n") / "pyproject.toml"
+    (entry,) = discovered(home).broken
+    assert entry.directory == "triage"
+    assert str(path) in entry.reason
+
+def test_a_project_file_that_is_a_directory_is_broken_rather_than_a_failed_listing(
+    tmp_path: Path,
+) -> None:
+    """Every way of not having a readable file but absence lands on one directory, not the walk."""
+    home = _home(tmp_path)
+    (workflows_dir(home) / "triage" / "pyproject.toml").mkdir(parents=True)
+    _directory(home, "other", _declaring(_pointing_here("other")))
+    found = discovered(home)
+    assert names(found.points) == ("other",)
+    assert [entry.directory for entry in found.broken] == ["triage"]
+
+def test_a_project_file_declaring_no_workflow_table_is_reported_rather_than_skipped(
+    tmp_path: Path,
+) -> None:
+    """A directory here is a workflow somebody is writing, so the missing table is the mistake."""
+    home = _home(tmp_path)
+    _directory(home, "triage", '[project]\nname = "triage"\nversion = "0.1.0"\n')
+    (entry,) = discovered(home).broken
+    assert entry.directory == "triage"
+    assert GROUP in entry.reason
+
+def test_a_table_under_a_different_entry_point_group_declares_no_workflow_here(
+    tmp_path: Path,
+) -> None:
+    """The group is matched exactly: a console script is a declaration about something else."""
+    home = _home(tmp_path)
+    _directory(
+        home,
+        "triage",
+        '[project]\nname = "triage"\nversion = "0.1.0"\n\n'
+        '[project.entry-points."console_scripts"]\ntriage = "triage:main"\n',
+    )
+    found = discovered(home)
+    assert found.points == ()
+    assert [entry.directory for entry in found.broken] == ["triage"]
+
+def test_an_entry_point_value_that_is_not_a_string_makes_its_directory_broken(
+    tmp_path: Path,
+) -> None:
+    """Refused where it is written rather than at the import that would fail unreadably."""
+    home = _home(tmp_path)
+    _directory(home, "triage", _declaring("triage = 3"))
+    (entry,) = discovered(home).broken
+    assert entry.directory == "triage"
+    assert "triage" in entry.reason
+
+def test_broken_directories_come_back_in_directory_order_whatever_the_filesystem_says(
+    tmp_path: Path,
+) -> None:
+    """Sorted for `names`' own reason: two machines that walked differently print one listing."""
+    home = _home(tmp_path)
+    for named in ("gamma", "alpha", "beta"):
+        _directory(home, named, "[project\n")
+    assert [entry.directory for entry in discovered(home).broken] == ["alpha", "beta", "gamma"]
+
+# --- resolving a name against the directories that broke -----------------------------------------
+
+def test_a_name_only_a_broken_directory_carries_is_refused_with_that_directorys_reason(
+    tmp_path: Path,
+) -> None:
+    """What `agl run <a directory being written>` gets: the file to open, not a shopping list."""
+    home = _home(tmp_path)
+    path = _directory(home, "half-written", "[project\n") / "pyproject.toml"
+    with pytest.raises(InputError) as raised:
+        check_unbroken(discovered(home), "half-written")
+    assert str(path) in str(raised.value)
+
+def test_a_name_no_broken_directory_carries_is_left_for_the_load_to_answer_for(
+    tmp_path: Path,
+) -> None:
+    """The check is silent on everything else, so an unknown name still gets `load`'s listing."""
+    home = _home(tmp_path)
+    _directory(home, "half-written", "[project\n")
+    _directory(home, "triage", _declaring(_pointing_here(_OTHER)))
+    found = discovered(home)
+    check_unbroken(found, _WORKFLOW)
+    with pytest.raises(NotFoundError):
+        load(found.points, _WORKFLOW, _Workflow)
+
+def test_a_declared_name_is_never_refused_for_a_broken_directory_that_shares_it(
+    tmp_path: Path,
+) -> None:
+    """The collision `_index` cannot see, decided by the rule that a directory declares nothing.
+
+    The workflow is declared under `triage` from a directory called something else, and the
+    directory called `triage` is the broken one. Two *points* of one name are two workflows and
+    `ConflictError` is right for them; this is one workflow beside a directory that named no
+    workflow at all, so refusing would cost the operator a workflow that works.
+    """
+    home = _home(tmp_path)
+    _directory(home, "elsewhere", _declaring(_pointing_here(_OTHER)))
+    _directory(home, _OTHER, "[project\n")
+    found = discovered(home)
+    check_unbroken(found, _OTHER)
+    assert load(found.points, _OTHER, _Workflow) is _instance

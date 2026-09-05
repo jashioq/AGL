@@ -1,4 +1,4 @@
-"""`tests/` on `sys.path`, and the one guard that cannot live in the module it protects.
+"""`tests/` on `sys.path`, and the guards that cannot live in the modules they protect.
 
 pytest's prepend import mode inserts, for every file it imports, that file's *basedir* - the first
 ancestor directory that is not itself a package - at the front of `sys.path`, and it does so before
@@ -47,8 +47,16 @@ A named variable that turned out to be the wrong one would be worse than none, b
 would then read as protection it was not providing. That measurement is not made here, and
 `scripts/check`'s paid-endpoint gate repeats the caveat where a reader will meet it. Until it is,
 Codex is protected by having no credential and not by where it would send one.
+
+**The second guard below is not about money at all**, and it is here for the structural reason
+above rather than by association with it. `sys.path` is process-global,
+`agl/config/workspace_path.py` appends the operator's workspace to it, and
+`agl/config/registry.py`'s `discovered` is what calls that - so any test walking a workspace under
+`tmp_path` leaves that directory on the path of every test collected after it.
+`_sys_path_as_each_test_found_it` takes it back off, and its own docstring is where that is argued.
 """
 
+import sys
 from collections.abc import Iterator
 import pytest
 from instruments.loopback import DUMMY_KEY, REPLY, Loopback
@@ -129,3 +137,26 @@ def _one_test_at_a_time(loopback: Loopback) -> Iterator[None]:
         f"landed on this suite's own loopback, which redacts it - but the next reader to point "
         f"that variable somewhere else would be shipping a live credential"
     )
+
+@pytest.fixture(autouse=True)
+def _sys_path_as_each_test_found_it() -> Iterator[None]:
+    """No test leaves an entry on the import path, whether it meant to put one there or not.
+
+    What a leak costs is never the test that caused it. The entries are appended, so nothing
+    already importable changes meaning; what breaks later is a test importing a module out of a
+    `tmp_path` directory pytest has since deleted, or a workflow package resolving because some
+    earlier test happened to run first. Both read as a defect in the file they surface in, and both
+    change with the order the suite was collected in.
+
+    Autouse and repository-wide for `loopback`'s reason rather than by imitation: the file that
+    will need this is the one written next, by somebody with no reason to know that listing
+    workflows touches interpreter state. A slice assignment rather than a rebinding, so what is
+    restored is whatever object `sys.path` names at teardown and this fixture's own snapshot is
+    never handed to the interpreter to go on mutating; and in a `finally`, so a test that raises
+    restores as surely as one that passes.
+    """
+    held = list(sys.path)
+    try:
+        yield
+    finally:
+        sys.path[:] = held

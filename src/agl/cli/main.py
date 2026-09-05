@@ -119,10 +119,18 @@ def _registered(resolved: sources.Resolved, cwd: Path) -> tuple[ProjectName, Ser
 def _dispatch(invocation: Invocation, parsed: argparse.Namespace, tail: Sequence[str]) -> int:
     command = getattr(parsed, _COMMAND)
     if command == run_command.NAME:
-        return run_command.execute(invocation.registered, parsed, tail, points=invocation.points)
+        return run_command.execute(
+            invocation.registered,
+            parsed,
+            tail,
+            home=invocation.settings.home,
+            points=invocation.points,
+        )
     if command == resume_command.NAME:
         _no_tail(command, tail)
-        return resume_command.execute(invocation.registered, parsed, points=invocation.points)
+        return resume_command.execute(
+            invocation.registered, parsed, home=invocation.settings.home, points=invocation.points
+        )
     if command == clear_command.NAME:
         _no_tail(command, tail)
         return clear_command.execute(invocation.registered, parsed)
@@ -131,7 +139,9 @@ def _dispatch(invocation: Invocation, parsed: argparse.Namespace, tail: Sequence
         return init_command.execute(invocation.settings, invocation.cwd, invocation.ask)
     if command == workflows_command.NAME:
         _no_tail(command, tail)
-        return workflows_command.execute(parsed, points=invocation.points)
+        return workflows_command.execute(
+            invocation.settings.home, parsed, points=invocation.points
+        )
     raise InternalError(
         f"`{_PROGRAM} {command}` reached the dispatch and there is no command by that name. The "
         f"parser admits only the subcommands declared in this module, so this is AGL's own bug "

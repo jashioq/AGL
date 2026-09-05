@@ -15,6 +15,7 @@ __all__ = [
     "check_trees_root",
     "check_unregistered",
     "git_root",
+    "read_document",
     "read_project",
     "read_settings",
     "resolve_project",
@@ -87,7 +88,7 @@ _NOTHING_SAID: Final = FileSettings(
 
 def read_settings(home: AglHome) -> FileSettings:
     path = settings_file(home)
-    document = _document(path)
+    document = read_document(path)
     if document is None:
         return _NOTHING_SAID
     intruders = sorted(_HOME_KEYS & document.keys())
@@ -107,7 +108,7 @@ def read_settings(home: AglHome) -> FileSettings:
 
 def read_project(home: AglHome, project: ProjectName) -> FileProject:
     path = project_config(home, project)
-    document = _document(path)
+    document = read_document(path)
     if document is None:
         raise NotFoundError(
             f"no project named {str(project)!r} is registered: AGL looked for {path} and there is "
@@ -180,7 +181,7 @@ def check_trees_root(path: Path, repo: Path, trees_root: Path) -> None:
 def resolve_project(home: AglHome, start: Path) -> FileProject:
     root = git_root(start)
     for candidate in _project_files(home):
-        document = _document(candidate)
+        document = read_document(candidate)
         if document is None:
             continue
         project = _project(candidate, document)
@@ -200,7 +201,8 @@ def resolve_project(home: AglHome, start: Path) -> FileProject:
         f"{root} to write one"
     )
 
-def _document(path: Path) -> Mapping[str, object] | None:
+def read_document(path: Path) -> Mapping[str, object] | None:
+    """The TOML at `path`, `None` where there is no file, `InputError` for every other failure."""
     try:
         with path.open("rb") as handle:
             document: dict[str, object] = tomllib.load(handle)
@@ -208,8 +210,8 @@ def _document(path: Path) -> Mapping[str, object] | None:
         return None
     except tomllib.TOMLDecodeError as error:
         raise InputError(
-            f"{path} is not valid TOML: {error}. AGL will not guess at what a half-parsed "
-            f"settings file meant to say"
+            f"{path} is not valid TOML: {error}. AGL will not guess at what a half-parsed file "
+            f"meant to say"
         ) from error
     except (OSError, UnicodeDecodeError) as error:
         raise InputError(f"{path} cannot be read: {error}") from error

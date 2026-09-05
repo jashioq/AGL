@@ -193,9 +193,9 @@ def test_a_file_that_cannot_be_read_is_an_input_error_and_not_a_missing_file(
 ) -> None:
     """A directory where the file should be. Chosen over `chmod 000`, which does nothing as root.
 
-    The distinction being asserted is the one `_document` makes: absence answers `None` and every
-    other `OSError` refuses, because "there is no such file" is ordinary and "it is a directory" is
-    a broken installation.
+    The distinction being asserted is the one `read_document` makes: absence answers `None` and
+    every other `OSError` refuses, because "there is no such file" is ordinary and "it is a
+    directory" is a broken installation.
     """
     home = _home(tmp_path)
     (home.path / "config.toml").mkdir(parents=True)

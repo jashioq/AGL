@@ -5,8 +5,8 @@ from pathlib import Path
 from typing import Final
 from agl.config import registry, sources, toml_file
 from agl.config.schema import Settings
-from agl.ports.errors import ConflictError, InputError, NotFoundError
-from agl.ports.home_layout import RunScope
+from agl.ports.errors import ConflictError, InputError, InternalError, NotFoundError
+from agl.ports.home_layout import AglHome, RunScope
 from agl.ports.ids import Namespace, ProjectName, RunLabel
 from agl.ports.run import RunSpec, checked_text
 from agl.ports.store import Store
@@ -17,7 +17,17 @@ from agl.sdk._engine.integration import Leases
 from agl.sdk._engine.services import Services
 from agl.sdk.workflow import Run, Workflow
 
-__all__ = ["Ask", "Cleared", "clear", "init", "list_workflows", "resume", "run", "workflow_help"]
+__all__ = [
+    "Ask",
+    "Cleared",
+    "Listing",
+    "clear",
+    "init",
+    "list_workflows",
+    "resume",
+    "run",
+    "workflow_help",
+]
 
 _TREES_DIRNAME: Final = ".agl-trees"
 
@@ -37,6 +47,14 @@ class Cleared:
 
     worktrees: tuple[str, ...]
 
+@dataclass(frozen=True, slots=True)
+class Listing:
+    """What a workspace holds: the names it declares, and the directories that declared none."""
+
+    names: tuple[str, ...]
+
+    broken: tuple[registry.BrokenWorkflow, ...]
+
 async def run(
     services: Services,
     project: ProjectName,
@@ -45,9 +63,10 @@ async def run(
     argv: Sequence[str] = (),
     *,
     base_ref: str | None = None,
+    home: AglHome | None = None,
     points: Iterable[EntryPoint] | None = None,
 ) -> None:
-    wf: Workflow[object] = registry.load(_points(points), name, Workflow)
+    wf = _loaded(_discovery(home, points), name)
     given = params.parse(wf.params, argv, prog=f"agl run {name}")
 
     scope = RunScope(project, label)
@@ -94,6 +113,7 @@ async def resume(
     project: ProjectName,
     label: RunLabel,
     *,
+    home: AglHome | None = None,
     points: Iterable[EntryPoint] | None = None,
 ) -> None:
     scope = RunScope(project, label)
@@ -104,16 +124,20 @@ async def resume(
         )
     spec = RunSpec.from_json(record)
 
-    wf: Workflow[object] = registry.load(_points(points), spec.workflow, Workflow)
+    wf = _loaded(_discovery(home, points), spec.workflow)
 
     if wf.version != spec.workflow_version:
         raise ConflictError(
             f"run {str(label)!r} was started by {spec.workflow!r} version "
-            f"{spec.workflow_version!r} and the installed {spec.workflow!r} is version "
+            f"{spec.workflow_version!r} and {spec.workflow!r} in your workspace is now version "
             f"{wf.version!r}. A run stamps its workflow's version and AGL refuses a mismatch "
             f"rather than migrating one: every step already on this run's ledger was "
-            f"produced by the workflow as it was then. Install {spec.workflow_version!r} to finish "
-            f"this run, or `agl clear {label}` and start it again on {wf.version!r}."
+            f"produced by the workflow as it was then. So this run finishes against that workflow "
+            f"and no other - put the directory back to what it was at {spec.workflow_version!r}, "
+            f"out of version control or from wherever the earlier copy is, rather than editing "
+            f"the `version=` line back, which would replay the ledger against code that never "
+            f"wrote it. Otherwise `agl clear {label}` drops the ledger and starts the run again "
+            f"on {wf.version!r}."
         )
 
     given = params.from_json(wf.params, spec.params)
@@ -167,11 +191,16 @@ def init(settings: Settings, cwd: Path, ask: Ask) -> Path:
         settings.home, name, root, trees, build, sources.DEFAULT_BUILD_TIMEOUT
     )
 
-def list_workflows(*, points: Iterable[EntryPoint] | None = None) -> tuple[str, ...]:
-    return registry.names(_points(points))
+def list_workflows(
+    *, home: AglHome | None = None, points: Iterable[EntryPoint] | None = None
+) -> Listing:
+    found = _discovery(home, points)
+    return Listing(names=registry.names(found.points), broken=found.broken)
 
-def workflow_help(name: str, *, points: Iterable[EntryPoint] | None = None) -> str:
-    wf: Workflow[object] = registry.load(_points(points), name, Workflow)
+def workflow_help(
+    name: str, *, home: AglHome | None = None, points: Iterable[EntryPoint] | None = None
+) -> str:
+    wf = _loaded(_discovery(home, points), name)
     return params.parser_for(wf.params, prog=f"agl run {name}").format_help()
 
 async def _walk(
@@ -200,5 +229,23 @@ async def _under(store: Store, scope: RunScope) -> tuple[Namespace, ...]:
         found.extend(await _under(store, scope.inside(namespace)))
     return tuple(found)
 
-def _points(points: Iterable[EntryPoint] | None) -> Iterable[EntryPoint]:
-    return registry.installed() if points is None else points
+def _loaded(found: registry.Discovery, name: str) -> Workflow[object]:
+    registry.check_unbroken(found, name)
+    return registry.load(found.points, name, Workflow)
+
+# Points handed over are the whole of what the caller has: the walk is skipped, so nothing reaches
+# the operator's home and `config/workspace_path.py` writes no entry to `sys.path`. That is what
+# `agl.testing`'s harness runs a workflow through, and it is why the parameter is still here.
+def _discovery(home: AglHome | None, points: Iterable[EntryPoint] | None) -> registry.Discovery:
+    if points is not None:
+        return registry.Discovery(tuple(points), ())
+    if home is None:
+        raise InternalError(
+            "an operation was asked to resolve a workflow and was handed neither a home to read "
+            "the workspace under nor the entry points to read in its place. Nothing typed on the "
+            "command line reaches this: `cli/main.py` passes the resolved home on every "
+            "invocation and `agl.testing`'s harness passes points on every one of its own, so the "
+            "two parameters are one argument spelled two ways and a call site naming neither has "
+            "dropped it. That is AGL's own bug"
+        )
+    return registry.discovered(home)

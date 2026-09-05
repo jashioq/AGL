@@ -43,8 +43,10 @@ workflow speaks.
 
 **`config/`** — Settings and the composition root. `sources.py` resolves flags > env > file >
 defaults once into an immutable object, `toml_file.py` is the only module that knows TOML,
-`registry.py` resolves entry points, and **`container.py` is the only module that constructs an
-adapter**.
+`registry.py` resolves entry points, **`workspace_path.py` is the only module in `src/` that writes
+to `sys.path`** — it appends the operator's workspace, so AGL's own environment always wins and the
+workspace can add names without displacing one — and **`container.py` is the only module that
+constructs an adapter**.
 
 **`cli/`** — argv in, exit code out. `main.py` dispatches to one module per subcommand (run,
 resume, clear, init, workflows) and is the one place `Path.cwd()` is read. Composition is

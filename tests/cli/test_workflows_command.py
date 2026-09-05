@@ -5,11 +5,11 @@ from the grammar it started with and is asserted here as deliberately as it is a
 `cli/commands/workflows.py`. The two halves are different claims and the tests are separated
 accordingly, because the interesting property of each is what it does *not* do.
 
-**The listing must survive a broken package.** `config/registry.py` says why in as many words: "one
-workflow package that fails to import still appears in the listing, and every other workflow still
-runs. A registry that imported the world to print a list would let any broken third-party package
-take down the command an operator runs to find out what they have." So one of this module's entry
-points is deliberately unloadable, and the listing is asserted to contain its name.
+**The listing must survive a workflow that will not import.** `registry.names` never calls `load`,
+so a workflow whose own code is broken still appears in the listing and every other workflow still
+runs. A registry that imported the world to print a list would let one half-written directory in
+the workspace take down the command an operator runs to find out what they have. So one of this
+module's entry points is deliberately unloadable, and the listing is asserted to contain its name.
 
 **Naming it must fail loudly.** The other half of the same guarantee: the load happens behind an
 explicit request, so `agl workflows broken` is the operator asking for the one thing that is broken,
@@ -18,7 +18,10 @@ against `InternalError` and `UpstreamUnavailable` both.
 
 **Neither invocation composes a repository.** `list_workflows` takes neither a project nor a
 services bundle. The `registered` on the `Invocation` raises if it is called, which is `main`'s own
-seam used as the instrument - nothing here reaches into a module to count anything.
+seam used as the instrument - nothing here reaches into a module to count anything. What it does
+take is the home the workspace sits under, and that is not a new dependency for this command:
+`main._compose` resolves settings for every invocation there is and always did, while `registered`
+- the callable that builds a container - is the half that stayed lazy.
 
 **`_perhaps` here is this module's own.** `run.py`, `resume.py` and `clear.py` share one argv
 reader out of `cli/commands/__init__.py`; this one is not a fourth caller of it. It returns
@@ -27,8 +30,8 @@ nothing at all", which is the whole of what an optional positional means here - 
 function rather than a copy, which is what the other three were and no longer are.
 
 The bundle is not needed at all, which is itself the point: these tests build no `container.fakes()`
-and no trees root, because a command that listed what is installed and needed a repository to do it
-would be a defect.
+and no trees root, because a command that listed what the workspace declares and needed a repository
+to do it would be a defect.
 """
 
 import ast
@@ -41,6 +44,7 @@ import pytest
 from agl.cli import main
 from agl.cli.commands import workflows as workflows_command
 from agl.config import registry, sources
+from agl.ports.home_layout import AglHome, workflows_dir
 from agl.ports.ids import ProjectName
 from agl.sdk.params import RefusingParser, arg
 from agl.sdk.workflow import Run, workflow
@@ -73,8 +77,8 @@ def _point(name: str, attribute: str) -> EntryPoint:
     """A registration line, pointed at this module: a name, a `module:attr`, and a group."""
     return EntryPoint(name=name, value=f"{__name__}:{attribute}", group=registry.GROUP)
 
-# A package that is not installed, registered under a name that is. `EntryPoint.load` raises
-# `ImportError`, which `registry.load` turns into `InputError` - and `registry.names` never loads.
+# A module nothing can import, declared under a name the listing still shows. `EntryPoint.load`
+# raises `ImportError`, which `registry.load` turns into `InputError` - and `names` never loads.
 BROKEN: Final = EntryPoint(
     name="broken", value="agl.workflows.no_such_package:broken", group=registry.GROUP
 )
@@ -94,6 +98,35 @@ def _main(*argv: str, points: tuple[EntryPoint, ...] = POINTS) -> int:
             settings=SETTINGS,
             cwd=ELSEWHERE,
             points=points,
+        ),
+    )
+
+def _workspace(tmp_path: Path) -> AglHome:
+    """An AGL_HOME under `tmp_path`, so nothing here can reach the operator's own."""
+    return AglHome(tmp_path / "home")
+
+def _directory(home: AglHome, named: str, pyproject: str) -> None:
+    """One directory under `workspace/workflows/`, holding the project file it is handed."""
+    path = workflows_dir(home) / named
+    path.mkdir(parents=True)
+    (path / "pyproject.toml").write_text(pyproject, encoding="utf-8")
+
+def _declaring(named: str, attribute: str) -> str:
+    """A project file declaring one workflow, pointed at this module so it resolves already."""
+    return (
+        f'[project]\nname = "{named}"\nversion = "0.1.0"\n\n'
+        f'[project.entry-points."{registry.GROUP}"]\n{named} = "{__name__}:{attribute}"\n'
+    )
+
+def _reading(home: AglHome, *argv: str) -> int:
+    """One `agl` invocation with no entry points supplied, so the workspace is what answers."""
+    return main.main(
+        argv,
+        compose=lambda: main.Invocation(
+            registered=_never,  # type: ignore[arg-type]
+            settings=sources.resolve_settings(sources.Overrides(), {"AGL_HOME": str(home.path)}),
+            cwd=ELSEWHERE,
+            points=None,
         ),
     )
 
@@ -125,15 +158,15 @@ def test_a_workflow_that_cannot_be_imported_does_not_take_the_listing_down(
 ) -> None:
     """`registry.names` never calls `load`, and this is the guarantee that buys.
 
-    An operator whose installation has one broken package still gets the answer to "what do I have",
-    and every other workflow still runs. This is the test the deliberate mutation goes red on: an
-    `execute` that loaded each workflow to list them would refuse the whole command here.
+    An operator with one half-written workflow in their workspace still gets the answer to "what do
+    I have", and every other workflow still runs. This is the test the deliberate mutation goes red
+    on: an `execute` that loaded each workflow to list them would refuse the whole command here.
     """
     assert _main("workflows") == 0
 
     assert "broken" in capsys.readouterr().out
 
-def test_an_installation_with_nothing_registered_says_so_on_stderr(
+def test_a_workspace_that_declares_nothing_says_so_on_stderr_and_still_exits_zero(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """An empty listing needs a sentence and not blank output - and not on the stream being piped.
@@ -141,13 +174,55 @@ def test_an_installation_with_nothing_registered_says_so_on_stderr(
     Logs go to stderr and data to stdout, so `agl workflows | wc -l` has to answer 0 here; and
     silence from a command that was asked a question reads as a command that failed quietly, so the
     explanation goes to stderr rather than nowhere. Exit 0, because nothing failed: no workflow
-    installed is the true answer.
+    declared is the true answer.
+
+    The sentence is where an operator with an empty workspace learns the shape of a declaration, so
+    the group and the line are both asserted. `registry.py`'s own "no workflow is declared at all"
+    defers to this one for that, which is why a message that merely named the group would not do.
     """
     assert _main("workflows", points=()) == 0
 
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "agl.workflows" in captured.err
+    assert '<name> = "<module>:<attribute>"' in captured.err
+
+# --- the workspace, read whenever no entry points are handed in ----------------------------------
+
+def test_a_directory_that_declares_no_workflow_is_named_beside_the_names_that_do(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The listing's guarantee, reaching the directories an operator wrote themselves.
+
+    One bad directory cannot answer for the others - `config/registry.py` says so and
+    `tests/config/test_registry.py` pins the walk; this is the half a person sees. The bad one goes
+    to stderr for `_NOTHING_DECLARED`'s reason: stdout is the list a script reads names off, and a
+    directory that declares nothing is not a name `agl run` takes.
+    """
+    home = _workspace(tmp_path)
+    _directory(home, "triage", _declaring("triage", "tickets"))
+    _directory(home, "half-written", "[project\n")
+
+    assert _reading(home, "workflows") == 0
+
+    captured = capsys.readouterr()
+    assert captured.out == "triage\n"
+    assert "half-written" in captured.err
+
+def test_naming_a_directory_that_declares_no_workflow_refuses_with_its_own_reason(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Exit 2 and the file that will not parse, which is the same class and the same code a
+    declaration pointing at a module nothing can import gets: a declaration that does not hold up,
+    read by AGL and written by whoever wrote the workflow. Exit 3's "there is no workflow by that
+    name" would be the wrong sentence entirely - the operator typed the name of a directory they
+    are writing."""
+    home = _workspace(tmp_path)
+    _directory(home, "half-written", "[project\n")
+
+    assert _reading(home, "workflows", "half-written") == 2
+
+    assert "pyproject.toml" in capsys.readouterr().err
 
 # --- the name, which imports exactly one ---------------------------------------------------------
 
@@ -179,10 +254,10 @@ def test_naming_the_broken_workflow_fails_loudly_for_that_name_and_no_other(
 ) -> None:
     """The other half of the listing's guarantee: a load behind an explicit request fails loudly.
 
-    Exit 2 and not 70 - `config/registry.py` argues it: "the declaration was written by a package
-    the operator installed, and AGL only read it", so exit 70's "file a bug against AGL" would send
-    the reader to the wrong codebase. The message names the entry point's value, which is what a
-    `pip uninstall` needs, and the listing above is asserted still to work afterwards.
+    Exit 2 and not 70 - `config/registry.py` argues it in as many words: "AGL only read what was
+    declared", so exit 70's "file a bug against AGL" would send the reader to the wrong codebase.
+    The message names the declaration's value, which is the string to search the workspace for, and
+    the listing above is asserted still to work afterwards.
     """
     assert _main("workflows", "broken") == 2
 

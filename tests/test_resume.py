@@ -25,7 +25,7 @@ under one entry-point name. Nothing is monkeypatched to produce either.
 **The version stamp is asserted with the record afterwards.** Resume gets one line - stamp the
 version, refuse on mismatch, because runs live hours - and a refusal that had already touched the
 run would be worse than none: the ledger it refused to finish under a stranger's version is the
-thing an operator is about to install the right version for.
+thing an operator is about to put the workflow directory back for.
 """
 
 from collections.abc import Mapping, Sequence
@@ -190,11 +190,11 @@ async def shifting_before(run: Run[NoParams]) -> None:
 
 @workflow(version="2.0")
 async def shifting_after(run: Run[NoParams]) -> None:
-    """The same entry-point name at another version - the installation a resume meets hours later.
+    """The same declared name at another version - the workspace a resume meets hours later.
 
     Two attributes of this module rather than a mutated `Workflow`: `Workflow` is frozen, and what
-    an operator actually has is a package that was upgraded, which is a different object behind one
-    entry-point key.
+    an operator actually has is a directory that was edited, which is a different object behind one
+    declared key.
     """
     handed.append(run)
 
@@ -219,9 +219,9 @@ POINTS: Final = (
     _point("halting", "halting"),
 )
 
-# The two mismatches, as two installations of one workflow. Kept out of `POINTS` so that a test
-# resuming under `AFTER` is resuming under an installation that holds one `shifting` and one
-# `drifting`, which is what an upgrade leaves behind.
+# The two mismatches, as two states of one workspace. Kept out of `POINTS` so that a test resuming
+# under `AFTER` is resuming against a workspace holding one `shifting` and one `drifting`, which is
+# what editing the two directories leaves behind.
 BEFORE: Final = (
     *POINTS, _point("shifting", "shifting_before"), _point("drifting", "drifting_before")
 )
@@ -597,10 +597,11 @@ async def test_a_workflow_version_the_record_was_not_stamped_with_is_refused(
     `ports/errors.py`'s "the world already holds something this operation would have to take or
     overwrite". `NotFoundError` would be wrong twice over, both things having been found.
 
-    The message is asserted for the two facts an operator acts on - which version the run is
-    stamped with, and that `agl clear` is the other way out - and the record is asserted untouched
-    afterwards, since the ledger this refused to finish is what the right version is about to
-    finish.
+    The message is asserted for the three facts an operator acts on - which version the run is
+    stamped with, that the way to finish it is to put the workflow directory back rather than to
+    install anything, and that `agl clear` is the other way out - and the record is asserted
+    untouched afterwards, since the ledger this refused to finish is what the restored directory is
+    about to finish.
     """
     dispatched: list[str] = []
     harness = _fakes(tmp_path, dispatched)
@@ -614,6 +615,7 @@ async def test_a_workflow_version_the_record_was_not_stamped_with_is_refused(
     assert exit_code_for(caught.value) == 4
     message = str(caught.value)
     assert "'1.0'" in message and "'2.0'" in message
+    assert "put the directory back" in message
     assert "agl clear auth" in message
     assert await _record(harness) == before, "a refused resume changed the run it refused"
     assert len(handed) == 1, "the workflow ran under a version the record was not stamped with"

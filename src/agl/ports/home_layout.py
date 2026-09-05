@@ -15,6 +15,10 @@ __all__ = [
     "settings_file",
     "step_dir",
     "step_entry",
+    "workflows_dir",
+    "workspace_dir",
+    "workspace_pyproject",
+    "workspace_site_packages",
 ]
 
 _SETTINGS_FILE: Final = "config.toml"
@@ -26,10 +30,20 @@ _RUN_RECORD: Final = "run.json"
 _PROJECT_SUFFIX: Final = ".toml"
 _ENTRY_SUFFIX: Final = ".json"
 
+_WORKSPACE: Final = "workspace"
+_WORKFLOWS: Final = "workflows"
+_PYPROJECT_FILE: Final = "pyproject.toml"
+_VENV: Final = ".venv"
+_VENV_LIBRARY: Final = "lib"
+_SITE_PACKAGES: Final = "site-packages"
+
 _MAX_SEGMENT_BYTES: Final = 255
 
 _DIGEST_CHARACTERS: Final = frozenset("0123456789abcdef")
 _DIGEST_LENGTH: Final = 64
+
+_INTERPRETER_FIRST: Final = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+_INTERPRETER_CHARACTERS: Final = _INTERPRETER_FIRST | frozenset("0123456789._-")
 
 @dataclass(frozen=True, slots=True)
 class AglHome:
@@ -140,6 +154,44 @@ def step_entry(home: AglHome, scope: RunScope, step: StepName, digest: str) -> P
     """
     return step_dir(home, scope, step) / f"{_checked_digest(digest)}{_ENTRY_SUFFIX}"
 
+def workspace_dir(home: AglHome) -> Path:
+    """The operator's own workflows and the project file that declares them, in one subtree.
+
+    :param home: where AGL keeps its own state, which is never where code is checked out
+    :return: `<home>/workspace/`, a sibling of `projects/` that AGL reads and never creates
+    """
+    return _root(home) / _WORKSPACE
+
+def workspace_pyproject(home: AglHome) -> Path:
+    """The workspace's own project file, which is where its entry points are written down.
+
+    :param home: where AGL keeps its own state, which is never where code is checked out
+    :return: `<home>/workspace/pyproject.toml`
+    """
+    return workspace_dir(home) / _PYPROJECT_FILE
+
+def workflows_dir(home: AglHome) -> Path:
+    """The workflows an operator has written, one directory each and no table listing them.
+
+    :param home: where AGL keeps its own state, which is never where code is checked out
+    :return: `<home>/workspace/workflows/`, the other container whose contents are an answer
+    """
+    return workspace_dir(home) / _WORKFLOWS
+
+# A venv keeps its pure-Python packages under `lib/python<major>.<minor>/` on POSIX and directly
+# under `Lib/` on Windows, and only the POSIX shape is composed: `adapters/git/_trees.py` imports
+# `fcntl`, so no run of AGL reaches a Windows machine at all. The segment arrives as an argument
+# because reading it means `sysconfig` or `sys`, which `tests/ports/test_home_layout.py` refuses.
+def workspace_site_packages(home: AglHome, interpreter: str) -> Path:
+    """What a workflow may import from the workspace venv, for one interpreter and no other.
+
+    :param home: where AGL keeps its own state, which is never where code is checked out
+    :param interpreter: the `lib/` subdirectory that interpreter installs into, `python3.14`
+    :return: `<home>/workspace/.venv/lib/<interpreter>/site-packages`
+    """
+    library = workspace_dir(home) / _VENV / _VENV_LIBRARY
+    return library / _checked_interpreter(interpreter) / _SITE_PACKAGES
+
 def _root(home: AglHome) -> Path:
     if not isinstance(home, AglHome):
         raise InternalError(
@@ -167,3 +219,15 @@ def _checked_digest(digest: str) -> str:
             f"framework-generated path segment inside the root it is joined onto"
         )
     return digest
+
+def _checked_interpreter(interpreter: str) -> str:
+    if interpreter[:1] not in _INTERPRETER_FIRST or not _INTERPRETER_CHARACTERS.issuperset(
+        interpreter
+    ):
+        raise InternalError(
+            f"interpreter {interpreter!r} is not a directory name a venv holds: expected a "
+            f"letter and then letters, digits, dots, hyphens or underscores, which is what "
+            f"`python3.14` is, and what keeps a framework-generated path segment inside the "
+            f"root it is joined onto"
+        )
+    return interpreter

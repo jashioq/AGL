@@ -564,11 +564,11 @@ async def test_the_workflows_own_flags_are_parsed_by_the_parser_agl_run_uses(
 async def test_a_workflow_declared_inside_a_function_is_refused_with_the_reason(
     tmp_path: Path,
 ) -> None:
-    """The harness resolves a workflow the way an installed one is resolved, so it can say no.
+    """The harness resolves a workflow the way a workspace declaration is, so it can say no.
 
-    A workflow is registered as `<module>:<name>`, and a `@workflow` declared inside something else
-    names no module attribute - so it could never be installed. Refused here, in front of the
-    author, rather than on the day they publish the package.
+    A workflow is declared as `<module>:<name>`, and a `@workflow` declared inside something else
+    names no module attribute - so no pyproject.toml could ever point at it. Refused here, in front
+    of the author, rather than on the day they move it into a workspace directory.
     """
 
     @workflow(version="1")

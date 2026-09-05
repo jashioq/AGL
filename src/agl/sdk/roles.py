@@ -181,7 +181,8 @@ def _beside_the_caller(caller: Mapping[str, object], asked: Path) -> Path:
             f"`prompt_file({str(asked)!r})` was called from something with no `__file__` - a REPL, "
             f"an `exec`, or a frozen import - so there is no module directory for a relative path "
             f"to be relative to. Pass an absolute path. AGL will not fall back to the current "
-            f"directory: a workflow is read from wherever it was installed, and the directory this "
-            f"process happens to have started in is the one place its prompts are certainly not"
+            f"directory: a workflow's prompts sit beside its code, in the workspace directory it "
+            f"was read from, and the directory `agl` was started in is the repository being "
+            f"worked on - the one place those prompts are certainly not"
         )
     return Path(declared).resolve().parent / asked

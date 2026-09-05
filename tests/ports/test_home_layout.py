@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Final
 import pytest
 from _corpus import ACCEPTED, CORPUS, PURE_IMPORTS, imported_modules, impurities
+from agl.adapters.git import _trees
 from agl.ports import home_layout
 from agl.ports.errors import InputError, InternalError
 from agl.ports.home_layout import (
@@ -27,6 +28,10 @@ from agl.ports.home_layout import (
     settings_file,
     step_dir,
     step_entry,
+    workflows_dir,
+    workspace_dir,
+    workspace_pyproject,
+    workspace_site_packages,
 )
 from agl.ports.ids import Namespace, ProjectName, RunLabel, StepName
 from agl.ports.tree_layout import TreesRoot
@@ -52,6 +57,12 @@ def test_every_named_path_under_agl_home_is_spelled_out_in_full() -> None:
     assert scope_dir(_HOME, t01) == Path(f"{_RUN}/worktrees/T-01")
     assert step_entry(_HOME, t01, StepName("review_quality"), _DIGEST) == Path(
         f"{_RUN}/worktrees/T-01/steps/review_quality/{_DIGEST}.json"
+    )
+    assert workspace_dir(_HOME) == Path("/agl-home/workspace")
+    assert workspace_pyproject(_HOME) == Path("/agl-home/workspace/pyproject.toml")
+    assert workflows_dir(_HOME) == Path("/agl-home/workspace/workflows")
+    assert workspace_site_packages(_HOME, "python3.14") == Path(
+        "/agl-home/workspace/.venv/lib/python3.14/site-packages"
     )
 
 def test_the_two_paths_under_home_that_no_project_name_composes() -> None:
@@ -228,6 +239,104 @@ def test_the_headroom_is_measured_in_bytes_though_no_name_can_show_that_any_more
         ProjectName("\xe9" * 125)
     assert all(len(value.encode("utf-8")) == len(value) for value in ACCEPTED)
 
+# --- The workspace, and the third segment no validated type vouches for -------------------------
+
+def test_the_workspace_is_a_subtree_of_its_own_that_no_project_name_reaches() -> None:
+    """A third name at the top of AGL_HOME, with everything the workspace holds beneath it.
+
+    `projects/` is what AGL recorded and `workspace/` is what the operator wrote, so no path
+    under one is ever addressed from the other. Containment in both directions rather than
+    inequality: a workflow that landed under `projects/<name>/` would be a different path from
+    every record there and would still be in the wrong subtree.
+    """
+    inside = (
+        workspace_pyproject(_HOME),
+        workflows_dir(_HOME),
+        workspace_site_packages(_HOME, "python3.14"),
+    )
+    assert workspace_dir(_HOME).parent == _HOME.path, "at the top of AGL_HOME, not below it"
+    for path in inside:
+        assert path.is_relative_to(workspace_dir(_HOME))
+        assert not path.is_relative_to(projects_dir(_HOME))
+    assert not workspace_dir(_HOME).is_relative_to(projects_dir(_HOME))
+    assert not projects_dir(_HOME).is_relative_to(workspace_dir(_HOME))
+
+@pytest.mark.parametrize(
+    "interpreter",
+    [
+        "", ".", "..", "../..", "/", "/usr/lib/python3.14", "lib/python3.14", ".venv",
+        "python3.14/../../..", "3.14", "-x", "~", "py\x00", "python 3.14", "\xe9",
+    ],
+)  # fmt: skip
+def test_an_interpreter_segment_that_is_not_a_venv_directory_name_is_refused(
+    interpreter: str,
+) -> None:
+    """`InternalError`, not `InputError`: this segment comes off `sysconfig`, not off a keyboard.
+
+    The two entries that are not escapes are the two mistakes a caller can actually make, and
+    both are refused where they are written rather than at the open that would have missed:
+    `"3.14"` is the version where the directory name was wanted, and an absolute path is
+    `sys.executable` handed over whole.
+    """
+    with pytest.raises(InternalError, match="not a directory name"):
+        workspace_site_packages(_HOME, interpreter)
+
+def test_no_string_in_the_corpus_takes_a_site_packages_path_out_of_the_venv(tmp_path: Path) -> None:
+    """Every value in the corpus as the interpreter segment: refused, or landing where it says.
+
+    Not `ACCEPTED`, and not a position in the property above. That property is about the language
+    `ids.py` accepts, and nothing in this section takes a name anybody typed - there is no
+    position for a corpus value to sit in, so the escape property has nothing to say about these
+    four functions at all. What is spent here is what the corpus is made of rather than what it
+    means: two and a half thousand hostile strings, against a segment no validated type vouches
+    for. Both counts are asserted, because a validator that refused everything would pass the
+    containment claim without composing one path.
+    """
+    root = tmp_path.resolve()
+    home = AglHome(root)
+    composed: list[str] = []
+    for value in CORPUS:
+        try:
+            path = workspace_site_packages(home, value).resolve()
+        except InternalError:
+            continue
+        assert path.is_relative_to(root), f"{value!r} escapes the workspace: {path}"
+        assert path.relative_to(root).parts == (
+            "workspace", ".venv", "lib", value, "site-packages",
+        ), f"{value!r} does not land where the layout says: {path}"  # fmt: skip
+        composed.append(value)
+    assert 250 < len(composed) < len(CORPUS) - 250, (
+        f"{len(composed)} of {len(CORPUS)} composed, and a lopsided split proves nothing"
+    )
+
+def test_a_venv_built_by_another_python_answers_with_a_directory_this_one_cannot_use() -> None:
+    """One directory per interpreter, which is what makes a mismatch a miss rather than a lie.
+
+    A workspace venv built by an older interpreter holds `lib/python3.13/site-packages` and
+    nothing at all for the one running AGL, so the path composed here is simply not on disk and
+    whatever reads it finds nothing. That is the truthful answer and not an inconvenience: what
+    was installed under one minor version is not importable by another, and a layout that folded
+    the two would hand this interpreter another one's packages. The free-threaded and PyPy names
+    are here because they are why this takes a directory name and not a pair of numbers.
+    """
+    for other in ("python3.13", "python3.14t", "pypy3.11"):
+        composed = workspace_site_packages(_HOME, other)
+        assert composed != workspace_site_packages(_HOME, "python3.14")
+        assert composed.parent.name == other
+        assert composed.is_relative_to(workspace_dir(_HOME))
+
+def test_only_the_posix_venv_layout_is_composed_because_no_run_reaches_windows() -> None:
+    """A Windows venv puts the same files under `Lib/`, and this layout composes neither name.
+
+    The comment on `workspace_site_packages` rests on AGL never running on Windows, and this is
+    the check under that sentence: `adapters/git/_trees.py` imports `fcntl`, which no Windows
+    build of Python ships, so `agl run` cannot reach a workspace there to want the other shape.
+    A `ports/` test reads an adapter for the one reason C10 gives - the sentence is load-bearing,
+    so it belongs where it fails when it stops being true.
+    """
+    assert "fcntl" in imported_modules(_trees)
+    assert "Lib" not in workspace_site_packages(_HOME, "python3.14").parts
+
 # --- The root, and the other root --------------------------------------------------------------
 
 def test_agl_home_must_be_absolute() -> None:
@@ -259,11 +368,19 @@ def test_a_trees_root_cannot_be_used_where_agl_home_belongs() -> None:
         project_config(trees, ProjectName("myapp"))  # type: ignore[arg-type]
     with pytest.raises(InternalError):
         step_entry(trees, _SCOPE, StepName("spec"), _DIGEST)  # type: ignore[arg-type]
-    # The two that take the root and nothing else route through `_root` like the rest.
+    with pytest.raises(InternalError, match="never conflated"):
+        workspace_site_packages(trees, "python3.14")  # type: ignore[arg-type]
+    # The five that take the root and nothing else route through `_root` like the rest.
     with pytest.raises(InternalError, match="never conflated"):
         settings_file(trees)  # type: ignore[arg-type]
     with pytest.raises(InternalError, match="TreesRoot"):
         projects_dir(trees)  # type: ignore[arg-type]
+    with pytest.raises(InternalError, match="never conflated"):
+        workspace_dir(trees)  # type: ignore[arg-type]
+    with pytest.raises(InternalError, match="TreesRoot"):
+        workspace_pyproject(trees)  # type: ignore[arg-type]
+    with pytest.raises(InternalError, match="never conflated"):
+        workflows_dir(trees)  # type: ignore[arg-type]
 
 def test_the_layout_is_pure_computation_and_imports_nothing_that_could_make_it_otherwise() -> None:
     """No `mkdir`, no `exists`, no environment, no `cwd` - and no `resolve`, which reads links.
