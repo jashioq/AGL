@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 from agl.ports.errors import InputError, InternalError
-from agl.ports.ids import Namespace, ProjectName, RunLabel, StepName
+from agl.ports.ids import Namespace, ProjectName, RunLabel, StepName, WorkflowName
 
 __all__ = [
     "AglHome",
@@ -15,6 +15,9 @@ __all__ = [
     "settings_file",
     "step_dir",
     "step_entry",
+    "workflow_dir",
+    "workflow_module",
+    "workflow_pyproject",
     "workflows_dir",
     "workspace_dir",
     "workspace_pyproject",
@@ -33,6 +36,9 @@ _ENTRY_SUFFIX: Final = ".json"
 _WORKSPACE: Final = "workspace"
 _WORKFLOWS: Final = "workflows"
 _PYPROJECT_FILE: Final = "pyproject.toml"
+# A directory holding one of these is a package rather than a namespace package, and only a package
+# answers to `<name>:<name>` - the shape a workflow's own declaration is written in.
+_PACKAGE_MODULE: Final = "__init__.py"
 _VENV: Final = ".venv"
 _VENV_LIBRARY: Final = "lib"
 _SITE_PACKAGES: Final = "site-packages"
@@ -158,7 +164,7 @@ def workspace_dir(home: AglHome) -> Path:
     """The operator's own workflows and the project file that declares them, in one subtree.
 
     :param home: where AGL keeps its own state, which is never where code is checked out
-    :return: `<home>/workspace/`, a sibling of `projects/` that AGL reads and never creates
+    :return: `<home>/workspace/`, a sibling of `projects/` holding what an operator wrote
     """
     return _root(home) / _WORKSPACE
 
@@ -177,6 +183,33 @@ def workflows_dir(home: AglHome) -> Path:
     :return: `<home>/workspace/workflows/`, the other container whose contents are an answer
     """
     return workspace_dir(home) / _WORKFLOWS
+
+def workflow_dir(home: AglHome, workflow: WorkflowName) -> Path:
+    """One workflow the operator wrote: its code, its prompts and the file that declares it.
+
+    :param home: where AGL keeps its own state, which is never where code is checked out
+    :param workflow: the name becomes the segment as it stands, validated by `ids.py`
+    :return: `<home>/workspace/workflows/<workflow>/`, imported as a package named after itself
+    """
+    return workflows_dir(home) / str(workflow)
+
+def workflow_pyproject(home: AglHome, workflow: WorkflowName) -> Path:
+    """The file a workflow declares itself in, which is the whole of registering one.
+
+    :param home: where AGL keeps its own state, which is never where code is checked out
+    :param workflow: the directory's name, which the declaration inside is free to disagree with
+    :return: `<workflow>/pyproject.toml`, the one file `config/registry.py` reads to find a name
+    """
+    return workflow_dir(home, workflow) / _PYPROJECT_FILE
+
+def workflow_module(home: AglHome, workflow: WorkflowName) -> Path:
+    """What `<name>:<name>` imports, and what makes the directory a package rather than a namespace.
+
+    :param home: where AGL keeps its own state, which is never where code is checked out
+    :param workflow: the directory's name, which is also the module name the import statement uses
+    :return: `<workflow>/__init__.py`
+    """
+    return workflow_dir(home, workflow) / _PACKAGE_MODULE
 
 # A venv keeps its pure-Python packages under `lib/python<major>.<minor>/` on POSIX and directly
 # under `Lib/` on Windows, and only the POSIX shape is composed: `adapters/git/_trees.py` imports

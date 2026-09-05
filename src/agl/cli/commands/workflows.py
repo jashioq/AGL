@@ -18,10 +18,13 @@ _NOTHING_TO_REPORT: Final = 0
 
 _NOTHING_DECLARED: Final = (
     'no workflow is declared: nothing in the workflows/ directory of your AGL workspace declares '
-    'an agl.workflows entry point. A workflow is a directory you write there, holding its code, '
-    'its prompts, and a pyproject.toml with one `<name> = "<module>:<attribute>"` line under '
-    '[project.entry-points."agl.workflows"]. That line is the whole of registering it: there is '
-    'nothing to install, and no central list in AGL to add it to.'
+    'an agl.workflows entry point. `agl new <name>` writes one, and makes the workspace too if '
+    'that is not there yet - what it leaves behind runs as it stands, so the first edit is yours '
+    'rather than a stub to fill in. Written by hand it is the same thing: a directory there '
+    'holding its code, its prompts, and a pyproject.toml with one '
+    '`<name> = "<module>:<attribute>"` line under [project.entry-points."agl.workflows"]. That '
+    'line is the whole of registering it either way: there is nothing to install, and no central '
+    'list in AGL to add it to.'
 )
 
 _BROKEN_PREAMBLE: Final = (

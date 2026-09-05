@@ -143,13 +143,18 @@ def test_an_unknown_name_in_an_empty_registry_says_no_workflow_is_declared_at_al
     """A different situation from "not that one", and a refusal ending in an empty list is a bug.
 
     Nothing declared is not the same answer as nothing installed, and the refusal has to hand the
-    operator somewhere to go: the group it read, and the command that spells out how to declare one.
+    operator somewhere to go: the group it read, the command that writes a workflow, and the
+    command that spells out how to declare one by hand. `agl new` is asserted as text here rather
+    than against `cli/commands/new.py`'s own `NAME`, because a test of the registry has no business
+    importing the CLI; `tests/cli/test_workflows_command.py` is where that name is pinned to the
+    module declaring it.
     """
     with pytest.raises(NotFoundError) as raised:
         load((), _WORKFLOW, _Workflow)
     message = str(raised.value)
     assert "no workflow is declared at all" in message
     assert GROUP in message
+    assert "agl new" in message
     assert "agl workflows" in message
 
 # --- one name, two declarations: ConflictError, exit 4 -----------------------------------------
@@ -277,7 +282,7 @@ def test_a_workflows_name_is_the_key_it_declares_and_not_the_directory_name(
 def test_a_missing_workflows_directory_is_a_quiet_empty_answer_and_not_an_error(
     tmp_path: Path,
 ) -> None:
-    """No workspace is the ordinary state of a fresh install, and AGL creates nothing to find."""
+    """No workspace is the ordinary state of a fresh install, and the walk makes none to find."""
     assert discovered(_home(tmp_path)) == Discovery((), ())
 
 def test_a_directory_holding_no_project_file_is_stray_and_is_left_out_entirely(

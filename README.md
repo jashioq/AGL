@@ -5,10 +5,12 @@ a worktree, hands roles to agents and lands what comes back — with fingerprint
 worktree isolation, preflight checks and exit codes supplied by the framework rather than written
 into the workflow.
 
-**This release ships no workflows.** `agl run` therefore has nothing to run and says so. The
-`agl.workflows` entry-point group is how a workflow is registered, and a distribution installed
-beside AGL can register into it today; a user workspace for workflows you write yourself is the
-next thing being built. Install this version to read the surface, not to run anything.
+**This release ships no workflows.** The ones AGL runs are the ones you write. `agl new <name>`
+writes a workflow into your own workspace under AGL_HOME — a directory holding a module and a
+pyproject.toml, which runs as it stands — and `agl run <name>` runs it; `agl workflows` lists what
+that workspace declares. AGL reads workflows from there and from nowhere else: the `agl.workflows`
+entry-point group is the table key each workflow directory's own pyproject.toml writes, rather than
+a group a distribution installed beside AGL registers into.
 
 ## Install
 

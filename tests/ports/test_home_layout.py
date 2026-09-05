@@ -28,15 +28,19 @@ from agl.ports.home_layout import (
     settings_file,
     step_dir,
     step_entry,
+    workflow_dir,
+    workflow_module,
+    workflow_pyproject,
     workflows_dir,
     workspace_dir,
     workspace_pyproject,
     workspace_site_packages,
 )
-from agl.ports.ids import Namespace, ProjectName, RunLabel, StepName
+from agl.ports.ids import Namespace, ProjectName, RunLabel, StepName, WorkflowName
 from agl.ports.tree_layout import TreesRoot
 
 _HOME: Final = AglHome(Path("/agl-home"))
+_TRIAGE: Final = WorkflowName("triage")
 _SCOPE: Final = RunScope(ProjectName("myapp"), RunLabel("auth"))
 _DIGEST: Final = "9f2c4e" + "b" * 54 + "a71b"
 _RUN: Final = "/agl-home/projects/myapp/runs/auth"
@@ -61,6 +65,13 @@ def test_every_named_path_under_agl_home_is_spelled_out_in_full() -> None:
     assert workspace_dir(_HOME) == Path("/agl-home/workspace")
     assert workspace_pyproject(_HOME) == Path("/agl-home/workspace/pyproject.toml")
     assert workflows_dir(_HOME) == Path("/agl-home/workspace/workflows")
+    assert workflow_dir(_HOME, _TRIAGE) == Path("/agl-home/workspace/workflows/triage")
+    assert workflow_pyproject(_HOME, _TRIAGE) == Path(
+        "/agl-home/workspace/workflows/triage/pyproject.toml"
+    )
+    assert workflow_module(_HOME, _TRIAGE) == Path(
+        "/agl-home/workspace/workflows/triage/__init__.py"
+    )
     assert workspace_site_packages(_HOME, "python3.14") == Path(
         "/agl-home/workspace/.venv/lib/python3.14/site-packages"
     )
@@ -252,6 +263,9 @@ def test_the_workspace_is_a_subtree_of_its_own_that_no_project_name_reaches() ->
     inside = (
         workspace_pyproject(_HOME),
         workflows_dir(_HOME),
+        workflow_dir(_HOME, _TRIAGE),
+        workflow_pyproject(_HOME, _TRIAGE),
+        workflow_module(_HOME, _TRIAGE),
         workspace_site_packages(_HOME, "python3.14"),
     )
     assert workspace_dir(_HOME).parent == _HOME.path, "at the top of AGL_HOME, not below it"

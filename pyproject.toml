@@ -49,10 +49,13 @@ Repository = "https://github.com/jashioq/AGL"
 [project.scripts]
 agl = "agl.cli.main:main"
 
-# No [project.entry-points."agl.workflows"] table: AGL ships no workflow, and the group is left for
-# other distributions to register into. `agl.config.registry` still resolves that group, so an
-# install of AGL alone lists nothing and refuses every `agl run` with "no workflow is installed at
-# all" - which is the state this version means, not a table somebody forgot to fill in.
+# No [project.entry-points."agl.workflows"] table, and a line written here would be read by nothing.
+# `agl.config.registry`'s `discovered` synthesises its entry points by walking the operator's own
+# workspace - one per declaration found under `workspace/workflows/` - and calls
+# `importlib.metadata.entry_points()` nowhere, so neither this distribution nor one installed beside
+# it registers a workflow through package metadata. What survives of the group is its name, which is
+# the table key a workflow directory in that workspace writes. `tests/test_measurable_targets.py` is
+# what keeps this table empty.
 
 # What it takes to *work on* AGL, which is not what it takes to install it. A PEP 735 dependency
 # group is not part of a built distribution: nothing below reaches a `pip install agents-gl`, and

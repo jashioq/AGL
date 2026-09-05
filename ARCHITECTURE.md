@@ -1,6 +1,6 @@
 # AGL architecture
 
-Eight layers, one dependency rule, one composition root. For the gates, see `CLAUDE.md`.
+Seven layers, one dependency rule, one composition root. For the gates, see `CLAUDE.md`.
 
 ## The layers
 
@@ -34,56 +34,68 @@ the same underscore under `adapters/`, which means private to that package and i
 `tests/test_naming_convention.py`. Something belongs here when two workflows would otherwise
 write it themselves.
 
-**`workflows/`** — One package per workflow, found through the `agl.workflows` entry points in
-`pyproject.toml`; no central table to edit. `fix` is one worktree run sequentially, Claude
-implementing and OpenAI reviewing; `split` is N chunks run concurrently, each landed into the
-run's base. A workflow imports `sdk` — never an adapter, never `config`. `ports` sits below it and
-is permitted, and neither shipped workflow names it: the authoring surface re-exports what a
-workflow speaks.
-
 **`config/`** — Settings and the composition root. `sources.py` resolves flags > env > file >
 defaults once into an immutable object, `toml_file.py` is the only module that knows TOML,
-`registry.py` resolves entry points, **`workspace_path.py` is the only module in `src/` that writes
-to `sys.path`** — it appends the operator's workspace, so AGL's own environment always wins and the
-workspace can add names without displacing one — and **`container.py` is the only module that
-constructs an adapter**.
+`registry.py` walks the operator's workspace for the declarations that name a workflow,
+**`workspace_path.py` is the only module in `src/` that writes to `sys.path`** — it appends the
+operator's workspace, so AGL's own environment always wins and the workspace can add names without
+displacing one — and **`container.py` is the only module that constructs an adapter**.
+`toml_file.py` both writes the workspace pin and is the only thing that reads it back, and it
+renders `agl new`'s scaffold from string constants rather than from a template file: a real
+entry-point table checked in here is what `tests/test_measurable_targets.py`'s declaration scan
+exists to fire on.
 
 **`cli/`** — argv in, exit code out. `main.py` dispatches to one module per subcommand (run,
-resume, clear, init, workflows) and is the one place `Path.cwd()` is read. Composition is
-per-command: the container sits behind a callable, so `init` and `workflows` never build one.
+resume, clear, init, new, workflows) and is the one place `Path.cwd()` is read. Composition is
+per-command: the container sits behind a callable, so `init`, `new` and `workflows` never build one.
 **Commands stay dumb.** A command declares its own arguments, reads them off the parsed namespace,
 calls `api` and turns what comes back into output and an exit status; everything that decides
 anything is one call away. So `clear` names one `api` function rather than a worktree walk and a
 `shutil.rmtree` past the `Store` port, `init` one rather than build-tool detection and TOML
-rendering, and `workflows` two only because the listing and the help are two operations — one of
-them imports a package and the other must never. Each suite under `tests/cli/` scans its own
-command's source for the `api.` names it reaches, so a use case moving back into the CLI fails a
-test instead of passing review.
+rendering, `new` one rather than a directory tree and two rendered documents, and `workflows` two
+only because the listing and the help are two operations — one of them imports a package and the
+other must never. Each suite under `tests/cli/` scans its own command's source for the `api.` names
+it reaches, so a use case moving back into the CLI fails a test instead of passing review.
 
 **`api.py`** — AGL's operations, callable without a terminal: `run`, `resume`, `clear`, `init`,
-`list_workflows`, `workflow_help`.
+`new_workflow`, `list_workflows`, `workflow_help`.
 
 **`testing.py`** — The workflow author's harness: `harness(tmp_path, agent=…)` builds an all-fakes
 bundle, `run(...)` and `resume(...)` drive `api` over it, `recorded` is every journal entry,
 `answering([...])` is a terminal that can answer a screen. A sibling of `cli/`, not a layer above
 it — a second caller of `api`.
 
+**A workflow is not a layer, and `src/` holds none.** One is a directory the operator wrote under
+`~/.agl/workspace/workflows/<name>/`, holding a module and a `pyproject.toml` that declares it —
+`[project.entry-points."agl.workflows"]`, and one `<name> = "<module>:<attribute>"` line under it —
+which is what `agl new` writes. `ports/home_layout.py` composes that subtree, as it composes
+everything else under `AGL_HOME`. `config/registry.py` finds a workflow by **walking `workflows/`**
+and building an `EntryPoint` per declaration it reads: the class is imported and `entry_points()`
+is called nowhere in `src/`, so nothing is installed, no distribution's metadata is read, and there
+is still no central table to edit. The name `agl run` takes is the key on the left of a declaration
+rather than the directory's own, and the workspace sits on this process's import path, so a
+workflow directory imports as a top-level package named after itself. A workflow builds on `sdk`;
+`ports` sits below it and is permitted, and the authoring surface re-exports what a workflow
+speaks.
+
 ## The dependency rule
 
 ```
-{cli, testing} → api → config → workflows → {sdk, adapters} → ports
+{cli, testing} → api → config → {sdk, adapters} → ports
 ```
 
 `sdk` and `adapters` are siblings and may not import each other; so are `cli` and `testing`.
 `config` may import everything under it and nothing above it, and only `config/container.py` may
 name an adapter. `.importlinter` holds five contracts and `lint-imports` enforces them: the layering
 above, the inner ring (a pure type never imports the ABC that speaks it), vendor containment,
-adapter independence, and the composition root. A sixth said that a workflow builds on `sdk` alone
-and never imports `agl.adapters` or `agl.config`; it went when AGL stopped shipping workflows, there
-being no `agl.workflows` for it to be a rule about. **It was wholly implied when it existed** — its
-config half by the layering and its adapters half by the composition root, whose `agl.*` source
-covered it — so nothing stopped being enforced, and what was lost is the failure message a workflow
-author would have read.
+adapter independence, and the composition root. The layering contract is `exhaustive`, so the seven
+names above are not merely ordered but are the whole of what `agl` may hold at top level: a package
+added under `src/agl/` breaks it until it is written in as a layer. A sixth said that a workflow
+builds on `sdk` alone and never imports `agl.adapters` or `agl.config`; it went when AGL stopped
+shipping workflows, there being no `agl.workflows` for it to be a rule about. **It was wholly
+implied when it existed** — its config half by the layering and its adapters half by the
+composition root, whose `agl.*` source covered it — so nothing stopped being enforced, and what was
+lost is the failure message a workflow author would have read.
 
 **One clause cannot be a contract.** "`ports` imports nothing but stdlib" is an *allow* list, and
 every import-linter contract type names what is forbidden or how modules are ordered — saying it
@@ -327,11 +339,26 @@ value and never calls the worker, so an effect that is not a file in the checkou
 a write to `$HOME`, a database row — happens twice on a miss and not at all on a hit. The ledger
 holds a value and a head, not what the world looked like.
 
-**Bump `@workflow(version=…)` when a workflow's shape changes.** `api.resume` compares the
-installed version against the one stamped in `run.json` and refuses a mismatch rather than
-migrating — the only thing between edited code and a ledger replayed into reordered steps. Edits
-reaching a fingerprint term merely re-run those steps; inserting, removing or reordering steps
-without a bump is silently wrong.
+**Bump `@workflow(version=…)` when a workflow's shape changes.** `api.resume` compares the version
+the workflow in the workspace now declares against the one stamped in `run.json` and refuses a
+mismatch rather than migrating — the only thing between edited code and a ledger replayed into
+reordered steps. Edits reaching a fingerprint term merely re-run those steps; inserting, removing
+or reordering steps without a bump is silently wrong.
+
+**Never refresh the workspace pin, and check it only where a workflow is about to run.**
+`config/toml_file.py` writes `[tool.agl] requires = "agents-gl==<version>"` into the workspace's own
+`pyproject.toml` when `make_workspace` creates it, once and never again — a pin kept current could
+never disagree with the AGL reading it, so the write-once rule and the refusal are one decision.
+`check_workspace_pin` is that refusal, and it has the shape of the version rule above: a recorded
+version against a running one, refused rather than migrated. `api._checked_discovery` asks it
+exactly where the workspace is walked in order to spend on what is found there — `api.run` and
+`api.resume`, before either has bought anything — and nowhere else; `list_workflows`,
+`workflow_help`, `clear`, `init` and `new_workflow` never refuse over it, none of them running a
+workflow, which is what the refusal's own closing sentence promises the operator. Both ways of
+getting it wrong are quiet ones. Refresh the pin from anywhere and the refusal can no longer fire,
+with every test in this repository still green. Drop it from `run` and a workflow written against
+another `agl.sdk` runs against this one, and what that spends before anything notices is agent
+turns.
 
 **Preflight's registry scan is best-effort; containment at every step is the guarantee.**
 `sdk/_engine/preflight.py`'s `check` runs once, before the record is written and before anything is

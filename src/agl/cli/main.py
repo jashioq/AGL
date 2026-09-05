@@ -10,6 +10,7 @@ from agl.api import Ask
 from agl.cli import commands
 from agl.cli.commands import clear as clear_command
 from agl.cli.commands import init as init_command
+from agl.cli.commands import new as new_command
 from agl.cli.commands import resume as resume_command
 from agl.cli.commands import run as run_command
 from agl.cli.commands import workflows as workflows_command
@@ -102,6 +103,7 @@ def parser() -> RefusingParser:
     resume_command.declare(declared)
     clear_command.declare(declared)
     init_command.declare(declared)
+    new_command.declare(declared)
     workflows_command.declare(declared)
     return root
 
@@ -137,6 +139,9 @@ def _dispatch(invocation: Invocation, parsed: argparse.Namespace, tail: Sequence
     if command == init_command.NAME:
         _no_tail(command, tail)
         return init_command.execute(invocation.settings, invocation.cwd, invocation.ask)
+    if command == new_command.NAME:
+        _no_tail(command, tail)
+        return new_command.execute(invocation.settings.home, parsed)
     if command == workflows_command.NAME:
         _no_tail(command, tail)
         return workflows_command.execute(

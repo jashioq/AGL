@@ -130,8 +130,9 @@ def _unknown(name: str, index: Mapping[str, EntryPoint]) -> str:
             f"nothing in the workflows/ directory of your AGL workspace declares an entry point "
             f"in the {GROUP} group. A workflow is a directory you write there and declare in its "
             f"own pyproject.toml; nothing is installed and there is no list in AGL to add it to, "
-            f"so that directory is the whole of it. `agl workflows` spells out the line that "
-            f"declares one"
+            f"so that directory is the whole of it. `agl new <name>` writes one, and makes the "
+            f"workspace too if that is not there yet; `agl workflows` spells out the line that "
+            f"declares one, for a directory you would rather write yourself"
         )
     return (
         f"there is no workflow named {name!r}. Declared under {GROUP}: {', '.join(registered)}. "

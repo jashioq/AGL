@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import Final
 import pytest
 from agl.cli import main
+from agl.cli.commands import new as new_command
 from agl.cli.commands import workflows as workflows_command
 from agl.config import registry, sources
 from agl.ports.home_layout import AglHome, workflows_dir
@@ -176,9 +177,13 @@ def test_a_workspace_that_declares_nothing_says_so_on_stderr_and_still_exits_zer
     explanation goes to stderr rather than nowhere. Exit 0, because nothing failed: no workflow
     declared is the true answer.
 
-    The sentence is where an operator with an empty workspace learns the shape of a declaration, so
-    the group and the line are both asserted. `registry.py`'s own "no workflow is declared at all"
-    defers to this one for that, which is why a message that merely named the group would not do.
+    The sentence is where an operator with an empty workspace learns what to do next, so both
+    halves of that are asserted: the command that writes a workflow, and the shape of the
+    declaration for a directory somebody would rather write by hand. `registry.py`'s own "no
+    workflow is declared at all" names the command too and still defers here for the line, which is
+    why a message that merely named the group would not do. The command is asserted as
+    `new_command.NAME` and not as text, so a module deleted out from under the sentence breaks this
+    test rather than leaving an operator pointed at a command that is not there.
     """
     assert _main("workflows", points=()) == 0
 
@@ -186,6 +191,7 @@ def test_a_workspace_that_declares_nothing_says_so_on_stderr_and_still_exits_zer
     assert captured.out == ""
     assert "agl.workflows" in captured.err
     assert '<name> = "<module>:<attribute>"' in captured.err
+    assert f"agl {new_command.NAME}" in captured.err
 
 # --- the workspace, read whenever no entry points are handed in ----------------------------------
 

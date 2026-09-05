@@ -1,10 +1,17 @@
-"""The rules these four names enforce, and the three properties nothing downstream re-checks.
+"""The rules these five names enforce, and the three properties nothing downstream re-checks.
 
 Validation happens once, on the way in, so a hole here surfaces as a mangled path or a rejected
 ref deep inside a later stage, with nothing in between to catch it. The properties in the middle
 section are therefore checked over a corpus rather than over examples: every accepted value must
 be free of path separators, must join into a path that stays inside its parent, and must satisfy
 real `git check-ref-format`.
+
+Four of the five speak one language and differ only over two reserved words, and the corpus and
+the properties are about those four. `WorkflowName` is the fifth and is the one type that
+*narrows* the language rather than reserving a word out of it - a workflow's name has to be a
+Python module name as well as a directory name - so it has a section of its own at the end and is
+deliberately kept out of the four-way comparison, which exists to say that the four have no
+vocabulary of their own.
 
 The character set is an allowlist, which changes what a corpus is for. Under a blocklist the
 interesting values were the ones that got through; under an allowlist almost nothing does, so
@@ -34,14 +41,14 @@ import random
 import shutil
 import subprocess
 import unicodedata
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 from typing import Final
 import pytest
 from agl.ports.errors import InputError
-from agl.ports.ids import Namespace, ProjectName, RunLabel, StepName
+from agl.ports.ids import Namespace, ProjectName, RunLabel, StepName, WorkflowName
 
 _TYPES: Final = (RunLabel, Namespace, ProjectName, StepName)
 _SEED: Final = 20260819
@@ -402,3 +409,100 @@ def test_collision_key_folds_the_case_a_filesystem_merges_and_would_fold_the_oth
     for spelling in (composed, decomposed):
         with pytest.raises(InputError, match="may hold only"):
             Namespace(spelling)
+
+# --- The fifth type, which narrows the language instead of reserving a word out of it ----------
+#
+# A workflow's name is three things at once - the directory it lives in, the top-level module
+# imported out of that directory, and the key its own pyproject.toml declares - and only the first
+# of those speaks the language the four types above share. So `WorkflowName` accepts a strict
+# subset, and the subset is exactly "and it is also a Python module name": `str.isidentifier` plus
+# the keyword table, which are the language's own answers rather than a second rule written here.
+#
+# **Nothing is reserved out of it, and that is a decision rather than an omission.** `_base` and
+# `_work` above are reserved because each would be one directory or one ref standing for two
+# things at once inside a layout AGL creates. A workflow directory collides with nothing of AGL's:
+# `workspace/workflows/<name>/` holds one directory per workflow and no fixture beside them, so
+# there is no word here that would mean two things. The one real hazard - a name an earlier
+# `sys.path` entry already answers to, `json` or `agl` - is not a fixed set at all: it depends on
+# the interpreter and on what is installed, so it could not be a reservation, and it surfaces at
+# `agl run` as `config/registry.py`'s refusal naming the declaration that could not be loaded.
+
+_IDENTIFIERS: Final = ["triage", "fix", "split_by_ticket", "_private", "release2", "T", "x" * 200]
+
+# Legal directory names, every one of them, and not one of them a module name.
+_NOT_IDENTIFIERS: Final = ["my-flow", "triage.v2", "2fast", "a-b", "v1.0", "_a-b"]
+
+_KEYWORDS: Final = ["class", "def", "import", "None", "lambda", "async", "await", "in"]
+
+@pytest.mark.parametrize("spelled", _NOT_IDENTIFIERS)
+def test_a_name_a_directory_takes_and_an_import_statement_cannot_is_refused(spelled: str) -> None:
+    """Why this type exists: `my-flow/` is a fine directory and `import my-flow` is not a line.
+
+    Every value here passes the four types above, so the refusal is this type's own - and the
+    message has to name the rule, because an operator told only "invalid name" has nothing on
+    screen that distinguishes it from the separator and device-name rules next door.
+    """
+    for name_type in _TYPES:
+        assert str(name_type(spelled)) == spelled
+    with pytest.raises(InputError, match="not a Python identifier") as caught:
+        WorkflowName(spelled)
+    assert repr(spelled) in str(caught.value), "the message quotes what the caller passed"
+    assert "workflow name" in str(caught.value), "the message says which kind of name"
+
+@pytest.mark.parametrize("spelled", _KEYWORDS)
+def test_a_python_keyword_is_refused_although_it_spells_a_perfectly_good_identifier(
+    spelled: str,
+) -> None:
+    """`str.isidentifier` says yes to every one of these, so the keyword table is a second question.
+
+    Asked of `keyword.iskeyword` rather than of a list written here, so a word the language adds
+    is refused the day this interpreter learns it - and `None`, `async` and `await` are in the
+    sample because each was an ordinary identifier in some earlier Python.
+    """
+    assert spelled.isidentifier(), "the arrangement needs an identifier, or it proves nothing"
+    with pytest.raises(InputError, match="Python keyword") as caught:
+        WorkflowName(spelled)
+    assert repr(spelled) in str(caught.value), "the message quotes what the caller passed"
+
+@pytest.mark.parametrize("spelled", _IDENTIFIERS)
+def test_an_identifier_that_breaks_none_of_the_shared_rules_is_taken_as_a_workflow_name(
+    spelled: str,
+) -> None:
+    """Over-refusing costs a workflow author a name, so the accepted side is pinned too."""
+    assert str(WorkflowName(spelled)) == spelled
+
+def test_the_workflow_name_language_is_a_strict_subset_of_the_one_the_others_share() -> None:
+    """Narrowing and never widening: no workflow name is a value the shared rules would refuse.
+
+    Asserted over the corpus rather than over examples, because what would be silent is the
+    *other* direction - a value this type accepted and the shared rules did not would be a name
+    that reached a path or a ref through a type that had never checked it.
+
+    `StepName` is the comparison because it reserves nothing, so the set it accepts is the shared
+    language exactly. `Namespace` would be the wrong end of it: `_base` is refused there and is a
+    perfectly good workflow name, so the two differ by a reservation rather than by this rule.
+    """
+    workflows = {value for value in _CORPUS if _takes(WorkflowName, value)}
+    shared = {value for value in _CORPUS if _takes(StepName, value)}
+    assert workflows < shared, f"{len(workflows)} accepted against {len(shared)}"
+    assert len(workflows) > 100, f"the corpus left only {len(workflows)} workflow names"
+
+def test_no_word_at_all_is_reserved_out_of_a_workflow_name() -> None:
+    """The decision recorded where somebody would look for the reservation that is not there.
+
+    `workspace`, `workflows` and `agl` are the three a reader expects to find refused, and each is
+    a directory beside the others under `workspace/workflows/` rather than a second meaning for a
+    path AGL composes. `_base` and `_work` stay accepted here for the same reason they are
+    accepted by two of the four types above: a reservation costs a name and buys nothing where
+    there is no collision.
+    """
+    for word in ("workspace", "workflows", "agl", "run", "new", "main", "_base", "_work"):
+        assert str(WorkflowName(word)) == word
+
+def _takes(name_type: Callable[[str], object], value: str) -> bool:
+    """Whether `name_type` accepts `value`, so a corpus comparison reads as one set against one."""
+    try:
+        name_type(value)
+    except InputError:
+        return False
+    return True

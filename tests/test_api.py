@@ -42,11 +42,11 @@ from agl import api
 from agl.adapters.claude_code.fake import Conversation, Script
 from agl.adapters.git.history import GitHistory
 from agl.adapters.git.workspace import GitWorkspaceProvider
-from agl.config import container, registry, sources
+from agl.config import container, distribution, registry, sources
 from agl.ports.agent import AgentOutcome, Claude, StopReason
 from agl.ports.errors import ConflictError, InputError, NotFoundError, exit_code_for
-from agl.ports.home_layout import AglHome, RunScope, workflows_dir
-from agl.ports.ids import Namespace, ProjectName, RunLabel
+from agl.ports.home_layout import AglHome, RunScope, workflows_dir, workspace_pyproject
+from agl.ports.ids import Namespace, ProjectName, RunLabel, WorkflowName
 from agl.ports.run import JsonValue, RunSpec
 from agl.ports.tree_layout import TreesRoot, base_worktree, run_branch
 from agl.ports.workspace import Workspace, WorkspaceProvider
@@ -776,6 +776,110 @@ def test_a_declared_workflow_keeps_the_name_a_broken_directory_happens_to_share(
     assert [entry.directory for entry in listing.broken] == ["triage"]
     assert "usage: agl run triage" in api.workflow_help("triage", home=home)
 
+# --- the workspace's own pin, and which operations are entitled to refuse over it ----------------
+#
+# `config/toml_file.py`'s `check_workspace_pin` is the comparison and the suite over that module
+# holds it; what is drawn here is the line between the operations that ask it and the operations
+# that do not, which is a fact about this module and about nothing else.
+#
+# `run` and `resume` ask, because they are the two that read a workflow out of the workspace in
+# order to spend agent turns on it, and a workflow written against another AGL's `agl.sdk` fails
+# after the money has gone rather than before. Nothing else here asks. A listing and a help print
+# what the operator already has and buy nothing, and they are the first two things somebody types
+# when a command has just refused them - withholding those would leave a refusal with nothing to
+# act on. `new_workflow` writes a scaffold this AGL rendered, so it is the one thing in an old
+# workspace that cannot be stale, and it is the on-ramp: an operator upgrading AGL must be able to
+# start writing. `clear` takes no home at all and so could not ask if it wanted to.
+#
+# Every arrangement below pins a version this tree is not, and each asserts the *class* rather than
+# just that something raised: without the check the same call raises `NotFoundError` off an empty
+# workspace, so the class is what says the refusal came first.
+
+def _stale(home: AglHome) -> None:
+    """A workspace root recording an AGL this one is not, which is the state the pin refuses on."""
+    workflows_dir(home).mkdir(parents=True, exist_ok=True)
+    workspace_pyproject(home).write_text(
+        f'[tool.uv.workspace]\nmembers = ["workflows/*"]\n\n'
+        f'[tool.agl]\nrequires = "{distribution.DISTRIBUTION}==0.0.0"\n',
+        encoding="utf-8",
+    )
+
+@pytest.mark.asyncio
+async def test_a_run_out_of_a_workspace_another_agl_made_refuses_before_it_reads_one(
+    tmp_path: Path,
+) -> None:
+    """Exit 4, and it arrives before the workspace has been walked for the name that was typed.
+
+    The workspace declares nothing, so an `api.run` that walked first would answer `NotFoundError`
+    and send the operator looking for a workflow to write. The pin is a fact about the whole
+    workspace and the walk is a question about one name in it, so the order is not a preference:
+    the run is refused, and then it does not matter what the name resolved to.
+    """
+    home = _home(tmp_path)
+    _stale(home)
+    harness = _fakes(tmp_path)
+
+    with pytest.raises(ConflictError) as refused:
+        await api.run(harness.services, PROJECT, "probe", LABEL, (), home=home)
+
+    assert exit_code_for(refused.value) == 4
+    assert str(workspace_pyproject(home)) in str(refused.value)
+
+@pytest.mark.asyncio
+async def test_a_resume_out_of_that_same_workspace_refuses_on_the_pin_as_well(
+    tmp_path: Path,
+) -> None:
+    """The second spender, and the one whose ledger makes the stakes concrete.
+
+    A resume replays what is recorded and runs the rest, so a workspace whose workflow was written
+    against another `agl.sdk` is a run that half-replays and then buys the remainder against code
+    it was not recorded by. The run below is started through `points=`, which is the seam that
+    reads no workspace, so what the resume meets is a workspace that went stale between the two.
+    """
+    home = _home(tmp_path)
+    harness = _fakes(tmp_path)
+    await _run(harness)
+    _stale(home)
+
+    with pytest.raises(ConflictError) as refused:
+        await api.resume(harness.services, PROJECT, LABEL, home=home)
+
+    assert exit_code_for(refused.value) == 4
+
+def test_a_stale_pin_costs_the_operator_neither_the_listing_nor_the_help(tmp_path: Path) -> None:
+    """Both readers answer over a workspace no run would touch, and that is deliberate.
+
+    These are what somebody reaches for after a refusal - which workflows are in there, and what
+    flags one takes - so refusing them too would take away the means of acting on the refusal
+    while adding no protection: neither imports an agent, and neither spends.
+    """
+    home = _home(tmp_path)
+    _stale(home)
+    _directory(home, "triage", _declaring("triage", "probe"))
+
+    listing = api.list_workflows(home=home)
+
+    assert listing.names == ("triage",)
+    assert "usage: agl run triage" in api.workflow_help("triage", home=home)
+
+def test_a_stale_pin_leaves_the_on_ramp_open_for_the_scaffold_this_agl_writes(
+    tmp_path: Path,
+) -> None:
+    """`agl new` is what an operator types straight after an upgrade, and it must still write.
+
+    The scaffold is rendered by the AGL running now, against the `agl.sdk` that AGL ships, so it is
+    the one thing in an old workspace that cannot be stale - and `api.new_workflow` calls
+    `make_workspace` on every invocation, so a refusal here would fire on every `agl new` in a
+    workspace made before the upgrade, which is exactly when there is work to be started.
+    """
+    home = _home(tmp_path)
+    _stale(home)
+
+    written = api.new_workflow(home, WorkflowName("release"))
+
+    assert written.is_dir()
+    assert api.list_workflows(home=home).names == ("release",)
+
 def test_init_needs_neither_a_bundle_nor_a_registered_repository(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -813,12 +917,14 @@ def test_every_operation_the_module_declares_is_built() -> None:
     suite of its own - `tests/test_resume.py` and `tests/test_clear.py` - and `init` was the one
     left.
 
-    `workflow_help` is on `__all__` beside the five verbs `agl` dispatches and is not one of them:
+    `workflow_help` is on `__all__` beside the six verbs `agl` dispatches and is not one of them:
     it is the operation behind `agl workflows <name>`, which extends that grammar, and
-    `cli/commands/workflows.py` is where the deviation is argued. `Ask`, `Cleared` and `Listing`
-    are the three entries that are not operations at all - the callable `init` asks its one
-    question through, and the two values `clear` and `list_workflows` answer with - and they are
-    here because a caller annotating any of them has to be able to name it.
+    `cli/commands/workflows.py` is where the deviation is argued. `new_workflow` is a verb and is
+    spelled unlike the command it serves, `agl new`, because `new` is an adjective and every other
+    name here is what the operation does. `Ask`, `Cleared` and `Listing` are the three entries that
+    are not operations at all - the callable `init` asks its one question through, and the two
+    values `clear` and `list_workflows` answer with - and they are here because a caller annotating
+    any of them has to be able to name it.
     """
     assert set(api.__all__) == {
         "Ask",
@@ -827,6 +933,7 @@ def test_every_operation_the_module_declares_is_built() -> None:
         "clear",
         "init",
         "list_workflows",
+        "new_workflow",
         "resume",
         "run",
         "workflow_help",

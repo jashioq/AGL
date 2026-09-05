@@ -3,9 +3,21 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
+from agl.config.distribution import DISTRIBUTION, UNINSTALLED, installed_version
 from agl.ports.errors import ConflictError, InputError, NotFoundError
-from agl.ports.home_layout import AglHome, project_config, projects_dir, settings_file
-from agl.ports.ids import ProjectName
+from agl.ports.home_layout import (
+    AglHome,
+    project_config,
+    projects_dir,
+    settings_file,
+    workflow_dir,
+    workflow_module,
+    workflow_pyproject,
+    workflows_dir,
+    workspace_dir,
+    workspace_pyproject,
+)
+from agl.ports.ids import ProjectName, WorkflowName
 from agl.ports.tree_layout import TreesRoot
 
 __all__ = [
@@ -14,7 +26,10 @@ __all__ = [
     "FileSettings",
     "check_trees_root",
     "check_unregistered",
+    "check_workspace_pin",
     "git_root",
+    "make_workflow",
+    "make_workspace",
     "read_document",
     "read_project",
     "read_settings",
@@ -38,6 +53,43 @@ _AGENT_KEYS: Final = (_ENABLED, _CLI_PATH)
 _PROJECT_KEYS: Final = (_NAME, _REPO, _TREES_ROOT, _BUILD, _BUILD_TIMEOUT)
 
 _HOME_KEYS: Final = frozenset({"home", "agl_home", "AGL_HOME"})
+
+# uv reads a member as a glob against the directory holding this file, so `*` there would take in
+# the `.venv` a sync builds beside `workflows/` - the one `home_layout.workspace_site_packages`
+# composes - and the workspace would hold its own environment as a member of itself.
+_MEMBERS_TABLE: Final = '[tool.uv.workspace]\nmembers = ["workflows/*"]\n'
+
+# `[tool.<name>]` is the table a tool owns in a pyproject.toml and every other tool reads past, so
+# this one is AGL's alone. The file holds no `[project]` table at all, which is what makes it a
+# virtual uv workspace root rather than a package of its own, and what keeps it from ever reading
+# as the workflow declaration `config/registry.py` looks for.
+_TOOL: Final = "tool"
+_AGL: Final = "agl"
+_REQUIRES: Final = "requires"
+
+# The scaffold is rendered from these rather than copied out of a template checked in beside them,
+# because a pyproject.toml in this repository carrying a real entry-point table is exactly what
+# `tests/test_measurable_targets.py`'s declaration scan exists to catch.
+#
+# A `WorkflowName` is a Python identifier, so nothing interpolated below can carry a character a
+# TOML basic string or a Python source file would need escaped.
+_MODULE_DOCUMENT: Final = """from agl.sdk import Run, workflow
+
+@workflow(version="1")
+async def {name}(run: Run) -> None:
+    ...
+"""
+
+# No `[build-system]` and no dependency on AGL itself: the workspace is on this process's import
+# path rather than installed into it, so a workflow is imported from where it was written and
+# nothing has to build it.
+_PROJECT_DOCUMENT: Final = """[project]
+name = "{name}"
+version = "0.1.0"
+
+[project.entry-points."{group}"]
+{name} = "{name}:{name}"
+"""
 
 # Tested for existence and never for being a directory: a linked worktree or a submodule writes a
 # file holding a `gitdir:` line there instead.
@@ -153,6 +205,66 @@ def write_project(
         ) from error
     return path
 
+def make_workspace(home: AglHome) -> None:
+    try:
+        workflows_dir(home).mkdir(parents=True, exist_ok=True)
+        try:
+            with workspace_pyproject(home).open("x", encoding="utf-8", newline="\n") as handle:
+                handle.write(_workspace_document())
+        except FileExistsError:
+            return
+    except OSError as error:
+        raise InputError(
+            f"the workspace at {workspace_dir(home)} cannot be created: {error}. That subtree is "
+            f"where the workflows you write live, and AGL makes it rather than asking you to - so "
+            f"until it can be made there is nowhere for a workflow to go"
+        ) from error
+
+def make_workflow(home: AglHome, name: WorkflowName, group: str) -> Path:
+    directory = workflow_dir(home, name)
+    try:
+        directory.mkdir(parents=True)
+    except FileExistsError as error:
+        raise ConflictError(_already_written(directory, name)) from error
+    except OSError as error:
+        raise InputError(_unwritable(directory, error)) from error
+    for path, document in (
+        (workflow_module(home, name), _MODULE_DOCUMENT.format(name=name)),
+        (workflow_pyproject(home, name), _PROJECT_DOCUMENT.format(name=name, group=group)),
+    ):
+        try:
+            with path.open("x", encoding="utf-8", newline="\n") as handle:
+                handle.write(document)
+        except OSError as error:
+            raise InputError(_unwritable(path, error)) from error
+    return directory
+
+# Compared as text against the string `_version_pin` writes, which is what keeps the comparison
+# free of a requirement parser: PEP 503 normalises `agents_gl` onto `agents-gl` and PEP 440 admits
+# `== 0.0.1` beside `==0.0.1`, so a pin somebody rewrote by hand can mean this version and still
+# read as a disagreement here. What that costs is a refusal naming the exact line to write back.
+def check_workspace_pin(home: AglHome) -> None:
+    """Refuse where the workspace records one AGL and another is about to run its workflows."""
+    recorded = _recorded_pin(home)
+    running = _version_pin()
+    if recorded is None or running is None or recorded == running:
+        return
+    path = workspace_pyproject(home)
+    raise ConflictError(
+        f"your AGL workspace was made by {recorded!r} and the AGL running now is {running!r}: "
+        f"{path} sets {_REQUIRES} under [{_TOOL}.{_AGL}], which names the AGL the workflows in "
+        f"that workspace were written against, and it does not name this one. AGL refuses to run "
+        f"one rather than hoping the two agree - a workflow is written against the `agl.sdk` of a "
+        f"particular AGL, and what a run spends before finding out otherwise is agent turns. Two "
+        f"things end this and both are yours to choose between. Install {recorded!r} again, and "
+        f"this workspace runs as it always did. Or keep the AGL you have: read your workflows "
+        f"against this version's `agl.sdk`, then edit {path} so that its line reads "
+        f"`{_REQUIRES} = {_quoted(running)}`. AGL writes that line when it makes a workspace and "
+        f"never refreshes it, which is what lets it disagree with the AGL reading it - a pin kept "
+        f"current could never say anything. `agl new`, `agl workflows` and `agl clear` are "
+        f"unaffected, none of them running a workflow"
+    )
+
 def git_root(start: Path) -> Path:
     directory = start.resolve()
     for candidate in (directory, *directory.parents):
@@ -216,6 +328,27 @@ def read_document(path: Path) -> Mapping[str, object] | None:
     except (OSError, UnicodeDecodeError) as error:
         raise InputError(f"{path} cannot be read: {error}") from error
     return document
+
+def _workspace_document() -> str:
+    pin = _version_pin()
+    if pin is None:
+        return _MEMBERS_TABLE
+    return f"{_MEMBERS_TABLE}\n[{_TOOL}.{_AGL}]\n{_REQUIRES} = {_quoted(pin)}\n"
+
+# PEP 440 admits neither a leading letter nor a space, so `UNINSTALLED` can never be half of a
+# requirement any resolver reads. A workspace made where there is no metadata to read therefore
+# carries no pin at all, which is what a workspace made by hand carries too.
+def _version_pin() -> str | None:
+    version = installed_version()
+    return None if version == UNINSTALLED else f"{DISTRIBUTION}=={version}"
+
+def _recorded_pin(home: AglHome) -> str | None:
+    path = workspace_pyproject(home)
+    document = read_document(path)
+    if document is None:
+        return None
+    tools = _sub_table(document, _TOOL, path, "")
+    return _text(_sub_table(tools, _AGL, path, f"{_TOOL}."), _REQUIRES, path, f"{_TOOL}.{_AGL}.")
 
 def _project(path: Path, document: Mapping[str, object]) -> FileProject:
     _only(document, _PROJECT_KEYS, path, "")
@@ -328,6 +461,22 @@ def _already(path: Path, project: ProjectName) -> str:
         f"and run `agl init` again. If it is a different repository whose directory happens to "
         f"carry the same name, one of the two has to be renamed: a project's name is its "
         f"directory's name, and that name is the file AGL records its runs beside"
+    )
+
+def _already_written(directory: Path, name: WorkflowName) -> str:
+    return (
+        f"a workflow named {str(name)!r} is already in your workspace: {directory} exists, and "
+        f"`agl new` writes a workflow directory once and never writes over one - whatever is in "
+        f"there is yours. Edit it, or run `agl new` under a name nothing has taken. `agl "
+        f"workflows` lists the names the workspace declares, which are the keys each directory's "
+        f"own pyproject.toml writes rather than the directories' own names"
+    )
+
+def _unwritable(path: Path, error: OSError) -> str:
+    return (
+        f"{path} cannot be written: {error}. `agl new` writes a workflow directory and the two "
+        f"files in it, so this one is unfinished - what did get written is left where it is "
+        f"rather than half-removed, and deleting the directory is what starts the command over"
     )
 
 def _quoted(value: str) -> str:

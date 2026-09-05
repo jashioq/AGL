@@ -1,3 +1,4 @@
+import keyword
 import string
 import unicodedata
 from collections.abc import Mapping
@@ -5,7 +6,7 @@ from dataclasses import dataclass
 from typing import ClassVar, Final
 from agl.ports.errors import InputError
 
-__all__ = ["Namespace", "ProjectName", "RunLabel", "StepName"]
+__all__ = ["Namespace", "ProjectName", "RunLabel", "StepName", "WorkflowName"]
 
 _ALLOWED_CHARACTERS: Final = frozenset(string.ascii_letters + string.digits + "._-")
 
@@ -85,6 +86,22 @@ def _unusable(value: str) -> str | None:
         )
     return None
 
+# Asked only of a value `_unusable` has already passed, so what is left for `str.isidentifier` to
+# refuse is a '.' or a '-' inside the name and a leading digit.
+def _unimportable(value: str) -> str | None:
+    if not value.isidentifier():
+        return (
+            "it is not a Python identifier, and a workflow's name is the module `agl run` "
+            "imports as well as the directory holding it - so it may carry letters, digits and "
+            "underscores only, and may not open with a digit"
+        )
+    if keyword.iskeyword(value):
+        return (
+            f"it is a Python keyword, so `import {value}` is a syntax error and the module a "
+            f"declaration of that name would have to import cannot be written at all"
+        )
+    return None
+
 @dataclass(frozen=True, slots=True)
 class _Name:
     _KIND: ClassVar[str] = "name"
@@ -93,12 +110,17 @@ class _Name:
     value: str
 
     def __post_init__(self) -> None:
-        reason = _unusable(self.value) or self._RESERVED.get(self.collision_key)
+        reason = (
+            _unusable(self.value) or self._also_unusable() or self._RESERVED.get(self.collision_key)
+        )
         if reason is not None:
             raise InputError(f"{self._KIND} {self.value!r} cannot be used: {reason}")
 
     def __str__(self) -> str:
         return self.value
+
+    def _also_unusable(self) -> str | None:
+        return None
 
     @property
     def collision_key(self) -> str:
@@ -134,3 +156,10 @@ class ProjectName(_Name):
 @dataclass(frozen=True, slots=True)
 class StepName(_Name):
     _KIND: ClassVar[str] = "step name"
+
+@dataclass(frozen=True, slots=True)
+class WorkflowName(_Name):
+    _KIND: ClassVar[str] = "workflow name"
+
+    def _also_unusable(self) -> str | None:
+        return _unimportable(self.value)

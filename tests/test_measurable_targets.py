@@ -914,6 +914,7 @@ _EIGHT_POINT: Final = EntryPoint(name="probe", value=f"{__name__}:probe", group=
 # own subcommands below, so this table cannot silently fall behind the grammar.
 _INVOCATIONS: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
     ("init", ("init",)),
+    ("new", ("new", "scaffold")),
     ("workflows", ("workflows",)),
     ("run", ("run", "probe", "-n", "auth", "-r", "add oauth")),
     ("resume", ("resume", "auth")),

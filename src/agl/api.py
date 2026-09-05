@@ -7,7 +7,7 @@ from agl.config import registry, sources, toml_file
 from agl.config.schema import Settings
 from agl.ports.errors import ConflictError, InputError, InternalError, NotFoundError
 from agl.ports.home_layout import AglHome, RunScope
-from agl.ports.ids import Namespace, ProjectName, RunLabel
+from agl.ports.ids import Namespace, ProjectName, RunLabel, WorkflowName
 from agl.ports.run import RunSpec, checked_text
 from agl.ports.store import Store
 from agl.ports.tree_layout import BASE_DIRNAME, TreesRoot, run_branch, worktree_branch
@@ -24,6 +24,7 @@ __all__ = [
     "clear",
     "init",
     "list_workflows",
+    "new_workflow",
     "resume",
     "run",
     "workflow_help",
@@ -66,7 +67,7 @@ async def run(
     home: AglHome | None = None,
     points: Iterable[EntryPoint] | None = None,
 ) -> None:
-    wf = _loaded(_discovery(home, points), name)
+    wf = _loaded(_checked_discovery(home, points), name)
     given = params.parse(wf.params, argv, prog=f"agl run {name}")
 
     scope = RunScope(project, label)
@@ -124,7 +125,7 @@ async def resume(
         )
     spec = RunSpec.from_json(record)
 
-    wf = _loaded(_discovery(home, points), spec.workflow)
+    wf = _loaded(_checked_discovery(home, points), spec.workflow)
 
     if wf.version != spec.workflow_version:
         raise ConflictError(
@@ -191,6 +192,15 @@ def init(settings: Settings, cwd: Path, ask: Ask) -> Path:
         settings.home, name, root, trees, build, sources.DEFAULT_BUILD_TIMEOUT
     )
 
+# The workspace is made unconditionally rather than after a check: `make_workspace` creates each of
+# the three things it makes only where that thing is absent, so the workspace an operator already
+# has is left exactly as it stands and there is no second answer here about what "already there"
+# means. `registry.GROUP` travels as an argument because `config/registry.py` imports this module,
+# so the group is defined once and reaches the writer the only way round the import allows.
+def new_workflow(home: AglHome, name: WorkflowName) -> Path:
+    toml_file.make_workspace(home)
+    return toml_file.make_workflow(home, name, registry.GROUP)
+
 def list_workflows(
     *, home: AglHome | None = None, points: Iterable[EntryPoint] | None = None
 ) -> Listing:
@@ -232,6 +242,18 @@ async def _under(store: Store, scope: RunScope) -> tuple[Namespace, ...]:
 def _loaded(found: registry.Discovery, name: str) -> Workflow[object]:
     registry.check_unbroken(found, name)
     return registry.load(found.points, name, Workflow)
+
+# `run` and `resume` are the two operations that read a workflow out of the workspace in order to
+# spend on it, so they are the two that ask whether that workspace was made by the AGL running now.
+# `list_workflows`, `workflow_help`, `clear` and `new_workflow` refuse over no pin: none of them
+# runs a workflow, and `agl new`'s scaffold is written by the AGL running it. The `points=` arm
+# skips the question along with the walk, nothing reached that way having come out of a workspace.
+def _checked_discovery(
+    home: AglHome | None, points: Iterable[EntryPoint] | None
+) -> registry.Discovery:
+    if points is None and home is not None:
+        toml_file.check_workspace_pin(home)
+    return _discovery(home, points)
 
 # Points handed over are the whole of what the caller has: the walk is skipped, so nothing reaches
 # the operator's home and `config/workspace_path.py` writes no entry to `sys.path`. That is what
