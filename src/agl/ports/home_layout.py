@@ -20,6 +20,7 @@ __all__ = [
     "workflow_pyproject",
     "workflows_dir",
     "workspace_dir",
+    "workspace_editor_pth",
     "workspace_pyproject",
     "workspace_site_packages",
 ]
@@ -42,6 +43,10 @@ _PACKAGE_MODULE: Final = "__init__.py"
 _VENV: Final = ".venv"
 _VENV_LIBRARY: Final = "lib"
 _SITE_PACKAGES: Final = "site-packages"
+# Named after the package it puts within reach, which is what a path configuration file's name is
+# for, and it is a name nothing else in that directory takes: `uv sync` leaves `_virtualenv.pth`
+# beside it, and the distribution AGL publishes is `agents-gl` rather than `agl`.
+_EDITOR_PTH: Final = "agl.pth"
 
 _MAX_SEGMENT_BYTES: Final = 255
 
@@ -224,6 +229,15 @@ def workspace_site_packages(home: AglHome, interpreter: str) -> Path:
     """
     library = workspace_dir(home) / _VENV / _VENV_LIBRARY
     return library / _checked_interpreter(interpreter) / _SITE_PACKAGES
+
+def workspace_editor_pth(home: AglHome, interpreter: str) -> Path:
+    """The one file AGL writes inside the workspace venv, and no run of AGL reads it.
+
+    :param home: where AGL keeps its own state, which is never where code is checked out
+    :param interpreter: the `lib/` subdirectory that interpreter installs into, `python3.14`
+    :return: `<home>/workspace/.venv/lib/<interpreter>/site-packages/agl.pth`
+    """
+    return workspace_site_packages(home, interpreter) / _EDITOR_PTH
 
 def _root(home: AglHome) -> Path:
     if not isinstance(home, AglHome):

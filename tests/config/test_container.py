@@ -63,6 +63,7 @@ from agl.ports.ids import Namespace, ProjectName, RunLabel
 from agl.ports.integration import Integrator
 from agl.ports.run import JsonValue
 from agl.ports.store import Store
+from agl.ports.sync import Syncer
 from agl.ports.terminal import Screen, Terminal
 from agl.ports.tree_layout import TreesRoot
 from agl.ports.verifier import Verifier, VerifierOutcome
@@ -708,3 +709,33 @@ async def test_no_agent_and_no_script_is_still_each_providers_own_default(tmp_pa
     outcome = await harness.services.agents.run(_task(tmp_path, Claude.OPUS))
 
     assert "fake" in outcome.text and outcome.stop_reason is StopReason.COMPLETED
+
+# --- The syncer, which is in neither bundle ------------------------------------------------------
+
+def test_a_syncer_is_built_on_its_own_because_a_sync_addresses_no_project_at_all() -> None:
+    """Two builders beside `answering`, and port-typed like everything else the container hands out.
+
+    A sync is about the operator's workspace - the workflows they wrote and what those declare -
+    and there is no repository, no trees root and no build command anywhere in that question. So
+    the syncer is not a tenth field of `Services`, which is a run's bundle and which the comparison
+    at the top of this file would have caught it being added to; it is built the way `answering`
+    builds a terminal, from nothing.
+
+    Inert for the real one, like every other constructor here: nothing resolves uv, and a machine
+    with no uv on it builds this object exactly as a machine with one does.
+    """
+    assert isinstance(container.real_syncer(), Syncer)
+    assert isinstance(container.fake_syncer(), Syncer)
+
+@pytest.mark.asyncio
+async def test_the_fake_syncer_answers_a_workspace_that_was_never_written(tmp_path: Path) -> None:
+    """The fakes half of the pair, asked about a directory that does not exist and answering anyway.
+
+    That is what makes it usable in an all-fakes deployment: nothing is installed, no index is
+    reached and no environment is built, so a command that syncs can be driven end to end wherever
+    the rest of the fakes are.
+    """
+    outcome = await container.fake_syncer().sync(tmp_path / "workspace")
+
+    assert outcome.synced is True
+    assert not (tmp_path / "workspace").exists()

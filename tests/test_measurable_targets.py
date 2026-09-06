@@ -916,6 +916,7 @@ _INVOCATIONS: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
     ("init", ("init",)),
     ("new", ("new", "scaffold")),
     ("workflows", ("workflows",)),
+    ("sync", ("sync",)),
     ("run", ("run", "probe", "-n", "auth", "-r", "add oauth")),
     ("resume", ("resume", "auth")),
     ("clear", ("clear", "auth")),
@@ -1003,7 +1004,9 @@ def test_every_declared_command_runs_on_fakes_with_no_way_out(
 
     **Substituted through `main`'s own seam and nothing is monkeypatched to get there.** `compose=`
     is the parameter `cli/main.py` declares for exactly this, so the bundle is `container.fakes()`,
-    the entry points are this module's own, and `ask` is the canned answer `agl init` asks for.
+    the entry points are this module's own, `ask` is the canned answer `agl init` asks for, and
+    `syncer` is `container.fake_syncer` - the one field on the `Invocation` whose real default
+    would start a process, which is why `agl sync` is the row that needs it filled in.
     Nothing here reaches into a module's internals; the only patching in this test is the poison,
     which is the assertion rather than the arrangement.
 
@@ -1031,6 +1034,7 @@ def test_every_declared_command_runs_on_fakes_with_no_way_out(
             cwd=repo,
             points=(_EIGHT_POINT,),
             ask=answer,
+            syncer=container.fake_syncer,
         )
 
     driven = {name for name, _ in _INVOCATIONS}

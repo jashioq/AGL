@@ -3,13 +3,14 @@ from dataclasses import dataclass
 from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Final
-from agl.config import registry, sources, toml_file
+from agl.config import registry, sources, toml_file, workspace_path
 from agl.config.schema import Settings
 from agl.ports.errors import ConflictError, InputError, InternalError, NotFoundError
-from agl.ports.home_layout import AglHome, RunScope
+from agl.ports.home_layout import AglHome, RunScope, workspace_dir
 from agl.ports.ids import Namespace, ProjectName, RunLabel, WorkflowName
 from agl.ports.run import RunSpec, checked_text
 from agl.ports.store import Store
+from agl.ports.sync import Syncer, SyncOutcome
 from agl.ports.tree_layout import BASE_DIRNAME, TreesRoot, run_branch, worktree_branch
 from agl.sdk import params
 from agl.sdk._engine import preflight
@@ -27,6 +28,7 @@ __all__ = [
     "new_workflow",
     "resume",
     "run",
+    "sync_workspace",
     "workflow_help",
 ]
 
@@ -201,6 +203,24 @@ def new_workflow(home: AglHome, name: WorkflowName) -> Path:
     toml_file.make_workspace(home)
     return toml_file.make_workflow(home, name, registry.GROUP)
 
+# The first three steps are in the order the command is for. `agl sync` is what an operator reaches
+# for once `check_workspace_pin` has refused a run, so a sync that installed against a workspace
+# still recording another AGL would leave that refusal exactly where it found it; and a re-pin
+# against a workspace that is not there yet would meet `UvSyncer`'s own refusal rather than making
+# one. The re-pin is a second call and not something `make_workspace` grew, for the reason
+# `config/toml_file.py` gives above `write_workspace_pin`.
+#
+# The fourth is the only one after the install and the only one a refusal skips. What it writes
+# names the venv an install just finished building, so a sync uv refused - where that venv may hold
+# nothing, or may not be there at all - is left with no claim about one rather than a stale claim.
+async def sync_workspace(syncer: Syncer, home: AglHome) -> SyncOutcome:
+    toml_file.make_workspace(home)
+    toml_file.write_workspace_pin(home)
+    outcome = await syncer.sync(workspace_dir(home))
+    if outcome.synced:
+        workspace_path.write_editor_pth(home)
+    return outcome
+
 def list_workflows(
     *, home: AglHome | None = None, points: Iterable[EntryPoint] | None = None
 ) -> Listing:
@@ -245,8 +265,9 @@ def _loaded(found: registry.Discovery, name: str) -> Workflow[object]:
 
 # `run` and `resume` are the two operations that read a workflow out of the workspace in order to
 # spend on it, so they are the two that ask whether that workspace was made by the AGL running now.
-# `list_workflows`, `workflow_help`, `clear` and `new_workflow` refuse over no pin: none of them
-# runs a workflow, and `agl new`'s scaffold is written by the AGL running it. The `points=` arm
+# `list_workflows`, `workflow_help`, `clear`, `new_workflow` and `sync_workspace` refuse over no
+# pin: none of them runs a workflow, `agl new`'s scaffold is written by the AGL running it, and a
+# sync refusing over the pin it exists to move could never be run. The `points=` arm
 # skips the question along with the walk, nothing reached that way having come out of a workspace.
 def _checked_discovery(
     home: AglHome | None, points: Iterable[EntryPoint] | None

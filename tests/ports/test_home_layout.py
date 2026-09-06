@@ -33,6 +33,7 @@ from agl.ports.home_layout import (
     workflow_pyproject,
     workflows_dir,
     workspace_dir,
+    workspace_editor_pth,
     workspace_pyproject,
     workspace_site_packages,
 )
@@ -74,6 +75,9 @@ def test_every_named_path_under_agl_home_is_spelled_out_in_full() -> None:
     )
     assert workspace_site_packages(_HOME, "python3.14") == Path(
         "/agl-home/workspace/.venv/lib/python3.14/site-packages"
+    )
+    assert workspace_editor_pth(_HOME, "python3.14") == Path(
+        "/agl-home/workspace/.venv/lib/python3.14/site-packages/agl.pth"
     )
 
 def test_the_two_paths_under_home_that_no_project_name_composes() -> None:
@@ -267,6 +271,7 @@ def test_the_workspace_is_a_subtree_of_its_own_that_no_project_name_reaches() ->
         workflow_pyproject(_HOME, _TRIAGE),
         workflow_module(_HOME, _TRIAGE),
         workspace_site_packages(_HOME, "python3.14"),
+        workspace_editor_pth(_HOME, "python3.14"),
     )
     assert workspace_dir(_HOME).parent == _HOME.path, "at the top of AGL_HOME, not below it"
     for path in inside:
@@ -291,9 +296,14 @@ def test_an_interpreter_segment_that_is_not_a_venv_directory_name_is_refused(
     both are refused where they are written rather than at the open that would have missed:
     `"3.14"` is the version where the directory name was wanted, and an absolute path is
     `sys.executable` handed over whole.
+
+    Both callables taking the segment are asked. `workspace_editor_pth` composes from the other
+    today, and one that stopped doing so would be one segment's validation short of it.
     """
     with pytest.raises(InternalError, match="not a directory name"):
         workspace_site_packages(_HOME, interpreter)
+    with pytest.raises(InternalError, match="not a directory name"):
+        workspace_editor_pth(_HOME, interpreter)
 
 def test_no_string_in_the_corpus_takes_a_site_packages_path_out_of_the_venv(tmp_path: Path) -> None:
     """Every value in the corpus as the interpreter segment: refused, or landing where it says.

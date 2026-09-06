@@ -925,6 +925,12 @@ def test_every_operation_the_module_declares_is_built() -> None:
     are not operations at all - the callable `init` asks its one question through, and the two
     values `clear` and `list_workflows` answer with - and they are here because a caller annotating
     any of them has to be able to name it.
+
+    `sync_workspace` is the eighth operation and the seventh verb, and it is spelled with its
+    object for `new_workflow`'s reason: `agl sync` reads as a verb on the command line and `sync`
+    alone would not say here what is being synced. It takes a `Syncer` rather than a `Services`,
+    which is the whole shape of the operation - a sync addresses the operator's workspace, so
+    there is no project to resolve and no bundle to build.
     """
     assert set(api.__all__) == {
         "Ask",
@@ -936,6 +942,7 @@ def test_every_operation_the_module_declares_is_built() -> None:
         "new_workflow",
         "resume",
         "run",
+        "sync_workspace",
         "workflow_help",
     }
     assert not [name for name in api.__all__ if "unbuilt" in name.lower()]

@@ -81,6 +81,7 @@ forbidden_modules =
     agl.ports.history
     agl.ports.verifier
     agl.ports.store
+    agl.ports.sync
     agl.ports.terminal
     agl.ports.clock
 
@@ -152,6 +153,7 @@ modules =
     agl.adapters.filesystem
     agl.adapters.rich_terminal
     agl.adapters.system_clock
+    agl.adapters.uv
 
 
 # 5. The composition root: config/container.py is the only module that says `new`.

@@ -14,8 +14,9 @@ refusal that leaves the operator hunting for which of their files was wrong.
 """
 
 import ast
+import stat
 import tomllib
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import fields
 from pathlib import Path
 from textwrap import dedent
@@ -40,6 +41,7 @@ from agl.config.toml_file import (
     read_settings,
     resolve_project,
     write_project,
+    write_workspace_pin,
 )
 from agl.ports.errors import ConflictError, InputError, NotFoundError, exit_code_for
 from agl.ports.home_layout import (
@@ -737,8 +739,9 @@ def test_a_workspace_path_that_is_a_file_is_refused_instead_of_passing_for_a_wor
 
 # --- The pin read back, which is the whole of what writing it bought ------------------------------
 #
-# `make_workspace` writes the pin once and never refreshes it, so this reader is the only thing
-# that ever acts on a disagreement, and the states it has to tell apart are three rather than two.
+# `make_workspace` writes the pin and `write_workspace_pin` below is the only thing that moves it
+# again, so this reader acts on every disagreement either leaves, and the states it has to tell
+# apart are three rather than two.
 # A workspace an installed AGL made records a requirement; a workspace made in a bare checkout
 # records none, there being no version to write; and a workspace made by hand has no root file at
 # all. Only the first can disagree with anything, so the rule is one sentence - refuse where both
@@ -780,16 +783,17 @@ def test_a_workspace_this_agl_made_is_one_this_agl_runs_without_a_word(tmp_path:
         f"no metadata at all."
     )
 
-def test_a_workspace_another_agl_made_refuses_and_names_the_line_that_ends_it(
+def test_a_workspace_another_agl_made_refuses_and_names_the_command_that_ends_it(
     tmp_path: Path,
 ) -> None:
-    """Exit 4, both versions, the file, and the exact text that makes the two agree.
+    """Exit 4, both versions, the file, and the command that makes the two agree.
 
-    The message is asserted on the line it tells the operator to write and not merely on the words
-    "version" or "mismatch", because naming the fix is the whole of what this refusal is for: the
-    pin is never refreshed by anything AGL runs, so an operator who cannot find the key is stuck
-    with a command that refuses and no way through it. `_quoted` is what the fix line goes through
-    in `src/`, and a double-quoted TOML basic string is what is asserted here.
+    The message is asserted on the command it hands the operator and not merely on the words
+    "version" or "mismatch", because naming the fix is the whole of what this refusal is for: one
+    command moves that pin, and a refusal that did not name it would leave somebody with a command
+    that refuses and nothing to type next. The line `agl sync` writes is asserted beside it -
+    `_quoted` is what that line goes through in `src/`, and a double-quoted TOML basic string is
+    what comes out.
     """
     home = _home(tmp_path)
     _recording(home, f"{distribution.DISTRIBUTION}==0.0.0")
@@ -803,8 +807,11 @@ def test_a_workspace_another_agl_made_refuses_and_names_the_line_that_ends_it(
     assert f"{distribution.DISTRIBUTION}==0.0.0" in said
     assert running in said
     assert str(workspace_pyproject(home)) in said
+    assert "agl sync" in said, (
+        f"the refusal does not name the one command that ends it. What it said was: {said}"
+    )
     assert f'requires = "{running}"' in said, (
-        f"the refusal does not spell the line that ends it. What it said was: {said}"
+        f"the refusal does not spell the line that command writes. What it said was: {said}"
     )
 
 def test_a_workspace_with_no_project_file_above_it_records_nothing_to_disagree_with(
@@ -876,6 +883,243 @@ def test_a_requirement_that_is_not_a_string_is_refused_rather_than_read_past(
         check_workspace_pin(home)
 
     assert "tool.agl.requires" in str(raised.value)
+
+# --- The pin written again, which is the only rewrite in AGL --------------------------------------
+#
+# `write_workspace_pin` is the other side of the reader above and the one thing in the codebase
+# that moves that line. It is deliberately not part of `make_workspace`: creation is not
+# reconciliation, and the tests two sections up hold the creation to writing over nothing at all.
+# So what is asserted here is the pair of properties a rewrite has and a creation does not - that
+# the operator's own text survives it, and that a file whose shape the line edit cannot reach is
+# refused rather than half-written.
+#
+# `_version_pin` is the writer here as it is in `make_workspace`, so the round trip below is the
+# same textual identity `check_workspace_pin` compares on, asserted through both functions at once.
+
+def test_a_stale_pin_is_replaced_in_place_and_every_other_line_is_left_alone(
+    tmp_path: Path,
+) -> None:
+    """The rewrite is one line, and the assertion is the file with that line put back.
+
+    Reconstructing the original from the result is what says "one line": a re-render from
+    `make_workspace`'s own template would move the pin and pass any assertion about the pin, while
+    dropping the operator's tables and comments on the way. A workspace root is a file they are
+    meant to edit - uv reads its index and source settings out of tables beside AGL's own - so
+    everything that is not the one line has to come back byte for byte.
+    """
+    home = _home(tmp_path)
+    _recording(home, f"{distribution.DISTRIBUTION}==0.0.0")
+    root = workspace_pyproject(home)
+    root.write_text(
+        root.read_text(encoding="utf-8") + '\n# mine\n[tool.uv]\nindex-strategy = "first-index"\n',
+        encoding="utf-8",
+    )
+    before = root.read_text(encoding="utf-8")
+
+    write_workspace_pin(home)
+
+    stale = f"{distribution.DISTRIBUTION}==0.0.0"
+    written = _pin(home)
+    assert written is not None and written != stale
+    assert root.read_text(encoding="utf-8").replace(written, stale) == before
+
+def test_a_workspace_recording_no_pin_gains_the_table_and_the_line_together(tmp_path: Path) -> None:
+    """The shape a bare checkout leaves behind, completed by the first installed AGL to sync it.
+
+    `make_workspace` omits the whole `[tool.agl]` table where there is no version to write, so the
+    absent key and the absent header are one state rather than two - and a writer that inserted a
+    line under a header that was not there would produce a file naming a key at top level.
+    """
+    home = _home(tmp_path)
+    _recording(home, None)
+
+    write_workspace_pin(home)
+
+    assert _pin(home) == f"{distribution.DISTRIBUTION}=={distribution.installed_version()}"
+    assert _members(home) == ["workflows/*"]
+
+def test_a_workspace_already_pinned_to_this_agl_is_not_written_to_at_all(tmp_path: Path) -> None:
+    """Idempotent over the bytes, which is the only comparison that can tell a skip from a rewrite.
+
+    `agl sync` calls this on every invocation, so a writer that rewrote an already-correct file
+    would put the operator's workspace root through a rename every time they synced - for no
+    change at all, and with a window in which an interrupted one could lose it.
+    """
+    home = _home(tmp_path)
+    make_workspace(home)
+    root = workspace_pyproject(home)
+    root.write_text(
+        root.read_text(encoding="utf-8") + "# an operator's own line\n", encoding="utf-8"
+    )
+    before = _contents(home)
+
+    write_workspace_pin(home)
+
+    assert _contents(home) == before
+
+def test_an_agl_with_no_metadata_of_its_own_leaves_a_recorded_pin_where_it_is(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A bare checkout writes nothing, which is the same silence `check_workspace_pin` answers with.
+
+    The three available answers were to refuse the sync, to take the recorded pin away, and to
+    leave it. Refusing would make `agl sync` unusable in a checkout, which is where it is run
+    most - a development tree is exactly the place whose workspace needs installing. Taking it
+    away would disarm the guard permanently for every *installed* AGL that read the file
+    afterwards, and it would be a bare checkout that did it. So the pin is left: an AGL that
+    cannot name itself neither judges the recorded version nor replaces it, and that is the same
+    rule the reader keeps, read from the other side.
+
+    The arm is reached the way `tests/config/test_distribution.py` reaches it, by pointing
+    `DISTRIBUTION` at the import package's name for one test, so the lookup and its
+    `PackageNotFoundError` are the real ones and nothing is stubbed.
+    """
+    monkeypatch.setattr(distribution, "DISTRIBUTION", distribution.__name__.partition(".")[0])
+    home = _home(tmp_path)
+    _recording(home, "agents-gl==0.0.0")
+    before = _contents(home)
+
+    write_workspace_pin(home)
+
+    assert _contents(home) == before
+    assert distribution.UNINSTALLED not in workspace_pyproject(home).read_text(encoding="utf-8")
+
+def test_a_build_system_requires_above_agls_table_is_not_the_key_this_moves(tmp_path: Path) -> None:
+    """`requires` is not AGL's word alone, and the search that finds the line has to know it.
+
+    PEP 518 gives `[build-system]` a `requires` of its own, and a workspace root is a plausible
+    place for one to appear - so a writer that found the first `requires` in the file would
+    overwrite a build system's dependency list with a pin on AGL. The table's own line is asserted
+    intact beside the one that moved, because either alone would pass against that bug.
+    """
+    home = _home(tmp_path)
+    workflows_dir(home).mkdir(parents=True)
+    workspace_pyproject(home).write_text(
+        '[build-system]\nrequires = ["hatchling"]\n\n[tool.agl]\nrequires = "agents-gl==0.0.0"\n',
+        encoding="utf-8",
+    )
+
+    write_workspace_pin(home)
+
+    document = tomllib.loads(workspace_pyproject(home).read_text(encoding="utf-8"))
+    assert document["build-system"]["requires"] == ["hatchling"]
+    assert _pin(home) == f"{distribution.DISTRIBUTION}=={distribution.installed_version()}"
+
+def test_a_pin_spelled_where_the_line_edit_cannot_reach_it_is_refused_unwritten(
+    tmp_path: Path,
+) -> None:
+    """The composed text is parsed and read back before anything is written, and this is why.
+
+    TOML gives one key several spellings, and the line edit knows only the one AGL writes: a
+    `requires` under a `[tool.agl]` header. Written as a dotted key under `[tool]` it is the same
+    key to the reader and invisible to the writer, so appending a `[tool.agl]` table would produce
+    a file declaring that table twice - which is to say a file that no longer parses, over the
+    operator's own. The check is what turns that into a refusal, and the refusal names the key and
+    the line to leave behind, because an operator who cannot find it has a command that refuses
+    and no way through it.
+    """
+    home = _home(tmp_path)
+    workflows_dir(home).mkdir(parents=True)
+    root = workspace_pyproject(home)
+    root.write_text('[tool]\nagl.requires = "agents-gl==0.0.0"\n', encoding="utf-8")
+    before = root.read_bytes()
+
+    with pytest.raises(InputError) as raised:
+        write_workspace_pin(home)
+
+    said = str(raised.value)
+    assert root.read_bytes() == before
+    assert "tool.agl.requires" in said
+    assert f'requires = "{distribution.DISTRIBUTION}=={distribution.installed_version()}"' in said
+    assert exit_code_for(raised.value) == 2
+
+def test_the_mode_the_project_file_already_had_survives_the_rename_that_replaces_it(
+    tmp_path: Path,
+) -> None:
+    """The file is the operator's, and a rewrite is not the place its permissions change.
+
+    The replacement is written with `tempfile.mkstemp`, which opens at 0600 by definition, and
+    renamed over the original - so without carrying the mode across, every sync would quietly
+    narrow a file the operator owns. Asserted from a mode nothing here would produce by accident.
+    """
+    home = _home(tmp_path)
+    _recording(home, f"{distribution.DISTRIBUTION}==0.0.0")
+    root = workspace_pyproject(home)
+    root.chmod(0o640)
+
+    write_workspace_pin(home)
+
+    assert stat.S_IMODE(root.stat().st_mode) == 0o640
+
+def test_a_workspace_this_writer_re_pinned_is_one_the_reader_passes_without_a_word(
+    tmp_path: Path,
+) -> None:
+    """The round trip that is the whole point: a refusal ended, through both functions at once.
+
+    The comparison `check_workspace_pin` makes is textual, so writer and reader agreeing is a fact
+    about two spellings meeting rather than about a version number - and this is the pair that has
+    to meet for `agl sync` to be the answer to the refusal rather than one more thing to try.
+    """
+    home = _home(tmp_path)
+    _recording(home, f"{distribution.DISTRIBUTION}==0.0.0")
+    with pytest.raises(ConflictError):
+        check_workspace_pin(home)
+
+    write_workspace_pin(home)
+
+    check_workspace_pin(home)
+
+def _call_sites(node: ast.AST, name: str) -> list[ast.Call]:
+    """Every call to `name` under `node`, spelled bare or reached through a module attribute."""
+    return [
+        call
+        for call in ast.walk(node)
+        if isinstance(call, ast.Call)
+        and (
+            (isinstance(call.func, ast.Name) and call.func.id == name)
+            or (isinstance(call.func, ast.Attribute) and call.func.attr == name)
+        )
+    ]
+
+def test_only_the_sync_that_installs_ever_rewrites_the_workspace_pin_in_src() -> None:
+    """The one caller, read off the tree rather than off the prose in `src/` that asserts it.
+
+    What gives `check_workspace_pin` anything to refuse is that the pin is *not* kept current, so
+    a second caller of this writer - a re-pin folded into `make_workspace`, or one on the discovery
+    path - disarms that refusal permanently and leaves every test in this repository green. This
+    file's own included, which is why the assertion has to come from the source: every case above
+    that expects a refusal arranges its workspace root by hand through `_recording`, so none of
+    them would notice a creation that had started re-pinning.
+
+    The enclosing function is asserted beside the count, because moving the call out of
+    `api.sync_workspace` is the same defect wearing other clothes - a pin that moved with no
+    install behind it, leaving the workspace claiming an AGL its venv was never resolved against.
+    The two numbers are compared separately so that a call at module level, which no function would
+    hold, fails here rather than passing as an absence.
+    """
+    package = Path(__file__).resolve().parent.parent.parent / "src" / "agl"
+    writer = write_workspace_pin.__name__
+    holders: dict[str, list[str]] = {}
+    sites = 0
+    for module in sorted(package.rglob("*.py")):
+        tree = ast.parse(module.read_text(encoding="utf-8"))
+        sites += len(_call_sites(tree, writer))
+        named = [
+            node.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+            and _call_sites(node, writer)
+        ]
+        if named:
+            holders[str(module.relative_to(package))] = named
+
+    assert (sites, holders) == (1, {"api.py": ["sync_workspace"]}), (
+        f"{writer} is called {sites} time(s) in {package}, from {holders}, and the architecture "
+        f"is that `agl sync` moves that line and nothing else does - a claim the refusal in "
+        f"`check_workspace_pin` makes to the operator in so many words. A second caller costs "
+        f"that refusal its ability to fire at all, and no other test in this repository would go "
+        f"red over it."
+    )
 
 # --- One workflow inside that workspace, written once ---------------------------------------------
 #
@@ -1050,6 +1294,82 @@ def test_a_workflow_directory_that_cannot_be_made_says_so_rather_than_reporting_
         make_workflow(home, _TRIAGE, _GROUP)
 
     assert str(workflow_dir(home, _TRIAGE)) in str(raised.value)
+
+# --- What the two documents together never declare -----------------------------------------------
+
+# Every key uv reads a requirement out of, at whatever depth its table sits: `[project]`'s
+# `dependencies` and `optional-dependencies`, PEP 735's `[dependency-groups]`, and the `sources`
+# table `[tool.uv]` takes. `requires` is deliberately not among them - PEP 518 gives it to
+# `[build-system]`, and `[tool.agl]` gives it a second owner whose whole point is that it is *not*
+# a dependency. The listing of top-level tables below is what covers the build system's.
+_RESOLVED_KEYS: Final = frozenset(
+    {"dependencies", "optional-dependencies", "dependency-groups", "sources"}
+)
+
+def _keyed(document: Mapping[str, object], prefix: str = "") -> Iterator[tuple[str, object]]:
+    """Every key in a parsed document with its dotted path, tables walked to whatever depth."""
+    for key, value in document.items():
+        dotted = f"{prefix}{key}"
+        yield dotted, value
+        if isinstance(value, dict):
+            yield from _keyed(value, f"{dotted}.")
+
+def test_neither_the_workspace_root_nor_a_scaffolded_workflow_declares_a_dependency_on_agl(
+    tmp_path: Path,
+) -> None:
+    """A synced workspace never resolves AGL from an index, and this is where that is decided.
+
+    **`[tool.agl] requires` is not a dependency and this is the test that says so.** It is AGL's
+    own private record of which AGL made the workspace, written under the table
+    `[tool.<name>]` reserves for one tool and every other reader walks past - uv included. The two
+    documents `agl new` leaves behind declare no dependency at all between them: the workspace root
+    has no `[project]` table, being a virtual uv workspace root, and the scaffold declares a name,
+    a version and one entry point. So `uv sync` resolves `agents-gl` from nowhere, and the venv it
+    builds holds every package a workflow declares except the `agl` its first line imports.
+
+    That gap is closed by `config/workspace_path.py`'s `write_editor_pth`, which puts the running
+    AGL's own directory into the venv rather than a requirement into a file the operator owns. The
+    assertion here is the half that would break if a later stage reached for the other answer: a
+    dependency table added to either document, under any spelling and at any depth.
+
+    Nothing below runs `uv sync` - no test may - so what is measured is the documents AGL writes,
+    which is what a resolution would be reading.
+    """
+    home = _home(tmp_path)
+    make_workspace(home)
+    make_workflow(home, _TRIAGE, _GROUP)
+    documents = {
+        path: tomllib.loads(path.read_text(encoding="utf-8"))
+        for path in (workspace_pyproject(home), workflow_pyproject(home, _TRIAGE))
+    }
+
+    for path, document in documents.items():
+        declared = [
+            dotted for dotted, _ in _keyed(document) if dotted.rpartition(".")[2] in _RESOLVED_KEYS
+        ]
+        assert declared == [], (
+            f"{path} declares {declared}, which is a table uv resolves out of. Nothing AGL writes "
+            f"into an operator's workspace may declare a dependency: a workflow is imported from "
+            f"where it was written and AGL is on the import path rather than installed onto it."
+        )
+        assert "build-system" not in document, (
+            f"{path} has grown a `[build-system]`, whose `requires` is resolved before anything "
+            f"else in the file. It would also make this document a package uv has to build."
+        )
+
+    naming = {
+        f"{path}:{dotted}"
+        for path, document in documents.items()
+        for dotted, value in _keyed(document)
+        if isinstance(value, str) and distribution.DISTRIBUTION in value
+    }
+    pinned = _pin(home)
+    expected = set() if pinned is None else {f"{workspace_pyproject(home)}:tool.agl.requires"}
+    assert naming == expected, (
+        f"{sorted(naming)} name AGL's distribution, and the only place that may is the workspace "
+        f"root's `tool.agl.requires`. A second one is a resolver being told to fetch AGL from an "
+        f"index, which is the thing this pair of documents exists not to do."
+    )
 
 # --- A trees root inside the repository, refused -------------------------------------------------
 #

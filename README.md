@@ -12,6 +12,12 @@ that workspace declares. AGL reads workflows from there and from nowhere else: t
 entry-point group is the table key each workflow directory's own pyproject.toml writes, rather than
 a group a distribution installed beside AGL registers into.
 
+A workflow that imports nothing beyond `agl` needs no environment of its own and runs as it stands.
+One declaring third-party dependencies in its own pyproject.toml needs `agl sync`, which installs
+what your workspace's workflows declare — their dependencies and never the workflows themselves, so
+importing a workflow still resolves from the source you are editing. It requires `uv` on your PATH,
+and nothing runs it for you: `agl new` stays offline.
+
 ## Install
 
 ```bash

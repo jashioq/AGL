@@ -24,11 +24,14 @@ from agl.adapters.routing import RoutingAgentRunner
 from agl.adapters.shell.fake import FakeVerifier
 from agl.adapters.shell.verifier import ShellVerifier
 from agl.adapters.system_clock import ManualClock, SystemClock
+from agl.adapters.uv.fake import FakeSyncer
+from agl.adapters.uv.syncer import UvSyncer
 from agl.config.schema import AgentSettings, Project, Settings
 from agl.ports.agent import AgentOutcome, AgentRunner, Provider, ToolResult
 from agl.ports.errors import UpstreamUnavailable
 from agl.ports.run import JsonValue
 from agl.ports.store import Store
+from agl.ports.sync import Syncer
 from agl.ports.terminal import Terminal
 from agl.ports.tree_layout import TreesRoot
 from agl.sdk._engine.services import Services
@@ -41,8 +44,10 @@ __all__ = [
     "ScriptedTerminal",
     "Services",
     "answering",
+    "fake_syncer",
     "fakes",
     "real",
+    "real_syncer",
 ]
 
 FAKE_BUILD: Final = "agl-fake-build"
@@ -127,6 +132,15 @@ def fakes(
 
 def answering(responses: Sequence[Press | int] = ()) -> ScriptedTerminal:
     return ScriptedTerminal(responses)
+
+# Outside both bundles, and beside `answering` for the same reason: a sync addresses the operator's
+# workspace rather than a run, so there is no project, no repository and no trees root in scope -
+# exactly as there is none for `agl new` or `agl workflows`.
+def real_syncer() -> Syncer:
+    return UvSyncer()
+
+def fake_syncer() -> FakeSyncer:
+    return FakeSyncer()
 
 def _claude_script(agent: Agent | None) -> claude_fake.Script | None:
     if agent is None:
