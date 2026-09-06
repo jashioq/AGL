@@ -1,0 +1,21 @@
+name: publish
+
+# Manual only. The branch is the "Use workflow from" selector in the Run workflow dialog, and
+# GitHub restricts workflow_dispatch to accounts with write access - a fork's PR branch is never
+# in that list.
+on:
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    # PyPI trusted publishing: the OIDC token this mints is the credential, so there is no API
+    # token in the repository's secrets to leak or rotate.
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv build
+      - uses: pypa/gh-action-pypi-publish@release/v1
