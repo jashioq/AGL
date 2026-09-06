@@ -1,8 +1,8 @@
 """The grammar: `agl resume <label>`, and the two things it deliberately refuses to carry.
 
 `tests/test_resume.py` drives `api.resume` from the library side, where every refusal it owes is
-asserted. This module drives the real entry point for what argv means, and there are only three
-claims to make about a command whose whole grammar is one positional:
+asserted. This module drives the real entry point for what argv means, and there are four claims to
+make about a command whose whole grammar is one positional:
 
 **It holds nothing else.** `resume` takes the label only; params come from `run.json`. The pin is
 read off the parser object rather than off a sentence - one positional and no flag but `-h` - which
@@ -19,6 +19,13 @@ took, whose answer is not "unrecognised argument" but where those flags went.
 **It stays a dumb command.** One `api` name, read off the module's own source, because the
 repair is not that the file is short - it is that everything which decides anything is one call
 away.
+
+**It says what it replayed, and only when it replayed something.** The count comes back from `api`
+the way `Cleared` does and the command turns it into a line on stderr, so the last section here
+asserts that line whole - both spellings of it - and asserts the silence at nought from the `run`
+side, which is where the same helper is reached with a count that is structurally zero. That is why
+this module grows a workflow that takes steps: `flagged` records its params and touches no ledger,
+so nothing else here could tell a replay from a walk.
 
 The bundle is substituted through `main`'s one seam and nothing is monkeypatched, exactly as
 `tests/cli/test_main.py` does it: `compose=` is a keyword-only parameter whose default is the real
@@ -37,11 +44,13 @@ import pytest
 from agl.cli import main
 from agl.cli.commands import resume as resume_command
 from agl.config import container, registry, sources
+from agl.ports.agent import Claude, Restriction
 from agl.ports.home_layout import RunScope
 from agl.ports.ids import ProjectName, RunLabel
 from agl.ports.tree_layout import TreesRoot
 from agl.sdk.params import RefusingParser, arg
-from agl.sdk.workflow import Run, workflow
+from agl.sdk.roles import Role, role
+from agl.sdk.workflow import Run, Stop, workflow
 
 # `agl init` is the one command that reads `settings` and `cwd`, and no invocation below is one -
 # but neither field is optional (`cli/main.py` argues why), so both carry a real value nothing here
@@ -67,17 +76,55 @@ class FlaggedParams:
 # imports a module and reads an attribute in it, so a workflow declared in a test is unreachable.
 flagged_with: Final[list[FlaggedParams]] = []
 
-@workflow(version="1.1")
+@workflow
 async def flagged(run: Run[FlaggedParams]) -> None:
     """Records what it was given, which is what makes "the resume was handed the record's params"
     visible from the argv side without this module reading a store."""
     flagged_with.append(run.params)
 
+@role(model=Claude.SONNET)
+def early() -> Role[None]:
+    """The first of two read-only steps, and the one entry a halted run leaves on the ledger."""
+    return Role(
+        name="early",
+        instructions="do the early thing",
+        restrictions={Restriction.NO_VCS_WRITES},
+    )
+
+@role(model=Claude.SONNET)
+def late() -> Role[None]:
+    """The second, differing in the terms that make it a second address and a second digest."""
+    return Role(
+        name="late",
+        instructions="do the late thing",
+        restrictions={Restriction.NO_VCS_WRITES},
+    )
+
+class HaltedHere(Stop):
+    """A workflow ending itself between two steps, which is a run that stopped with work left.
+
+    A `Stop` rather than a crash because `main` reports one on stdout and exits 7, so the stderr
+    the replay line is asserted on afterwards holds nothing this module did not put there.
+    """
+
+# Armed before the invocation that is meant to stop after one step, and cleared before the resume.
+# Module level because the workflow has to be: `EntryPoint.load` sees no local of a test function.
+halt: Final[list[str]] = []
+
+@workflow
+async def stepping(run: Run[FlaggedParams]) -> None:
+    """Two read-only steps with a place between them to stop, which is what leaves a ledger with
+    one entry on it for a resume to replay - the state `agl resume` exists for."""
+    await run.step(early())
+    if halt:
+        raise HaltedHere(halt[0])
+    await run.step(late())
+
 def _point(name: str) -> EntryPoint:
     """A registration line, pointed at this module: a name, a `module:attr`, and a group."""
     return EntryPoint(name=name, value=f"{__name__}:{name}", group=registry.GROUP)
 
-POINTS: Final = (_point("flagged"),)
+POINTS: Final = (_point("flagged"), _point("stepping"))
 
 def _fakes(tmp_path: Path) -> container.FakeServices:
     """Target #8's deployment, seeded so `History` has a default ref and a commit to resolve."""
@@ -274,3 +321,77 @@ def test_the_run_command_still_carries_its_tail(tmp_path: Path) -> None:
 
     assert flagged_with == [FlaggedParams(request="add oauth", concurrent=3)]
     assert asyncio.run(harness.services.store.read_record(SCOPE)) is not None
+
+# --- what a replay says, and what the run that left the ledger does not ---------------------------
+
+def test_a_resume_that_replayed_two_steps_says_so_on_stderr_and_names_the_clear(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The line, whole, for the run that had nothing left to do: every step came off the ledger.
+
+    **On stderr, and the stream is the claim.** `cli/commands/workflows.py` writes the rule down
+    at the line that obeys it: stdout carries what a machine consumes, which is why a name goes
+    there and a broken directory does not. `resume 'auth' finished` is the line a script reads;
+    this one is a note to whoever is watching, so it goes beside the refusals rather than into it.
+
+    **`agl clear auth` is quoted in the form that command actually takes**, a required positional,
+    because it is the answer to the question the count raises: the ledger is why this cost nothing,
+    and taking it away is how the operator gets the work done again.
+    """
+    halt.clear()
+    harness = _fakes(tmp_path)
+    assert _main(harness, "run", "stepping", "-n", "auth", "-r", "x") == 0
+    capsys.readouterr()
+
+    assert _main(harness, "resume", "auth") == 0
+
+    captured = capsys.readouterr()
+    assert captured.err == "replayed 2 steps from cache - `agl clear auth` removes it.\n"
+    assert captured.out == "resume 'auth' finished\n"
+
+def test_a_resume_that_replayed_one_step_counts_it_in_the_singular(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The shape a resume is typed for: a run stopped with work left, and one step replayed.
+
+    The count is invocations of `run.step` served from the journal, so a run that got one step in
+    leaves exactly one to replay, and the second step is paid for here rather than read back.
+    Written in the singular because a number and a plural that disagree read as a bug in the
+    number, and this is the count an interrupted first run most often leaves.
+    """
+    halt.clear()
+    halt.append("stopped between the two steps")
+    harness = _fakes(tmp_path)
+    assert _main(harness, "run", "stepping", "-n", "auth", "-r", "x") == 7
+    halt.clear()
+    capsys.readouterr()
+
+    assert _main(harness, "resume", "auth") == 0
+
+    assert capsys.readouterr().err == "replayed 1 step from cache - `agl clear auth` removes it.\n"
+
+def test_a_run_says_nothing_because_a_label_with_a_ledger_is_refused_not_replayed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Silence at zero, and the reason `agl run` is always at zero - which is not the verb.
+
+    `cli/commands/run.py` reports the same count through the same helper, so nothing here is
+    resume-only. What keeps its number at nought is `api.run`'s own refusal: a label with a record
+    beside it is a `ConflictError` pointing at `agl resume` or `agl clear`, and a label without one
+    has no entry any digest could hit. So a run walks a ledger it wrote itself and replays none of
+    it, and the line does not appear - which is what makes its appearance mean something.
+    """
+    halt.clear()
+    harness = _fakes(tmp_path)
+
+    assert _main(harness, "run", "stepping", "-n", "auth", "-r", "x") == 0
+
+    first = capsys.readouterr()
+    assert first.err == ""
+    assert first.out == "run 'auth' finished\n"
+
+    assert _main(harness, "resume", "auth") == 0
+    capsys.readouterr()
+
+    assert _main(harness, "run", "stepping", "-n", "auth", "-r", "x") == 4
+    assert "replayed" not in capsys.readouterr().err

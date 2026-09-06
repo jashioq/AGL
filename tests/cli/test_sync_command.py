@@ -1,20 +1,11 @@
-"""`agl sync`: the workspace's dependencies installed, and the pin moved onto the AGL doing it.
+"""`agl sync`: the dependencies an operator's workflows declare, installed beside them.
 
-Two things happen here and only one of them is the verb. Installing is uv's half and reaches this
-suite as a scripted answer, because a test that ran uv would need an index; the half that is AGL's
-own is the **re-pin**, and that is what most of this file is about. `config/toml_file.py`'s
-`check_workspace_pin` refuses a run whose workspace records a different AGL and names this command
-as the way through; `agl sync` is the only thing in the codebase permitted to rewrite the line, so
-that refusal is promising something only this file can hold. The acceptance criterion below is
-therefore not "the syncer was called" - it is that a workspace which refused a run before the
-command refuses none after it.
+Installing is uv's half and reaches this suite as a scripted answer, because a test that ran uv
+would need an index. What is AGL's own is the workspace the installer is pointed at: it is made
+where it is absent, so an operator who has typed nothing else meets a sync rather than the
+adapter's refusal, and it is never written over, the file being theirs once it exists.
 
-**The order matters and is asserted rather than assumed.** The workspace is made, then re-pinned,
-then synced. A sync that installed first would leave the refusal standing over a workspace whose
-packages were now present, which is the worst of the three orders: work done, and the command that
-did it still refusing.
-
-**A fourth step follows the install and only a finished one.** `write_editor_pth` puts the running
+**A third step follows the install and only a finished one.** `write_editor_pth` puts the running
 AGL within reach of the venv uv just built, which is the one thing a workflow imports that nothing
 installs there. It is the only step a refusal skips, and both halves of that are asserted below.
 
@@ -36,9 +27,8 @@ import agl
 from agl.adapters.uv.fake import FakeSyncer
 from agl.cli import main
 from agl.cli.commands import sync as sync_command
-from agl.config import distribution, sources
-from agl.config.toml_file import check_workspace_pin
-from agl.ports.errors import ConflictError, NotFoundError, UpstreamUnavailable
+from agl.config import sources
+from agl.ports.errors import NotFoundError, UpstreamUnavailable
 from agl.ports.home_layout import (
     AglHome,
     workflows_dir,
@@ -55,11 +45,6 @@ from agl.sdk.params import RefusingParser
 # optional (`cli/main.py` argues why), so it carries a real path nothing here opens.
 ELSEWHERE: Final = Path("/nowhere")
 
-# What a workspace an older AGL made records, and the string every re-pin below has to displace.
-STALE: Final = f"{distribution.DISTRIBUTION}==0.0.0"
-
-RUNNING: Final = f"{distribution.DISTRIBUTION}=={distribution.installed_version()}"
-
 AGREED: Final = SyncOutcome(synced=True, status=0, output="")
 
 # The `lib/` subdirectory this interpreter installs into, which is the one `agl sync` addresses:
@@ -67,21 +52,14 @@ AGREED: Final = SyncOutcome(synced=True, status=0, output="")
 SEGMENT: Final = Path(sysconfig.get_path("purelib")).parent.name
 
 class Recording(Syncer):
-    """A syncer that answers as scripted and keeps what it was handed: the path, and the file.
-
-    The project file is read *inside* `sync`, which is the whole of what this class adds over
-    `FakeSyncer`: the pin as the installer saw it is the only evidence of the order the three
-    steps ran in, and by the time a test looks at the file afterwards both orders agree.
-    """
+    """A syncer answering as scripted and keeping what it was asked, which `FakeSyncer` does not."""
 
     def __init__(self, outcome: SyncOutcome = AGREED) -> None:
         self.asked: list[Path] = []
-        self.saw: list[str] = []
         self._outcome = outcome
 
     async def sync(self, workspace: Path) -> SyncOutcome:
         self.asked.append(workspace)
-        self.saw.append((workspace / "pyproject.toml").read_text(encoding="utf-8"))
         return self._outcome
 
 class Raising(Syncer):
@@ -114,15 +92,6 @@ def _main(home: AglHome, syncer: Syncer, *argv: str) -> int:
         ),
     )
 
-def _recording(home: AglHome, requirement: str) -> None:
-    """A workspace whose root file records `requirement` - what an older AGL would have left."""
-    workflows_dir(home).mkdir(parents=True)
-    workspace_pyproject(home).write_text(
-        f'[tool.uv.workspace]\nmembers = ["workflows/*"]\n\n'
-        f'[tool.agl]\nrequires = "{requirement}"\n',
-        encoding="utf-8",
-    )
-
 def _installed(home: AglHome) -> Path:
     """The venv uv would have built, stood up by hand: `FakeSyncer` starts no process at all."""
     workspace_site_packages(home, SEGMENT).mkdir(parents=True)
@@ -134,47 +103,7 @@ def _sync_parser() -> RefusingParser:
     commands = root.add_subparsers(dest="command", required=True, parser_class=RefusingParser)
     return sync_command.declare(commands)
 
-# --- the acceptance criterion ---------------------------------------------------------------------
-
-def test_a_workspace_that_refused_a_run_before_this_sync_refuses_none_after_it(
-    tmp_path: Path,
-) -> None:
-    """The criterion in its own words, and it is the reason this command exists at all.
-
-    `check_workspace_pin` is asked before and after, and the before half is asserted so that the
-    after half means something: a test that only called it afterwards would pass identically
-    against a workspace that had never disagreed. What ends the refusal is the line `agl sync`
-    rewrote, and nothing else in AGL rewrites it - `make_workspace` writes it once and skips a
-    file that is already there, which is the property `tests/config/test_toml_file.py` holds. That
-    refusal names this command, so what fails here is a promise it makes rather than a convenience.
-    """
-    home = _home(tmp_path)
-    _recording(home, STALE)
-    with pytest.raises(ConflictError):
-        check_workspace_pin(home)
-
-    assert _main(home, FakeSyncer(), "sync") == 0
-
-    check_workspace_pin(home)
-
-def test_the_pin_is_moved_before_the_installer_is_asked_to_do_anything(tmp_path: Path) -> None:
-    """The order of the three steps, read off the file as the syncer saw it rather than after.
-
-    A sync that installed first and re-pinned afterwards passes every other test in this file: the
-    pin ends up moved either way. What it would cost is the case where uv refuses - the command
-    exits non-zero with the workspace's packages untouched *and* the refusal still standing, so an
-    operator who came here to end a version mismatch has neither half of what they asked for.
-    """
-    home = _home(tmp_path)
-    _recording(home, STALE)
-    syncer = Recording()
-
-    assert _main(home, syncer, "sync") == 0
-
-    assert RUNNING in syncer.saw[0], (
-        f"the workspace file the installer was handed still read {syncer.saw[0]!r}. The re-pin "
-        f"happens first, so that a refused install leaves the mismatch ended anyway."
-    )
+# --- what the installer is pointed at ---------------------------------------------------------
 
 def test_the_installer_is_handed_the_workspace_directory_and_not_its_project_file(
     tmp_path: Path,
@@ -213,10 +142,10 @@ def test_a_sync_where_no_workspace_exists_makes_one_rather_than_reporting_it_mis
     assert workspace_pyproject(home).is_file()
     assert workflows_dir(home).is_dir()
 
-def test_a_sync_over_a_workspace_this_agl_made_leaves_its_file_byte_for_byte(
+def test_a_sync_over_a_workspace_that_already_exists_leaves_its_file_byte_for_byte(
     tmp_path: Path,
 ) -> None:
-    """A workspace already pinned to this AGL is not rewritten, and the bytes are the assertion.
+    """A workspace that is already there is not rewritten, and the bytes are the assertion.
 
     The paths would look identical either way, which is why this is over the contents: the operator
     owns that file once it exists, and a command that rewrote it on every invocation would be one
@@ -234,34 +163,10 @@ def test_a_sync_over_a_workspace_this_agl_made_leaves_its_file_byte_for_byte(
 
     assert edited.read_bytes() == before
 
-def test_the_operators_own_lines_survive_a_re_pin_of_the_one_line_agl_owns(
-    tmp_path: Path,
-) -> None:
-    """The rewrite is one line and not a re-render, asserted on text AGL never writes.
-
-    A re-pin that composed the file from `make_workspace`'s own template would move the pin and
-    pass the acceptance test above while deleting every table, comment and glob the operator had
-    put there - and a workspace root is a file they are meant to edit, uv reading its index and
-    source settings out of tables beside AGL's own.
-    """
-    home = _home(tmp_path)
-    _recording(home, STALE)
-    root = workspace_pyproject(home)
-    mine = '\n# mine\n[tool.uv]\nindex-strategy = "unsafe-best-match"\n'
-    root.write_text(root.read_text(encoding="utf-8") + mine, encoding="utf-8")
-
-    assert _main(home, FakeSyncer(), "sync") == 0
-
-    kept = root.read_text(encoding="utf-8")
-    assert "# mine" in kept
-    assert 'index-strategy = "unsafe-best-match"' in kept
-    assert STALE not in kept
-    assert RUNNING in kept
-
 def test_a_finished_sync_leaves_the_workspace_venv_naming_the_agl_that_ran_it(
     tmp_path: Path,
 ) -> None:
-    """The fourth step, and the reason it is here: nothing installs AGL into that venv.
+    """The third step, and the reason it is here: nothing installs AGL into that venv.
 
     `agl new` writes a workflow whose first line imports `agl.sdk`, and neither the workspace root
     nor the scaffold declares AGL as a dependency - `tests/config/test_toml_file.py` holds that,

@@ -47,10 +47,9 @@ defaults once into an immutable object, `toml_file.py` is the only module that k
 **`container.py` is the only module that constructs an adapter** — with `real_syncer` and
 `fake_syncer` standing outside both service bundles beside `answering`, because a sync addresses
 the operator's workspace and resolves no project, so there is no repository and no trees root for
-one to sit in. `toml_file.py` both writes the workspace pin and is the only thing that reads it
-back, and it renders `agl new`'s scaffold from string constants rather than from a template file: a
-real entry-point table checked in here is what `tests/test_measurable_targets.py`'s declaration scan
-exists to fire on.
+one to sit in. `toml_file.py` renders `agl new`'s scaffold from string constants rather than from a
+template file: a real entry-point table checked in here is what
+`tests/test_measurable_targets.py`'s declaration scan exists to fire on.
 
 One module in that layer needs more than a clause. **`workspace_path.py` is the only module in
 `src/` that writes to `sys.path`**, and `extend` appends two entries rather than one, in this order
@@ -81,10 +80,16 @@ namespace, calls `api` and turns what comes back into output and an exit status;
 decides anything is one call away. So `clear` names one `api` function rather than a worktree walk
 and a `shutil.rmtree` past the `Store` port, `init` one rather than build-tool detection and TOML
 rendering, `new` one rather than a directory tree and two rendered documents, `sync` one rather
-than an argv for an installer and a line edit of the operator's own project file, and `workflows`
-two only because the listing and the help are two operations — one of them imports a package and
-the other must never. Each suite under `tests/cli/` scans its own command's source for the `api.`
-names it reaches, so a use case moving back into the CLI fails a test instead of passing review.
+than an argv for an installer, and `workflows` two only because the listing and the help are two
+operations — one of them imports a package and the other must never. **Which stream a line goes to
+is part of that turning**: what a machine consumes goes to stdout, and a note about it goes to
+stderr. So `workflows` prints a broken directory's reason on stderr, a name on stdout being a name
+`agl run` takes, and `run` and `resume` print `replayed <n> steps from cache` there for the same
+reason — the count arriving from `api` as a `Replayed`, the way `Cleared` does, rather than being
+worked out by the command. That line is silent at nought, every first run having replayed nothing,
+so its presence is the report. Each suite under `tests/cli/` scans its own command's source for the
+`api.` names it reaches, so a use case moving back into the CLI fails a test instead of passing
+review.
 
 **`api.py`** — AGL's operations, callable without a terminal: `run`, `resume`, `clear`, `init`,
 `new_workflow`, `list_workflows`, `workflow_help`, `sync_workspace`. The last is the odd one out
@@ -111,6 +116,26 @@ declaration rather than the directory's own, and the workspace sits on this proc
 so a workflow directory imports as a top-level package named after itself. A workflow builds on
 `sdk`; `ports` sits below it and is permitted, and the authoring surface re-exports what a workflow
 speaks.
+
+**One line of that project file is read by AGL as well, and it is the only version bound AGL has.**
+`[project] dependencies` carries `agents-gl>=<the version that scaffolded the workflow>`, which is
+what `agl new` writes, and `config/registry.py` reads it out of the same document on the same pass
+that reads the declaration. What it buys is one refusal in one place: a workflow written against an
+AGL this is not is refused **before `registry.load` imports its module**, naming the bound and the
+running version, where the import would instead have failed on whichever name moved — inside the
+operator's own file, about a symbol rather than about a version. `config/distribution.py` owns the
+comparison and it is `packaging`'s rather than one of version *text*, `0.0.10` being above `0.0.2`
+as versions and below it as strings. Three states are silence and each would otherwise be a false
+refusal: a workflow declaring no bound at all, which is every one written before this and every one
+written by hand; an entry that will not parse or that carries an environment marker, both of which
+are the installer's to answer for; and an AGL running from a source tree, which has no version to
+compare and would otherwise refuse every workflow in the workspace at once. An unmet bound is not a
+`BrokenWorkflow` — that directory declared a workflow, so the name stays in `agl workflows`'
+listing, which promises what a workspace declares rather than what would load. The price is that
+`dependencies` is a table uv resolves, so a sync over the workspace fetches `agents-gl` from an
+index into the venv beside the workflows; it changes no import, because `config/workspace_path.py`
+appends and the running AGL keeps resolving from the entry it already resolved from, whatever that
+venv comes to hold under the name.
 
 ## The dependency rule
 
@@ -147,6 +172,15 @@ deliberate: the two SDKs are unconditional base dependencies, present in every i
 contract is the only thing keeping each one to its own adapter package; the Codex CLI is a binary
 installed separately and resolved at preflight, so it has no import statement for a contract to
 hold.
+
+A third entry in `[project] dependencies` is neither a vendor SDK nor a binary. `packaging` is what
+`config/distribution.py` compares a workflow's declared bound on AGL with, PEP 440 being a grammar
+rather than an ordering of text: there is no endpoint behind it, nothing to contain, and this
+contract naming it would forbid the one import that has to exist. `vendor_drift` in
+`tests/test_contract_listings.py` is what keeps that from being a hole — it reads
+`[project] dependencies` against this contract's forbidden side and holds `packaging` in
+`NOT_A_VENDOR` with the reason it is not one, so a fourth entry is argued about there before
+anything here changes.
 
 ## The terminal
 
@@ -379,45 +413,21 @@ value and never calls the worker, so an effect that is not a file in the checkou
 a write to `$HOME`, a database row — happens twice on a miss and not at all on a hit. The ledger
 holds a value and a head, not what the world looked like.
 
-**Bump `@workflow(version=…)` when a workflow's shape changes.** `api.resume` compares the version
-the workflow in the workspace now declares against the one stamped in `run.json` and refuses a
-mismatch rather than migrating — the only thing between edited code and a ledger replayed into
-reordered steps. Edits reaching a fingerprint term merely re-run those steps; inserting, removing
-or reordering steps without a bump is silently wrong.
-
-**The workspace pin moves in exactly one place, and is checked only where a workflow is about to
-run.** `config/toml_file.py` writes `[tool.agl] requires = "agents-gl==<version>"` into the
-workspace's own `pyproject.toml` when `make_workspace` creates it, and `write_workspace_pin` moves
-that one line afterwards — a targeted line edit and not a re-render, a workspace root being a file
-the operator keeps their own uv tables in. It is AGL's private record and no installer reads it: uv
-walks past a `[tool.<name>]` table it does not own, and the workspace root declares no `[project]`,
-so nothing a sync does resolves `agents-gl` from anywhere. `api.sync_workspace` is that rewrite's
-one caller in `src/`, and the single caller is what leaves `check_workspace_pin` room to fire — a
-pin refreshed by anything a run does could never disagree with the AGL reading it, so the two are
-one decision. `check_workspace_pin` is that refusal, and it has the shape of the version rule
-above: a recorded version against a running one, refused rather than migrated.
-`api._checked_discovery` asks it exactly where the workspace is walked in order to spend on what is
-found there — `api.run` and `api.resume`, before either has bought anything — and nowhere else;
-`list_workflows`, `workflow_help`, `clear`, `init`, `new_workflow` and `sync_workspace` never
-refuse over it, none of them running a workflow, which is what the refusal's own closing sentence
-promises the operator. `sync_workspace` least of all: it is the command that refusal tells the
-operator to type, so a refusal inside it would be a loop with nothing on the other side of it.
-
-Both ways of getting it wrong are quiet, and both are the two halves of `sync_workspace` coming
-apart. **Re-pin without installing** and the workspace records the AGL running now over a venv
-still holding whatever the last one resolved: every run gets past the guard, and the thing the
-guard was there to stop — a workflow written against another `agl.sdk`, spending agent turns before
-anything notices — now happens with nothing left to notice it. **Install without re-pinning**
-spends no money and is the half an operator has to report, because they cannot get out of it: uv
-installs exactly what was asked for and says it finished, the next `agl run` refuses with the same
-message naming `agl sync` as the way through, and the answer to the refusal is the command they
-just ran. Moving the rewrite anywhere else is the first of those wearing the second's clothes, and
-every test in this repository stays green through it — which is why
-`tests/config/test_toml_file.py::test_only_the_sync_that_installs_ever_rewrites_the_workspace_pin_in_src`
-reads the tree for that caller rather than trusting the sentence above, and why
-`tests/cli/test_sync_command.py` holds the other half by asking the reader before and after one
-`agl sync`. Drop the check from `run` and neither half matters: a workflow written against another
-`agl.sdk` runs against this one, and what that spends before anything notices is agent turns.
+**A resume finishes against the files the run was recorded by.** `api.run` digests every file of
+the workflow's own directory — `config/workflow_files.py`, `__pycache__` left out because the
+import that loads a workflow writes bytecode into the directory about to be hashed — and stamps
+that map into `run.json` as `workflow_digests`; `api.resume` measures the directory again, refuses
+a difference rather than migrating it, and names the files that changed, were added or are gone,
+five per kind before it starts counting. That refusal is the only thing between edited code and a
+ledger replayed into reordered steps: an edit reaching a fingerprint term merely re-runs those
+steps, while inserting, removing or reordering them is silently wrong. What it reads is the
+operator's own directory and not a number an author has to remember to move, and the price is the
+other direction — a comment added to a prompt, or a `[project] version` bumped in the file that
+declares the workflow, refuses a resume that would have replayed correctly, which
+`tests/config/test_workflow_files.py` writes down as a decision rather than leaving it to be
+discovered. A caller handing its own entry points over walked no workspace and read its workflow
+out of no directory, so its map is empty at both ends and the comparison passes; `sdk/params.py`'s
+own refusal is what still stands behind it there.
 
 **Preflight's registry scan is best-effort; containment at every step is the guarantee.**
 `sdk/_engine/preflight.py`'s `check` runs once, before the record is written and before anything is
@@ -512,11 +522,15 @@ The reasoning is the point — without it these get re-proposed.
   could assert about without pinning the decision it declines to make.
 - **No CLI positionals.** `agl run <workflow>` already occupies that slot, so `arg()` refuses a
   flagless field where it is written rather than at the parse that would have gone wrong.
-- **`@workflow` takes `version` and nothing else.** `params=`, `name=` and `roles=` each restated
-  something the framework could already read, and the copy is the half free to be wrong — `Run` is
-  covariant, so a `@workflow(params=SomeParams)` over an `async def wf(run: Run)` annotated with a
-  *different* params type type-checked fine, the decorator's copy and the signature's disagreeing in
-  silence.
+- **`@workflow` takes nothing at all and is written bare.** `params=`, `name=` and `roles=` each
+  restated something the framework could already read, and the copy is the half free to be wrong —
+  `Run` is covariant, so a `@workflow(params=SomeParams)` over an `async def wf(run: Run)` annotated
+  with a *different* params type type-checked fine, the decorator's copy and the signature's
+  disagreeing in silence. `version=` was the last one out and went the other way: nothing in `src/`
+  ever read it, a resume being refused by the digests of the workflow's own directory instead.
+  `@workflow()` is therefore the one wrong spelling left, and `fn` carries a default it is never
+  legitimately called with so that the refusal names the bare spelling rather than arriving as
+  Python's own `TypeError` about a missing argument.
 - **No fan-out or parallelism helper.** The framework never spawns a task for a workflow; steps
   serialise within a namespace, so real concurrency is more worktrees, and a helper would wrap
   `asyncio.TaskGroup` while owning nothing.

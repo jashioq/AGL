@@ -13,7 +13,7 @@ __all__ = ["JsonValue", "RunSpec", "WireShape", "checked_text", "wire_moment"]
 type JsonValue = None | bool | int | float | str | list[JsonValue] | dict[str, JsonValue]
 
 _WIRE_KEYS: Final = (
-    "workflow", "workflow_version", "label", "base_ref", "base_sha", "branch", "params",
+    "workflow", "workflow_digests", "label", "base_ref", "base_sha", "branch", "params",
     "created_at",
 )
 
@@ -32,6 +32,9 @@ _STORE_REFUSES: Final = (
     "so the store refuses the write and this refuses it here, where the caller still knows what "
     "it handed over"
 )
+
+_PARAM_KEY: Final = "the param key"
+_WORKFLOW_FILE: Final = "the workflow file"
 
 @dataclass(frozen=True, slots=True)
 class WireShape:
@@ -116,7 +119,7 @@ def wire_moment(moment: datetime) -> str:
 class RunSpec:
     workflow: str
 
-    workflow_version: str
+    workflow_digests: Mapping[str, str]
 
     label: RunLabel
 
@@ -132,13 +135,15 @@ class RunSpec:
 
     def __post_init__(self) -> None:
         for name, value in (
-            ("workflow", self.workflow), ("workflow_version", self.workflow_version),
-            ("base_ref", self.base_ref), ("branch", self.branch),
+            ("workflow", self.workflow), ("base_ref", self.base_ref), ("branch", self.branch),
         ):
             if not value:
                 raise InternalError(f"a run record's {name!r} is empty, and that names nothing")
         _check_sha(self.base_sha)
         checked_text(self.base_ref, "base_ref")
+        object.__setattr__(
+            self, "workflow_digests", MappingProxyType(_checked_digests(self.workflow_digests))
+        )
         object.__setattr__(self, "params", MappingProxyType(_checked_params(self.params)))
         object.__setattr__(self, "created_at", _WIRE.normalised(self.created_at))
 
@@ -147,9 +152,12 @@ class RunSpec:
 
         :return: a fresh `dict`, its keys spelled out so that renaming a field cannot rename one
         """
+        # Annotated where it is built rather than emitted straight into the object below, because
+        # `dict` is invariant: the digests are `str` and a `dict[str, str]` is not a `JsonValue`.
+        digests: dict[str, JsonValue] = dict(_checked_digests(self.workflow_digests))
         return {
             "workflow": self.workflow,
-            "workflow_version": self.workflow_version,
+            "workflow_digests": digests,
             "label": str(self.label),
             "base_ref": self.base_ref,
             "base_sha": self.base_sha,
@@ -169,6 +177,12 @@ class RunSpec:
         if not isinstance(data, Mapping):
             raise InternalError(f"a run record is a JSON object, not a {type(data).__name__}")
         _WIRE.check(data)
+        digests = data["workflow_digests"]
+        if not isinstance(digests, Mapping):
+            raise InternalError(
+                f"run.json's 'workflow_digests' is a {type(digests).__name__}, and a workflow's "
+                f"digests are a JSON object - one file of its own directory per key"
+            )
         params = data["params"]
         if not isinstance(params, Mapping):
             raise InternalError(
@@ -182,7 +196,7 @@ class RunSpec:
             raise InternalError(f"run.json holds a value AGL cannot read back: {error}") from error
         return cls(
             workflow=_WIRE.text(data, "workflow"),
-            workflow_version=_WIRE.text(data, "workflow_version"),
+            workflow_digests=digests,
             label=label,
             base_ref=_WIRE.text(data, "base_ref"),
             base_sha=_WIRE.text(data, "base_sha"),
@@ -199,18 +213,35 @@ def _check_sha(value: str) -> None:
             f"stops being unique as the repository grows and so pins nothing"
         )
 
+# A key here is a path a directory listing produced, so it carries a lone surrogate wherever the
+# filesystem held bytes that are not valid UTF-8 - which `checked_text` refuses, the same rule
+# `params` and `base_ref` are held to and for the same reason.
+def _checked_digests(digests: Mapping[str, str]) -> dict[str, str]:
+    checked: dict[str, str] = {}
+    for name, digest in digests.items():
+        spelled = _checked_key(name, _WORKFLOW_FILE)
+        if not isinstance(digest, str):
+            raise InternalError(
+                f"the digest recorded for {_WORKFLOW_FILE} {spelled!r} is a "
+                f"{type(digest).__name__}, and a digest is the one string a resume compares "
+                f"against that workflow's directory as it stands now"
+            )
+        checked[spelled] = checked_text(digest, f"{_WORKFLOW_FILE} {spelled!r}'s digest")
+    return checked
+
 def _checked_params(params: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
     return {
-        _checked_key(key): _checked_json(value, f"params.{key}") for key, value in params.items()
+        _checked_key(key, _PARAM_KEY): _checked_json(value, f"params.{key}")
+        for key, value in params.items()
     }
 
-def _checked_key(key: object) -> str:
+def _checked_key(key: object, where: str) -> str:
     if not isinstance(key, str):
         raise InternalError(
-            f"the param key {key!r} is a {type(key).__name__}, and a JSON object is keyed by "
+            f"{where} {key!r} is a {type(key).__name__}, and a JSON object is keyed by "
             f"strings - writing this record would silently rename it"
         )
-    return checked_text(key, f"the param key {key!r}")
+    return checked_text(key, f"{where} {key!r}")
 
 def checked_text(value: str, where: str, *, cost: str = _STORE_REFUSES) -> str:
     """`value` itself, if it is text AGL can write down - which is every `str` but one kind.
@@ -243,7 +274,8 @@ def _checked_json(value: object, where: str) -> JsonValue:
         return value
     if isinstance(value, Mapping):
         return {
-            _checked_key(key): _checked_json(item, f"{where}.{key}") for key, item in value.items()
+            _checked_key(key, _PARAM_KEY): _checked_json(item, f"{where}.{key}")
+            for key, item in value.items()
         }
     if isinstance(value, list | tuple):
         return [_checked_json(item, f"{where}[{index}]") for index, item in enumerate(value)]

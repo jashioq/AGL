@@ -144,8 +144,6 @@ class _NoParams:
 
 @dataclass(frozen=True, slots=True)
 class Workflow[P = object]:
-    version: str
-
     fn: _Function[P]
 
     @property
@@ -157,34 +155,26 @@ class Workflow[P = object]:
         """
         return cast("type[P]", _declared(self.fn))
 
-def workflow[P](*, version: str) -> Callable[[_Function[P]], Workflow[P]]:
-    """Declare an async function to be a workflow, stamping the version a resume compares.
+def workflow[P](fn: _Function[P] | None = None) -> Workflow[P]:
+    """Declare an async function to be a workflow, which is what makes it a name `agl run` takes.
 
-    :param version: recorded on every run this starts, and matched exactly before one is resumed
-    :return: a decorator refusing anything that is not an `async def`, at import time
-    :raises InputError: `version` is empty or only whitespace, so no resume could compare it
+    :param fn: the `async def` a bare `@workflow` is written above; `None` is the empty call
+    :return: what the entry point declaring this workflow names, holding `fn` unwrapped
+    :raises InputError: `@workflow` was written as a call, or `fn` is not an `async def`
     """
-    _check_text("version", version)
-
-    def declare(fn: _Function[P]) -> Workflow[P]:
-        if not iscoroutinefunction(fn):
-            raise InputError(
-                f"{fn!r} is decorated as a workflow and is not an `async def`. A workflow is one "
-                f"async function, the framework awaits it, and a plain function returning "
-                f"an awaitable type-checks here and then never yields"
-            )
-        return Workflow(version=version, fn=fn)
-
-    return declare
-
-def _check_text(field: str, value: str) -> None:
-    if not value.strip():
+    if fn is None:
         raise InputError(
-            f"a workflow's {field} is required and cannot be blank: `@workflow` was given "
-            f"{value!r}. It is written into every run record this workflow starts, and `RunSpec` "
-            f"refuses an empty `workflow_version` - so a run declared this way could not be "
-            f"recorded, let alone resumed"
+            "`@workflow` takes no arguments and is written bare, so `@workflow()` calls it with "
+            "no function to decorate and there is nothing for the parentheses to carry. Write "
+            "`@workflow` on the line above the `async def`, with no call and no keyword"
         )
+    if not iscoroutinefunction(fn):
+        raise InputError(
+            f"{fn!r} is decorated as a workflow and is not an `async def`. A workflow is one "
+            f"async function, the framework awaits it, and a plain function returning "
+            f"an awaitable type-checks here and then never yields"
+        )
+    return Workflow(fn=fn)
 
 def _declared(fn: Callable[..., object]) -> object:
     parameters, hints = _hints(fn)
@@ -192,7 +182,7 @@ def _declared(fn: Callable[..., object]) -> object:
         raise InputError(
             f"the workflow {_written_at(fn)} takes no parameters, and a workflow is one async "
             f"function taking a `Run` - which is also where it declares its own parameters, "
-            f"now that `@workflow` takes only `version=`. Write `async def {fn.__qualname__}(run: "
+            f"`@workflow` itself taking none. Write `async def {fn.__qualname__}(run: "
             f"Run[YourParams])`, or `run: Run` for a workflow that never reads `run.params`"
         )
     first = parameters[0]
@@ -225,8 +215,8 @@ def _not_a_run(fn: Callable[..., object], first: str, annotation: object, subjec
     return (
         f"the workflow {_written_at(fn)} annotates {first!r} as {named(annotation)}, and a "
         f"workflow is one async function taking a `Run`. That annotation is also where it "
-        f"declares its parameters, now that `@workflow` takes only `version=`, so this is not a "
-        f"style note: there is nothing here to read the params class out of. Write `{first}: "
+        f"declares its parameters, `@workflow` itself taking none, so this is not a style note: "
+        f"there is nothing here to read the params class out of. Write `{first}: "
         f"Run[YourParams]`, or `{first}: Run` for a workflow that never reads `run.params`"
     )
 

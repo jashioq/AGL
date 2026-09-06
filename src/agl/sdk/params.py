@@ -136,7 +136,7 @@ def to_json(instance: object) -> Mapping[str, JsonValue]:
 def from_json[T](params: type[T], data: Mapping[str, JsonValue]) -> T:
     """Rebuild a resumed run's parameters from its record, refusing rather than converting anything.
 
-    :param params: the class to rebuild into; `api.resume` has already matched `workflow_version`
+    :param params: the class to rebuild into; `api.resume` has already matched the workflow's files
     :param data: what `to_json` wrote, read back at the types it stored and never coerced to fit
     :return: an instance holding the values the first invocation was given
     :raises InputError: a field the record lacks, a key the class does not declare, or a moved type
@@ -149,10 +149,11 @@ def from_json[T](params: type[T], data: Mapping[str, JsonValue]) -> T:
     if missing or unknown:
         raise InputError(
             f"the stored parameters are not {kind}'s: missing {missing}, unexpected {unknown}. A "
-            f"record carries the parameters the run was started with, and `agl resume` compares "
-            f"`workflow_version` before it reads them - so a record whose keys are not this "
-            f"class's was written by a workflow that changed its params and kept its version. "
-            f"Bump the version, or `agl clear` the run and start it again"
+            f"record carries the parameters the run was started with, and `agl resume` digests "
+            f"the workflow's own directory before it reads them - so a record whose keys are not "
+            f"this class's was written against a class that comparison does not cover: one "
+            f"declared outside that directory, or a run started from entry points a caller handed "
+            f"over rather than a workspace. Put the class back, or `agl clear` the run"
         )
     factory: Callable[..., T] = params
     return factory(

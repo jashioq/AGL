@@ -31,7 +31,9 @@ _SHA256: Final = _ABBREVIATED * 3 + "4d2b"
 
 _WIRE: Final[dict[str, JsonValue]] = {
     "workflow": "tickets",
-    "workflow_version": "1.0.0",
+    # One digest per file of the workflow's own directory, which is what a resume compares. Two
+    # entries, one of them nested, so a walk that dropped a key's separators is visible here.
+    "workflow_digests": {"roles.py": "a" * 64, "prompts/review.md": "b" * 64},
     "label": "auth",
     "base_ref": "main",
     "base_sha": _SHA,
@@ -47,7 +49,7 @@ def test_the_wire_shape_is_eight_keys_in_one_order_with_those_spellings() -> Non
     """`run.json`, spelled out - eight keys, in that order, with those spellings."""
     assert _SPEC.to_json() == {
         "workflow": "tickets",
-        "workflow_version": "1.0.0",
+        "workflow_digests": {"roles.py": "a" * 64, "prompts/review.md": "b" * 64},
         "label": "auth",
         "base_ref": "main",
         "base_sha": _SHA,
@@ -56,7 +58,7 @@ def test_the_wire_shape_is_eight_keys_in_one_order_with_those_spellings() -> Non
         "created_at": "2026-08-18T09:14:02Z",
     }
     assert tuple(_SPEC.to_json()) == (
-        "workflow", "workflow_version", "label", "base_ref", "base_sha", "branch", "params",
+        "workflow", "workflow_digests", "label", "base_ref", "base_sha", "branch", "params",
         "created_at",
     )  # fmt: skip
     assert _SPEC.label == RunLabel("auth"), "the label is a validated type, not the string on disk"
@@ -273,13 +275,13 @@ def test_the_ref_a_run_starts_from_is_checked_the_way_a_param_is() -> None:
     passes one through. That ordering is `tests/test_api.py`'s claim, `adapters/git/_runner.py` is
     where the encode failure is now translated, and this line is what both of them call.
 
-    **`workflow` and `workflow_version` are deliberately not checked, and this is where that is
-    written down** so it is not re-proposed as an oversight. `workflow` is whatever
-    `registry.load` matched against the installed entry points, and an unmatched name is a
-    `NotFoundError` before any record exists; entry point names are read from package metadata as
-    UTF-8 and cannot carry one. `workflow_version` is a literal in a workflow author's own source,
-    which is code being installed rather than input arriving. Neither reaches this field from
-    outside, and a check that cannot fire is a claim nobody can maintain.
+    **`workflow` is deliberately not checked, and this is where that is written down** so it is
+    not re-proposed as an oversight. It is whatever `registry.load` matched against the declared
+    entry points, and an unmatched name is a `NotFoundError` before any record exists; entry point
+    names are read out of a TOML document as UTF-8 and cannot carry one. It does not reach this
+    field from outside, and a check that cannot fire is a claim nobody can maintain.
+    `workflow_digests` is the field on the other side of that line - its keys are names a
+    directory listing produced - and the test below it is where that seam is held.
     """
     for surrogate in ("\udcff", "weird\udcffname", "\ud800", "refs/heads/\udc80"):
         with pytest.raises(InputError, match="surrogate") as given:
@@ -297,6 +299,38 @@ def test_the_ref_a_run_starts_from_is_checked_the_way_a_param_is() -> None:
         )
     landed = json.loads(json.dumps(replace(_SPEC, base_ref="caf\u00e9").to_json()))
     assert landed["base_ref"] == "caf\u00e9", "the field must survive the encoder it is refused for"
+
+def test_a_workflow_file_whose_name_the_filesystem_spelled_in_broken_bytes_is_refused() -> None:
+    """The fourth seam, and the only one whose values a person never typed at all.
+
+    A key here is a path `Path.iterdir` handed back, and a name the filesystem holds as bytes that
+    are not valid UTF-8 comes back carrying lone surrogates - which is why
+    `config/workflow_files.py` encodes one with `surrogatepass` before hashing it, and why such a
+    name really can arrive here. Refused as `InputError`, exit 2, for `_WRONG_EXIT`'s reason: the
+    unwritable thing is a file in the operator's own workspace and not anything AGL did.
+
+    The digest is checked as well as the name. It is a hexdigest today and could not carry one,
+    but the field is public and `replace` takes whatever it is handed - so the half that cannot
+    fire from inside AGL is the half a caller reaches first.
+    """
+    for surrogate in ("ro\udcffles.py", "prompts/\ud800.md"):
+        with pytest.raises(InputError, match="surrogate") as as_name:
+            replace(_SPEC, workflow_digests={surrogate: "a" * 64})
+        assert exit_code_for(as_name.value) == 2, _WRONG_EXIT
+
+    with pytest.raises(InputError, match="surrogate") as as_digest:
+        replace(_SPEC, workflow_digests={"roles.py": "\udcff" * 64})
+    assert exit_code_for(as_digest.value) == 2, _WRONG_EXIT
+
+    with pytest.raises(InputError, match="surrogate") as read_back:
+        RunSpec.from_json({**_WIRE, "workflow_digests": {"ro\udcffles.py": "a" * 64}})
+    assert exit_code_for(read_back.value) == 2, _WRONG_EXIT
+
+    named = {"caf\u00e9.md": "a" * 64, "\U0001f34c/roles.py": "b" * 64}
+    assert replace(_SPEC, workflow_digests=named).workflow_digests == named, (
+        "a filename UTF-8 encodes perfectly well was refused. The rule here is category Cs and "
+        "nothing else - what a file may be called is the filesystem's to say, not this module's"
+    )
 
 # --- The pin ------------------------------------------------------------------------------------
 
@@ -360,7 +394,9 @@ def test_a_record_is_an_object_carrying_exactly_these_keys(payload: object) -> N
     "key, value",
     [
         ("workflow", 4), ("workflow", ""), ("workflow", None),
-        ("workflow_version", 1.0), ("workflow_version", ""),
+        ("workflow_digests", None), ("workflow_digests", []), ("workflow_digests", "roles.py"),
+        ("workflow_digests", {"roles.py": 1}), ("workflow_digests", {"roles.py": None}),
+        ("workflow_digests", {"roles.py": ["a" * 64]}),
         ("label", ""), ("label", "agl/auth"), ("label", ".hidden"), ("label", 7),
         ("base_ref", ""), ("base_ref", ["main"]),
         ("base_sha", _ABBREVIATED), ("base_sha", None),
@@ -376,12 +412,14 @@ def test_a_field_that_is_not_what_the_schema_says_is_refused(key: str, value: Js
         RunSpec.from_json({**_WIRE, key: value})
 
 def test_a_record_written_by_another_version_of_agl_is_refused_rather_than_migrated() -> None:
-    """The version is stamped and compared, never upgraded, and an unknown key is that rule too."""
+    """A key AGL does not know is a record another version wrote, refused rather than upgraded."""
     with pytest.raises(InternalError, match="another version"):
         RunSpec.from_json({**_WIRE, "status": "running"})
     with pytest.raises(InternalError, match="unexpected"):
         RunSpec.from_json({**_WIRE, "targets": []})
-    assert replace(_SPEC, workflow_version="2.0.0") != _SPEC, "the stamp is part of the record"
+    assert replace(_SPEC, workflow_digests={"roles.py": "c" * 64}) != _SPEC, (
+        "the stamp is part of the record"
+    )
 
 def test_a_labels_own_refusal_is_re_spoken_as_ours() -> None:
     """`ids.py` says `InputError`, which is exit 2 - and nobody typed the contents of this file."""

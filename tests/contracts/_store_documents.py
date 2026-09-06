@@ -79,10 +79,16 @@ def record(marker: str) -> dict[str, JsonValue]:
 
     `params` is workflow-defined and so is the field a caller is most likely to reach into after
     reading - which is what makes it the right place to try to edit the store through.
+    `workflow_digests` is the second nested object and is deliberately not empty: a store that
+    dropped it would still round-trip every scalar field beside it.
     """
     return {
         "workflow": "tickets",
-        "workflow_version": "1.0.0",
+        "workflow_digests": {
+            "__init__.py": digest(f"module:{marker}"),
+            "prompts/review.md": digest(f"prompt:{marker}"),
+            "pyproject.toml": digest(f"project:{marker}"),
+        },
         "label": marker,
         "base_ref": "main",
         "base_sha": digest(f"base:{marker}")[:40],

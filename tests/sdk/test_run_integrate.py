@@ -791,7 +791,7 @@ return value and no argument to smuggle one through, which is the shape chosen a
 something to work around. The one test that reads it clears it first.
 """
 
-@workflow(version="1")
+@workflow
 async def walks_away(run: Run[NoParams]) -> None:
     """A workflow that hits a conflict and simply ends, which is the case run exit is for.
 

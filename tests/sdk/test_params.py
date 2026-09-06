@@ -250,7 +250,7 @@ def test_the_rendered_mapping_round_trips_through_json_and_into_a_run_spec() -> 
     assert json.loads(json.dumps(dict(rendered))) == {"request": "add oauth", "concurrent": 4}
     spec = RunSpec(
         workflow="tickets",
-        workflow_version="1.0.0",
+        workflow_digests={},
         label=RunLabel("auth"),
         base_ref="main",
         base_sha="8c19f7ae4d2b0913e5f6" * 2,
@@ -331,8 +331,8 @@ def test_an_int_is_admitted_where_a_float_is_declared() -> None:
     assert from_json(Widening, {"ratio": 3}) == given
 
 def test_a_field_the_record_does_not_carry_is_refused_by_name() -> None:
-    """A workflow that gained a parameter and kept its version. Named, because "the params do not
-    match" leaves the reader to work out which field moved."""
+    """A workflow that gained a parameter where no digest saw it move. Named, because "the params
+    do not match" leaves the reader to work out which field moved."""
     with pytest.raises(InputError, match="'concurrent'"):
         from_json(TicketsParams, {"request": "add oauth"})
 
@@ -348,8 +348,8 @@ def test_a_value_of_another_type_is_refused_rather_than_converted() -> None:
 
     `"4"` is what `-c 4` looked like before `argparse` converted it, and converting it here would
     hand the run a parameter nobody chose - and every fingerprint taken over it would be taken over
-    a value the first invocation never had. The version stamp is what should have caught this; what
-    is left for this module is to be loud rather than helpful.
+    a value the first invocation never had. The digest comparison in `api.resume` is what should
+    have caught this; what is left for this module is to be loud rather than helpful.
     """
     with pytest.raises(InputError, match="never converted"):
         from_json(TicketsParams, {"request": "x", "concurrent": "4"})

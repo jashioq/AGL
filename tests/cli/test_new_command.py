@@ -44,7 +44,7 @@ from typing import Final, NoReturn
 import pytest
 from agl.cli import main
 from agl.cli.commands import new as new_command
-from agl.config import container, registry, sources
+from agl.config import container, distribution, registry, sources
 from agl.ports.agent import AgentTask
 from agl.ports.home_layout import (
     AglHome,
@@ -256,6 +256,30 @@ def test_the_written_project_file_declares_that_one_workflow_and_declares_nothin
     assert document["project"]["entry-points"] == {registry.GROUP: {"triage": "triage:triage"}}
     assert document["project"]["name"] == "triage"
     assert sorted(document) == ["project"]
+
+def test_agl_new_writes_a_bound_on_the_running_agl_that_the_reader_accepts(
+    tmp_path: Path,
+) -> None:
+    """The scaffold says which AGL wrote it, and the very next command reads that back.
+
+    `config/registry.py` refuses a workflow whose declared bound the running AGL does not meet, and
+    it refuses it *before* importing anything - so a scaffold whose own bound did not admit the AGL
+    that wrote it would be a workflow refused by the command that created it. The walk is what is
+    asserted rather than the string, because the string is `api.new_workflow`'s composition and the
+    walk is the thing that has to accept it.
+
+    The version is asserted present as well. A bare `agents-gl` with no specifier would round-trip
+    through the reader just as happily and would say nothing at all about which AGL is meant, which
+    is the way this passes while being useless.
+    """
+    home = _home(tmp_path)
+
+    assert _main(home, "new", str(TRIAGE)) == 0
+
+    document = tomllib.loads(workflow_pyproject(home, TRIAGE).read_text(encoding="utf-8"))
+    declared = document["project"]["dependencies"]
+    assert declared == [f"{distribution.DISTRIBUTION}>={distribution.installed_version()}"]
+    assert registry.discovered(home).unsatisfied == {}
 
 def test_the_written_module_is_the_packages_own_so_the_declaration_can_resolve_at_all(
     tmp_path: Path,

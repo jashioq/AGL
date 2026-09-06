@@ -1176,7 +1176,7 @@ return value and no argument to smuggle one through, which is the shape chosen. 
 that reads it clears it first.
 """
 
-@workflow(version="1")
+@workflow
 async def raises_mid_conflict(run: Run[NoParams]) -> None:
     """A workflow that hits a conflict and then gives up by raising, mid-decision.
 

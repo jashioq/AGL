@@ -317,7 +317,7 @@ def _asking(run: Run[NoParams], *, on_screen: bool) -> Tool:
 
     return tool(ASK, "ask the person running this task, and wait for their answer", Asked, answered)
 
-@workflow(version="1")
+@workflow
 async def negotiating(run: Run[NoParams]) -> None:
     """A role whose asking tool answers from the workflow, without showing anybody anything.
 
@@ -326,12 +326,12 @@ async def negotiating(run: Run[NoParams]) -> None:
     """
     reported.append(await run.step(deciding(ask=_asking(run, on_screen=False))))
 
-@workflow(version="1")
+@workflow
 async def approving(run: Run[NoParams]) -> None:
     """The standing example: the handler shows the question and returns what came back."""
     reported.append(await run.step(deciding(ask=_asking(run, on_screen=True))))
 
-@workflow(version="1")
+@workflow
 async def unattended(run: Run[NoParams]) -> None:
     """The same role with the asking tool left off, and nothing else changed."""
     reported.append(await run.step(deciding()))

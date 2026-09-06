@@ -4,7 +4,7 @@ from collections.abc import Iterable, Sequence
 from importlib.metadata import EntryPoint
 from typing import Final
 from agl import api
-from agl.cli.commands import Registered, _said
+from agl.cli.commands import Registered, _print_replays, _said
 from agl.ports.home_layout import AglHome
 from agl.ports.ids import RunLabel
 from agl.sdk.params import RefusingParser
@@ -71,7 +71,7 @@ def execute(
     name = _said(parsed, _WORKFLOW, command=NAME)
     label = RunLabel(_said(parsed, _LABEL, command=NAME))
     project, services = registered()
-    asyncio.run(
+    replayed = asyncio.run(
         api.run(
             services,
             project,
@@ -83,6 +83,10 @@ def execute(
             points=points,
         )
     )
+    # Nought on every reachable path today, `api.run` refusing a label that has a record - so what
+    # decides is the count and not the verb, and a `run` that could ever replay would say so with
+    # no edit here. `tests/cli/test_resume_command.py` pins the silence from this side.
+    _print_replays(label, replayed)
     print(f"run {str(label)!r} finished")
     return _NOTHING_TO_REPORT
 

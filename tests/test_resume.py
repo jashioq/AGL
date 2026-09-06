@@ -16,19 +16,31 @@ pass every assertion about the final state and cost the operator an agent; one t
 second step would pass every assertion about the first.
 
 **Everything is `container.fakes()`** - no network, no git, no process - which is target #8 and what
-lets a two-invocation replay cost milliseconds. The workflows are declared in this module and
-reached through hand-constructed `EntryPoint` values, exactly as `tests/test_api.py` does, and that
-seam is also how the two mismatches below are arranged: a workflow whose *version* moved between the
-run and the resume, and one whose *params class* did, are two attributes of this module registered
-under one entry-point name. Nothing is monkeypatched to produce either.
+lets a two-invocation replay cost milliseconds. Most of the workflows are declared in this module
+and reached through hand-constructed `EntryPoint` values, exactly as `tests/test_api.py` does, and
+that seam is how the params drift below is arranged: the class a record was written from and the
+class a resume meets are two attributes of this module registered under one entry-point name.
+Nothing is monkeypatched to produce it.
 
-**The version stamp is asserted with the record afterwards.** Resume gets one line - stamp the
-version, refuse on mismatch, because runs live hours - and a refusal that had already touched the
-run would be worse than none: the ledger it refused to finish under a stranger's version is the
-thing an operator is about to put the workflow directory back for.
+**What a resume compares is a directory and not an attribute**, so the tests that are about the
+comparison itself are the ones that cannot use that seam - `points=` reaches no workspace and so
+measures nothing - and they scaffold a real workflow directory under `tmp_path` instead. Their own
+banner says what each of them buys.
+
+**The comparison is asserted with the record afterwards.** Resume gets one line - digest the
+directory, refuse on a difference, because runs live hours - and a refusal that had already touched
+the run would be worse than none: the ledger it refused to finish against edited code is the thing
+an operator is about to put the directory back for.
+
+**What `api.run` and `api.resume` answer with is a count of what they replayed**, and its own
+section asserts it against `dispatched` rather than against the ledger, for the reason above. Both
+verbs answer, because the condition the CLI reports on is the number and never which verb was
+typed; that a run's number is always nought is a consequence of `api.run` refusing a label that has
+a record, and is asserted here as a claim about the count rather than left implied.
 """
 
-from collections.abc import Mapping, Sequence
+import sys
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, replace
 from datetime import timedelta
@@ -53,11 +65,12 @@ from agl.ports.agent import (
 from agl.ports.errors import (
     ConflictError,
     InputError,
+    InternalError,
     NotFoundError,
     UpstreamUnavailable,
     exit_code_for,
 )
-from agl.ports.home_layout import RunScope
+from agl.ports.home_layout import AglHome, RunScope, workflows_dir
 from agl.ports.ids import Namespace, ProjectName, RunLabel, StepName
 from agl.ports.run import JsonValue
 from agl.ports.store import Store
@@ -90,7 +103,7 @@ class ResumeParams:
 @dataclass(frozen=True)
 class OtherParams:
     """`ResumeParams`' fields under other names: what a workflow that changed its params looks
-    like from the record's side, once the version stamp has let it past."""
+    like from the record's side, once the digest comparison has let it past."""
 
     ask: str = arg("-a", "--ask", help="what to build, spelled another way")
 
@@ -154,7 +167,7 @@ produced: Final[list[Summary]] = []
 interrupt: Final[list[str]] = []
 raised: Final[list[Stop]] = []
 
-@workflow(version="1.1")
+@workflow
 async def two_steps(run: Run[ResumeParams]) -> None:
     """Two steps, with a place between them for the process to die.
 
@@ -169,13 +182,25 @@ async def two_steps(run: Run[ResumeParams]) -> None:
         raise Interrupted(interrupt[0])
     produced.append(await run.step(second()))
 
-@workflow(version="1")
+@workflow
+async def branching(run: Run[ResumeParams]) -> None:
+    """One step here and one in a child worktree, so a replay of it spans two namespaces.
+
+    A namespace has a journal and a chain of its own, and the count a resume reports is the walk's
+    rather than one journal's - which is only visible where there is more than one journal to be
+    wrong about.
+    """
+    handed.append(run)
+    produced.append(await run.step(first()))
+    produced.append(await run.worktree("side").step(second()))
+
+@workflow
 async def quiet(run: Run[NoParams]) -> None:
     """Takes no step at all - the run for which "`agl/<label>` is a real ref from run start" is
     only true if something above the first step provisioned `_base`."""
     handed.append(run)
 
-@workflow(version="0.1")
+@workflow
 async def halting(run: Run[NoParams]) -> None:
     """Ends deliberately, with a reason of its own - which the framework must not rename."""
     handed.append(run)
@@ -183,30 +208,15 @@ async def halting(run: Run[NoParams]) -> None:
     raised.append(stop)
     raise stop
 
-@workflow(version="1.0")
-async def shifting_before(run: Run[NoParams]) -> None:
-    """The workflow the record is stamped by. Registered under `shifting`."""
-    handed.append(run)
-
-@workflow(version="2.0")
-async def shifting_after(run: Run[NoParams]) -> None:
-    """The same declared name at another version - the workspace a resume meets hours later.
-
-    Two attributes of this module rather than a mutated `Workflow`: `Workflow` is frozen, and what
-    an operator actually has is a directory that was edited, which is a different object behind one
-    declared key.
-    """
-    handed.append(run)
-
-@workflow(version="1.0")
+@workflow
 async def drifting_before(run: Run[ResumeParams]) -> None:
     """The params class the record is written from. Registered under `drifting`."""
     handed.append(run)
 
-@workflow(version="1.0")
+@workflow
 async def drifting_after(run: Run[OtherParams]) -> None:
-    """The same name and the **same version**, with the params renamed underneath - the one way a
-    record can reach `params.from_json` disagreeing with the class, and the fault it names."""
+    """The same declared name with its params renamed underneath - the one way a record reaches
+    `params.from_json` disagreeing with the class, once no directory is measured to catch it."""
     handed.append(run)
 
 def _point(name: str, attribute: str) -> EntryPoint:
@@ -215,19 +225,16 @@ def _point(name: str, attribute: str) -> EntryPoint:
 
 POINTS: Final = (
     _point("two_steps", "two_steps"),
+    _point("branching", "branching"),
     _point("quiet", "quiet"),
     _point("halting", "halting"),
 )
 
-# The two mismatches, as two states of one workspace. Kept out of `POINTS` so that a test resuming
-# under `AFTER` is resuming against a workspace holding one `shifting` and one `drifting`, which is
-# what editing the two directories leaves behind.
-BEFORE: Final = (
-    *POINTS, _point("shifting", "shifting_before"), _point("drifting", "drifting_before")
-)
-AFTER: Final = (
-    *POINTS, _point("shifting", "shifting_after"), _point("drifting", "drifting_after")
-)
+# The params drift, as two states of one workspace. Kept out of `POINTS` so that a test resuming
+# under `AFTER` is resuming against a workspace holding one `drifting`, which is what editing that
+# directory leaves behind.
+BEFORE: Final = (*POINTS, _point("drifting", "drifting_before"))
+AFTER: Final = (*POINTS, _point("drifting", "drifting_after"))
 
 def _reporting(dispatched: list[str]) -> Script:
     """An agent that writes nothing, reports one payload, and records that it was paid for.
@@ -263,18 +270,18 @@ async def _start(
     argv: Sequence[str] = ("-r", "add oauth"),
     *,
     points: Sequence[EntryPoint] = POINTS,
-) -> None:
+) -> api.Replayed:
     """The first invocation: `agl run <name> -n auth`, with this module's entry points."""
-    await api.run(harness.services, PROJECT, name, LABEL, argv, points=points)
+    return await api.run(harness.services, PROJECT, name, LABEL, argv, points=points)
 
 async def _resume(
     harness: container.FakeServices,
     *,
     label: RunLabel = LABEL,
     points: Sequence[EntryPoint] = POINTS,
-) -> None:
+) -> api.Replayed:
     """The second invocation: `agl resume auth`, and the label is the whole of what it takes."""
-    await api.resume(harness.services, PROJECT, label, points=points)
+    return await api.resume(harness.services, PROJECT, label, points=points)
 
 def _clear() -> None:
     """Every module-level recorder, between invocations. Called by hand rather than through a
@@ -377,6 +384,110 @@ async def test_the_workflow_is_handed_its_params_as_the_dataclass_the_record_sto
     assert isinstance(handed[0].params, ResumeParams)
     assert handed[0].params == ResumeParams(request="add oauth", concurrent=4)
     assert type(handed[0].params.concurrent) is int
+
+# --- what the walk replayed, counted --------------------------------------------------------------
+#
+# `Replayed.steps` is one per `run.step` invocation served off the ledger and is what
+# `cli/commands/__init__.py` turns into `replayed <n> steps from cache`. It is asserted here against
+# `dispatched`, which is the same instrument the section above uses: a step that was replayed did
+# not reach an agent, so the two numbers have to add up to the calls the workflow made. Counting
+# entries instead would say nothing, since a resume reads entries a divergent fingerprint never
+# hits.
+
+@pytest.mark.asyncio
+async def test_a_resume_counts_the_step_it_replayed_and_the_run_before_it_counted_none(
+    tmp_path: Path,
+) -> None:
+    """The number and its complement, in one scenario: one step off the ledger and one paid for.
+
+    The run that wrote the ledger reports nought, and not because it is `run`: it walked a ledger
+    that was empty when it started, having written its own record a line earlier. `api.run` refuses
+    a label that already has one, so nought is the only count a run can reach - which is what makes
+    the CLI's silence at nought a fact about the count rather than about the verb.
+    """
+    dispatched: list[str] = []
+    harness = _fakes(tmp_path, dispatched)
+    _clear()
+    interrupt.append("killed between the two steps")
+
+    with pytest.raises(Interrupted):
+        await _start(harness)
+
+    _clear()
+    replayed = await _resume(harness)
+
+    assert replayed == api.Replayed(steps=1)
+    assert dispatched == ["do the first thing", "do the second thing"], (
+        "one step was replayed and one was paid for, so exactly one agent ran in each invocation"
+    )
+
+@pytest.mark.asyncio
+async def test_a_run_that_took_two_steps_of_its_own_replayed_neither_of_them(
+    tmp_path: Path,
+) -> None:
+    """The run's own count, on its own, so the assertion above is not carrying two claims.
+
+    Nought over a run that genuinely stepped twice - it wrote both entries and read neither -
+    rather than over a workflow that never touched a journal at all.
+    """
+    dispatched: list[str] = []
+    harness = _fakes(tmp_path, dispatched)
+    _clear()
+
+    replayed = await _start(harness)
+
+    assert replayed == api.Replayed(steps=0)
+    assert dispatched == ["do the first thing", "do the second thing"]
+
+@pytest.mark.asyncio
+async def test_resuming_a_finished_run_counts_every_step_the_ledger_already_held(
+    tmp_path: Path,
+) -> None:
+    """The far end of the sweep, where the count is the whole workflow and no agent is paid.
+
+    Worth its own line beside the one above because a count taken at the first miss would be right
+    there and silent here: this run never misses, so there is no moment inside the walk at which
+    "replay is over" happens. It is why the number is read after the walk and not during it.
+    """
+    dispatched: list[str] = []
+    harness = _fakes(tmp_path, dispatched)
+    _clear()
+
+    await _start(harness)
+    _clear()
+    replayed = await _resume(harness)
+
+    assert replayed == api.Replayed(steps=2)
+    assert dispatched == ["do the first thing", "do the second thing"], (
+        "a resume with nothing left to do paid an agent anyway"
+    )
+
+@pytest.mark.asyncio
+async def test_the_count_spans_namespaces_and_holds_a_child_worktrees_replayed_steps(
+    tmp_path: Path,
+) -> None:
+    """One number for the run tree, not one per journal.
+
+    `branching` steps once in its own namespace and once in a child's, and each namespace opens a
+    `Journal` of its own. What they share is the `Fingerprints` `api._walk` builds and `Run._child`
+    hands down, which is why the tally lives there: a counter on `Journal` would report the root's
+    step and lose the child's.
+    """
+    dispatched: list[str] = []
+    harness = _fakes(tmp_path, dispatched)
+    _clear()
+
+    await _start(harness, name="branching")
+    assert await harness.services.store.namespaces(SCOPE) == (Namespace("side"),), (
+        "the child never got a namespace of its own, so this run has one journal and the count "
+        "below would be right for the wrong reason"
+    )
+
+    _clear()
+    replayed = await _resume(harness)
+
+    assert replayed == api.Replayed(steps=2)
+    assert dispatched == ["do the first thing", "do the second thing"]
 
 # --- the record is read and never written --------------------------------------------------------
 
@@ -586,67 +697,18 @@ async def test_a_label_with_no_record_is_a_not_found_and_reads_as_runs_mirror(
     assert str(taken.value) == "run 'auth' already exists - `agl resume auth` or `agl clear auth`."
 
 @pytest.mark.asyncio
-async def test_a_workflow_version_the_record_was_not_stamped_with_is_refused(
-    tmp_path: Path,
-) -> None:
-    """`ARCHITECTURE.md`'s "Invariants where a mistake is silent": stamp the version, refuse on
-    mismatch rather than migrating.
-
-    `ConflictError` - exit 4, the same code `run` answers a taken label with - because the record
-    exists and the workflow exists and neither is wrong: they do not fit, which is
-    `ports/errors.py`'s "the world already holds something this operation would have to take or
-    overwrite". `NotFoundError` would be wrong twice over, both things having been found.
-
-    The message is asserted for the three facts an operator acts on - which version the run is
-    stamped with, that the way to finish it is to put the workflow directory back rather than to
-    install anything, and that `agl clear` is the other way out - and the record is asserted
-    untouched afterwards, since the ledger this refused to finish is what the restored directory is
-    about to finish.
-    """
-    dispatched: list[str] = []
-    harness = _fakes(tmp_path, dispatched)
-    _clear()
-    await _start(harness, "shifting", (), points=BEFORE)
-    before = await _record(harness)
-
-    with pytest.raises(ConflictError) as caught:
-        await _resume(harness, points=AFTER)
-
-    assert exit_code_for(caught.value) == 4
-    message = str(caught.value)
-    assert "'1.0'" in message and "'2.0'" in message
-    assert "put the directory back" in message
-    assert "agl clear auth" in message
-    assert await _record(harness) == before, "a refused resume changed the run it refused"
-    assert len(handed) == 1, "the workflow ran under a version the record was not stamped with"
-
-@pytest.mark.asyncio
-async def test_the_same_version_is_not_a_mismatch(tmp_path: Path) -> None:
-    """The other side of `==`, so that the test above is about a comparison and not about refusing.
-
-    Worth its own line because a stamp that refused everything would satisfy every assertion in the
-    test above, and the workflow that resumes normally elsewhere in this file is a different one.
-    """
-    dispatched: list[str] = []
-    harness = _fakes(tmp_path, dispatched)
-    _clear()
-    await _start(harness, "shifting", (), points=BEFORE)
-
-    await _resume(harness, points=BEFORE)
-
-    assert len(handed) == 2
-
-@pytest.mark.asyncio
 async def test_params_the_workflows_current_class_will_not_take_are_refused(
     tmp_path: Path,
 ) -> None:
-    """`sdk/params.py`'s refusal, reached the only way an operator can reach it.
+    """`sdk/params.py`'s refusal, reached the only way this module's seam can reach it.
 
-    The workflow keeps its version and changes its params class, which is exactly the case the
-    version stamp cannot catch and the case that module names as the realistic one. `InputError` -
-    exit 2 - because the reader is the workflow's author and the fix is a line in their package,
-    where exit 70 would send them to file a bug against AGL. The message names the keys, because
-    "the params do not match" leaves them to work out which field moved.
+    The workflow changes its params class where the digest comparison cannot see it - these
+    workflows are attributes of this file, reached through `points=`, so no directory is measured
+    and the comparison passes over a pair of empty maps. That is the shape that module's refusal
+    names, and it is why the refusal is still there behind the comparison. `InputError` - exit 2 -
+    because the reader is the workflow's author and the fix is a line in their package, where exit
+    70 would send them to file a bug against AGL. The message names the keys, because "the params
+    do not match" leaves them to work out which field moved.
     """
     dispatched: list[str] = []
     harness = _fakes(tmp_path, dispatched)
@@ -677,6 +739,255 @@ async def test_a_workflow_the_record_names_and_nothing_registers_is_a_not_found(
 
     assert exit_code_for(caught.value) == 3
     assert "quiet" in str(caught.value)
+
+# --- the workflow's own directory, which is what a resume actually compares ----------------------
+#
+# Every test under this banner drives `api` with `home=` rather than `points=`, because the thing
+# under test is the walk: `config/registry.py` reads a declaration out of a directory and hands the
+# directory along with it, and `api` digests that directory rather than reading an attribute off
+# the imported object. The entry point in each scaffolded pyproject.toml names an attribute of
+# *this* module, so what is imported is a file pytest has already loaded and the directory holds
+# code nothing runs - which is the point rather than a shortcut, the map being about the directory
+# and not about what an import happened to reach. A prompt is the sharpest case of that: no import
+# reads one, and no attribute of the loaded object could answer for one.
+#
+# `test_a_resume_of_an_untouched_directory_replays_although_the_run_imported_it_first` is the one
+# that does not take that shortcut, for the reason its own docstring gives.
+
+_ROLES_DOCUMENT: Final = 'NOTE = "a module beside the workflow, which the digest map covers"\n'
+
+_PROMPT_DOCUMENT: Final = "# review\n\nread what changed and say what is wrong with it\n"
+
+# The importable workflow the ordering test below scaffolds and runs, so it becomes a top-level
+# module in this interpreter for the length of one test - distinctive for that reason.
+IMPORTED: Final = "resumed_workflow"
+
+_IMPORTED_DOCUMENT: Final = f"""from agl.sdk import Run, workflow
+from .roles import NOTE
+
+@workflow
+async def {IMPORTED}(run: Run) -> None:
+    assert NOTE
+"""
+
+def _home(tmp_path: Path) -> AglHome:
+    """An AGL_HOME nothing else can reach, built rather than resolved so no variable is read."""
+    return AglHome(tmp_path / "home")
+
+def _declaring(named: str, value: str) -> str:
+    """The project file a workflow directory declares itself in, naming the object AGL runs."""
+    return (
+        f'[project]\nname = "{named}"\nversion = "0.1.0"\n\n'
+        f'[project.entry-points."{registry.GROUP}"]\n{named} = "{value}"\n'
+    )
+
+def _directory(home: AglHome, named: str = "triage", attribute: str = "quiet") -> Path:
+    """One workflow directory under the workspace: a declaration, a module and a prompt."""
+    path = workflows_dir(home) / named
+    (path / "prompts").mkdir(parents=True)
+    (path / "pyproject.toml").write_text(
+        _declaring(named, f"{__name__}:{attribute}"), encoding="utf-8"
+    )
+    (path / "roles.py").write_text(_ROLES_DOCUMENT, encoding="utf-8")
+    (path / "prompts" / "review.md").write_text(_PROMPT_DOCUMENT, encoding="utf-8")
+    return path
+
+@pytest.fixture
+def _forgotten_afterwards() -> Iterator[None]:
+    """The imported workflow, out of `sys.modules` again once the test that imported it is done.
+
+    `tests/conftest.py` restores `sys.path` and not `sys.modules`, and the directory this name was
+    imported from is deleted with `tmp_path` - so a later test scaffolding it would silently run
+    this one's code out of a directory that is gone.
+    """
+    yield
+    for held in [
+        name for name in sys.modules if name == IMPORTED or name.startswith(f"{IMPORTED}.")
+    ]:
+        del sys.modules[held]
+
+@pytest.mark.asyncio
+async def test_a_file_edited_in_the_workflow_directory_refuses_the_resume_and_is_named(
+    tmp_path: Path,
+) -> None:
+    """The refusal `api.resume` makes, and the whole of what makes it worth more than a count.
+
+    `ConflictError` - exit 4, the same code `run` answers a taken label with - because the record
+    exists and the workflow exists and neither is wrong: they do not fit, which is
+    `ports/errors.py`'s "the world already holds something this operation would have to take or
+    overwrite". `NotFoundError` would be wrong twice over, both things having been found.
+
+    **The file is named and no other file is.** A refusal saying only "the workflow changed" ends
+    a run somebody was in the middle of and leaves them to work out what they touched; naming the
+    file is the whole of the difference. The prompt is what is edited here, because it is the file
+    furthest from anything the imported object could have been asked about.
+
+    The record is asserted untouched afterwards, since the ledger this refused to finish is what
+    the restored directory is about to finish, and the workflow is asserted not to have run again.
+    """
+    dispatched: list[str] = []
+    harness = _fakes(tmp_path, dispatched)
+    home = _home(tmp_path)
+    directory = _directory(home)
+    _clear()
+    await api.run(harness.services, PROJECT, "triage", LABEL, (), home=home)
+    before = await _record(harness)
+
+    (directory / "prompts" / "review.md").write_text("# review\n\nsay it differently\n", "utf-8")
+    with pytest.raises(ConflictError) as caught:
+        await api.resume(harness.services, PROJECT, LABEL, home=home)
+
+    assert exit_code_for(caught.value) == 4
+    message = str(caught.value)
+    assert "changed prompts/review.md" in message
+    assert "roles.py" not in message, "a file nobody touched was named as though it had moved"
+    assert "put the directory back" in message
+    assert "agl clear auth" in message
+    assert await _record(harness) == before, "a refused resume changed the run it refused"
+    assert len(handed) == 1, "the workflow ran against files the ledger was not written by"
+
+@pytest.mark.asyncio
+async def test_a_file_added_beside_the_workflow_and_one_taken_away_are_told_apart(
+    tmp_path: Path,
+) -> None:
+    """The other two of the three differences a map comparison can see, kept distinct in the words.
+
+    They are three because they send an operator to three places. A file that is gone is the one
+    that cannot be restored by editing anything - it has to come back - and reporting it as
+    "changed" would send somebody looking through a diff of a file that is not there.
+    """
+    dispatched: list[str] = []
+    harness = _fakes(tmp_path, dispatched)
+    home = _home(tmp_path)
+    directory = _directory(home)
+    _clear()
+    await api.run(harness.services, PROJECT, "triage", LABEL, (), home=home)
+
+    (directory / "prompts" / "plan.md").write_text("# plan\n", encoding="utf-8")
+    (directory / "roles.py").unlink()
+    with pytest.raises(ConflictError) as caught:
+        await api.resume(harness.services, PROJECT, LABEL, home=home)
+
+    message = str(caught.value)
+    assert "added prompts/plan.md" in message
+    assert "removed roles.py" in message
+    assert "changed" not in message, "nothing was edited, and two files were reported as though"
+
+@pytest.mark.asyncio
+async def test_a_directory_rewritten_wholesale_names_five_files_and_counts_the_rest(
+    tmp_path: Path,
+) -> None:
+    """The bound, which exists because an unbounded list in a terminal is its own kind of failure.
+
+    Fifteen files are added at once and five of them are named. The count is what keeps the message
+    honest about being an excerpt - a truncated list with nothing saying so reads as the whole
+    answer - and the names are sorted, so which five they are is a fact about the directory rather
+    than about the order a filesystem listed it in.
+    """
+    dispatched: list[str] = []
+    harness = _fakes(tmp_path, dispatched)
+    home = _home(tmp_path)
+    directory = _directory(home)
+    _clear()
+    await api.run(harness.services, PROJECT, "triage", LABEL, (), home=home)
+
+    for index in range(15):
+        (directory / f"step{index:02d}.py").write_text(f"STEP = {index}\n", encoding="utf-8")
+    with pytest.raises(ConflictError) as caught:
+        await api.resume(harness.services, PROJECT, LABEL, home=home)
+
+    message = str(caught.value)
+    assert "added step00.py, step01.py, step02.py, step03.py, step04.py and 10 more" in message
+    assert "step05.py" not in message, "the sixth file of fifteen was named, so nothing is bounded"
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_forgotten_afterwards")
+async def test_a_resume_of_an_untouched_directory_replays_although_the_run_imported_it_first(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The ordering hazard the digest map was built against, measured rather than reasoned about.
+
+    `api.resume` loads the workflow before it digests the directory, and loading it is an *import*
+    - which makes CPython write bytecode into the very directory about to be hashed.
+    `config/workflow_files.py` leaves `__pycache__` out for that reason, and this is where the
+    exclusion meets the ordering it exists for: a resume that hashed what its own import had just
+    written would refuse every run, always, and the message would name files nobody wrote.
+
+    So this is the one test under this banner that scaffolds a workflow the workspace really
+    imports, rather than pointing a declaration back at this module. The assertion that the
+    directory holds bytecode afterwards is what says the hazard was actually present - with
+    `sys.dont_write_bytecode` set on the machine this runs on, nothing would be written and a green
+    line here would have measured nothing.
+    """
+    monkeypatch.setattr(sys, "dont_write_bytecode", False)
+    monkeypatch.setattr(sys, "pycache_prefix", None)
+    dispatched: list[str] = []
+    harness = _fakes(tmp_path, dispatched)
+    home = _home(tmp_path)
+    directory = workflows_dir(home) / IMPORTED
+    directory.mkdir(parents=True)
+    (directory / "pyproject.toml").write_text(
+        _declaring(IMPORTED, f"{IMPORTED}:{IMPORTED}"), encoding="utf-8"
+    )
+    (directory / "__init__.py").write_text(_IMPORTED_DOCUMENT, encoding="utf-8")
+    (directory / "roles.py").write_text(_ROLES_DOCUMENT, encoding="utf-8")
+    _clear()
+
+    await api.run(harness.services, PROJECT, IMPORTED, LABEL, (), home=home)
+    await api.resume(harness.services, PROJECT, LABEL, home=home)
+
+    assert (directory / "__pycache__").is_dir(), (
+        f"no bytecode was written under {directory}, so this test measured nothing: the import "
+        f"the ordering is a hazard for either did not happen or wrote nothing"
+    )
+    stamped = (await _record(harness))["workflow_digests"]
+    assert isinstance(stamped, dict)
+    assert tuple(stamped) == ("__init__.py", "pyproject.toml", "roles.py"), (
+        "the record's map is not the directory's three files, so the resume above passed over a "
+        "comparison of two maps that were measured from something other than what was written"
+    )
+
+@pytest.mark.asyncio
+async def test_a_record_predating_digests_is_refused_and_agl_clear_still_takes_the_run_away(
+    tmp_path: Path,
+) -> None:
+    """What a run started before AGL digested anything meets, and the decision behind it.
+
+    Those records carry a declared `workflow_version` and no `workflow_digests`, so `WireShape`
+    refuses them by both halves at once: the key AGL needs is missing and the key it used to write
+    is unexpected. `InternalError` - exit 70 - is not the shape "your run predates this AGL"
+    deserves, and it is kept anyway. `ports/run.py` refuses records rather than migrating them, so
+    a clause there that knew the name of a key AGL no longer writes would be a migration path in
+    the one module whose whole rule is that it has none, and it would outlive by years the handful
+    of records it was written for.
+
+    What makes that affordable is the second half, and it is asserted rather than argued: `clear`
+    reads the record only to find out whether one is there and never parses it, so the way out of
+    the refusal is the command the refusals beside it already name. The alternative to refusing at
+    all - reading an absent map as an empty one - is the one answer that must not happen, an empty
+    map being exactly what a caller handing its own entry points over records.
+    """
+    dispatched: list[str] = []
+    harness = _fakes(tmp_path, dispatched)
+    _clear()
+    await _start(harness, "quiet", ())
+    current = await _record(harness)
+    stale: dict[str, JsonValue] = {
+        key: value for key, value in current.items() if key != "workflow_digests"
+    }
+    await harness.services.store.write_record(SCOPE, {**stale, "workflow_version": "1.0"})
+
+    with pytest.raises(InternalError) as caught:
+        await _resume(harness)
+
+    assert exit_code_for(caught.value) == 70
+    assert "workflow_digests" in str(caught.value)
+    assert "workflow_version" in str(caught.value)
+
+    cleared = await api.clear(harness.services, PROJECT, LABEL)
+
+    assert cleared.branches == (run_branch(LABEL),)
+    assert await harness.services.store.read_record(SCOPE) is None
 
 # --- the ordering hazard, on the resumed side ----------------------------------------------------
 
@@ -748,7 +1059,7 @@ async def test_the_params_rebuild_refuses_before_preflight_spends_a_turn(tmp_pat
     Preflight is the only call in `resume` that costs real turns - `check_ready` asks a live harness
     - so every refusal that is free goes in front of it, and rebuilding the params from a mapping is
     two key-set comparisons. The failure this orders against is not exotic: a workflow author edits
-    a params dataclass and leaves the `version` line alone, which is what happens repeatedly to
+    a params dataclass while a run is part-way through, which is what happens repeatedly to
     whoever is iterating, and it should not cost them a round trip to a harness first.
 
     Arranged so that **both** refusals are available and only one can be reported - the params have
@@ -769,7 +1080,7 @@ async def test_the_params_rebuild_refuses_before_preflight_spends_a_turn(tmp_pat
 
     assert runner.asked == [], (
         "a resume asked a live harness whether it was ready before telling the author that their "
-        "workflow's params class had moved without its version - which is the turn `api.py`'s "
+        "workflow's params class had moved - which is the turn `api.py`'s "
         "cheapest-refusal-first rule exists to keep off the bill"
     )
 

@@ -72,6 +72,13 @@ all - and the argument for leaving it, together with what leaving it costs, is w
 `test_a_steps_result_refuses_a_float_json_has_no_spelling_for`'s own docstring, because it is the
 same asymmetry that test turns on.
 
+**One last pair is here because a number leaves this loop and is read by a person.** The walk's
+hit branch tallies on `Fingerprints`, `api._walk` hands the total back and the CLI prints
+`replayed <n> steps from cache`, so what the branch counts is the whole meaning of that line. Both
+of the ways it could lie are asserted rather than argued: `claim` runs on both branches, so a tally
+sitting there would count misses too, and an entry no walk asked about would inflate the count if
+the number came from the ledger instead of from the calls.
+
 Named `test_journal_walk.py`: `tests/` carries no `__init__.py` - see `tests/conftest.py` for why
 it must not - so pytest's module names are the bare filenames and every one has to be unique.
 """
@@ -302,6 +309,65 @@ async def test_a_miss_runs_the_worker_writes_one_entry_and_a_second_walk_hits(
 
     assert second.runs == 0, "the entry was on the ledger and the agent was paid for again anyway"
     assert replayed == {"tickets": ["T-01"]}
+
+# --- the tally, at the one line that tells a hit from a miss -------------------------------------
+#
+# `Fingerprints.replays` is what `api._walk` hands back and `cli/commands/__init__.py` turns into
+# `replayed <n> steps from cache`. It is asserted here because this is the only place a replay is
+# discriminated: `claim` is called on both branches, so a tally taken there would count every step
+# and the line would be an operator-facing number that is never zero.
+
+@pytest.mark.asyncio
+async def test_a_miss_leaves_the_tally_at_nought_and_a_hit_moves_it_by_one(
+    tmp_path: Path,
+) -> None:
+    """The two branches, counted, against the same call made twice.
+
+    Each walk gets a `Fingerprints` of its own, which is what a resume gets: `n` is never
+    persisted, so the second walk asks the same address the first one wrote and this time it is
+    there.
+    """
+    harness, workspace, base = await _opened(tmp_path)
+    written = Fingerprints()
+
+    await _step(_journal(harness, workspace, base, fingerprints=written), TICKETS, _Worker("one"))
+
+    assert written.replays == 0, "a step that paid for its worker was tallied as one that did not"
+
+    resumed = Fingerprints()
+    reached = _Worker("this must never be reached")
+
+    assert await _step(
+        _journal(harness, workspace, base, fingerprints=resumed), TICKETS, reached
+    ) == "one"
+
+    assert reached.runs == 0
+    assert resumed.replays == 1
+
+@pytest.mark.asyncio
+async def test_the_tally_counts_steps_served_and_not_entries_the_ledger_happens_to_hold(
+    tmp_path: Path,
+) -> None:
+    """Three entries on the ledger and a walk that asks for two of them: the answer is two.
+
+    The number an operator reads is what *this* walk did not have to pay for, so an entry nothing
+    asked about does not belong in it - a workflow that took a branch it did not take last time
+    leaves entries behind, and counting them would report work that was never replayed.
+    """
+    harness, workspace, base = await _opened(tmp_path)
+    written = _journal(harness, workspace, base)
+    for step in (SPEC, TICKETS, REVIEW):
+        await _step(written, step, _Worker(str(step)))
+
+    resumed = Fingerprints()
+    walk = _journal(harness, workspace, base, fingerprints=resumed)
+    for step in (SPEC, TICKETS):
+        await _step(walk, step, _Worker("this must never be reached"))
+
+    assert resumed.replays == 2
+    assert await _entry_at(harness, REVIEW, _digest(base)) is not None, (
+        "the third entry is what makes this a count of steps asked for rather than of entries"
+    )
 
 # --- `last_good` is chained logically ------------------------------------------------------------
 

@@ -45,8 +45,8 @@ from agl.adapters.git.workspace import GitWorkspaceProvider
 from agl.config import container, distribution, registry, sources
 from agl.ports.agent import AgentOutcome, Claude, StopReason
 from agl.ports.errors import ConflictError, InputError, NotFoundError, exit_code_for
-from agl.ports.home_layout import AglHome, RunScope, workflows_dir, workspace_pyproject
-from agl.ports.ids import Namespace, ProjectName, RunLabel, WorkflowName
+from agl.ports.home_layout import AglHome, RunScope, workflows_dir
+from agl.ports.ids import Namespace, ProjectName, RunLabel
 from agl.ports.run import JsonValue, RunSpec
 from agl.ports.tree_layout import TreesRoot, base_worktree, run_branch
 from agl.ports.workspace import Workspace, WorkspaceProvider
@@ -63,7 +63,7 @@ SCOPE: Final = RunScope(PROJECT, LABEL)
 # `run.json`, key for key. Written out rather than read off `RunSpec`'s fields, because the
 # published shape of the file is what this asserts and a record that agreed with itself would pass.
 WIRE_KEYS: Final = frozenset(
-    {"workflow", "workflow_version", "label", "base_ref", "base_sha", "branch", "params",
+    {"workflow", "workflow_digests", "label", "base_ref", "base_sha", "branch", "params",
      "created_at"}
 )
 
@@ -100,19 +100,19 @@ def looking() -> Role:
 handed: Final[list[Run[ProbeParams]]] = []
 raised: Final[list[Stop]] = []
 
-@workflow(version="1.1")
+@workflow
 async def probe(run: Run[ProbeParams]) -> None:
     """Returns. The wiring probe, with params it can be asserted on."""
     handed.append(run)
 
-@workflow(version="0.1")
+@workflow
 async def halting(run: Run[NoParams]) -> None:
     """Ends deliberately, with a reason of its own - which the framework must not rename."""
     stop = ReviewNotConverging("two rounds and no convergence")
     raised.append(stop)
     raise stop
 
-@workflow(version="0.1")
+@workflow
 async def stepping(run: Run[NoParams]) -> None:
     """Takes one step, so that the checkout `api.run` provisioned is asked for a second time.
 
@@ -168,14 +168,18 @@ async def test_a_workflow_that_returns_runs_to_completion(tmp_path: Path) -> Non
 async def test_the_record_holds_exactly_the_published_fields(tmp_path: Path) -> None:
     """`run.json`'s published shape, key for key and value for value. `created_at` is the sample
     moment because the fakes bundle's clock is frozen at it, and `concurrent` is a default the user
-    never typed - `resume` takes no flags, so an unspoken one is lost if it is not here."""
+    never typed - `resume` takes no flags, so an unspoken one is lost if it is not here.
+
+    `workflow_digests` is empty and that is the answer this seam owes: the run is started from
+    entry points this module handed over, so no workspace was walked and this workflow was read
+    out of no directory at all. `tests/config/test_workflow_files.py` measures a real one."""
     harness = _fakes(tmp_path)
     await _run(harness)
     record = await _record(harness)
 
     assert set(record) == WIRE_KEYS
     assert record["workflow"] == "probe"
-    assert record["workflow_version"] == "1.1"
+    assert record["workflow_digests"] == {}
     assert record["label"] == "auth"
     assert record["branch"] == run_branch(LABEL) == "agl/auth"
     assert record["created_at"] == "2026-08-18T09:14:02Z"
@@ -756,6 +760,37 @@ async def test_a_run_named_after_a_broken_directory_refuses_with_that_directorys
     assert exit_code_for(refused.value) == 2
     assert "half-written" in str(refused.value)
 
+@pytest.mark.asyncio
+async def test_a_run_of_a_workflow_needing_a_newer_agl_refuses_before_it_imports_anything(
+    tmp_path: Path,
+) -> None:
+    """The one ordering claim that has to be made through the real call path rather than beside it.
+
+    `api._loaded` asks `registry.check_satisfied` and then `registry.load`, and `load` is the line
+    that imports a workflow's module. The declaration here names a module nothing anywhere holds,
+    so an import reached at all would answer about that module - and the refusal an operator gets
+    instead names the bound their file declares and the AGL that is running.
+
+    Exit 2, which is the class `agl run` gives anything the operator can fix in a file of theirs;
+    the version they have to install is named in the message rather than being a code to look up.
+    """
+    home = _home(tmp_path)
+    _directory(
+        home,
+        "triage",
+        f'[project]\nname = "triage"\nversion = "0.1.0"\n'
+        f'dependencies = ["{distribution.DISTRIBUTION}>=99999.0.0"]\n\n'
+        f'[project.entry-points."{registry.GROUP}"]\ntriage = "no_such_module:anything"\n',
+    )
+    harness = _fakes(tmp_path)
+
+    with pytest.raises(InputError) as refused:
+        await api.run(harness.services, PROJECT, "triage", LABEL, (), home=home)
+
+    assert exit_code_for(refused.value) == 2
+    assert "99999.0.0" in str(refused.value)
+    assert "loading it failed" not in str(refused.value)
+
 def test_a_declared_workflow_keeps_the_name_a_broken_directory_happens_to_share(
     tmp_path: Path,
 ) -> None:
@@ -775,110 +810,6 @@ def test_a_declared_workflow_keeps_the_name_a_broken_directory_happens_to_share(
     assert listing.names == ("triage",)
     assert [entry.directory for entry in listing.broken] == ["triage"]
     assert "usage: agl run triage" in api.workflow_help("triage", home=home)
-
-# --- the workspace's own pin, and which operations are entitled to refuse over it ----------------
-#
-# `config/toml_file.py`'s `check_workspace_pin` is the comparison and the suite over that module
-# holds it; what is drawn here is the line between the operations that ask it and the operations
-# that do not, which is a fact about this module and about nothing else.
-#
-# `run` and `resume` ask, because they are the two that read a workflow out of the workspace in
-# order to spend agent turns on it, and a workflow written against another AGL's `agl.sdk` fails
-# after the money has gone rather than before. Nothing else here asks. A listing and a help print
-# what the operator already has and buy nothing, and they are the first two things somebody types
-# when a command has just refused them - withholding those would leave a refusal with nothing to
-# act on. `new_workflow` writes a scaffold this AGL rendered, so it is the one thing in an old
-# workspace that cannot be stale, and it is the on-ramp: an operator upgrading AGL must be able to
-# start writing. `clear` takes no home at all and so could not ask if it wanted to.
-#
-# Every arrangement below pins a version this tree is not, and each asserts the *class* rather than
-# just that something raised: without the check the same call raises `NotFoundError` off an empty
-# workspace, so the class is what says the refusal came first.
-
-def _stale(home: AglHome) -> None:
-    """A workspace root recording an AGL this one is not, which is the state the pin refuses on."""
-    workflows_dir(home).mkdir(parents=True, exist_ok=True)
-    workspace_pyproject(home).write_text(
-        f'[tool.uv.workspace]\nmembers = ["workflows/*"]\n\n'
-        f'[tool.agl]\nrequires = "{distribution.DISTRIBUTION}==0.0.0"\n',
-        encoding="utf-8",
-    )
-
-@pytest.mark.asyncio
-async def test_a_run_out_of_a_workspace_another_agl_made_refuses_before_it_reads_one(
-    tmp_path: Path,
-) -> None:
-    """Exit 4, and it arrives before the workspace has been walked for the name that was typed.
-
-    The workspace declares nothing, so an `api.run` that walked first would answer `NotFoundError`
-    and send the operator looking for a workflow to write. The pin is a fact about the whole
-    workspace and the walk is a question about one name in it, so the order is not a preference:
-    the run is refused, and then it does not matter what the name resolved to.
-    """
-    home = _home(tmp_path)
-    _stale(home)
-    harness = _fakes(tmp_path)
-
-    with pytest.raises(ConflictError) as refused:
-        await api.run(harness.services, PROJECT, "probe", LABEL, (), home=home)
-
-    assert exit_code_for(refused.value) == 4
-    assert str(workspace_pyproject(home)) in str(refused.value)
-
-@pytest.mark.asyncio
-async def test_a_resume_out_of_that_same_workspace_refuses_on_the_pin_as_well(
-    tmp_path: Path,
-) -> None:
-    """The second spender, and the one whose ledger makes the stakes concrete.
-
-    A resume replays what is recorded and runs the rest, so a workspace whose workflow was written
-    against another `agl.sdk` is a run that half-replays and then buys the remainder against code
-    it was not recorded by. The run below is started through `points=`, which is the seam that
-    reads no workspace, so what the resume meets is a workspace that went stale between the two.
-    """
-    home = _home(tmp_path)
-    harness = _fakes(tmp_path)
-    await _run(harness)
-    _stale(home)
-
-    with pytest.raises(ConflictError) as refused:
-        await api.resume(harness.services, PROJECT, LABEL, home=home)
-
-    assert exit_code_for(refused.value) == 4
-
-def test_a_stale_pin_costs_the_operator_neither_the_listing_nor_the_help(tmp_path: Path) -> None:
-    """Both readers answer over a workspace no run would touch, and that is deliberate.
-
-    These are what somebody reaches for after a refusal - which workflows are in there, and what
-    flags one takes - so refusing them too would take away the means of acting on the refusal
-    while adding no protection: neither imports an agent, and neither spends.
-    """
-    home = _home(tmp_path)
-    _stale(home)
-    _directory(home, "triage", _declaring("triage", "probe"))
-
-    listing = api.list_workflows(home=home)
-
-    assert listing.names == ("triage",)
-    assert "usage: agl run triage" in api.workflow_help("triage", home=home)
-
-def test_a_stale_pin_leaves_the_on_ramp_open_for_the_scaffold_this_agl_writes(
-    tmp_path: Path,
-) -> None:
-    """`agl new` is what an operator types straight after an upgrade, and it must still write.
-
-    The scaffold is rendered by the AGL running now, against the `agl.sdk` that AGL ships, so it is
-    the one thing in an old workspace that cannot be stale - and `api.new_workflow` calls
-    `make_workspace` on every invocation, so a refusal here would fire on every `agl new` in a
-    workspace made before the upgrade, which is exactly when there is work to be started.
-    """
-    home = _home(tmp_path)
-    _stale(home)
-
-    written = api.new_workflow(home, WorkflowName("release"))
-
-    assert written.is_dir()
-    assert api.list_workflows(home=home).names == ("release",)
 
 def test_init_needs_neither_a_bundle_nor_a_registered_repository(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -921,10 +852,14 @@ def test_every_operation_the_module_declares_is_built() -> None:
     it is the operation behind `agl workflows <name>`, which extends that grammar, and
     `cli/commands/workflows.py` is where the deviation is argued. `new_workflow` is a verb and is
     spelled unlike the command it serves, `agl new`, because `new` is an adjective and every other
-    name here is what the operation does. `Ask`, `Cleared` and `Listing` are the three entries that
-    are not operations at all - the callable `init` asks its one question through, and the two
-    values `clear` and `list_workflows` answer with - and they are here because a caller annotating
-    any of them has to be able to name it.
+    name here is what the operation does. `Ask`, `Cleared`, `Listing` and `Replayed` are the four
+    entries that are not operations at all - the callable `init` asks its one question through, and
+    the three values `clear`, `list_workflows` and the two walking verbs answer with - and they are
+    here because a caller annotating any of them has to be able to name it.
+
+    `Replayed` is one value answering for two verbs, which is what keeps the report `run` and
+    `resume` share count-based rather than command-based: both walk a ledger through `_walk`, so
+    neither is the one that replays and the number is what says whether anything did.
 
     `sync_workspace` is the eighth operation and the seventh verb, and it is spelled with its
     object for `new_workflow`'s reason: `agl sync` reads as a verb on the command line and `sync`
@@ -936,6 +871,7 @@ def test_every_operation_the_module_declares_is_built() -> None:
         "Ask",
         "Cleared",
         "Listing",
+        "Replayed",
         "clear",
         "init",
         "list_workflows",

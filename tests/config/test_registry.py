@@ -70,7 +70,16 @@ from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Final
 import pytest
-from agl.config.registry import GROUP, Discovery, check_unbroken, discovered, load, names
+from agl.config.distribution import DISTRIBUTION, installed_version
+from agl.config.registry import (
+    GROUP,
+    Discovery,
+    check_satisfied,
+    check_unbroken,
+    discovered,
+    load,
+    names,
+)
 from agl.ports.errors import ConflictError, InputError, NotFoundError
 from agl.ports.home_layout import AglHome, workflows_dir
 
@@ -422,3 +431,163 @@ def test_a_declared_name_is_never_refused_for_a_broken_directory_that_shares_it(
     found = discovered(home)
     check_unbroken(found, _OTHER)
     assert load(found.points, _OTHER, _Workflow) is _instance
+
+# --- the AGL a workflow declares it was written against, read in the same pass ------------------
+#
+# The walk already opens each directory's project file for the entry-point table, and it reads the
+# `[project] dependencies` list out of that same document. What it is looking for is one entry: a
+# bound on AGL's own distribution, which `agl new` writes naming the AGL that scaffolded the
+# workflow. `config/distribution.py` owns the comparison and every shape that is *not* a refusal -
+# no bound, an unparseable one, another distribution's, an AGL with no version of its own - and
+# `tests/config/test_distribution.py` is where those are asserted, one per case, with no directory
+# involved. What is left here is the half only a walk can show.
+#
+# **The order is the deliverable.** `load` is the line that imports a workflow's module, and a
+# workflow written against a newer AGL fails that import on whichever name moved - inside the
+# operator's own file, naming a symbol rather than a version. So every case below points its
+# declaration at a module that does not exist and cannot be made to: what the refusal says is then
+# the whole evidence of which of the two ran first.
+#
+# **An unmet bound is not a broken directory**, and the two are deliberately different fields. A
+# broken directory declared no workflow, so it has no name but its own and drops out of the
+# listing; this one declared a perfectly good workflow that this AGL cannot run, so it keeps its
+# name and `agl workflows` still prints it - which is that command's own promise, that a workflow
+# whose code will not load is still a workflow the workspace declares.
+
+_UNIMPORTABLE: Final = "a_module_no_workspace_holds:anything"
+
+_BEYOND_REACH: Final = "99999.0.0"
+
+def _needing(bound: str, *declarations: str) -> str:
+    """A project file needing AGL at `bound`, declaring whichever entry points it is handed."""
+    return (
+        f'[project]\nname = "probe"\nversion = "0.1.0"\n'
+        f'dependencies = ["{DISTRIBUTION}{bound}"]\n\n'
+        f'[project.entry-points."{GROUP}"]\n' + "".join(f"{line}\n" for line in declarations)
+    )
+
+def test_a_workflow_needing_an_agl_this_is_not_is_refused_before_anything_is_imported(
+    tmp_path: Path,
+) -> None:
+    """The deliverable, and the two refusals are compared rather than one of them asserted alone.
+
+    The declaration points at a module nothing anywhere holds, so `load` has exactly one thing it
+    can do with these points and it is not what the operator should read. Both calls are made, in
+    both orders, off one walk: the check answers about the bound, the load answers about an import
+    that failed, and `api._loaded` asks them in the order that gives the first. Without the second
+    call this test would pass against a check that fired for no reason at all.
+    """
+    home = _home(tmp_path)
+    _directory(home, "triage", _needing(f">={_BEYOND_REACH}", f"triage = {_UNIMPORTABLE!r}"))
+    found = discovered(home)
+
+    with pytest.raises(InputError) as refused:
+        check_satisfied(found, "triage")
+    with pytest.raises(InputError) as imported:
+        load(found.points, "triage", _Workflow)
+
+    assert _BEYOND_REACH in str(refused.value)
+    assert "loading it failed" in str(imported.value)
+    assert "loading it failed" not in str(refused.value)
+
+def test_the_refusal_names_the_bound_the_file_declared_and_the_agl_that_is_running(
+    tmp_path: Path,
+) -> None:
+    """Both numbers, because either alone leaves the operator with nothing to decide.
+
+    The bound says which AGL the workflow was written against and the running version says which
+    one is here; a message carrying one of them tells somebody that something is wrong and not
+    what. The file is named too, that being where the line they would edit sits.
+    """
+    home = _home(tmp_path)
+    path = _directory(
+        home, "triage", _needing(f">={_BEYOND_REACH}", f"triage = {_UNIMPORTABLE!r}")
+    ) / "pyproject.toml"
+
+    with pytest.raises(InputError) as refused:
+        check_satisfied(discovered(home), "triage")
+
+    said = str(refused.value)
+    assert f">={_BEYOND_REACH}" in said
+    assert installed_version() in said
+    assert str(path) in said
+
+def test_a_workflow_out_of_bound_keeps_its_name_and_is_no_broken_directory(
+    tmp_path: Path,
+) -> None:
+    """`agl workflows` prints what a workspace declares, and this workflow is declared.
+
+    A directory in `broken` declared no workflow and is reported under its own name because that is
+    the only name it has left. This one declared a name and `agl run` takes it - the refusal is
+    about the AGL underneath rather than about the file - so dropping it from the listing would
+    hide the workflow whose bound the operator has to go and read.
+    """
+    home = _home(tmp_path)
+    _directory(home, "triage", _needing(f">={_BEYOND_REACH}", f"triage = {_UNIMPORTABLE!r}"))
+
+    found = discovered(home)
+
+    assert names(found.points) == ("triage",)
+    assert found.broken == ()
+    assert sorted(found.unsatisfied) == ["triage"]
+
+def test_a_workflow_whose_bound_this_agl_meets_reaches_the_load_as_usual(
+    tmp_path: Path,
+) -> None:
+    """The control, and it is what keeps the check from being a refusal of every workflow.
+
+    The bound is composed from the version this AGL reports, so it is met on any tree that can run
+    this test at all. The load is then reached and answers about the import, which is the sentence
+    the case above proves is *not* what an out-of-bound workflow gets.
+    """
+    home = _home(tmp_path)
+    _directory(
+        home, "triage", _needing(f">={installed_version()}", f"triage = {_UNIMPORTABLE!r}")
+    )
+    found = discovered(home)
+
+    check_satisfied(found, "triage")
+
+    assert found.unsatisfied == {}
+    with pytest.raises(InputError) as imported:
+        load(found.points, "triage", _Workflow)
+    assert "loading it failed" in str(imported.value)
+
+def test_one_directorys_unmet_bound_leaves_every_other_workflow_in_the_workspace_alone(
+    tmp_path: Path,
+) -> None:
+    """A bound is one workflow's claim about AGL and answers for that workflow and no other.
+
+    The same rule a broken directory follows, and it has to be said again here because the field is
+    different: an operator with five workflows and one written against tomorrow's AGL still runs
+    the other four. The one that is fine is loaded rather than merely listed, which is the half a
+    listing assertion alone would not reach.
+    """
+    home = _home(tmp_path)
+    _directory(home, "triage", _needing(f">={_BEYOND_REACH}", f"triage = {_UNIMPORTABLE!r}"))
+    _directory(home, "tickets", _declaring(_pointing_here(_WORKFLOW)))
+    found = discovered(home)
+
+    check_satisfied(found, _WORKFLOW)
+
+    assert names(found.points) == ("tickets", "triage")
+    assert sorted(found.unsatisfied) == ["triage"]
+    assert load(found.points, _WORKFLOW, _Workflow) is _instance
+
+def test_the_check_is_silent_about_a_name_no_directory_in_the_workspace_declared(
+    tmp_path: Path,
+) -> None:
+    """Like `check_unbroken` beside it: silent on everything it has nothing to say about.
+
+    An unknown name is `load`'s to answer, with its listing of what is declared. A check that
+    refused here would take that listing away from the operator and put a message about a bound in
+    its place, about a workflow that does not exist.
+    """
+    home = _home(tmp_path)
+    _directory(home, "triage", _needing(f">={_BEYOND_REACH}", f"triage = {_UNIMPORTABLE!r}"))
+    found = discovered(home)
+
+    check_satisfied(found, _WORKFLOW)
+
+    with pytest.raises(NotFoundError):
+        load(found.points, _WORKFLOW, _Workflow)

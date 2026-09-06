@@ -436,7 +436,7 @@ _LONE_SURROGATE: Final = chr(0xD800)
 # a resolved commit is, which is what that field refuses anything else for.
 _RECORD: Final[dict[str, JsonValue]] = {
     "workflow": "tickets",
-    "workflow_version": "1.0.0",
+    "workflow_digests": {},
     "label": "auth",
     "base_ref": "main",
     "base_sha": _HEAD,

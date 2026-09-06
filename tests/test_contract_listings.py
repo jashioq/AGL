@@ -74,8 +74,9 @@ and cannot be: a distribution may install a top-level module under any name it l
 `pyyaml` becomes `yaml` and `pillow` becomes `PIL`. What the rule guarantees is *noticing* a third
 SDK, not naming it correctly; when it guesses wrong the guard still fires, and
 `VENDOR_IMPORT_NAMES` is where the true name goes. `NOT_A_VENDOR` is the other escape, for a
-dependency that is not a vendor SDK at all. Both start empty, and neither pre-authorises anything: a
-dependency added at a later stage trips this guard first and is argued about here second.
+dependency that is not a vendor SDK at all. The first is empty and the second holds one name, and
+neither pre-authorises anything: a dependency added at a later stage trips this guard first and is
+argued about here second.
 
 `[project] dependencies` is the whole of what this reads, and that is the second limit. Both of
 today's vendor SDKs are unconditional entries in it, so that list is what an install of AGL gets
@@ -196,10 +197,21 @@ ADAPTER_EXEMPT: Final[Mapping[str, str]] = {
 # stay that way: both of today's SDKs import under the name they ship as.
 VENDOR_IMPORT_NAMES: Final[Mapping[str, str]] = {}
 
-# Declared dependencies that are not vendor SDKs, each with the reason. Empty: every distribution
-# AGL depends on is a vendor, which is the premise this comparison rests on. A dependency that
-# breaks that premise is argued about here, not quietly skipped.
-NOT_A_VENDOR: Final[Mapping[str, str]] = {}
+# Declared dependencies that are not vendor SDKs, each with the reason. One entry, and it is the
+# premise of the comparison being weakened rather than a name being waved through: every *other*
+# distribution AGL depends on is a vendor, and one that is not is argued about here.
+#
+# `packaging` is a grammar and not a backend. Nothing behind it can be reached, spoken to or paid
+# for - there is no endpoint, no credential and no process - so "installing one vendor drags in the
+# other's SDK", which is the whole of what contract 3 exists to prevent, has nothing to be about
+# here. It is imported by `config/distribution.py` alone, to compare a workflow's declared bound on
+# AGL against the AGL that is running, and PEP 440 is what makes that a parse rather than a string
+# comparison. Contract 3 could name it and would then forbid the one import that has to exist.
+NOT_A_VENDOR: Final[Mapping[str, str]] = {
+    "packaging": "PEP 440 and PEP 508 parsing, used by config/distribution.py to compare a "
+    "workflow's declared bound on AGL against the running version; no endpoint behind it, so "
+    "there is no vendor to contain",
+}
 
 # Where a requirement string stops being a distribution name: a version, a marker, an extras list.
 _REQUIREMENT_END: Final = frozenset("[<>=!~;(, \t")

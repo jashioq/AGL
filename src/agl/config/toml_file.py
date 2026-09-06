@@ -1,13 +1,8 @@
-import os
-import stat
-import tempfile
 import tomllib
-from collections.abc import Mapping, Sequence
-from contextlib import suppress
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
-from agl.config.distribution import DISTRIBUTION, UNINSTALLED, installed_version
 from agl.ports.errors import ConflictError, InputError, NotFoundError
 from agl.ports.home_layout import (
     AglHome,
@@ -30,7 +25,6 @@ __all__ = [
     "FileSettings",
     "check_trees_root",
     "check_unregistered",
-    "check_workspace_pin",
     "git_root",
     "make_workflow",
     "make_workspace",
@@ -39,7 +33,6 @@ __all__ = [
     "read_settings",
     "resolve_project",
     "write_project",
-    "write_workspace_pin",
 ]
 
 _PROJECT_SUFFIX: Final = ".toml"
@@ -61,16 +54,11 @@ _HOME_KEYS: Final = frozenset({"home", "agl_home", "AGL_HOME"})
 
 # uv reads a member as a glob against the directory holding this file, so `*` there would take in
 # the `.venv` a sync builds beside `workflows/` - the one `home_layout.workspace_site_packages`
-# composes - and the workspace would hold its own environment as a member of itself.
+# composes - and the workspace would hold its own environment as a member of itself. It is the
+# whole of the document, and the `[project]` table it leaves out is what makes the file a virtual
+# uv workspace root rather than a package of its own - and what keeps it from ever reading as the
+# workflow declaration `config/registry.py` looks for.
 _MEMBERS_TABLE: Final = '[tool.uv.workspace]\nmembers = ["workflows/*"]\n'
-
-# `[tool.<name>]` is the table a tool owns in a pyproject.toml and every other tool reads past, so
-# this one is AGL's alone. The file holds no `[project]` table at all, which is what makes it a
-# virtual uv workspace root rather than a package of its own, and what keeps it from ever reading
-# as the workflow declaration `config/registry.py` looks for.
-_TOOL: Final = "tool"
-_AGL: Final = "agl"
-_REQUIRES: Final = "requires"
 
 # The scaffold is rendered from these rather than copied out of a template checked in beside them,
 # because a pyproject.toml in this repository carrying a real entry-point table is exactly what
@@ -80,18 +68,20 @@ _REQUIRES: Final = "requires"
 # TOML basic string or a Python source file would need escaped.
 _MODULE_DOCUMENT: Final = """from agl.sdk import Run, workflow
 
-@workflow(version="1")
+@workflow
 async def {name}(run: Run) -> None:
     ...
 """
 
-# No `[build-system]` and no dependency on AGL itself: the workspace is on this process's import
-# path rather than installed into it, so a workflow is imported from where it was written and
-# nothing has to build it.
+# No `[build-system]`: the workspace is on this process's import path rather than installed into
+# it, so a workflow is imported from where it was written and nothing has to build it. The one
+# requirement it does declare is AGL's own, and it is written for a reader rather than a resolver -
+# `config/registry.py` reads it back before it imports the workflow, and refuses a workflow written
+# against an AGL this is not.
 _PROJECT_DOCUMENT: Final = """[project]
 name = "{name}"
 version = "0.1.0"
-
+{dependencies}
 [project.entry-points."{group}"]
 {name} = "{name}:{name}"
 """
@@ -114,10 +104,6 @@ _ESCAPED: Final = {
 
 _FIRST_PRINTABLE: Final = 0x20
 _DELETE: Final = 0x7F
-
-# What a re-pin writes beside the file it is replacing, so an interrupted one leaves a name nothing
-# in AGL reads: `config/registry.py` walks `workflows/` and never the workspace root's siblings.
-_PARTIAL_PREFIX: Final = "partial-"
 
 @dataclass(frozen=True, slots=True)
 class FileAgent:
@@ -219,7 +205,7 @@ def make_workspace(home: AglHome) -> None:
         workflows_dir(home).mkdir(parents=True, exist_ok=True)
         try:
             with workspace_pyproject(home).open("x", encoding="utf-8", newline="\n") as handle:
-                handle.write(_workspace_document())
+                handle.write(_MEMBERS_TABLE)
         except FileExistsError:
             return
     except OSError as error:
@@ -229,7 +215,7 @@ def make_workspace(home: AglHome) -> None:
             f"until it can be made there is nowhere for a workflow to go"
         ) from error
 
-def make_workflow(home: AglHome, name: WorkflowName, group: str) -> Path:
+def make_workflow(home: AglHome, name: WorkflowName, group: str, bound: str | None) -> Path:
     directory = workflow_dir(home, name)
     try:
         directory.mkdir(parents=True)
@@ -237,9 +223,10 @@ def make_workflow(home: AglHome, name: WorkflowName, group: str) -> Path:
         raise ConflictError(_already_written(directory, name)) from error
     except OSError as error:
         raise InputError(_unwritable(directory, error)) from error
+    project = _PROJECT_DOCUMENT.format(name=name, group=group, dependencies=_dependencies(bound))
     for path, document in (
         (workflow_module(home, name), _MODULE_DOCUMENT.format(name=name)),
-        (workflow_pyproject(home, name), _PROJECT_DOCUMENT.format(name=name, group=group)),
+        (workflow_pyproject(home, name), project),
     ):
         try:
             with path.open("x", encoding="utf-8", newline="\n") as handle:
@@ -247,54 +234,6 @@ def make_workflow(home: AglHome, name: WorkflowName, group: str) -> Path:
         except OSError as error:
             raise InputError(_unwritable(path, error)) from error
     return directory
-
-# The one place in AGL that rewrites something an operator holds, and it is deliberately not part
-# of `make_workspace`: creating a workspace writes over nothing, so a workspace made by an older
-# AGL keeps the pin that says so until somebody asks for it to move. `agl sync` is that asking and
-# is the only caller - a re-pin folded into the creation would refresh the pin on every `agl new`,
-# and a pin kept current is one `check_workspace_pin` could never disagree with.
-def write_workspace_pin(home: AglHome) -> None:
-    """Record the running AGL as the one this workspace's workflows are written against."""
-    pin = _version_pin()
-    # Nothing written rather than a refusal, which is `check_workspace_pin`'s answer to the same
-    # state read from the other side: an AGL with no metadata cannot name itself, so it neither
-    # judges a recorded pin nor replaces one - and a checkout is where `agl sync` is run most.
-    if pin is None or _recorded_pin(home) == pin:
-        return
-    path = workspace_pyproject(home)
-    _rewrite(path, _repinned(_file_text(path), pin, path))
-
-# What this refusal stands between is a workspace and an AGL that did not make it, and what leaves
-# it room to fire is that `write_workspace_pin` above moves the pin for one command and for nothing
-# a run does: an operator who upgraded AGL has not synced yet, and their workspace still names what
-# wrote it. Compared as text against the string `_version_pin` writes, which is what keeps the
-# comparison free of a requirement parser: PEP 503 normalises `agents_gl` onto `agents-gl` and PEP
-# 440 admits `== 0.0.1` beside `==0.0.1`, so a pin somebody rewrote by hand can mean this version
-# and still read as a disagreement here. What settles that is `agl sync` writing the one spelling
-# this compares against, which is why the refusal below points at the command and shows the line it
-# writes rather than leaving an operator to spell it.
-def check_workspace_pin(home: AglHome) -> None:
-    """Refuse where the workspace records one AGL and another is about to run its workflows."""
-    recorded = _recorded_pin(home)
-    running = _version_pin()
-    if recorded is None or running is None or recorded == running:
-        return
-    path = workspace_pyproject(home)
-    raise ConflictError(
-        f"your AGL workspace was made by {recorded!r} and the AGL running now is {running!r}: "
-        f"{path} sets {_REQUIRES} under [{_TOOL}.{_AGL}], which names the AGL the workflows in "
-        f"that workspace were written against, and it does not name this one. AGL refuses to run "
-        f"one rather than hoping the two agree - a workflow is written against the `agl.sdk` of a "
-        f"particular AGL, and what a run spends before finding out otherwise is agent turns. Two "
-        f"things end this and both are yours to choose between. Install {recorded!r} again, and "
-        f"this workspace runs as it always did. Or keep the AGL you have: read your workflows "
-        f"against this version's `agl.sdk`, then run `agl sync`, which writes "
-        f"`{_REQUIRES} = {_quoted(running)}` into {path} and installs what those workflows declare "
-        f"against it. That command is the only thing in AGL that moves the line, which is what "
-        f"lets a workspace go on naming an AGL you no longer run. `agl sync` itself, `agl init`, "
-        f"`agl new`, `agl workflows` and `agl clear` are unaffected, none of them running a "
-        f"workflow"
-    )
 
 def git_root(start: Path) -> Path:
     directory = start.resolve()
@@ -359,101 +298,6 @@ def read_document(path: Path) -> Mapping[str, object] | None:
     except (OSError, UnicodeDecodeError) as error:
         raise InputError(f"{path} cannot be read: {error}") from error
     return document
-
-def _workspace_document() -> str:
-    pin = _version_pin()
-    if pin is None:
-        return _MEMBERS_TABLE
-    return f"{_MEMBERS_TABLE}\n[{_TOOL}.{_AGL}]\n{_REQUIRES} = {_quoted(pin)}\n"
-
-# PEP 440 admits neither a leading letter nor a space, so `UNINSTALLED` can never be half of a
-# requirement any resolver reads. A workspace made where there is no metadata to read therefore
-# carries no pin at all, which is what a workspace made by hand carries too.
-def _version_pin() -> str | None:
-    version = installed_version()
-    return None if version == UNINSTALLED else f"{DISTRIBUTION}=={version}"
-
-def _recorded_pin(home: AglHome) -> str | None:
-    path = workspace_pyproject(home)
-    document = read_document(path)
-    return None if document is None else _pin_of(document, path)
-
-def _pin_of(document: Mapping[str, object], path: Path) -> str | None:
-    tools = _sub_table(document, _TOOL, path, "")
-    return _text(_sub_table(tools, _AGL, path, f"{_TOOL}."), _REQUIRES, path, f"{_TOOL}.{_AGL}.")
-
-# One line edited in place rather than the file re-rendered from `_workspace_document`: the
-# workspace root is written once and is the operator's thereafter - their own tables, their own
-# comments - and a re-render would take all of it away to move one string. What makes a textual
-# edit safe to make at all is `_checked_document`, which parses the result before it is written.
-def _repinned(text: str, pin: str, path: Path) -> str:
-    written = f"{_REQUIRES} = {_quoted(pin)}\n"
-    lines = text.splitlines(keepends=True)
-    header = _header_line(lines)
-    if header is None:
-        kept = text.rstrip("\n")
-        opening = f"{kept}\n\n" if kept else ""
-        return _checked_document(f"{opening}[{_TOOL}.{_AGL}]\n{written}", pin, path)
-    key = _key_line(lines, header)
-    before = lines[: header + 1] if key is None else lines[:key]
-    after = lines[header + 1 :] if key is None else lines[key + 1 :]
-    return _checked_document("".join([*before, written, *after]), pin, path)
-
-def _header_line(lines: Sequence[str]) -> int | None:
-    header = f"[{_TOOL}.{_AGL}]"
-    return next((index for index, line in enumerate(lines) if line.strip() == header), None)
-
-# The search stops at the next table header, because `requires` is not AGL's word alone: PEP 518
-# gives `[build-system]` a `requires` of its own, and every workspace root this module writes is a
-# file a build system's table could join later.
-def _key_line(lines: Sequence[str], header: int) -> int | None:
-    for index in range(header + 1, len(lines)):
-        stripped = lines[index].strip()
-        if stripped.startswith("["):
-            return None
-        if stripped.partition("=")[0].strip() == _REQUIRES:
-            return index
-    return None
-
-# The composed text is parsed and read back before anything is written, so a spelling the line edit
-# above cannot reach - TOML admits `agl.requires` under `[tool]` and a quoted `"requires"` under
-# the header, and neither is the line this looks for - refuses with the file untouched instead of
-# producing one that declares the same key twice and no longer parses.
-def _checked_document(text: str, pin: str, path: Path) -> str:
-    try:
-        document = tomllib.loads(text)
-    except tomllib.TOMLDecodeError as error:
-        raise InputError(_unpinnable(path, pin)) from error
-    if _pin_of(document, path) != pin:
-        raise InputError(_unpinnable(path, pin))
-    return text
-
-def _rewrite(path: Path, text: str) -> None:
-    try:
-        # Beside the file and not in the system temp directory: `os.replace` is atomic within one
-        # filesystem and raises `EXDEV` across two, which is the same reason `dir=` is written in
-        # `adapters/filesystem/store.py`. What it buys here is that an interrupted re-pin leaves
-        # the operator's workspace declaration whole rather than truncated.
-        handle, partial = tempfile.mkstemp(dir=path.parent, prefix=_PARTIAL_PREFIX)
-    except OSError as error:
-        raise InputError(_unrewritable(path, error)) from error
-    try:
-        with os.fdopen(handle, "w", encoding="utf-8", newline="\n") as opened:
-            # `mkstemp` opens at 0600 by definition, and this is the operator's own file rather
-            # than one of AGL's records - so the mode it already had is carried onto the rename.
-            os.chmod(partial, stat.S_IMODE(path.stat().st_mode))
-            opened.write(text)
-        os.replace(partial, path)
-    except OSError as error:
-        with suppress(OSError):
-            os.unlink(partial)
-        raise InputError(_unrewritable(path, error)) from error
-
-def _file_text(path: Path) -> str:
-    try:
-        return path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as error:
-        raise InputError(f"{path} cannot be read: {error}") from error
 
 def _project(path: Path, document: Mapping[str, object]) -> FileProject:
     _only(document, _PROJECT_KEYS, path, "")
@@ -577,32 +421,18 @@ def _already_written(directory: Path, name: WorkflowName) -> str:
         f"own pyproject.toml writes rather than the directories' own names"
     )
 
-def _unpinnable(path: Path, pin: str) -> str:
-    return (
-        f"{path} cannot be re-pinned to {pin!r}, and nothing has been written: AGL composed the "
-        f"file with that line in it, read the result back, and {_TOOL}.{_AGL}.{_REQUIRES} still "
-        f"does not say it. What AGL edits is the one `{_REQUIRES}` line under a "
-        f"`[{_TOOL}.{_AGL}]` header, and TOML spells that key more ways than one - "
-        f"`{_AGL}.{_REQUIRES}` written under `[{_TOOL}]`, or a quoted `\"{_REQUIRES}\"` under the "
-        f"header - so this file uses a spelling AGL's own writer does not reach. That is yours to "
-        f"settle rather than AGL's to guess at: leave a `[{_TOOL}.{_AGL}]` table whose line reads "
-        f"`{_REQUIRES} = {_quoted(pin)}`, and run `agl sync` again"
-    )
-
-def _unrewritable(path: Path, error: OSError) -> str:
-    return (
-        f"{path} cannot be rewritten: {error}. That file records which AGL your workspace was made "
-        f"by, and `agl sync` re-pins it to the AGL running now before it installs anything. The "
-        f"replacement is written beside it and renamed over it, so what is there is the file that "
-        f"was always there, and nothing has been installed"
-    )
-
 def _unwritable(path: Path, error: OSError) -> str:
     return (
         f"{path} cannot be written: {error}. `agl new` writes a workflow directory and the two "
         f"files in it, so this one is unfinished - what did get written is left where it is "
         f"rather than half-removed, and deleting the directory is what starts the command over"
     )
+
+# Empty where there is no bound to write, which leaves the blank line the template already holds
+# above its next table - so an AGL with no version of its own scaffolds a workflow claiming nothing
+# rather than one claiming a version no resolver and no reader could parse.
+def _dependencies(bound: str | None) -> str:
+    return "" if bound is None else f"dependencies = [{_quoted(bound)}]\n"
 
 def _quoted(value: str) -> str:
     escaped = "".join(

@@ -232,7 +232,7 @@ def approve(question: Question) -> Screen[Answer]:
         responses=[Choice(option, value=Answer(option)) for option in question.options],
     )
 
-@workflow(version="1")
+@workflow
 async def demo(run: Run[DemoParams]) -> None:
     """Implement, then review what was implemented, and repair what the review found.
 
@@ -246,7 +246,7 @@ async def demo(run: Run[DemoParams]) -> None:
     if findings.high:
         await run.step(implement(), note=findings.summary, commit="address the review")
 
-@workflow(version="1")
+@workflow
 async def asking(run: Run[DemoParams]) -> None:
     """One step whose agent stops to ask, answered by a person at a screen this workflow owns.
 
@@ -264,7 +264,7 @@ async def asking(run: Run[DemoParams]) -> None:
 
     await run.step(decide(ask=tool(ASK, "ask whether to go ahead", Asked, answered)))
 
-@workflow(version="1")
+@workflow
 async def landing(run: Run[DemoParams]) -> None:
     """One child worktree, one committing step, one integration - a run's shape at its smallest.
 
@@ -571,7 +571,7 @@ async def test_a_workflow_declared_inside_a_function_is_refused_with_the_reason(
     of the author, rather than on the day they move it into a workspace directory.
     """
 
-    @workflow(version="1")
+    @workflow
     async def hidden(run: Run[DemoParams]) -> None:
         """Declared inside this test, which is exactly what is being refused."""
 

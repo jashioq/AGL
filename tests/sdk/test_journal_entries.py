@@ -357,7 +357,7 @@ def test_an_entry_and_a_run_record_write_one_spelling_of_a_timestamp() -> None:
     entry = Entry(fingerprint=FIRST, value=None, head=HEAD, at=moment)
     spec = RunSpec(
         workflow="tickets",
-        workflow_version="1.0.0",
+        workflow_digests={},
         label=RunLabel("auth"),
         base_ref="main",
         base_sha=hashlib.sha256(b"base").hexdigest()[:40],
@@ -400,7 +400,7 @@ def test_one_wire_shape_speaks_for_both_records_and_neither_lost_its_own_words()
     document = _entry(FIRST, value={"tickets": []}).to_json()
     record: dict[str, JsonValue] = {
         "workflow": "tickets",
-        "workflow_version": "1.0.0",
+        "workflow_digests": {},
         "label": "auth",
         "base_ref": "main",
         "base_sha": "8c19f7ae4d2b0913e5f6" * 2,

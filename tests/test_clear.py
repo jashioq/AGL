@@ -123,7 +123,7 @@ def writing() -> Role:
     a call site - three steps below run it and none of them varies anything."""
     return Role(name="work", instructions="leave some work behind")
 
-@workflow(version="1.0")
+@workflow
 async def nesting(run: Run[NoParams]) -> None:
     """A run with something at every depth: its own work, a child's, and the child's child's.
 
@@ -141,7 +141,7 @@ async def nesting(run: Run[NoParams]) -> None:
     grandchild = child.worktree(str(GRANDCHILD))
     await grandchild.step(writing(), commit="the grandchild's work")
 
-@workflow(version="1.0")
+@workflow
 async def quiet(run: Run[NoParams]) -> None:
     """Takes no step at all, so `agl/auth` never leaves the commit the run was cut from.
 
@@ -154,7 +154,7 @@ async def quiet(run: Run[NoParams]) -> None:
 # issues it has to be: `EntryPoint.load` imports a module and reads an attribute in it.
 refused: Final[list[ConflictError]] = []
 
-@workflow(version="1.0")
+@workflow
 async def clearing(run: Run[NoParams]) -> None:
     """Clears itself, from inside itself, which is the one way one process can be two invocations.
 
@@ -700,7 +700,7 @@ async def test_a_run_whose_checkouts_were_never_cut_is_cleared_without_raising(
     ref = await history.default_ref()
     spec = RunSpec(
         workflow="quiet",
-        workflow_version="1.0",
+        workflow_digests={},
         label=LABEL,
         base_ref=ref,
         base_sha=await history.resolve(ref),

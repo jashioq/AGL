@@ -2,19 +2,30 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from importlib.metadata import EntryPoint
 from pathlib import Path
+from types import MappingProxyType
 from typing import Final
-from agl.config import workspace_path
+from agl.config import distribution, workspace_path
 from agl.config.toml_file import read_document
 from agl.ports.errors import ConflictError, InputError, NotFoundError
 from agl.ports.home_layout import AglHome, workflows_dir
 
-__all__ = ["GROUP", "BrokenWorkflow", "Discovery", "check_unbroken", "discovered", "load", "names"]
+__all__ = [
+    "GROUP",
+    "BrokenWorkflow",
+    "Discovery",
+    "check_satisfied",
+    "check_unbroken",
+    "discovered",
+    "load",
+    "names",
+]
 
 GROUP: Final = "agl.workflows"
 
 _PYPROJECT_FILE: Final = "pyproject.toml"
 _PROJECT: Final = "project"
 _ENTRY_POINTS: Final = "entry-points"
+_DEPENDENCIES: Final = "dependencies"
 
 @dataclass(frozen=True, slots=True)
 class BrokenWorkflow:
@@ -26,11 +37,23 @@ class BrokenWorkflow:
 
 @dataclass(frozen=True, slots=True)
 class Discovery:
-    """One walk of the workspace: the entry points it read, and the directories it could not."""
+    """One walk: what it read, where each was declared, what would not read, what will not run."""
 
     points: tuple[EntryPoint, ...]
 
     broken: tuple[BrokenWorkflow, ...]
+
+    # Keyed by declared name and not by directory name, the two being free to differ. A caller
+    # that handed its own points over walked nothing, so no declaration came out of a directory
+    # and this stays empty - `api.py` digests what is in here, and an empty map is what such a
+    # run records.
+    directories: Mapping[str, Path] = MappingProxyType({})
+
+    # Keyed the same way, and holding the refusal a name earns before anything imports it. A
+    # declaration stays in `points` when its directory's AGL bound is unmet, because `agl
+    # workflows` lists what a workspace declares rather than what would load - so what would
+    # otherwise be an `ImportError` out of the workflow's own first line is a sentence here.
+    unsatisfied: Mapping[str, str] = MappingProxyType({})
 
 def discovered(home: AglHome) -> Discovery:
     # Every point this walk synthesises names a module inside the workspace, and `EntryPoint.load`
@@ -49,13 +72,17 @@ def discovered(home: AglHome) -> Discovery:
         ) from error
     points: list[EntryPoint] = []
     broken: list[BrokenWorkflow] = []
+    directories: dict[str, Path] = {}
+    unsatisfied: dict[str, str] = {}
     for entry in entries:
         if not entry.is_dir():
             continue
         found = _declared(entry)
         points.extend(found.points)
         broken.extend(found.broken)
-    return Discovery(tuple(points), tuple(broken))
+        directories.update(found.directories)
+        unsatisfied.update(found.unsatisfied)
+    return Discovery(tuple(points), tuple(broken), directories, unsatisfied)
 
 # A directory's name is not a workflow's name - `_declared` reads the key on the left of a
 # declaration, wherever the file holding it sits - so a broken directory that happens to share a
@@ -67,6 +94,14 @@ def check_unbroken(found: Discovery, name: str) -> None:
     for entry in found.broken:
         if entry.directory == name:
             raise InputError(entry.reason)
+
+# Asked between `check_unbroken` and `load`, and the order is the whole of what this buys: `load`
+# is where a workflow's module is imported, and a workflow written against an AGL this one is not
+# fails that import on whichever name moved. Answering first is what turns that into a sentence.
+def check_satisfied(found: Discovery, name: str) -> None:
+    refusal = found.unsatisfied.get(name)
+    if refusal is not None:
+        raise InputError(refusal)
 
 def names(points: Iterable[EntryPoint]) -> tuple[str, ...]:
     return tuple(sorted(_index(points)))
@@ -155,18 +190,24 @@ def _declared(directory: Path) -> Discovery:
     # a scratch copy, a notes directory or a `.venv` is stray rather than a workflow that broke.
     if document is None:
         return Discovery((), ())
-    table = _nested(_nested(_nested(document, _PROJECT), _ENTRY_POINTS), GROUP)
+    project = _nested(document, _PROJECT)
+    table = _nested(_nested(project, _ENTRY_POINTS), GROUP)
     if not table:
         return _broken(directory, _undeclared(path))
     values = {name: value for name, value in table.items() if isinstance(value, str)}
     if len(values) < len(table):
         return _broken(directory, _unusable(path, sorted(set(table) - set(values))))
+    # The same read of the same file the declaration came out of: the bound is one entry of the
+    # `dependencies` list a resolver reads, so nothing here opens a second document.
+    bound = distribution.unsatisfied_bound(project.get(_DEPENDENCIES))
     return Discovery(
         tuple(
             EntryPoint(name=name, value=value, group=GROUP)
             for name, value in sorted(values.items())
         ),
         (),
+        dict.fromkeys(values, directory),
+        {} if bound is None else dict.fromkeys(values, _unsatisfied(path, bound)),
     )
 
 def _nested(table: Mapping[str, object], key: str) -> Mapping[str, object]:
@@ -189,4 +230,16 @@ def _unusable(path: Path, declarations: list[str]) -> str:
         f'{path} declares {", ".join(declarations)} under {GROUP}, and what stands beside each of '
         f'those is not a string. An entry point is `<name> = "<module>:<attribute>"`, so there is '
         f'nothing written here that AGL could import'
+    )
+
+def _unsatisfied(path: Path, bound: str) -> str:
+    return (
+        f'{path} says this workflow needs {distribution.DISTRIBUTION}{bound}, and the AGL running '
+        f'here is {distribution.installed_version()}. Nothing has been imported: a workflow whose '
+        f'first line is `from agl.sdk import ...` written against an AGL this is not fails on '
+        f'whichever name moved, and the failure names a line in your file rather than the version '
+        f'that is wrong. That bound is one entry of the `{_DEPENDENCIES}` list in the '
+        f'[{_PROJECT}] table of this file, and `agl new` writes it naming the AGL that scaffolded '
+        f'the workflow. So either install an AGL the bound admits, or - once the workflow is known '
+        f'to run against the one you have - widen the bound to say so'
     )

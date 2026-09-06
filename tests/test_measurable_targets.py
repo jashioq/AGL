@@ -898,7 +898,7 @@ def _eight_role() -> Role:
     """The one role the probe runs, so `agl run` has work to do."""
     return Role(name="only", instructions="do the work")
 
-@workflow(version="1")
+@workflow
 async def probe(run: Run[_EightParams]) -> None:
     """One step, so that `agl run` has work to do and `agl resume` has an entry to replay.
 
@@ -1183,12 +1183,12 @@ async def _renameable(
         await run.worktree(space).step(steps[1], order=10 + index)
     await run.step(steps[2], order=99)
 
-@workflow(version="1")
+@workflow
 async def named_one(run: Run[_RenameParams]) -> None:
     """The workflow under one set of names."""
     await _renameable(run, steps=_FIRST_STEPS, spaces=_FIRST_SPACES)
 
-@workflow(version="1")
+@workflow
 async def named_two(run: Run[_RenameParams]) -> None:
     """The same workflow under a different name for every namespace and every step."""
     await _renameable(run, steps=_SECOND_STEPS, spaces=_SECOND_SPACES)
@@ -1206,12 +1206,12 @@ async def _landing(run: Run[_RenameParams], *, space: str) -> None:
     assert not outcome.conflicted
     await run.step(_renamed("work"), order=2)
 
-@workflow(version="1")
+@workflow
 async def landing_one(run: Run[_RenameParams]) -> None:
     """The landing programme under one namespace."""
     await _landing(run, space="one")
 
-@workflow(version="1")
+@workflow
 async def landing_two(run: Run[_RenameParams]) -> None:
     """The landing programme under a different namespace, and nothing else different."""
     await _landing(run, space="three")

@@ -232,7 +232,7 @@ def reporter() -> Role[_Found]:
 # every test that reads it asks one question - did this run reach its workflow, or was it refused
 # first - and the answer must not depend on which module the workflow happens to be written in.
 
-@workflow(version="1.1")
+@workflow
 async def two_providers(run: Run[NoParams]) -> None:
     """The multi-vendor case: this module names Claude and OpenAI, so one run asks both.
 
@@ -241,7 +241,7 @@ async def two_providers(run: Run[NoParams]) -> None:
     """
     entered.append("two_providers")
 
-@workflow(version="1.1")
+@workflow
 async def replacing(run: Run[NoParams]) -> None:
     """Steps with a role that requires tool calling, in a module whose factories require nothing.
 

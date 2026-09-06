@@ -82,7 +82,7 @@ def writing() -> Role:
     the `commit=` then records - which is what puts `agl/auth` ahead of the base ref."""
     return Role(name="write", instructions="leave some work behind")
 
-@workflow(version="1.0")
+@workflow
 async def working(run: Run[NoParams]) -> None:
     """One step that commits, so this run's branch is not contained in the ref it started from."""
     await run.step(writing(), commit="the work this run produced")

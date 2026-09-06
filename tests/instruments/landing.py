@@ -360,7 +360,7 @@ class _Driver:
         """
         spec = RunSpec(
             workflow="landing",
-            workflow_version="1",
+            workflow_digests={},
             label=self.label,
             base_ref="HEAD",
             base_sha=self.config.base,

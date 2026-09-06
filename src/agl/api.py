@@ -1,9 +1,9 @@
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Final
-from agl.config import registry, sources, toml_file, workspace_path
+from agl.config import distribution, registry, sources, toml_file, workflow_files, workspace_path
 from agl.config.schema import Settings
 from agl.ports.errors import ConflictError, InputError, InternalError, NotFoundError
 from agl.ports.home_layout import AglHome, RunScope, workspace_dir
@@ -15,6 +15,7 @@ from agl.ports.tree_layout import BASE_DIRNAME, TreesRoot, run_branch, worktree_
 from agl.sdk import params
 from agl.sdk._engine import preflight
 from agl.sdk._engine.integration import Leases
+from agl.sdk._engine.journal import Fingerprints
 from agl.sdk._engine.services import Services
 from agl.sdk.workflow import Run, Workflow
 
@@ -22,6 +23,7 @@ __all__ = [
     "Ask",
     "Cleared",
     "Listing",
+    "Replayed",
     "clear",
     "init",
     "list_workflows",
@@ -33,6 +35,12 @@ __all__ = [
 ]
 
 _TREES_DIRNAME: Final = ".agl-trees"
+
+# How many files a resume's refusal names before it starts counting, per kind of difference. A
+# directory rewritten wholesale would otherwise put its whole listing on a terminal, and what the
+# message owes is enough to recognise the edit that was made - `git status` in the workspace is
+# the complete answer. `tests/test_resume.py` pins the bound.
+_SHOWN: Final = 5
 
 _BUILD_PROMPT: Final = (
     "What command builds and tests this project? AGL runs it at the merge gate, through a shell, "
@@ -58,6 +66,12 @@ class Listing:
 
     broken: tuple[registry.BrokenWorkflow, ...]
 
+@dataclass(frozen=True, slots=True)
+class Replayed:
+    """What a walk did not pay for: the steps it served off the ledger, over every namespace."""
+
+    steps: int
+
 async def run(
     services: Services,
     project: ProjectName,
@@ -68,8 +82,9 @@ async def run(
     base_ref: str | None = None,
     home: AglHome | None = None,
     points: Iterable[EntryPoint] | None = None,
-) -> None:
-    wf = _loaded(_checked_discovery(home, points), name)
+) -> Replayed:
+    found = _discovery(home, points)
+    wf = _loaded(found, name)
     given = params.parse(wf.params, argv, prog=f"agl run {name}")
 
     scope = RunScope(project, label)
@@ -98,7 +113,7 @@ async def run(
     )
     spec = RunSpec(
         workflow=name,
-        workflow_version=wf.version,
+        workflow_digests=_digests(found, name),
         label=label,
         base_ref=ref,
         base_sha=await services.history.resolve(ref),
@@ -109,7 +124,7 @@ async def run(
 
     async with services.workspaces.hold(label):
         await services.store.write_record(scope, spec.to_json())
-        await _walk(services, wf, scope, spec, given)
+        return await _walk(services, wf, scope, spec, given)
 
 async def resume(
     services: Services,
@@ -118,7 +133,7 @@ async def resume(
     *,
     home: AglHome | None = None,
     points: Iterable[EntryPoint] | None = None,
-) -> None:
+) -> Replayed:
     scope = RunScope(project, label)
     record = await services.store.read_record(scope)
     if record is None:
@@ -127,20 +142,20 @@ async def resume(
         )
     spec = RunSpec.from_json(record)
 
-    wf = _loaded(_checked_discovery(home, points), spec.workflow)
+    found = _discovery(home, points)
+    wf = _loaded(found, spec.workflow)
 
-    if wf.version != spec.workflow_version:
+    measured = _digests(found, spec.workflow)
+    if measured != spec.workflow_digests:
         raise ConflictError(
-            f"run {str(label)!r} was started by {spec.workflow!r} version "
-            f"{spec.workflow_version!r} and {spec.workflow!r} in your workspace is now version "
-            f"{wf.version!r}. A run stamps its workflow's version and AGL refuses a mismatch "
-            f"rather than migrating one: every step already on this run's ledger was "
-            f"produced by the workflow as it was then. So this run finishes against that workflow "
-            f"and no other - put the directory back to what it was at {spec.workflow_version!r}, "
-            f"out of version control or from wherever the earlier copy is, rather than editing "
-            f"the `version=` line back, which would replay the ledger against code that never "
-            f"wrote it. Otherwise `agl clear {label}` drops the ledger and starts the run again "
-            f"on {wf.version!r}."
+            f"run {str(label)!r} was started by {spec.workflow!r}, and that workflow's own "
+            f"directory is not what it was then: {_moved(spec.workflow_digests, measured)}. A run "
+            f"digests every file of the directory its workflow is written in, and AGL refuses a "
+            f"resume that disagrees rather than migrating one: every step already on this run's "
+            f"ledger was produced by those files as they stood. So this run finishes against them "
+            f"and no others - put the directory back to what it was when the run started, out of "
+            f"version control or from wherever the earlier copy is. Otherwise `agl clear {label}` "
+            f"drops the ledger and starts the run again on the {spec.workflow!r} you have now."
         )
 
     given = params.from_json(wf.params, spec.params)
@@ -148,7 +163,7 @@ async def resume(
     await preflight.check(services.agents, services.history, wf.fn)
 
     async with services.workspaces.hold(label):
-        await _walk(services, wf, scope, spec, given)
+        return await _walk(services, wf, scope, spec, given)
 
 async def clear(services: Services, project: ProjectName, label: RunLabel) -> Cleared:
     scope = RunScope(project, label)
@@ -198,24 +213,22 @@ def init(settings: Settings, cwd: Path, ask: Ask) -> Path:
 # the three things it makes only where that thing is absent, so the workspace an operator already
 # has is left exactly as it stands and there is no second answer here about what "already there"
 # means. `registry.GROUP` travels as an argument because `config/registry.py` imports this module,
-# so the group is defined once and reaches the writer the only way round the import allows.
+# so the group is defined once and reaches the writer the only way round the import allows. The
+# bound travels beside it for a different reason - the writer renders documents and has no business
+# knowing what AGL is - and reading it costs a look at this interpreter's own metadata, which is
+# what keeps `agl new` a command that resolves nothing and opens no socket.
 def new_workflow(home: AglHome, name: WorkflowName) -> Path:
     toml_file.make_workspace(home)
-    return toml_file.make_workflow(home, name, registry.GROUP)
+    return toml_file.make_workflow(home, name, registry.GROUP, distribution.requirement())
 
-# The first three steps are in the order the command is for. `agl sync` is what an operator reaches
-# for once `check_workspace_pin` has refused a run, so a sync that installed against a workspace
-# still recording another AGL would leave that refusal exactly where it found it; and a re-pin
-# against a workspace that is not there yet would meet `UvSyncer`'s own refusal rather than making
-# one. The re-pin is a second call and not something `make_workspace` grew, for the reason
-# `config/toml_file.py` gives above `write_workspace_pin`.
+# The workspace is made first because a sync against one that is not there yet would meet
+# `UvSyncer`'s own refusal rather than making one.
 #
-# The fourth is the only one after the install and the only one a refusal skips. What it writes
+# The last step is the only one after the install and the only one a refusal skips. What it writes
 # names the venv an install just finished building, so a sync uv refused - where that venv may hold
 # nothing, or may not be there at all - is left with no claim about one rather than a stale claim.
 async def sync_workspace(syncer: Syncer, home: AglHome) -> SyncOutcome:
     toml_file.make_workspace(home)
-    toml_file.write_workspace_pin(home)
     outcome = await syncer.sync(workspace_dir(home))
     if outcome.synced:
         workspace_path.write_editor_pth(home)
@@ -235,9 +248,10 @@ def workflow_help(
 
 async def _walk(
     services: Services, wf: Workflow[object], scope: RunScope, spec: RunSpec, given: object
-) -> None:
+) -> Replayed:
     await services.workspaces.open(scope.label, None, spec.base_sha)
     leases = Leases()
+    fingerprints = Fingerprints()
     try:
         async with services.terminal:
             await wf.fn(
@@ -246,11 +260,13 @@ async def _walk(
                     services=services,
                     scope=scope,
                     base=spec.base_sha,
+                    fingerprints=fingerprints,
                     leases=leases,
                 )
             )
     finally:
         leases.release_all()
+    return Replayed(steps=fingerprints.replays)
 
 async def _under(store: Store, scope: RunScope) -> tuple[Namespace, ...]:
     found: list[Namespace] = []
@@ -261,20 +277,33 @@ async def _under(store: Store, scope: RunScope) -> tuple[Namespace, ...]:
 
 def _loaded(found: registry.Discovery, name: str) -> Workflow[object]:
     registry.check_unbroken(found, name)
+    registry.check_satisfied(found, name)
     return registry.load(found.points, name, Workflow)
 
-# `run` and `resume` are the two operations that read a workflow out of the workspace in order to
-# spend on it, so they are the two that ask whether that workspace was made by the AGL running now.
-# `list_workflows`, `workflow_help`, `clear`, `new_workflow` and `sync_workspace` refuse over no
-# pin: none of them runs a workflow, `agl new`'s scaffold is written by the AGL running it, and a
-# sync refusing over the pin it exists to move could never be run. The `points=` arm
-# skips the question along with the walk, nothing reached that way having come out of a workspace.
-def _checked_discovery(
-    home: AglHome | None, points: Iterable[EntryPoint] | None
-) -> registry.Discovery:
-    if points is None and home is not None:
-        toml_file.check_workspace_pin(home)
-    return _discovery(home, points)
+# A caller that handed its own points over walked no workspace, so its workflow was read out of no
+# directory and there is nothing to digest. Every declaration `config/registry.py` reads out of a
+# workspace carries the directory it came from, so the empty answer is that seam and never a
+# workflow whose files went unmeasured.
+def _digests(found: registry.Discovery, name: str) -> Mapping[str, str]:
+    directory = found.directories.get(name)
+    return {} if directory is None else workflow_files.digests(directory)
+
+def _moved(recorded: Mapping[str, str], measured: Mapping[str, str]) -> str:
+    changed = sorted(
+        name for name in recorded if name in measured and measured[name] != recorded[name]
+    )
+    added = sorted(name for name in measured if name not in recorded)
+    removed = sorted(name for name in recorded if name not in measured)
+    return "; ".join(
+        f"{what} {_listed(names)}"
+        for what, names in (("changed", changed), ("added", added), ("removed", removed))
+        if names
+    )
+
+def _listed(names: Sequence[str]) -> str:
+    rest = len(names) - _SHOWN
+    shown = ", ".join(names[:_SHOWN])
+    return shown if rest <= 0 else f"{shown} and {rest} more"
 
 # Points handed over are the whole of what the caller has: the walk is skipped, so nothing reaches
 # the operator's home and `config/workspace_path.py` writes no entry to `sys.path`. That is what

@@ -30,14 +30,23 @@ classifiers = [
     "Topic :: Software Development :: Code Generators",
     "Topic :: Software Development :: Version Control :: Git",
 ]
-# Both unconditional, and that is not `ARCHITECTURE.md`'s "Vendor containment" being walked back:
-# what contains a vendor is `.importlinter`'s contract 3 and `config/container.py` importing each
-# one inside the function that constructs it, and neither of those reads package metadata. `rich`
-# could not be optional in any case - `container.py`'s real composition root refuses a run outright
-# when it cannot be imported, there being no headless display for `real()` to fall back to.
+# Both SDKs unconditional, and that is not `ARCHITECTURE.md`'s "Vendor containment" being walked
+# back: what contains a vendor is `.importlinter`'s contract 3 and `config/container.py` importing
+# each one inside the function that constructs it, and neither of those reads package metadata.
+# `rich` could not be optional in any case - `container.py`'s real composition root refuses a run
+# outright when it cannot be imported, there being no headless display for `real()` to fall back to.
 # Nothing here for the OpenAI connector: that adapter drives the Codex CLI *binary*, which is
 # installed separately, so there is no distribution for this list to name.
-dependencies = ["claude-agent-sdk>=0.2.140", "rich>=15.0.0"]
+#
+# `packaging` is the one member that is no vendor SDK, and `NOT_A_VENDOR` in
+# tests/test_contract_listings.py is where that exception is written down rather than assumed.
+# `config/distribution.py` reads the `agents-gl` bound a workflow declares in its own pyproject.toml
+# and asks whether the AGL running satisfies it. PEP 440 is a grammar and not an ordering of text -
+# `"0.0.10" >= "0.0.2"` is False as strings and true as versions - so the comparison is
+# `packaging.specifiers`' and nothing here compares strings. It arrives today as a transitive
+# dependency of pytest, which is a dev tool: an `agl` installed by an operator gets what this list
+# names and nothing a `[dependency-groups]` entry pulled in beside it.
+dependencies = ["claude-agent-sdk>=0.2.140", "packaging>=25.0", "rich>=15.0.0"]
 
 # Both labels point at the repository because there is nowhere else to send anyone yet: no
 # documentation site, and no tracker apart from the repo's own. Two labels rather than one because

@@ -94,6 +94,14 @@ def _counter_key(scope: RunScope, step: StepName, base: str) -> tuple[RunScope, 
 class Fingerprints:
     def __init__(self) -> None:
         self._counts: dict[tuple[RunScope, str, str], int] = {}
+        self._replays = 0
+
+    # One of these serves a whole run tree - `sdk/workflow.py`'s `Run._child` hands its own down
+    # and `api._walk` builds the one the root is given - so this tally spans every namespace, which
+    # is what makes it the walk's answer rather than one journal's.
+    @property
+    def replays(self) -> int:
+        return self._replays
 
     def digest(self, scope: RunScope, step: StepName, base: str) -> str:
         count = self._counts.get(_counter_key(scope, step, base), 0)
@@ -102,6 +110,9 @@ class Fingerprints:
     def claim(self, scope: RunScope, step: StepName, base: str) -> None:
         key = _counter_key(scope, step, base)
         self._counts[key] = self._counts.get(key, 0) + 1
+
+    def replay(self) -> None:
+        self._replays += 1
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class Entry:
@@ -224,6 +235,7 @@ class Journal:
             entry = await read_entry(self._store, self._scope, name, digest)
             if entry is not None:
                 self._fingerprints.claim(self._scope, name, base)
+                self._fingerprints.replay()
                 self._last_good = entry.head
                 return entry.value
 

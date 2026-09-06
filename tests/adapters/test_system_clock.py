@@ -86,7 +86,7 @@ def _record_at(moment: datetime) -> RunSpec:
     """A run record, stamped with `moment` - the one thing every reading ends up in."""
     return RunSpec(
         workflow="tickets",
-        workflow_version="1.0.0",
+        workflow_digests={},
         label=RunLabel("auth"),
         base_ref="main",
         base_sha=_SHA,

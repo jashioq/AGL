@@ -34,6 +34,7 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Final
 import pytest
+from packaging.version import Version
 from agl.config import distribution
 
 # This repository's own `pyproject.toml`, which is where the distribution name is decided and the
@@ -119,3 +120,170 @@ def test_looking_up_the_import_package_name_raises_because_it_is_no_distribution
     """
     with pytest.raises(PackageNotFoundError):
         version(_IMPORT_PACKAGE)
+
+# --- The bound a workflow declares on AGL, written by `agl new` and read before an import ------
+#
+# Two halves of one string and they are deliberately in one module: `requirement()` composes the
+# line `config/toml_file.py` writes into a scaffold, and `unsatisfied_bound` reads that same line
+# back out of `[project] dependencies` when `config/registry.py` walks the workspace. The round
+# trip at the bottom is what says they are halves of one thing rather than two similar functions.
+#
+# **`packaging` and not a string comparison, which is the whole reason this repository grew a
+# runtime dependency.** The check this replaces compared version *text*, and false refusals are
+# what that produces: `"0.0.10" >= "0.0.2"` is False as strings and true as versions, and no
+# ordering of text expresses a range at all. Both facts are asserted below rather than described.
+#
+# Nothing here reaches an index, and nothing here installs anything. The version being compared
+# against is this interpreter's own metadata, which `installed_version` above already reads.
+
+def _uninstalled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The bare-checkout state, reached the way the test above reaches it: through a name nothing
+    installed answers to, so the `PackageNotFoundError` is the real one."""
+    monkeypatch.setattr(distribution, "DISTRIBUTION", _IMPORT_PACKAGE)
+
+def test_the_bound_agl_new_writes_is_a_floor_naming_the_running_version() -> None:
+    """`>=` and never `==`: a workflow keeps working as AGL grows and breaks on an older one.
+
+    What a bound is for is the direction that breaks. A workflow's first line imports names out of
+    `agl.sdk`, and an AGL *older* than the one it was written against is the AGL missing one of
+    them; a newer one is the ordinary case and pinning it would refuse every upgrade. The version
+    named is read back rather than restated, so this fails on the day the composition stops naming
+    the running AGL at all.
+    """
+    written = distribution.requirement()
+
+    assert written == f"{distribution.DISTRIBUTION}>={distribution.installed_version()}"
+
+def test_an_agl_with_no_version_writes_no_requirement_into_a_scaffold(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A source tree has no version, and `UNINSTALLED` is a sentence rather than one.
+
+    Interpolating it would write `agents-gl>=unknown (agents-gl is not installed)` into somebody's
+    project file - a requirement no resolver parses and no reader of this repository would have
+    meant. Nothing is the honest answer: AGL cannot say which AGL scaffolded the workflow, so the
+    scaffold makes no claim, and the reader below is silent for the same reason.
+    """
+    _uninstalled(monkeypatch)
+
+    assert distribution.requirement() is None
+
+def test_the_bound_a_scaffold_is_given_is_one_its_own_reader_accepts() -> None:
+    """The round trip, and the one property that keeps `agl new` from scaffolding a refusal.
+
+    `agl new` writes the bound and `config/registry.py` reads it back on the very next command, so
+    a floor the reader does not accept is a workflow that cannot be run by the AGL that wrote it.
+    The two are separate functions in this module and nothing but this asserts they agree.
+    """
+    written = distribution.requirement()
+    assert written is not None, "this tree is installed, so there is a bound to round-trip"
+
+    assert distribution.unsatisfied_bound([written]) is None
+
+def test_a_bound_the_running_agl_sits_below_comes_back_as_its_specifier() -> None:
+    """What the refusal is built from: the specifier, not the whole requirement and not a bool.
+
+    `config/registry.py` names the bound and the running version in one sentence, so what it needs
+    back is the half the operator has to edit. A `>=` floor above the running version is the only
+    shape that can be reached without knowing what this tree's version is.
+    """
+    running = Version(distribution.installed_version())
+    above = f"{running.major + 1}.0.0"
+
+    assert distribution.unsatisfied_bound([f"agents-gl>={above}"]) == f">={above}"
+
+def test_a_bound_is_a_range_evaluated_as_versions_and_never_as_version_text() -> None:
+    """The two halves of what a comparison of version text cannot do, on one running version.
+
+    **Text is the wrong order.** `0.0.10` is above `0.0.2` as versions and below it as strings, so
+    a floor of `0.0.2` admits it and a comparison of text refuses it - which is the shape every
+    false refusal a text comparison makes has. The string comparison is written out beside it,
+    because "the versions compare correctly" says nothing without the answer it is not giving.
+
+    **And text expresses no range at all.** Four operators are put against the AGL that is running,
+    two of which it satisfies and two of which it does not, and neither `==` nor `<` is something a
+    floor-shaped check could have answered. The version is read back rather than written down, so
+    this holds on any tree rather than on the one it was written against.
+    """
+    assert "0.0.10" < "0.0.2", "the textual comparison this check must not be"
+    assert Version("0.0.10") > Version("0.0.2")
+
+    running = distribution.installed_version()
+    asked = {
+        specifier: distribution.unsatisfied_bound([f"{distribution.DISTRIBUTION}{specifier}"])
+        for specifier in (f">={running}", f"=={running}", f">{running}", f"<{running}")
+    }
+
+    assert asked == {
+        f">={running}": None,
+        f"=={running}": None,
+        f">{running}": f">{running}",
+        f"<{running}": f"<{running}",
+    }
+
+@pytest.mark.parametrize(
+    "spelled", ["agents-gl", "agents_gl", "Agents-GL", "AGENTS.GL", "agents--gl"]
+)
+def test_every_pep_503_spelling_of_the_distribution_names_the_same_project(spelled: str) -> None:
+    """`packaging`'s own normalisation and not `.lower()`, which folds neither `_` nor a run.
+
+    PEP 503 folds case *and* every run of `-`, `_` and `.` into one `-`, so all five spellings
+    below are one project name and a workflow written by hand may use any of them. A refusal that
+    matched on the exact string would pass over four of these and import the workflow anyway,
+    which is the failure this whole check exists to prevent.
+    """
+    assert distribution.unsatisfied_bound([f"{spelled}>=99.0.0"]) == ">=99.0.0"
+
+@pytest.mark.parametrize(
+    "declared",
+    [
+        None,
+        [],
+        "agents-gl>=99.0.0",
+        {"agents-gl": ">=99.0.0"},
+        [3],
+        [None],
+        ["httpx>=0.27", "pydantic>=2"],
+        ["agents-gl >>= 99"],
+        ['agents-gl>=99.0.0; sys_platform == "some-machine-that-is-not-this-one"'],
+    ],
+)
+def test_a_dependencies_value_declaring_no_readable_agl_bound_refuses_no_workflow(
+    declared: object,
+) -> None:
+    """Every shape that is not a bound on AGL, and all of them are silence rather than a refusal.
+
+    Three different reasons, one answer. **Nothing was said**: absent, empty, or naming other
+    distributions - which is every workflow written before the bound existed, and every one written
+    by hand. **It is not this check's file to police**: `dependencies` is PEP 621's table and uv
+    resolves every line of it, so a requirement AGL cannot parse is the installer's complaint and
+    refusing over it would make AGL a second, partial validator of somebody's project file. **It is
+    not this machine's requirement**: a marker names an environment, and deciding whether one
+    applies here is the resolver's - guessing wrong refuses a workflow that would have run.
+
+    The wrong container is in the list for the reader's sake: TOML admits a string and a table
+    where an array belongs, and neither is a list of requirements.
+    """
+    assert distribution.unsatisfied_bound(declared) is None
+
+def test_an_agl_that_is_not_installed_measures_no_bound_and_refuses_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The decision this whole check turns on: no version to compare is silence, not a refusal.
+
+    A source tree carries no `.dist-info`, and this suite frequently runs in one - so a refusal
+    here would refuse every workflow in the workspace at once and turn a missing install into a
+    build that fails for the wrong reason. Silence also matches what the operator is owed: the
+    bound converts an `ImportError` into a sentence, and where AGL cannot say which AGL it is there
+    is nothing to convert. The bound below is one no released AGL will ever satisfy, so the
+    silence is the uninstalled state answering and not the comparison passing.
+
+    The bound is composed *before* the substitution, and that ordering is the assertion: what the
+    substitution takes away is the version to compare against and nothing else, the name the reader
+    matches on having been normalised at import. A bound spelled after it would name `agl`, match
+    nothing, and pass without ever reaching the arm under test.
+    """
+    bound = f"{distribution.DISTRIBUTION}>=99.0.0"
+    _uninstalled(monkeypatch)
+
+    assert distribution.unsatisfied_bound([bound]) is None

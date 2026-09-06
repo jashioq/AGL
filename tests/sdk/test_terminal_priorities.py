@@ -475,7 +475,7 @@ def _agent(record: _Agent) -> Script:
 
 # --- the workflows, reached through hand-constructed entry points ---------------------------------
 
-@workflow(version="1")
+@workflow
 async def deciding(run: Run[NoParams]) -> None:
     """The conflict loop, run - and the middle line of it is what this file is for.
 
@@ -533,7 +533,7 @@ async def deciding(run: Run[NoParams]) -> None:
         else:
             await outcome.abort()
 
-@workflow(version="1")
+@workflow
 async def contested(run: Run[NoParams]) -> None:
     """Two children asking, a third one landing, and the parent's own next step behind all of it.
 

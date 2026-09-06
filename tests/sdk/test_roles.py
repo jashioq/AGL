@@ -779,9 +779,9 @@ def test_nothing_here_is_checked_against_a_provider() -> None:
 # fingerprint*, and every entry recorded before it was added misses. `test_folding_tool_calling_in
 # _moves_no_digest_although_its_trigger_is_a_term` below is where the two halves are separated: the
 # fold rides for free, the tool it rides behind does not. What follows from it is
-# `ARCHITECTURE.md`'s "Bump `@workflow(version=…)` when a workflow's shape changes" - a workflow
-# that gave a role a tool it did not have before is a workflow whose version has to move, and it
-# has already happened once to a workflow AGL shipped.
+# `ARCHITECTURE.md`'s "A resume finishes against the files the run was recorded by" - giving a role
+# a tool it did not have before is an edit to a file in the workflow's own directory, so a run in
+# flight when it lands is refused rather than replayed past it.
 
 def test_declaring_a_reporting_tool_requires_tool_calling() -> None:
     """A role that offers a tool needs a backend able to call one, and there is no role for which
@@ -837,11 +837,12 @@ def test_folding_tool_calling_in_moves_no_digest_although_its_trigger_is_a_term(
     digest is different today from what it was before this implication existed.
 
     **The second assertion is the one an author meets**, and it is the reason this test is quoted
-    from `ARCHITECTURE.md`'s version rule. Declaring a tool
-    *does* move the digest, and a question is now an ordinary tool - so a workflow that gives a role
-    somewhere to ask has changed that step's fingerprint, every entry recorded under the toolless
-    role misses, and a resume re-buys the step. That is a shape change, and a shape change is a
-    `@workflow(version=…)` bump.
+    from `ARCHITECTURE.md`'s "A resume finishes against the files the run was recorded by".
+    Declaring a tool *does* move the digest, and a question is now an ordinary tool - so a workflow
+    that gives a role somewhere to ask has changed that step's fingerprint, and every entry
+    recorded under the toolless role misses. A run already in flight never reaches that: the edit
+    is a file in the workflow's own directory, so its resume is refused and the re-buy is a
+    decision somebody makes rather than a bill they read afterwards.
     """
     typed = replace(REVIEWER, requires={Capability.TOOL_CALLING})
     folded = replace(REVIEWER, requires=frozenset())

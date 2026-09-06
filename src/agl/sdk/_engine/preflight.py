@@ -64,9 +64,9 @@ def _declared_beside(declared_by: _Declaration) -> tuple[RoleFactory[..., Any], 
             f"the workflow function {declared_by.__qualname__!r} says it was written in "
             f"{declared_by.__module__!r}, and that module is not in `sys.modules`. "
             f"Preflight reads a workflow's role factories out of the namespace its `def` ran in - "
-            f"`@workflow` takes no `roles=`, for the reason `ARCHITECTURE.md`'s 'Deliberately not "
-            f"built' gives - and an entry point is what imported that module, so there is no "
-            f"supported way to reach this line"
+            f"`@workflow` takes no arguments at all, for the reason `ARCHITECTURE.md`'s "
+            f"'Deliberately not built' gives - and an entry point is what imported that module, "
+            f"so there is no supported way to reach this line"
         )
     beside = tuple(vars(written_in).values())
     return tuple(bound for bound in beside if isinstance(bound, RoleFactory)) + tuple(

@@ -20,14 +20,12 @@ type _Commands = argparse._SubParsersAction[RefusingParser]
 def declare(commands: _Commands) -> RefusingParser:
     return commands.add_parser(
         NAME,
-        help="install what your workspace's workflows declare, and re-pin it to this AGL",
+        help="install what your workspace's workflows declare",
         description=(
             "Install the dependencies the workflows in your AGL workspace declare, into an "
             "environment beside them that AGL adds to a run's import path. The workspace is made "
-            "if it is not there yet, and its record of which AGL made it is moved to the AGL "
-            "running now first - so this is also the command that ends a version-mismatch "
-            "refusal, and the only thing in AGL that rewrites that line. Nothing about a "
-            "repository is read: a sync addresses the workflows you wrote and no project."
+            "if it is not there yet. Nothing about a repository is read: a sync addresses the "
+            "workflows you wrote and no project."
         ),
         allow_abbrev=False,
     )
