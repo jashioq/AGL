@@ -1,3 +1,4 @@
+import sys
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from importlib.metadata import EntryPoint
@@ -5,7 +6,7 @@ from pathlib import Path
 from typing import Final
 from agl.config import distribution, registry, sources, toml_file, workflow_files, workspace_path
 from agl.config.schema import Settings
-from agl.ports.errors import ConflictError, InputError, InternalError, NotFoundError
+from agl.ports.errors import ConflictError, InputError, InternalError, NotFoundError, UpstreamError
 from agl.ports.home_layout import AglHome, RunScope, workspace_dir
 from agl.ports.ids import Namespace, ProjectName, RunLabel, WorkflowName
 from agl.ports.run import RunSpec, checked_text
@@ -30,7 +31,6 @@ __all__ = [
     "new_workflow",
     "resume",
     "run",
-    "sync_workspace",
     "workflow_help",
 ]
 
@@ -80,9 +80,15 @@ async def run(
     argv: Sequence[str] = (),
     *,
     base_ref: str | None = None,
+    syncer: Syncer | None = None,
     home: AglHome | None = None,
     points: Iterable[EntryPoint] | None = None,
 ) -> Replayed:
+    # Above the discovery chain, because `config/registry.py`'s `discovered` is what puts the
+    # workspace venv on `sys.path` and its `load` is what imports the workflow's own module. A
+    # dependency added to a workflow and not yet installed fails that import, and an install
+    # underneath it never runs - so the next run fails identically and nothing ever heals.
+    await _sync_workspace(syncer, home)
     found = _discovery(home, points)
     wf = _loaded(found, name)
     given = params.parse(wf.params, argv, prog=f"agl run {name}")
@@ -131,6 +137,7 @@ async def resume(
     project: ProjectName,
     label: RunLabel,
     *,
+    syncer: Syncer | None = None,
     home: AglHome | None = None,
     points: Iterable[EntryPoint] | None = None,
 ) -> Replayed:
@@ -142,6 +149,7 @@ async def resume(
         )
     spec = RunSpec.from_json(record)
 
+    await _sync_workspace(syncer, home)
     found = _discovery(home, points)
     wf = _loaded(found, spec.workflow)
 
@@ -216,23 +224,15 @@ def init(settings: Settings, cwd: Path, ask: Ask) -> Path:
 # so the group is defined once and reaches the writer the only way round the import allows. The
 # bound travels beside it for a different reason - the writer renders documents and has no business
 # knowing what AGL is - and reading it costs a look at this interpreter's own metadata, which is
-# what keeps `agl new` a command that resolves nothing and opens no socket.
-def new_workflow(home: AglHome, name: WorkflowName) -> Path:
-    toml_file.make_workspace(home)
-    return toml_file.make_workflow(home, name, registry.GROUP, distribution.requirement())
-
-# The workspace is made first because a sync against one that is not there yet would meet
-# `UvSyncer`'s own refusal rather than making one.
+# what keeps `agl new` a command that resolves no project.
 #
-# The last step is the only one after the install and the only one a refusal skips. What it writes
-# names the venv an install just finished building, so a sync uv refused - where that venv may hold
-# nothing, or may not be there at all - is left with no claim about one rather than a stale claim.
-async def sync_workspace(syncer: Syncer, home: AglHome) -> SyncOutcome:
+# The scaffold is written before the install, so an installer that refuses leaves the two documents
+# on disk and a second `agl new` under the same name refuses them rather than writing them again.
+async def new_workflow(syncer: Syncer, home: AglHome, name: WorkflowName) -> Path:
     toml_file.make_workspace(home)
-    outcome = await syncer.sync(workspace_dir(home))
-    if outcome.synced:
-        workspace_path.write_editor_pth(home)
-    return outcome
+    written = toml_file.make_workflow(home, name, registry.GROUP, distribution.requirement())
+    await _sync_workspace(syncer, home)
+    return written
 
 def list_workflows(
     *, home: AglHome | None = None, points: Iterable[EntryPoint] | None = None
@@ -267,6 +267,59 @@ async def _walk(
     finally:
         leases.release_all()
     return Replayed(steps=fingerprints.replays)
+
+# A caller that handed no syncer installs nothing, the way one that handed its own points walks no
+# workspace: `agl.testing`'s harness is both at once and `cli/main.py` is neither. Making the
+# workspace is the scaffold's job and not this one's - `run` and `resume` read a workflow out of
+# one that is already there.
+#
+# An installer that could not be *started* raises out of `sync` rather than answering, which is
+# `ports/sync.py`'s own clause, and it is deliberately not caught: nothing was tried, and a machine
+# with no installer on it is not one a run can carry on past.
+#
+# The environment is stat-ed before the installer is spawned and never after, because `uv sync`
+# builds the venv before it resolves: a first-ever sync that then failed leaves one standing, and
+# an answer read afterwards would let `_unchanged` describe a state no sync has ever produced.
+async def _sync_workspace(syncer: Syncer | None, home: AglHome | None) -> None:
+    if syncer is None or home is None:
+        return
+    stood = workspace_path.venv_exists(home)
+    outcome = await syncer.sync(workspace_dir(home))
+    if outcome.synced:
+        workspace_path.write_editor_pth(home)
+        return
+    if not stood:
+        raise UpstreamError(_refused(outcome))
+    print(_unchanged(outcome), file=sys.stderr)
+
+# Never on stdout, for `cli/commands/__init__.py`'s reason: what a machine consumes goes there and
+# this is a note to whoever is reading the terminal. It is written here rather than handed back for
+# a command to print, because what a run hands back it hands back at the end - and the end of a run
+# is hours after the point at which knowing this would have been worth anything.
+def _unchanged(outcome: SyncOutcome) -> str:
+    return (
+        f"warning: the sync was refused - uv exited {outcome.status} rather than 0 - and this "
+        f"workspace already had an environment, so it stands exactly as the last sync that "
+        f"succeeded left it and AGL carries on against that. What a workflow imports may therefore "
+        f"be older than what it now declares, and anything added since is not installed at all. "
+        f"Nothing above uv decided this and nothing above it can explain it - a resolution that "
+        f"cannot be satisfied, an index that could not be reached and a package that will not "
+        f"build all arrive here as the same non-zero exit - so what uv said is printed whole below "
+        f"rather than summarised:\n\n{outcome.output.rstrip()}"
+    )
+
+def _refused(outcome: SyncOutcome) -> str:
+    return (
+        f"the sync was refused: uv exited {outcome.status} rather than 0, and this workspace has "
+        f"no environment to fall back on - so what the workflows in it declare is not installed "
+        f"and a run that imports one of those packages will not find it. Carrying on would only "
+        f"defer the same failure to the first workflow that imports one, where it would name a "
+        f"package rather than the install that never happened. Nothing above uv decided this and "
+        f"nothing above it can explain it - a resolution that cannot be satisfied, an index that "
+        f"could not be reached and a package that will not build all arrive here as the same "
+        f"non-zero exit - so what uv said is printed whole below rather than "
+        f"summarised:\n\n{outcome.output.rstrip()}"
+    )
 
 async def _under(store: Store, scope: RunScope) -> tuple[Namespace, ...]:
     found: list[Namespace] = []

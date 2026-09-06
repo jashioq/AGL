@@ -31,9 +31,12 @@ worktree. Those two tests build a repository, put `GitWorkspaceProvider` and `Gi
 """
 
 import subprocess
+import sys
+import sysconfig
 from collections.abc import AsyncIterator, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, replace
+from importlib import import_module
 from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Final
@@ -42,12 +45,27 @@ from agl import api
 from agl.adapters.claude_code.fake import Conversation, Script
 from agl.adapters.git.history import GitHistory
 from agl.adapters.git.workspace import GitWorkspaceProvider
+from agl.adapters.uv.fake import FakeSyncer
 from agl.config import container, distribution, registry, sources
 from agl.ports.agent import AgentOutcome, Claude, StopReason
-from agl.ports.errors import ConflictError, InputError, NotFoundError, exit_code_for
-from agl.ports.home_layout import AglHome, RunScope, workflows_dir
+from agl.ports.errors import (
+    ConflictError,
+    InputError,
+    NotFoundError,
+    UpstreamError,
+    UpstreamUnavailable,
+    exit_code_for,
+)
+from agl.ports.home_layout import (
+    AglHome,
+    RunScope,
+    workflows_dir,
+    workspace_dir,
+    workspace_site_packages,
+)
 from agl.ports.ids import Namespace, ProjectName, RunLabel
 from agl.ports.run import JsonValue, RunSpec
+from agl.ports.sync import Syncer, SyncOutcome
 from agl.ports.tree_layout import TreesRoot, base_worktree, run_branch
 from agl.ports.workspace import Workspace, WorkspaceProvider
 from agl.sdk.params import arg
@@ -778,9 +796,9 @@ async def test_a_run_of_a_workflow_needing_a_newer_agl_refuses_before_it_imports
     _directory(
         home,
         "triage",
-        f'[project]\nname = "triage"\nversion = "0.1.0"\n'
-        f'dependencies = ["{distribution.DISTRIBUTION}>=99999.0.0"]\n\n'
-        f'[project.entry-points."{registry.GROUP}"]\ntriage = "no_such_module:anything"\n',
+        f'[project]\nname = "triage"\nversion = "0.1.0"\n\n'
+        f'[project.entry-points."{registry.GROUP}"]\ntriage = "no_such_module:anything"\n\n'
+        f'[tool.agl]\nrequires = "{distribution.DISTRIBUTION}>=99999.0.0"\n',
     )
     harness = _fakes(tmp_path)
 
@@ -810,6 +828,311 @@ def test_a_declared_workflow_keeps_the_name_a_broken_directory_happens_to_share(
     assert listing.names == ("triage",)
     assert [entry.directory for entry in listing.broken] == ["triage"]
     assert "usage: agl run triage" in api.workflow_help("triage", home=home)
+
+# --- the install `run` and `resume` fold in, and the three answers it can end on -----------------
+#
+# There is no `agl sync`, so nothing an operator types installs anything: `run`, `resume` and
+# `new_workflow` each ask an installer on the way past, and this is where the ordering and the
+# three outcomes are pinned from the library side. `tests/cli/test_run_command.py` and
+# `tests/cli/test_resume_command.py` hold the same refusal from the command side, where the home is
+# a path nothing may write to and an environment can therefore never stand.
+#
+# **The order is the whole of why this stage exists.** An install below the import would never run
+# on the machine that needed it - the import fails first, the install is skipped, and the next run
+# fails identically for ever.
+#
+# **The three answers.** An installer that cannot be *started* raises and is not weighed at all. One
+# that ran and refused is weighed against whether this workspace had an environment *before* it
+# ran: none, and the run stops, because carrying on only moves the failure to a workflow's import
+# line; one that stood, and the run says so on stderr and carries on against what the last
+# successful sync left. The stat has to be taken beforehand, because `uv sync` builds the venv
+# before it resolves - so a first-ever sync that failed leaves one behind, and asking afterwards
+# would answer "an environment stood" over one nothing has ever installed into.
+
+# One workflow package name and one distribution's, each spent once in this file and never again: a
+# module imported in one test stays in `sys.modules` for the rest of the session, and restoring
+# `sys.path` does not take it back out.
+_NEEDS_INSTALLING: Final = "probe_workflow_needing_an_install"
+_PLANTED: Final = "probe_venv_module_planted_by_the_install"
+
+# What the installers below hand back as uv's own words, asserted verbatim wherever one is refused.
+_UV_SAID: Final = "error: no solution found for probe-workflow\n"
+
+def _site(home: AglHome) -> Path:
+    """Where `config/workspace_path.py` looks for an environment, at this interpreter's segment.
+
+    The `lib/` subdirectory name is read off this interpreter's real `purelib` rather than off
+    `sys.version_info`, which spells a free-threaded build and a PyPy one wrong.
+    """
+    return workspace_site_packages(home, Path(sysconfig.get_path("purelib")).parent.name)
+
+class _Installer(Syncer):
+    """A stand-in for uv: it can build the environment, plant a module in it, and answer either way.
+
+    `FakeSyncer` answers and touches nothing, which is what every other test here wants of an
+    installer. What it cannot do is the thing these rules turn on: leave a directory behind on the
+    way to saying no, which is what `uv sync` does because it builds the venv before it resolves.
+    """
+
+    def __init__(
+        self, site: Path | None = None, *, synced: bool = True, plants: str | None = None
+    ) -> None:
+        self.site: Final = site
+        self.synced: Final = synced
+        self.plants: Final = plants
+        self.asked: Final[list[Path]] = []
+
+    async def sync(self, workspace: Path) -> SyncOutcome:
+        self.asked.append(workspace)
+        if self.site is not None:
+            self.site.mkdir(parents=True, exist_ok=True)
+        if self.plants is not None and self.site is not None:
+            (self.site / f"{self.plants}.py").write_text('MARKER = "planted"\n', encoding="utf-8")
+        return SyncOutcome(
+            synced=self.synced, status=0 if self.synced else 2, output=_UV_SAID
+        )
+
+class _Unstartable(Syncer):
+    """An installer that could not be started at all, which the port says is a raise and not an
+    answer."""
+
+    async def sync(self, workspace: Path) -> SyncOutcome:
+        raise UpstreamUnavailable("uv is not installed, or 'uv' is not on PATH")
+
+def _importing_workflow(home: AglHome, named: str, dependency: str) -> None:
+    """A workflow directory whose module's first line imports something only an install provides."""
+    _directory(
+        home,
+        named,
+        f'[project]\nname = "{named}"\nversion = "0.1.0"\n\n'
+        f'[project.entry-points."{registry.GROUP}"]\n{named} = "{named}:{named}"\n',
+    )
+    (workflows_dir(home) / named / "__init__.py").write_text(
+        f"from {dependency} import MARKER\n"
+        f"from agl.sdk import Run, workflow\n"
+        f"\n"
+        f"@workflow\n"
+        f"async def {named}(run: Run) -> None:\n"
+        f"    assert MARKER\n",
+        encoding="utf-8",
+    )
+
+@pytest.mark.asyncio
+async def test_a_run_imports_a_workflow_only_after_installing_what_that_workflow_needs(
+    tmp_path: Path,
+) -> None:
+    """The operator's own story, end to end: add a dependency, import it, and just run.
+
+    The workflow's first line imports a module that exists nowhere until this run's own install
+    plants it, under a name reachable from no other directory in the session - so a run that
+    reached `config/registry.py`'s `load` first would raise `InputError` naming that module, and
+    completing at all is the ordering claim. It is asserted unreachable beforehand rather than
+    taken on trust.
+
+    The second assertion is the same claim about the *path* rather than about the import.
+    `config/workspace_path.py`'s `extend` appends the venv's site-packages only where that
+    directory is there when it looks, and the installer builds it during this very call: a venv
+    this run created and did not then admit to `sys.path` would be the same defect one step over,
+    green on every import the workflow does not do.
+    """
+    home = _home(tmp_path)
+    _importing_workflow(home, _NEEDS_INSTALLING, _PLANTED)
+    installer = _Installer(_site(home), plants=_PLANTED)
+    harness = _fakes(tmp_path)
+    with pytest.raises(ModuleNotFoundError):
+        import_module(_PLANTED)
+
+    await api.run(
+        harness.services, PROJECT, _NEEDS_INSTALLING, LABEL, (), syncer=installer, home=home
+    )
+
+    assert installer.asked == [workspace_dir(home)]
+    assert str(_site(home)) in sys.path
+
+@pytest.mark.asyncio
+async def test_a_resume_reaches_the_venv_its_own_install_just_built(tmp_path: Path) -> None:
+    """The same ordering on the other walking verb, and the verb it matters most on.
+
+    A resume finishes a run that may have been started days ago and on another machine's workspace,
+    so the environment it imports from is the one it has now. The run below installs nothing and
+    leaves no venv - which is what makes the resume's own install the first one to build it - and
+    what is asserted is that the directory it built is on `sys.path` afterwards, which only
+    happens where the install ran above `config/registry.py`'s `discovered`.
+    """
+    home = _home(tmp_path)
+    _directory(home, "triage", _declaring("triage", "stepping"))
+    harness = _fakes(tmp_path)
+    await api.run(harness.services, PROJECT, "triage", LABEL, (), syncer=_Installer(), home=home)
+    assert str(_site(home)) not in sys.path
+    installer = _Installer(_site(home))
+
+    await api.resume(harness.services, PROJECT, LABEL, syncer=installer, home=home)
+
+    assert installer.asked == [workspace_dir(home)]
+    assert str(_site(home)) in sys.path
+
+@pytest.mark.asyncio
+async def test_a_refused_install_with_no_environment_behind_it_stops_the_run_at_exit_six(
+    tmp_path: Path,
+) -> None:
+    """Nothing to fall back on, so the run stops rather than deferring the failure somewhere worse.
+
+    Exit 6 is `UpstreamError`'s, which is the class for a state of the world the same call gets
+    past later - a fixed dependency, an index that answers - rather than something wrong in a file
+    the operator wrote. What uv said is carried whole, because a resolution that cannot be
+    satisfied, an index that could not be reached and a package that will not build all arrive
+    here as one non-zero exit and nothing above uv can tell them apart.
+    """
+    home = _home(tmp_path)
+    _directory(home, "triage", _declaring("triage", "stepping"))
+    installer = FakeSyncer()
+    installer.answers(workspace_dir(home), synced=False, status=2, output=_UV_SAID)
+    harness = _fakes(tmp_path)
+
+    with pytest.raises(UpstreamError) as refused:
+        await api.run(harness.services, PROJECT, "triage", LABEL, (), syncer=installer, home=home)
+
+    assert exit_code_for(refused.value) == 6
+    assert _UV_SAID.strip() in str(refused.value)
+    assert await harness.services.store.read_record(SCOPE) is None
+
+@pytest.mark.asyncio
+async def test_a_refused_install_over_an_environment_that_already_stood_warns_and_runs_anyway(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The rare third case: connectivity fine, uv there, and the resolution refused anyway.
+
+    A yanked version, a conflict between two workflows, one index that answered badly - the run
+    carries on against what the last successful sync left, because that environment is what every
+    run before this one used and refusing would take a working machine away over a change the
+    operator can still undo. The warning goes to stderr, which is where a note about a run belongs
+    and never where a machine reads its answer, and it carries uv's own words rather than a
+    summary of them.
+    """
+    home = _home(tmp_path)
+    _directory(home, "triage", _declaring("triage", "stepping"))
+    _site(home).mkdir(parents=True)
+    installer = FakeSyncer()
+    installer.answers(workspace_dir(home), synced=False, status=2, output=_UV_SAID)
+    harness = _fakes(tmp_path)
+
+    await api.run(harness.services, PROJECT, "triage", LABEL, (), syncer=installer, home=home)
+
+    printed = capsys.readouterr()
+    assert _UV_SAID.strip() in printed.err
+    assert printed.out == ""
+    assert await harness.services.store.read_record(SCOPE) is not None
+
+@pytest.mark.asyncio
+async def test_an_environment_the_refused_install_built_itself_is_not_one_to_carry_on_from(
+    tmp_path: Path,
+) -> None:
+    """The measured reason the environment is stat-ed before the installer runs and never after.
+
+    `uv sync` builds the venv before it resolves: against a dependency nothing can satisfy, with no
+    `.venv` there at all, uv 0.11.29 exits non-zero and still leaves the interpreter, the
+    `pyvenv.cfg` and a `site-packages` holding its own `_virtualenv.pth`. So a check made after the
+    refusal sees an environment on the first failure a workspace ever had, and the run would tell
+    the operator it was carrying on with what the last successful sync left when there has never
+    been one. The installer below leaves exactly that behind, and the run stops anyway.
+    """
+    home = _home(tmp_path)
+    _directory(home, "triage", _declaring("triage", "stepping"))
+    installer = _Installer(_site(home), synced=False)
+    harness = _fakes(tmp_path)
+
+    with pytest.raises(UpstreamError):
+        await api.run(harness.services, PROJECT, "triage", LABEL, (), syncer=installer, home=home)
+
+    assert _site(home).is_dir(), "this test's premise is a venv the refused install left behind"
+    assert await harness.services.store.read_record(SCOPE) is None
+
+@pytest.mark.asyncio
+async def test_an_installer_that_could_not_be_started_stops_the_run_rather_than_warning(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A machine with no uv on it is not one an environment that happens to stand can rescue.
+
+    `ports/sync.py` says an installer that could not be started raises rather than answering, and
+    nothing here catches it: there is no verdict to weigh, nothing was attempted, and the two
+    rules above are about what uv *reported*. The environment below stands, which is what makes
+    this a claim rather than a coincidence - the warning path is the one this must not take.
+    """
+    home = _home(tmp_path)
+    _directory(home, "triage", _declaring("triage", "stepping"))
+    _site(home).mkdir(parents=True)
+    harness = _fakes(tmp_path)
+
+    with pytest.raises(UpstreamUnavailable):
+        await api.run(
+            harness.services, PROJECT, "triage", LABEL, (), syncer=_Unstartable(), home=home
+        )
+
+    assert capsys.readouterr().err == ""
+    assert await harness.services.store.read_record(SCOPE) is None
+
+@pytest.mark.asyncio
+async def test_an_install_that_finished_says_nothing_at_all_on_either_stream(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Silence on success is the whole of "a user never thinks about syncing".
+
+    A warm no-op sync is milliseconds and has nothing to report, so a line saying so on every run
+    would be noise on the ordinary path and would train an operator to skip the one place a real
+    line appears. There is no skip condition either - the install is asked for every time and says
+    nothing every time it worked.
+    """
+    home = _home(tmp_path)
+    _directory(home, "triage", _declaring("triage", "stepping"))
+    harness = _fakes(tmp_path)
+
+    await api.run(harness.services, PROJECT, "triage", LABEL, (), syncer=_Installer(), home=home)
+
+    printed = capsys.readouterr()
+    assert printed.out == ""
+    assert printed.err == ""
+
+# Two more names spent once each, for `_NEEDS_INSTALLING`'s reason: the workflow that imports what
+# it never declared, and the package no install anywhere in this suite provides.
+_IMPORTING_UNDECLARED: Final = "probe_workflow_importing_what_it_never_declared"
+_UNDECLARED: Final = "probe_package_no_install_in_this_suite_provides"
+
+@pytest.mark.asyncio
+async def test_one_refusal_answers_the_command_that_installs_first_and_the_one_that_does_not(
+    tmp_path: Path,
+) -> None:
+    """`config/registry.py`'s `load` is reached from both, and its wording has to hold from either.
+
+    `api.run` has already installed by the time it imports and `api.workflow_help` never installs at
+    all, so a refusal telling an operator to run the command they are running is a lie on one of the
+    two - and one telling them to run a command on the other is the only useful thing it can say.
+    The two messages are compared rather than each asserted, because the claim is that there is one
+    of them: a wording that distinguished its caller would have to be handed a caller to do it, and
+    `load` takes points and a name.
+
+    The installer here answers yes and installs nothing, which is the ordinary shape of this
+    failure: the sync succeeded, and the package was never in the list it resolves.
+    """
+    home = _home(tmp_path)
+    _importing_workflow(home, _IMPORTING_UNDECLARED, _UNDECLARED)
+    harness = _fakes(tmp_path)
+
+    with pytest.raises(InputError) as installed:
+        await api.run(
+            harness.services,
+            PROJECT,
+            _IMPORTING_UNDECLARED,
+            LABEL,
+            (),
+            syncer=_Installer(),
+            home=home,
+        )
+    with pytest.raises(InputError) as asked:
+        api.workflow_help(_IMPORTING_UNDECLARED, home=home)
+
+    assert str(installed.value) == str(asked.value)
+    assert _UNDECLARED in str(installed.value)
+    assert exit_code_for(installed.value) == 2
 
 def test_init_needs_neither_a_bundle_nor_a_registered_repository(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -861,11 +1184,13 @@ def test_every_operation_the_module_declares_is_built() -> None:
     `resume` share count-based rather than command-based: both walk a ledger through `_walk`, so
     neither is the one that replays and the number is what says whether anything did.
 
-    `sync_workspace` is the eighth operation and the seventh verb, and it is spelled with its
-    object for `new_workflow`'s reason: `agl sync` reads as a verb on the command line and `sync`
-    alone would not say here what is being synced. It takes a `Syncer` rather than a `Services`,
-    which is the whole shape of the operation - a sync addresses the operator's workspace, so
-    there is no project to resolve and no bundle to build.
+    `sync_workspace` was on this list and is not an operation any more. It was public because
+    `agl sync` was a command and this was the operation behind it; the command is gone, a sync
+    being something `new_workflow`, `run` and `resume` each do rather than something anybody asks
+    for, and an operation nothing outside `api.py` calls is not a surface. It is `_sync_workspace`
+    now, one definition with three callers, which is what keeps the ordering of an install and the
+    file written after it out of the three verbs that share it - and out of the CLI, where the
+    command that used to hold it would otherwise have left it.
     """
     assert set(api.__all__) == {
         "Ask",
@@ -878,7 +1203,6 @@ def test_every_operation_the_module_declares_is_built() -> None:
         "new_workflow",
         "resume",
         "run",
-        "sync_workspace",
         "workflow_help",
     }
     assert not [name for name in api.__all__ if "unbuilt" in name.lower()]

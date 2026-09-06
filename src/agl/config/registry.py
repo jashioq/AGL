@@ -25,7 +25,9 @@ GROUP: Final = "agl.workflows"
 _PYPROJECT_FILE: Final = "pyproject.toml"
 _PROJECT: Final = "project"
 _ENTRY_POINTS: Final = "entry-points"
-_DEPENDENCIES: Final = "dependencies"
+_TOOL: Final = "tool"
+_AGL: Final = "agl"
+_REQUIRES: Final = "requires"
 
 @dataclass(frozen=True, slots=True)
 class BrokenWorkflow:
@@ -114,16 +116,7 @@ def load[T](points: Iterable[EntryPoint], name: str, kind: type[T]) -> T:
     try:
         loaded = point.load()
     except (ImportError, AttributeError) as error:
-        raise InputError(
-            f"the workflow {name!r} is declared as {point.value!r}, and loading it failed: "
-            f"{error}. That declaration is one line of the {GROUP} table in a workflow "
-            f"directory's pyproject.toml, and what stands to the left of the colon is imported "
-            f"like any other module - the workspace sits on this process's import path, so a "
-            f"workflow directory is imported as a top-level module named after itself. The fix is "
-            f"inside that directory, in the module and attribute the line names or in the code "
-            f"they resolve to; AGL only read what was declared. The original error is chained "
-            f"below this one"
-        ) from error
+        raise InputError(_unloadable(name, point, error)) from error
     if not isinstance(loaded, kind):
         raise InputError(
             f"the workflow {name!r} is declared as {point.value!r}, which loaded and turned out "
@@ -177,6 +170,47 @@ def _unknown(name: str, index: Mapping[str, EntryPoint]) -> str:
         f"pyproject.toml declares"
     )
 
+# The import machinery raises `ModuleNotFoundError` only where no finder answered at all, and sets
+# `name` to whatever it gave up on - so a package that is simply absent is told apart here from the
+# workflow's own code failing, which arrives as a plain `ImportError` (`from agl.sdk import gone`)
+# or as an `AttributeError` (a declaration naming an object its module does not hold).
+def _unloadable(name: str, point: EntryPoint, error: ImportError | AttributeError) -> str:
+    missing = error.name if isinstance(error, ModuleNotFoundError) else None
+    if missing is not None and _package(missing) != _package(point.module):
+        return _uninstalled(name, point, missing)
+    return (
+        f"the workflow {name!r} is declared as {point.value!r}, and loading it failed: {error}. "
+        f"That declaration is one line of the {GROUP} table in a workflow directory's "
+        f"pyproject.toml, and what stands to the left of the colon is imported like any other "
+        f"module - the workspace sits on this process's import path, so a workflow directory is "
+        f"imported as a top-level module named after itself. The fix is inside that directory, in "
+        f"the module and attribute the line names or in the code they resolve to; AGL only read "
+        f"what was declared. The original error is chained below this one"
+    )
+
+# One wording for three callers: `api.run` and `api.resume` have installed by the time they reach
+# this and `api.workflow_help` never does, and an install that was refused and warned, one that was
+# never asked for and a package no file declares are three states nothing here can tell apart. So
+# this names what installs and what does not, rather than a command to type.
+def _uninstalled(name: str, point: EntryPoint, missing: str) -> str:
+    return (
+        f"the workflow {name!r} is declared as {point.value!r}, and importing it went looking for "
+        f"{missing!r} and found nothing. That name is not part of {_package(point.module)!r}, "
+        f"which is where this workflow's own code lives, so it is something the workflow imports "
+        f"rather than something it is: a dependency, and it is not installed. An install puts in "
+        f"reach what a workflow declares in the `[project] dependencies` of its own pyproject.toml "
+        f"and nothing else, so if {missing!r} is not written there then writing it there is the "
+        f"whole fix - a package a workflow imports and never declares is one nothing installs, "
+        f"ever. If it is written there, nothing installed it before this import: what installs is "
+        f"`agl run` and `agl resume`, each of which does it before importing anything at all. So "
+        f"either this was one of those two and the install was refused, which said why on this "
+        f"terminal above this refusal, or it was a command that imports a workflow without "
+        f"installing first - which `agl workflows <workflow>` does, to read the flags one takes"
+    )
+
+def _package(module: str) -> str:
+    return module.partition(".")[0]
+
 def _describe(kind: type[object]) -> str:
     return f"{kind.__module__}.{kind.__qualname__}"
 
@@ -197,9 +231,10 @@ def _declared(directory: Path) -> Discovery:
     values = {name: value for name, value in table.items() if isinstance(value, str)}
     if len(values) < len(table):
         return _broken(directory, _unusable(path, sorted(set(table) - set(values))))
-    # The same read of the same file the declaration came out of: the bound is one entry of the
-    # `dependencies` list a resolver reads, so nothing here opens a second document.
-    bound = distribution.unsatisfied_bound(project.get(_DEPENDENCIES))
+    # The same read of the same file the declaration came out of, and the bound sits in a `[tool]`
+    # table uv walks past - so nothing here opens a second document and no sync resolves the line.
+    owned = _nested(_nested(document, _TOOL), _AGL)
+    bound = distribution.unsatisfied_bound(owned.get(_REQUIRES))
     return Discovery(
         tuple(
             EntryPoint(name=name, value=value, group=GROUP)
@@ -238,8 +273,8 @@ def _unsatisfied(path: Path, bound: str) -> str:
         f'here is {distribution.installed_version()}. Nothing has been imported: a workflow whose '
         f'first line is `from agl.sdk import ...` written against an AGL this is not fails on '
         f'whichever name moved, and the failure names a line in your file rather than the version '
-        f'that is wrong. That bound is one entry of the `{_DEPENDENCIES}` list in the '
-        f'[{_PROJECT}] table of this file, and `agl new` writes it naming the AGL that scaffolded '
-        f'the workflow. So either install an AGL the bound admits, or - once the workflow is known '
-        f'to run against the one you have - widen the bound to say so'
+        f'that is wrong. That bound is the `{_REQUIRES}` line of this file\'s [{_TOOL}.{_AGL}] '
+        f'table, which `agl new` writes naming the AGL that scaffolded the workflow - a floor and '
+        f'not a pin, so any later AGL meets it. So either install an AGL the bound admits, or - '
+        f'once the workflow is known to run against the one you have - widen the bound to say so'
     )

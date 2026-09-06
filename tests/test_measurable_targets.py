@@ -872,7 +872,7 @@ def test_every_contract_suite_is_run_by_at_least_two_implementations() -> None:
 # today and is not this target. It measures what somebody remembered to write, it names the number
 # five in a file that should not know it, and it is silent about a sixth command added later. What
 # is asserted instead is the target's own sentence: the commands are enumerated from the **real
-# parser** - the object `agl` itself builds, whose subcommands are whatever the five `declare` calls
+# parser** - the object `agl` itself builds, whose subcommands are whatever the `declare` calls
 # in `cli/main.py::parser()` put there - and every one of them is driven end-to-end through
 # `main.main` on `container.fakes()` with both ways out of the interpreter poisoned.
 #
@@ -916,7 +916,6 @@ _INVOCATIONS: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
     ("init", ("init",)),
     ("new", ("new", "scaffold")),
     ("workflows", ("workflows",)),
-    ("sync", ("sync",)),
     ("run", ("run", "probe", "-n", "auth", "-r", "add oauth")),
     ("resume", ("resume", "auth")),
     ("clear", ("clear", "auth")),
@@ -1006,7 +1005,8 @@ def test_every_declared_command_runs_on_fakes_with_no_way_out(
     is the parameter `cli/main.py` declares for exactly this, so the bundle is `container.fakes()`,
     the entry points are this module's own, `ask` is the canned answer `agl init` asks for, and
     `syncer` is `container.fake_syncer` - the one field on the `Invocation` whose real default
-    would start a process, which is why `agl sync` is the row that needs it filled in.
+    would start a process, and the three rows that reach it are `new`, `run` and `resume`, which
+    are the commands a sync is folded into.
     Nothing here reaches into a module's internals; the only patching in this test is the poison,
     which is the assertion rather than the arrangement.
 

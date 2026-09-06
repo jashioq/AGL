@@ -796,18 +796,17 @@ def test_a_workflow_directory_that_cannot_be_made_says_so_rather_than_reporting_
 
 # --- What each of the two documents declares, which is not the same answer ------------------------
 #
-# One test used to make this claim over both documents at once - neither declares a dependency, and
-# neither names AGL anywhere - and its live concern was the venv: `agents-gl` reachable by a
-# resolver means forty packages installed beside the workflows for a distribution that is already
-# on the import path. That concern belongs to the workspace root, which is the file uv reads to
-# find its members, and it is asserted below unchanged.
+# One live concern, held twice because the two documents answer differently. The concern is the
+# venv: `agents-gl` reachable by a resolver means forty packages installed beside the workflows for
+# a distribution that is already on the import path, and on a version no index holds yet it means a
+# resolution with no solution and a sync that exits non-zero. Neither document may send uv after it.
 #
-# The scaffold's answer is now the opposite one and is a decision rather than a drift. The bound it
-# declares is read by `config/registry.py` before a workflow is imported, so that a workflow
+# Where they differ is the *name*. The workspace root is read on every sync whatever the workflows
+# below it declare, so it may not carry `agents-gl` anywhere at all. The scaffold has to carry it
+# exactly once - `config/registry.py` reads that bound before a workflow is imported, so a workflow
 # written against an AGL this is not gets a sentence instead of an `ImportError` on whichever name
-# moved; and the price, accepted, is that a `uv sync` over that workspace resolves the line. What
-# the second test holds is the shape of what was accepted: exactly one requirement, naming AGL, and
-# nothing else the resolver would go looking for.
+# moved - and where it carries it is the whole of what keeps a resolver away: `[tool.agl]` is a
+# table uv does not own and does not read.
 
 # Every key uv reads a requirement out of, at whatever depth its table sits: `[project]`'s
 # `dependencies` and `optional-dependencies`, PEP 735's `[dependency-groups]`, and the `sources`
@@ -818,7 +817,8 @@ _RESOLVED_KEYS: Final = frozenset(
     {"dependencies", "optional-dependencies", "dependency-groups", "sources"}
 )
 
-_DECLARED_DEPENDENCIES: Final = "project.dependencies"
+# Where the one string naming AGL is allowed to sit in a scaffold, as `_strings` spells a path.
+_DECLARED_BOUND: Final = "tool.agl.requires"
 
 def _keyed(document: Mapping[str, object], prefix: str = "") -> Iterator[tuple[str, object]]:
     """Every key in a parsed document with its dotted path, tables walked to whatever depth."""
@@ -852,11 +852,11 @@ def test_the_workspace_root_declares_no_dependency_and_never_names_the_agl_distr
 ) -> None:
     """The file uv reads to find its members, and it must send the resolver after nothing at all.
 
-    This is the half that has not moved. The workspace root is a virtual uv workspace root - no
-    `[project]` table, a members glob and nothing else - so a requirement written here would be a
-    requirement of *every* sync, whatever the workflows below it declare, and `agents-gl` among
-    them would put AGL and everything it depends on into a venv that already reaches the running
-    AGL through `config/workspace_path.py`.
+    This is the document that may not name AGL anywhere, in any table. The workspace root is a
+    virtual uv workspace root - no `[project]` table, a members glob and nothing else - so a
+    requirement written here would be a requirement of *every* sync, whatever the workflows below
+    it declare, and `agents-gl` among them would put AGL and everything it depends on into a venv
+    that already reaches the running AGL through `config/workspace_path.py`.
 
     Asserted under any spelling and at any depth, `[build-system]` included: `requires` there is
     resolved before anything else in the file, and a document carrying one is a package uv has to
@@ -889,20 +889,22 @@ def test_the_workspace_root_declares_no_dependency_and_never_names_the_agl_distr
         f"was written against - and the root would say it for the whole workspace."
     )
 
-def test_a_scaffolded_workflow_declares_the_agl_bound_and_no_other_dependency_at_all(
+def test_a_scaffolded_workflow_names_the_agl_bound_where_no_resolver_reads_it(
     tmp_path: Path,
 ) -> None:
-    """One requirement, the one it was handed, and nothing else a resolver would go looking for.
+    """The bound once, in the table uv walks past, and no requirement for a resolver anywhere.
 
     The bound is what `config/registry.py` reads back before it imports the workflow, so it has to
-    be *there*; what this holds is that it is the only thing there. A second entry, an
-    `optional-dependencies` table or a `[dependency-groups]` would each be AGL putting a package
-    into somebody's workspace that they never asked for, and each is invisible until the sync that
-    installs it.
+    be *there*; where it sits is what decides whether anything else reads it too. `dependencies`,
+    `optional-dependencies` and `[dependency-groups]` are all tables uv resolves out of, and
+    `agents-gl` in one of them is AGL putting itself and its whole closure into somebody's
+    workspace venv for a distribution already on the import path - invisible until the sync that
+    installs it, and a sync with no solution at all on a version no index holds yet.
 
-    Both halves are asserted, because either alone passes against the wrong file: the resolved-key
-    listing would pass over a `dependencies` holding three requirements, and the value comparison
-    would pass over a document that also carried a `[build-system]`.
+    Three assertions, because each passes against a file the other two would catch: the
+    resolved-key listing would pass over a scaffold that named no bound at all, the dotted path
+    would pass over one that also wrote `dependencies`, and neither of them sees a `[build-system]`,
+    whose own `requires` uv resolves before it reads anything else in the file.
     """
     home = _home(tmp_path)
     make_workspace(home)
@@ -911,21 +913,45 @@ def test_a_scaffolded_workflow_declares_the_agl_bound_and_no_other_dependency_at
 
     path = workflow_pyproject(home, _TRIAGE)
     document = tomllib.loads(path.read_text(encoding="utf-8"))
-    assert _resolved_keys(document) == [_DECLARED_DEPENDENCIES], (
-        f"{path} declares {_resolved_keys(document)}, and {_DECLARED_DEPENDENCIES} is the whole of "
-        f"what a scaffold may declare. Anything else here is a resolution AGL wrote into an "
-        f"operator's workspace on their behalf."
+    assert _resolved_keys(document) == [], (
+        f"{path} declares {_resolved_keys(document)}, which is a table uv resolves out of. A "
+        f"scaffold declares no requirement at all: the bound on AGL is written for "
+        f"`config/registry.py` to read and for a resolver to walk past."
     )
     assert "build-system" not in document, (
         f"{path} has grown a `[build-system]`, whose `requires` is resolved before anything else "
         f"in the file - and a workflow is imported from where it was written rather than built."
     )
-    assert [value for _, value in _strings(document) if distribution.DISTRIBUTION in value] == [
-        _BOUND
-    ], (
-        f"{path} names AGL's distribution somewhere other than the one bound it was handed. The "
-        f"bound is the writer's whole claim about AGL and {_BOUND!r} is what it was given."
+    naming = {
+        dotted: value for dotted, value in _strings(document) if distribution.DISTRIBUTION in value
+    }
+    assert naming == {_DECLARED_BOUND: _BOUND}, (
+        f"{path} names AGL's distribution at {sorted(naming)} and {_DECLARED_BOUND} is the one "
+        f"place it may sit. The bound is the writer's whole claim about AGL, {_BOUND!r} is what it "
+        f"was handed, and the table it lands in is what decides who else reads it."
     )
+
+def test_an_agl_with_no_version_of_its_own_scaffolds_a_workflow_claiming_nothing(
+    tmp_path: Path,
+) -> None:
+    """`None` for the bound, which is what a source tree hands this writer, and the table goes.
+
+    `config/distribution.py` answers `None` where there is no `.dist-info` to read, and the
+    scaffold then says nothing about AGL rather than interpolating a sentence no version parser
+    accepts. What goes is the whole `[tool.agl]` table and not only the key: a header left standing
+    over nothing parses, reads as a claim and carries none - and the declaration beside it still
+    has to land, a workflow with no bound being one `config/registry.py` runs without complaint.
+    """
+    home = _home(tmp_path)
+    make_workspace(home)
+
+    make_workflow(home, _TRIAGE, _GROUP, None)
+
+    path = workflow_pyproject(home, _TRIAGE)
+    written = path.read_text(encoding="utf-8")
+    assert sorted(tomllib.loads(written)) == ["project"]
+    assert distribution.DISTRIBUTION not in written
+    assert _declarations(home, _TRIAGE) == {"triage": "triage:triage"}
 
 # --- A trees root inside the repository, refused -------------------------------------------------
 #

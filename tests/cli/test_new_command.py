@@ -1,4 +1,4 @@
-"""`agl new <workflow>`: the on-ramp, and the run that has to work the moment it finishes.
+"""`agl new <workflow>`: the on-ramp, the install that follows it, and the run that has to work.
 
 This is the one command that writes a workflow, so its acceptance criterion is not a file listing:
 it is that **`agl run <workflow>` works immediately afterwards**, against the workspace on disk and
@@ -7,17 +7,24 @@ it. A scaffold asserted by inspection - the right two filenames, the right table
 be wrong in every way that matters and still pass: a declaration naming a module that is not there,
 a package Python reads as a namespace package, a workflow the framework loads and cannot call.
 
-**What "immediately, offline, with no credentials" is measured as.** The run goes through the real
-parser, the real dispatch and the real `api.run`, with `points=None` - so the entry point comes off
-the file `agl new` wrote, through `config/registry.py`'s walk of the workspace and
-`config/workspace_path.py`'s entry on `sys.path`, and the module is imported from where it was
-written. Around it: `container.fakes()`, so no credential exists to spend; an agent that raises if
-anything asks it for a turn; and both doors out of the interpreter poisoned, so a subprocess or an
-outbound socket is a failure rather than an unnoticed dependency.
+**`agl new` is no longer offline, and the poison it used to be measured under now measures
+something better.** The command scaffolds and then installs what the workspace declares, so the
+one door it deliberately leaves through is uv - and what the first test asserts is the *ordering*
+that follows from it: the two documents are on disk before the installer is started, so an
+installer that cannot start at all leaves a scaffold behind rather than half of one. The run that
+follows it is still driven with both doors shut and a fake installer, which is where "the scaffold
+runs at once" survives: the entry point comes off the file `agl new` wrote, through
+`config/registry.py`'s walk of the workspace and `config/workspace_path.py`'s entry on `sys.path`,
+with `container.fakes()` behind it so no credential exists to spend and an agent that raises if
+anything asks it for a turn.
 `tests/test_measurable_targets.py::test_every_declared_command_runs_on_fakes_with_no_way_out` is
 where that poison is written out exhaustively, and it drives this command too; what is poisoned
-here is the two doors a run would leave through, kept local so that this file's central claim does
-not depend on reading another one.
+here is kept local so that this file's central claim does not depend on reading another one.
+
+**The installer is substituted through `main.Invocation`'s own `syncer` field**, which is the seam
+`cli/main.py` declares for exactly this; its default is `container.real_syncer` and
+`tests/cli/test_main.py` is where that default is pinned. Every invocation below hands one in, so
+no test here starts uv except the one whose whole subject is that it could not be started.
 
 **Nothing here reaches the operator's own home.** `AGL_HOME` is resolved from a mapping handed to
 `sources.resolve_settings` and never from the process environment, and every path is under
@@ -37,24 +44,32 @@ import inspect
 import socket
 import subprocess
 import sys
+import sysconfig
 import tomllib
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Final, NoReturn
 import pytest
+import agl
+from agl.adapters.uv.fake import FakeSyncer
 from agl.cli import main
 from agl.cli.commands import new as new_command
 from agl.config import container, distribution, registry, sources
 from agl.ports.agent import AgentTask
+from agl.ports.errors import NotFoundError, UpstreamUnavailable
 from agl.ports.home_layout import (
     AglHome,
     workflow_dir,
     workflow_module,
     workflow_pyproject,
     workflows_dir,
+    workspace_dir,
+    workspace_editor_pth,
     workspace_pyproject,
+    workspace_site_packages,
 )
 from agl.ports.ids import ProjectName, WorkflowName
+from agl.ports.sync import Syncer, SyncOutcome
 from agl.ports.tree_layout import TreesRoot
 from agl.sdk.params import RefusingParser
 from agl.sdk.testing import Reply
@@ -71,6 +86,38 @@ PROJECT: Final = ProjectName("myapp")
 # optional (`cli/main.py` argues why), so it carries a real path nothing here opens.
 ELSEWHERE: Final = Path("/nowhere")
 
+AGREED: Final = SyncOutcome(synced=True, status=0, output="")
+
+# The `lib/` subdirectory this interpreter installs into, which is the one a sync addresses:
+# `adapters/uv/syncer.py` builds the venv for `sys.executable` and nothing else.
+SEGMENT: Final = Path(sysconfig.get_path("purelib")).parent.name
+
+class Recording(Syncer):
+    """A syncer answering as scripted and keeping what it was asked, which `FakeSyncer` does not.
+
+    `existed` is read at the moment the installer is called and not afterwards, because what it is
+    there to say is that the workspace was already made by the time the sync was started.
+    """
+
+    def __init__(self, outcome: SyncOutcome = AGREED) -> None:
+        self.asked: list[Path] = []
+        self.existed: list[bool] = []
+        self._outcome = outcome
+
+    async def sync(self, workspace: Path) -> SyncOutcome:
+        self.asked.append(workspace)
+        self.existed.append(workspace.is_dir())
+        return self._outcome
+
+class Raising(Syncer):
+    """A syncer that raises what an adapter raises, so `main`'s one table answers for the class."""
+
+    def __init__(self, error: Exception) -> None:
+        self._error = error
+
+    async def sync(self, workspace: Path) -> SyncOutcome:
+        raise self._error
+
 class WentOutside(BaseException):
     """What a poisoned door raises, and a `BaseException` for the reason target #8 gives its own.
 
@@ -82,7 +129,7 @@ def _refusing(door: str) -> object:
     """A stand-in for `door` that raises rather than doing what it was for."""
 
     def poisoned(*args: object, **kwargs: object) -> NoReturn:
-        raise WentOutside(f"a scaffolded workflow's run reached {door}")
+        raise WentOutside(f"a scaffold, its installer or its run reached {door}")
 
     return poisoned
 
@@ -115,8 +162,14 @@ def _home(tmp_path: Path) -> AglHome:
     """An AGL_HOME under `tmp_path` that is not there yet - what a first `agl new` meets."""
     return AglHome(tmp_path / "home")
 
-def _main(home: AglHome, *argv: str) -> int:
-    """One `agl` invocation reading `home`, with no repository behind it and no entry points."""
+def _main(home: AglHome, *argv: str, syncer: Syncer | None = None) -> int:
+    """One `agl` invocation reading `home`, with no repository behind it and no entry points.
+
+    The installer defaults to `FakeSyncer` rather than to the field's own default, which would
+    start uv on every invocation in this file: `agl new` installs what the workspace declares once
+    the scaffold is written, and a test that scaffolds is not a test that wants an index.
+    """
+    installer = FakeSyncer() if syncer is None else syncer
     return main.main(
         argv,
         compose=lambda: main.Invocation(
@@ -126,8 +179,14 @@ def _main(home: AglHome, *argv: str) -> int:
             ),
             cwd=ELSEWHERE,
             points=None,
+            syncer=lambda: installer,
         ),
     )
+
+def _installed(home: AglHome) -> Path:
+    """The venv uv would have built, stood up by hand: `FakeSyncer` starts no process at all."""
+    workspace_site_packages(home, SEGMENT).mkdir(parents=True)
+    return workspace_editor_pth(home, SEGMENT)
 
 def _new_parser() -> RefusingParser:
     """The `new` subparser alone, built the way `main.parser()` builds it, for inspection."""
@@ -147,22 +206,32 @@ def _forgotten_afterwards() -> Iterator[None]:
 # --- the acceptance criterion -------------------------------------------------------------------
 
 @pytest.mark.usefixtures("_forgotten_afterwards")
-def test_a_workflow_agl_new_wrote_runs_at_once_with_no_credential_and_no_way_out(
+def test_the_scaffold_lands_when_the_installer_cannot_start_and_what_landed_runs_at_once(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The criterion in its own words: `agl new <name>`, then `agl run <name>`, and both answer 0.
+    """The criterion, rewritten around the one door `agl new` now leaves through.
 
-    Four things have to be true at once for this to pass, and no smaller test asserts their
-    conjunction. The declaration `agl new` wrote has to name a module that exists; the directory
-    has to be a package rather than a namespace package, or `<name>:<name>` resolves to a module
-    with no such attribute; the object the declaration names has to be a `Workflow`, which is what
+    **The scaffold is written before the installer is started, and the poison is what measures
+    it.** `agl new` runs here with `container.real_syncer` behind it against a poisoned
+    `create_subprocess_exec`, which is what an operator with no uv on their machine meets: the
+    command cannot finish, and what this asserts is that the two documents are on disk anyway. The
+    ordering is the whole of the property - a sync attempted first would leave a workflow the
+    operator asked for and does not have, and running `agl new` again after installing uv would
+    then be the only way to get it.
+
+    **What landed then runs, and that half is unchanged.** Four things have to be true at once for
+    the second invocation to answer 0, and no smaller test asserts their conjunction. The
+    declaration `agl new` wrote has to name a module that exists; the directory has to be a package
+    rather than a namespace package, or `<name>:<name>` resolves to a module with no such
+    attribute; the object the declaration names has to be a `Workflow`, which is what
     `registry.load` type-checks; and the function has to be callable by the framework with the
     `Run` it builds. Every one of those is a way a scaffold looks right in a listing and will not
-    run.
+    run. It is driven with a fake installer, the doors still shut, so the run itself reaches
+    nothing outside this process.
 
-    **The poison is proved live before the run and not after it.** Without that this would pass
-    identically if `monkeypatch` had done nothing, which is the failure mode a poisoning test has -
-    and the whole "offline" half of the criterion rests on it.
+    **The poison is proved live before either invocation and not after them.** Without that this
+    would pass identically if `monkeypatch` had done nothing, which is the failure mode a poisoning
+    test has - and both halves above rest on it.
 
     **The agent raises.** `container.fakes()` already has no credential to spend, so what this adds
     is that no turn is *asked for*: a scaffold declaring a role would reach one through preflight
@@ -172,19 +241,18 @@ def test_a_workflow_agl_new_wrote_runs_at_once_with_no_credential_and_no_way_out
     fakes = container.fakes(
         TreesRoot(tmp_path / "trees"), files={"src/a.py": b"pass\n"}, agent=_unwanted
     )
+    scaffolded = WorkflowName(SCAFFOLDED)
 
-    def compose() -> main.Invocation:
-        return main.Invocation(
+    def composing(syncer: Callable[[], Syncer]) -> main.Compose:
+        return lambda: main.Invocation(
             registered=lambda: (PROJECT, fakes.services),
             settings=sources.resolve_settings(
                 sources.Overrides(), {"AGL_HOME": str(home.path)}
             ),
             cwd=ELSEWHERE,
             points=None,
+            syncer=syncer,
         )
-
-    assert main.main(("new", SCAFFOLDED), compose=compose) == 0
-    capsys.readouterr()
 
     _poison(monkeypatch)
     with pytest.raises(WentOutside):
@@ -192,7 +260,16 @@ def test_a_workflow_agl_new_wrote_runs_at_once_with_no_credential_and_no_way_out
     with pytest.raises(WentOutside):
         socket.create_connection(("127.0.0.1", 1))
 
-    assert main.main(("run", SCAFFOLDED, "-n", "first"), compose=compose) == 0
+    with pytest.raises(WentOutside):
+        main.main(("new", SCAFFOLDED), compose=composing(container.real_syncer))
+
+    assert workflow_module(home, scaffolded).is_file()
+    assert workflow_pyproject(home, scaffolded).is_file()
+    capsys.readouterr()
+
+    assert (
+        main.main(("run", SCAFFOLDED, "-n", "first"), compose=composing(container.fake_syncer)) == 0
+    )
     assert "run 'first' finished" in capsys.readouterr().out
 
 def test_the_name_agl_run_takes_is_the_key_the_written_declaration_puts_on_the_left(
@@ -237,7 +314,7 @@ def test_a_new_workflow_is_two_files_in_a_directory_and_the_workspace_around_it(
         "workspace/workflows/triage/pyproject.toml",
     ]
 
-def test_the_written_project_file_declares_that_one_workflow_and_declares_nothing_else(
+def test_the_written_project_file_declares_one_workflow_and_the_agl_bound_beside_it(
     tmp_path: Path,
 ) -> None:
     """The declaration read as TOML: the group, the key, and the `module:attribute` it points at.
@@ -247,6 +324,10 @@ def test_the_written_project_file_declares_that_one_workflow_and_declares_nothin
     module does not bind. `<name>:<name>` is the one spelling where the directory, the package it
     is imported as and the function inside it are the same word, which is what lets `agl run`
     take the name somebody typed at `agl new`.
+
+    Two top-level tables and no third: `[project]`, which declares the workflow, and `[tool]`,
+    which carries the bound AGL reads back and nothing else reads at all. The listing is what says
+    a scaffold grew nothing beyond those two.
     """
     home = _home(tmp_path)
     _main(home, "new", str(TRIAGE))
@@ -255,7 +336,7 @@ def test_the_written_project_file_declares_that_one_workflow_and_declares_nothin
 
     assert document["project"]["entry-points"] == {registry.GROUP: {"triage": "triage:triage"}}
     assert document["project"]["name"] == "triage"
-    assert sorted(document) == ["project"]
+    assert sorted(document) == ["project", "tool"]
 
 def test_agl_new_writes_a_bound_on_the_running_agl_that_the_reader_accepts(
     tmp_path: Path,
@@ -271,14 +352,18 @@ def test_agl_new_writes_a_bound_on_the_running_agl_that_the_reader_accepts(
     The version is asserted present as well. A bare `agents-gl` with no specifier would round-trip
     through the reader just as happily and would say nothing at all about which AGL is meant, which
     is the way this passes while being useless.
+
+    The value is read at the path the writer writes it to, which is the one thing the walk beneath
+    it cannot say: an unread bound is silence and not a refusal, so a writer and a reader that had
+    drifted onto two different keys would leave `unsatisfied` empty for the wrong reason.
     """
     home = _home(tmp_path)
 
     assert _main(home, "new", str(TRIAGE)) == 0
 
     document = tomllib.loads(workflow_pyproject(home, TRIAGE).read_text(encoding="utf-8"))
-    declared = document["project"]["dependencies"]
-    assert declared == [f"{distribution.DISTRIBUTION}>={distribution.installed_version()}"]
+    declared = document["tool"]["agl"]["requires"]
+    assert declared == f"{distribution.DISTRIBUTION}>={distribution.installed_version()}"
     assert registry.discovered(home).unsatisfied == {}
 
 def test_the_written_module_is_the_packages_own_so_the_declaration_can_resolve_at_all(
@@ -310,19 +395,159 @@ def test_a_second_workflow_joins_the_workspace_the_first_one_made(tmp_path: Path
     """The workspace is created and never re-created, and two workflows are two directories.
 
     `api.new_workflow` calls `make_workspace` unconditionally, so the second invocation asks for a
-    workspace that is already there; the file it would rewrite is edited first, which is the only
-    way a rewrite is told from a skip when the paths are identical either way.
+    workspace that is already there; the file it would rewrite is edited first, and the bytes are
+    the assertion, which is the only way a rewrite is told from a skip when the paths are identical
+    either way. The operator owns that file once it exists, and a command that rewrote it on every
+    invocation would be one interrupted write away from taking their own lines with it, every time
+    it was run - the sync that now follows the scaffold reaches the same directory and must leave
+    it alone for the same reason.
     """
     home = _home(tmp_path)
     _main(home, "new", str(TRIAGE))
     root = workspace_pyproject(home)
     root.write_text(root.read_text(encoding="utf-8") + "# an operator's line\n", encoding="utf-8")
+    before = root.read_bytes()
 
     assert _main(home, "new", "release") == 0
 
-    assert "an operator's line" in root.read_text(encoding="utf-8")
+    assert root.read_bytes() == before
     assert sorted(path.name for path in workflows_dir(home).iterdir()) == ["release", "triage"]
     assert registry.names(registry.discovered(home).points) == ("release", "triage")
+
+# --- the install that follows the scaffold ------------------------------------------------------
+
+def test_the_installer_is_handed_the_workspace_directory_and_not_its_project_file(
+    tmp_path: Path,
+) -> None:
+    """`Syncer.sync` takes the directory, and uv walks *up* from whatever it is given.
+
+    Handing it the `pyproject.toml` would be a path uv reads as a directory that is not there;
+    handing it `workflows/` would resolve the first project file above it, which is the workspace
+    root by luck rather than by intent. `adapters/uv/syncer.py` refuses a directory with no
+    project file in it for the same family of reasons, and this is the caller's half of that.
+
+    That directory is asserted to have been *there* when the installer was handed it, which is the
+    other half: the scaffold makes the workspace, so an operator who has typed nothing else meets
+    an install rather than the adapter's refusal about a workspace nobody made.
+    """
+    home = _home(tmp_path)
+    assert not home.path.exists()
+    syncer = Recording()
+
+    assert _main(home, "new", str(TRIAGE), syncer=syncer) == 0
+
+    assert syncer.asked == [workspace_dir(home)]
+    assert syncer.existed == [True]
+
+def test_a_finished_sync_leaves_the_workspace_venv_naming_the_agl_that_ran_it(
+    tmp_path: Path,
+) -> None:
+    """The last step, and the reason it is here: nothing installs AGL into that venv.
+
+    `agl new` writes a workflow whose first line imports `agl.sdk`, and neither the workspace root
+    nor the scaffold declares AGL as a dependency - `tests/config/test_toml_file.py` holds that,
+    and it is deliberate, AGL being on the import path rather than installed into it. So an editor
+    with the workspace venv selected has every package the workflow declares and not the one it
+    imports first, and this file is what closes that gap. It closes it for an editor alone:
+    `config/workspace_path.py` says why no run of AGL reads it.
+    """
+    home = _home(tmp_path)
+    _main(home, "new", str(TRIAGE))
+    pth = _installed(home)
+
+    assert _main(home, "new", "release") == 0
+
+    assert agl.__file__ is not None
+    assert pth.read_text(encoding="utf-8") == f"{Path(agl.__file__).parent.parent}\n"
+
+def test_a_refused_sync_writes_no_path_file_into_the_venv_it_did_not_build(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The one step a refusal skips, and it is skipped because of what the file would claim.
+
+    uv exiting non-zero is every failure at once - a resolution with no solution, an index that
+    could not be reached, a package that would not build - and none of them says what is in that
+    venv now. A file written into it would name this AGL beside an environment nothing finished
+    installing into, so the two agree: nothing installed, nothing claimed.
+
+    The command still succeeds, and that is the half worth having a test for. An environment stood
+    here before this sync was started - the `agl new` above is what built it - so the refusal is a
+    warning rather than a stop, and the `.pth` is skipped on the path that carries on and not only
+    on the one that exits.
+    """
+    home = _home(tmp_path)
+    _main(home, "new", str(TRIAGE))
+    pth = _installed(home)
+    syncer = Recording(SyncOutcome(synced=False, status=2, output="error: no solution found\n"))
+
+    assert _main(home, "new", "release", syncer=syncer) == 0
+
+    assert not pth.exists()
+    assert "error: no solution found" in capsys.readouterr().err
+
+def test_a_refused_sync_exits_six_and_leaves_the_scaffold_it_could_not_install_for(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """uv refusing with no environment to fall back on is an upstream failure, which is exit 6.
+
+    There is nothing older here for a workflow to import - this home has never been synced - so
+    carrying on would only move the failure to the first line of the first workflow that imports
+    anything, where it would name a package rather than an install that never happened. A refusal
+    over an environment that *does* stand is the other rule and is a warning; the test above holds
+    that half, and the difference between the two is measured before uv is started rather than
+    after, `uv sync` having built the venv before it resolved.
+
+    The status uv gave is named as well as the text, because the two answer different questions: a
+    script branches on AGL's 6 and a person reads uv's own words for what could not be resolved.
+    The output leaves with the refusal rather than on stdout, so this command writes nothing to
+    stdout at all on the path where nothing was installed.
+
+    The scaffold is asserted present afterwards for the reason the first test in this file gives:
+    it was written before the installer was started, so fixing whatever uv complained about and
+    typing the command again is a refusal about a name that already exists rather than a second
+    chance at getting the files.
+    """
+    home = _home(tmp_path)
+    syncer = Recording(SyncOutcome(synced=False, status=2, output="error: no solution found\n"))
+
+    assert _main(home, "new", str(TRIAGE), syncer=syncer) == 6
+
+    captured = capsys.readouterr()
+    assert "error: no solution found" in captured.err
+    assert "uv exited 2" in captured.err
+    assert captured.out == ""
+    assert workflow_module(home, TRIAGE).is_file()
+
+def test_an_installer_that_could_not_be_started_exits_six_saying_so(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`UpstreamUnavailable` -> 6, and the adapter's sentence arrives unreworded.
+
+    That is the shape of "uv is not installed", which is the commonest way this fails on a machine
+    that has never run it: `adapters/uv/syncer.py` writes the sentence where the facts are - the
+    binary it looked for, and three ways to install one - and nothing on the way up edits it.
+    """
+    home = _home(tmp_path)
+    syncer = Raising(UpstreamUnavailable("uv is not installed, or 'uv' is not on PATH"))
+
+    assert _main(home, "new", str(TRIAGE), syncer=syncer) == 6
+
+    assert "uv is not installed" in capsys.readouterr().err
+
+def test_an_installer_that_found_no_workspace_exits_three_like_any_other_absence(
+    tmp_path: Path,
+) -> None:
+    """`NotFoundError` -> 3, through the same table every other command's absences resolve through.
+
+    The scaffold makes the workspace before the installer is started, so this is not a state `agl
+    new` can reach on its own - what it pins is that the adapter's refusal is not swallowed on the
+    way past, and that a command growing its own answer for a missing workspace would have to
+    disagree with `ports/errors.py`'s one table to do it.
+    """
+    home = _home(tmp_path)
+    syncer = Raising(NotFoundError("there is no workspace to sync"))
+
+    assert _main(home, "new", str(TRIAGE), syncer=syncer) == 3
 
 # --- the refusals, through argv -----------------------------------------------------------------
 
@@ -420,31 +645,18 @@ def test_the_command_calls_exactly_one_api_function() -> None:
     assert called == {"new_workflow"}
 
 def test_the_command_never_asks_for_a_registered_repository(tmp_path: Path) -> None:
-    """`agl new` takes the home and nothing else - it runs before there is a project at all.
+    """`agl new` takes the home and an installer - it runs before there is a project at all.
 
     `registered()` resolves a project settings file, and a workflow is written into the workspace
     rather than into any repository, so a clause calling it would make the on-ramp refuse
-    everywhere it exists for. `_never` on the `Invocation` is `main`'s own seam used as the
-    instrument, which is why every test in this file goes through `_main`.
+    everywhere it exists for. The install that now follows the scaffold changes nothing about
+    that: a sync addresses the workflows an operator wrote, and those live under no repository -
+    `container.real_syncer` takes no project for exactly that reason. `_never` on the `Invocation`
+    is `main`'s own seam used as the instrument, which is why every test in this file goes through
+    `_main`.
     """
     home = _home(tmp_path)
 
     assert _main(home, "new", str(TRIAGE)) == 0
     assert workflow_dir(home, TRIAGE).is_dir()
-
-def test_the_command_starts_no_event_loop() -> None:
-    """`api.new_workflow` is sync, so this module has no `asyncio.run` and does not import asyncio.
-
-    Read off the source, because "it worked anyway" is true of a command that wrapped a sync call
-    in a loop.
-    """
-    source = ast.parse(inspect.getsource(new_command))
-
-    imported = {
-        name.name
-        for node in ast.walk(source)
-        if isinstance(node, ast.Import)
-        for name in node.names
-    }
-
-    assert "asyncio" not in imported
+    assert workspace_pyproject(home).is_file()

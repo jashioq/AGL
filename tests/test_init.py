@@ -352,7 +352,7 @@ def test_init_is_sync_and_starts_no_event_loop(tmp_path: Path) -> None:
     It touches no port - `Store` holds runs and a project file is not one, and the write goes to
     `config/toml_file.py`, "the only module that knows TOML". So `cli/commands/init.py` has no
     `asyncio.run`, which is what `cli/main.py` means by leaving the loop to the command: a dispatch
-    that awaited everything would make the two sync commands pretend to be something they are not.
+    that awaited everything would make a synchronous command pretend to be something it is not.
     """
     written = api.init(_settings(tmp_path), _repo(tmp_path), _Asked())
 

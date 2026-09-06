@@ -10,7 +10,7 @@ from agl.ports.home_layout import (
     workspace_site_packages,
 )
 
-__all__ = ["extend", "write_editor_pth"]
+__all__ = ["extend", "venv_exists", "write_editor_pth"]
 
 # The directory holding the `agl` package this process imported, which is `src/` in a checkout and
 # an environment's own site-packages everywhere else. Composed from this module's location because
@@ -35,6 +35,14 @@ def extend(home: AglHome) -> None:
     # own directory, so two of them may both hold a `roles.py` without either shadowing the other.
     _append(str(workflows_dir(home)))
 
+# Asked before an installer is started and never after it has finished: `uv sync` builds the venv
+# before it resolves, so a sync that failed on the first ever attempt leaves one standing, and an
+# answer read afterwards would report an environment nothing has installed into. `api.py` is the
+# caller, and the rule it decides with this is written there.
+def venv_exists(home: AglHome) -> bool:
+    """Whether this interpreter has a workspace venv to import from - `extend`'s own question."""
+    return workspace_site_packages(home, _interpreter()).is_dir()
+
 # For the editor an operator writes workflows in, and for nothing that runs. `site` reads a `.pth`
 # while it builds `sys.path` for the interpreter that owns the venv, and no run of AGL is that
 # interpreter: `extend` above reaches the same site-packages through `sys.path.append`, which
@@ -53,7 +61,7 @@ def write_editor_pth(home: AglHome) -> None:
     written = f"{_AGL_PARENT}\n".encode()
     path = workspace_editor_pth(home, interpreter)
     # Silent rather than reported, and what decides that is where a report would have to travel:
-    # back through `api.sync_workspace` and its `SyncOutcome`, which is the installer's word about
+    # back through `api._sync_workspace` and its `SyncOutcome`, which is the installer's word about
     # an install and no place for an editor's convenience. What the silence costs is a sync that
     # says it finished over a venv holding no `agl.pth` - visible in the editor and nowhere else.
     with suppress(OSError):

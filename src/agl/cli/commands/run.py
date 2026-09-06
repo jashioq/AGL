@@ -7,6 +7,7 @@ from agl import api
 from agl.cli.commands import Registered, _print_replays, _said
 from agl.ports.home_layout import AglHome
 from agl.ports.ids import RunLabel
+from agl.ports.sync import Syncer
 from agl.sdk.params import RefusingParser
 
 __all__ = ["NAME", "declare", "execute"]
@@ -65,6 +66,7 @@ def execute(
     parsed: argparse.Namespace,
     argv: Sequence[str],
     *,
+    syncer: Syncer,
     home: AglHome,
     points: Iterable[EntryPoint] | None = None,
 ) -> int:
@@ -79,6 +81,7 @@ def execute(
             label,
             argv,
             base_ref=_perhaps(parsed, _BASE_REF),
+            syncer=syncer,
             home=home,
             points=points,
         )

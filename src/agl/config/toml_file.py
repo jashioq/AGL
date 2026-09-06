@@ -74,17 +74,17 @@ async def {name}(run: Run) -> None:
 """
 
 # No `[build-system]`: the workspace is on this process's import path rather than installed into
-# it, so a workflow is imported from where it was written and nothing has to build it. The one
-# requirement it does declare is AGL's own, and it is written for a reader rather than a resolver -
-# `config/registry.py` reads it back before it imports the workflow, and refuses a workflow written
-# against an AGL this is not.
+# it, so a workflow is imported from where it was written and nothing has to build it. It declares
+# no requirement either, and the bound on AGL sits under `[tool.agl]` rather than in
+# `dependencies` for the same reason: uv walks past a `[tool]` table it does not own, so the bound
+# is read by `config/registry.py` and resolved by nobody.
 _PROJECT_DOCUMENT: Final = """[project]
 name = "{name}"
 version = "0.1.0"
-{dependencies}
+
 [project.entry-points."{group}"]
 {name} = "{name}:{name}"
-"""
+{requires}"""
 
 # Tested for existence and never for being a directory: a linked worktree or a submodule writes a
 # file holding a `gitdir:` line there instead.
@@ -223,7 +223,7 @@ def make_workflow(home: AglHome, name: WorkflowName, group: str, bound: str | No
         raise ConflictError(_already_written(directory, name)) from error
     except OSError as error:
         raise InputError(_unwritable(directory, error)) from error
-    project = _PROJECT_DOCUMENT.format(name=name, group=group, dependencies=_dependencies(bound))
+    project = _PROJECT_DOCUMENT.format(name=name, group=group, requires=_bound_table(bound))
     for path, document in (
         (workflow_module(home, name), _MODULE_DOCUMENT.format(name=name)),
         (workflow_pyproject(home, name), project),
@@ -428,11 +428,10 @@ def _unwritable(path: Path, error: OSError) -> str:
         f"rather than half-removed, and deleting the directory is what starts the command over"
     )
 
-# Empty where there is no bound to write, which leaves the blank line the template already holds
-# above its next table - so an AGL with no version of its own scaffolds a workflow claiming nothing
-# rather than one claiming a version no resolver and no reader could parse.
-def _dependencies(bound: str | None) -> str:
-    return "" if bound is None else f"dependencies = [{_quoted(bound)}]\n"
+# Empty where there is no bound to write: `config/distribution.py` answers `None` on a tree with no
+# version of its own, and a workflow claiming nothing beats one claiming a version no reader parses.
+def _bound_table(bound: str | None) -> str:
+    return "" if bound is None else f"\n[tool.agl]\nrequires = {_quoted(bound)}\n"
 
 def _quoted(value: str) -> str:
     escaped = "".join(

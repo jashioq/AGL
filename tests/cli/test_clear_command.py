@@ -115,14 +115,20 @@ def _fakes(tmp_path: Path) -> container.FakeServices:
     )
 
 def _main(harness: container.FakeServices, *argv: str) -> int:
-    """One `agl` invocation, with this module's workflows in place of what is installed."""
+    """One `agl` invocation, with this module's workflows in place of what is installed.
+
+    `agl clear` starts no installer, but the `agl run` that arranges a run for it to take away
+    does: the real default would start uv on every arrangement below, and `ELSEWHERE` is not a
+    home anything may write to.
+    """
     return main.main(
         argv,
         compose=lambda: main.Invocation(
             registered=lambda: (PROJECT, harness.services),
-        settings=SETTINGS,
-        cwd=ELSEWHERE,
-        points=POINTS,
+            settings=SETTINGS,
+            cwd=ELSEWHERE,
+            points=POINTS,
+            syncer=container.fake_syncer,
         ),
     )
 

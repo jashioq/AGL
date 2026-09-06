@@ -26,9 +26,18 @@ provides keeps resolving from the entry it already resolved from. That is what
 it is a claim about the operator's machine rather than about this suite: a workspace venv is the
 operator's own directory and may hold anything at all, `agl` itself included.
 
+## The third function reads and answers, and what it is for is *when* it is asked
+
+`venv_exists` is the question `extend` already asks itself, exposed because `api.py` has to ask it
+**before** an installer runs rather than after: `uv sync` builds the venv before it resolves, so the
+answer changes the moment a sync that is going to fail starts. What is asserted below is that the
+two agree in both directions - a directory `extend` would append is one this reports, and one it
+skips in silence is one this denies - because a predicate that drifted from the insertion would put
+`api.py`'s "as the last successful sync left it" over an environment no import can reach.
+
 ## The second function here writes a file and puts nothing on the path
 
-`write_editor_pth` is what `agl sync` calls once uv has finished, and it is the odd one out twice
+`write_editor_pth` is what a finished install calls, and it is the odd one out twice
 over: it writes rather than reads, and nothing in AGL reads back what it wrote. `site` processes a
 `.pth` while it builds `sys.path` for the interpreter that owns the venv, and `extend` reaches that
 same directory with `sys.path.append`, which processes nothing - so
@@ -57,7 +66,7 @@ from typing import Final
 import pytest
 import agl
 from agl.config.registry import GROUP, discovered
-from agl.config.workspace_path import extend, write_editor_pth
+from agl.config.workspace_path import extend, venv_exists, write_editor_pth
 from agl.ports.home_layout import (
     AglHome,
     workflows_dir,
@@ -253,7 +262,7 @@ def test_two_workflows_each_holding_a_roles_module_both_load_without_shadowing_e
 def test_a_workflow_imports_a_third_party_module_out_of_the_workspace_venv(
     tmp_path: Path,
 ) -> None:
-    """What the venv entry is for, stated as the thing an operator asked `agl sync` to buy.
+    """What the venv entry is for, stated as the thing an operator's last install bought.
 
     The planted module stands in for a distribution `uv sync` installed. It is reachable under no
     other name and from no other directory, so the marker the point hands back can only have come
@@ -288,6 +297,65 @@ def test_discovery_puts_the_workspace_on_the_path_before_it_hands_back_a_single_
     assert [point.name for point in found.points] == [_ALPHA]
     assert str(workflows_dir(home)) in sys.path
 
+# --- the question the insertion asks, exposed for the caller that has to ask it first ------------
+
+def test_a_workspace_with_a_venv_this_interpreter_built_is_reported_as_having_one(
+    tmp_path: Path,
+) -> None:
+    """The ordinary yes, over exactly the directory `extend` would append."""
+    home = _home(tmp_path)
+    _venv(home)
+    assert venv_exists(home) is True
+
+def test_a_workspace_with_no_venv_beside_it_is_reported_as_having_none(tmp_path: Path) -> None:
+    """The ordinary no, which is the shape every workspace has until something installs into it."""
+    home = _home(tmp_path)
+    workflows_dir(home).mkdir(parents=True)
+    assert venv_exists(home) is False
+
+def test_a_venv_built_by_another_interpreter_is_no_environment_this_one_can_import_from(
+    tmp_path: Path,
+) -> None:
+    """An operator who upgraded Python has one of these: packages, and nothing this one imports.
+
+    `extend` skips such a directory in silence, so a caller told an environment stood there would
+    be told wrong twice over - a run refused for a failed install into it is refused correctly,
+    and one told to carry on with what the last sync left would be carrying on against nothing.
+    """
+    home = _home(tmp_path)
+    workspace_site_packages(home, "python0.1").mkdir(parents=True)
+    assert venv_exists(home) is False
+
+def test_the_predicate_and_the_insertion_agree_about_what_counts_as_an_environment(
+    tmp_path: Path,
+) -> None:
+    """One question asked twice, and a drift between the two is invisible from either side alone.
+
+    Both directions in one process, because either half alone passes against a predicate that
+    always answered the same way.
+    """
+    home = _home(tmp_path)
+    site = workspace_site_packages(home, _segment())
+
+    assert venv_exists(home) is False
+    extend(home)
+    assert str(site) not in sys.path
+
+    site.mkdir(parents=True)
+    assert venv_exists(home) is True
+    extend(home)
+    assert str(site) in sys.path
+
+def test_asking_the_predicate_puts_nothing_on_the_import_path(tmp_path: Path) -> None:
+    """A reader and not a writer: `api.py` asks it on every run, the ones it then refuses too."""
+    home = _home(tmp_path)
+    _venv(home)
+    before = list(sys.path)
+
+    assert venv_exists(home) is True
+
+    assert sys.path == before
+
 # --- the file the venv gets, which no run of AGL reads -------------------------------------------
 
 def _pth(home: AglHome) -> Path:
@@ -310,7 +378,7 @@ def test_the_file_written_into_the_venv_names_the_directory_the_running_agl_impo
     """One line, and it is the directory an editor has to be told about to resolve `agl.sdk`.
 
     `agl new` scaffolds a workflow whose first line is `from agl.sdk import Run, workflow`, and the
-    venv `agl sync` builds installs everything that workflow declares except AGL itself - nothing
+    venv AGL builds installs everything that workflow declares except AGL itself - nothing
     declares it, and this is the deliberate half of that. So the file is what an editor pointed at
     the workspace venv reads `agl` through, and the trailing newline is there because `site` reads
     a `.pth` a line at a time.
@@ -340,7 +408,7 @@ def test_writing_the_path_file_puts_nothing_on_this_processs_import_path(tmp_pat
 def test_writing_the_path_file_twice_leaves_one_file_holding_exactly_one_line(
     tmp_path: Path,
 ) -> None:
-    """`agl sync` is run repeatedly, and a writer that appended would grow the file every time."""
+    """A sync runs on every `agl run`, and a writer that appended would grow the file every time."""
     home = _home(tmp_path)
     site = _venv(home)
 

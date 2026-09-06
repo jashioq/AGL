@@ -49,6 +49,7 @@ from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Final
 import pytest
+from agl.adapters.uv.fake import FakeSyncer
 from agl.cli import main
 from agl.config import container, distribution, registry, sources
 from agl.ports.errors import (
@@ -59,6 +60,7 @@ from agl.ports.errors import (
 )
 from agl.ports.home_layout import RunScope
 from agl.ports.ids import ProjectName, RunLabel
+from agl.ports.sync import Syncer
 from agl.ports.tree_layout import TreesRoot
 from agl.sdk.workflow import Run, Stop, workflow
 
@@ -203,12 +205,16 @@ def _compose(harness: container.FakeServices) -> main.Compose:
     `registered` is a callable because composition is per-command, and here it is one that answers
     without reading anything - which is the whole of what a `run` invocation needs from a
     registered repository, and exactly what a real one would have had to resolve a project to get.
+
+    `syncer` is a fake because `agl run` syncs the workspace on the way past: the real default
+    would start uv on every invocation below, and `ELSEWHERE` is not a home anything may write to.
     """
     return lambda: main.Invocation(
         registered=lambda: (PROJECT, harness.services),
         settings=SETTINGS,
         cwd=ELSEWHERE,
         points=POINTS,
+        syncer=container.fake_syncer,
     )
 
 def _main(harness: container.FakeServices, *argv: str) -> int:
@@ -777,6 +783,24 @@ def test_the_seam_is_a_parameter_and_the_real_composition_is_its_default() -> No
     assert signature.parameters["compose"].default is None
     assert signature.parameters["compose"].kind is inspect.Parameter.KEYWORD_ONLY
     assert signature.return_annotation is int
+
+def test_the_real_syncer_is_the_default_behind_the_seam_every_suite_here_substitutes(
+    tmp_path: Path,
+) -> None:
+    """The seam is a field with a real default, spelled the way `compose=` and `points=` are.
+
+    Every invocation under `tests/cli/` that reaches an installer hands one in, so without this the
+    suites would be compatible with an `Invocation` whose default was a fake - and `agl new`, `agl
+    run` and `agl resume` typed at a terminal would each install nothing while reporting they had.
+    Constructing a `UvSyncer` resolves no binary and starts nothing, which is what makes the
+    default safe to build here, and the bundle behind `registered` is never asked for at all.
+    """
+    invocation = main.Invocation(
+        registered=lambda: (PROJECT, _fakes(tmp_path).services), settings=SETTINGS, cwd=ELSEWHERE
+    )
+
+    assert isinstance(invocation.syncer(), Syncer)
+    assert not isinstance(invocation.syncer(), FakeSyncer)
 
 def test_argv_defaults_to_the_command_line_without_this_module_saying_so(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch

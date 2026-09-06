@@ -435,7 +435,7 @@ def test_a_declared_name_is_never_refused_for_a_broken_directory_that_shares_it(
 # --- the AGL a workflow declares it was written against, read in the same pass ------------------
 #
 # The walk already opens each directory's project file for the entry-point table, and it reads the
-# `[project] dependencies` list out of that same document. What it is looking for is one entry: a
+# `[tool.agl] requires` value out of that same document. What it is looking for is one string: a
 # bound on AGL's own distribution, which `agl new` writes naming the AGL that scaffolded the
 # workflow. `config/distribution.py` owns the comparison and every shape that is *not* a refusal -
 # no bound, an unparseable one, another distribution's, an AGL with no version of its own - and
@@ -461,9 +461,10 @@ _BEYOND_REACH: Final = "99999.0.0"
 def _needing(bound: str, *declarations: str) -> str:
     """A project file needing AGL at `bound`, declaring whichever entry points it is handed."""
     return (
-        f'[project]\nname = "probe"\nversion = "0.1.0"\n'
-        f'dependencies = ["{DISTRIBUTION}{bound}"]\n\n'
-        f'[project.entry-points."{GROUP}"]\n' + "".join(f"{line}\n" for line in declarations)
+        f'[project]\nname = "probe"\nversion = "0.1.0"\n\n'
+        f'[project.entry-points."{GROUP}"]\n'
+        + "".join(f"{line}\n" for line in declarations)
+        + f'\n[tool.agl]\nrequires = "{DISTRIBUTION}{bound}"\n'
     )
 
 def test_a_workflow_needing_an_agl_this_is_not_is_refused_before_anything_is_imported(
@@ -591,3 +592,72 @@ def test_the_check_is_silent_about_a_name_no_directory_in_the_workspace_declared
 
     with pytest.raises(NotFoundError):
         load(found.points, _WORKFLOW, _Workflow)
+
+# --- an import that failed, and which of two things was missing ---------------------------------
+#
+# `load` is the one line that imports, and what it catches covers two situations an operator fixes
+# in different files. A workflow whose own module or attribute is not there is a declaration
+# pointing at nothing, and the fix is inside that directory. A workflow that imported something
+# else and did not find it is a dependency nothing installed, and the fix is a line in that
+# directory's `[project] dependencies` followed by an install - a different sentence, so the two
+# are told apart rather than sharing one.
+#
+# **The cut is `ModuleNotFoundError` and not `ImportError`**, because only the first means no
+# finder answered at all: `from agl.sdk import gone` raises the plain class and is the workflow's
+# own code failing against the AGL it has, which is not something an install would put right.
+#
+# Both cases below are driven through a real directory and a real import rather than through a
+# hand-built error, because the branch reads `EntryPoint.module` against what the interpreter said
+# was missing and a constructed error would let this file decide both halves.
+
+_ABSENT_PACKAGE: Final = "a_package_no_environment_in_this_suite_provides"
+
+_IMPORTING_WORKFLOW: Final = "probe_workflow_importing_something_absent"
+
+def _importing(home: AglHome, named: str, absent: str) -> None:
+    """A workflow directory whose package is importable and whose first line is not."""
+    directory = _directory(home, named, _declaring(f'{named} = "{named}:{named}"'))
+    (directory / "__init__.py").write_text(f"import {absent}\n", encoding="utf-8")
+
+def test_a_module_the_workflow_imports_and_nothing_installed_is_refused_as_a_dependency(
+    tmp_path: Path,
+) -> None:
+    """The deliverable: the name that was missing, and the file the operator declares it in.
+
+    The workflow's own package imports fine - the directory is there, the walk found it, and
+    `sys.path` reaches it - so the only thing missing is the package on its first line, which no
+    install in this suite provides. What the refusal must not do is send the operator into their
+    own module looking for a declaration that is not the problem.
+    """
+    home = _home(tmp_path)
+    _importing(home, _IMPORTING_WORKFLOW, _ABSENT_PACKAGE)
+    found = discovered(home)
+
+    with pytest.raises(InputError) as refused:
+        load(found.points, _IMPORTING_WORKFLOW, _Workflow)
+
+    said = str(refused.value)
+    assert _ABSENT_PACKAGE in said
+    assert "not installed" in said
+    assert "dependencies" in said
+
+def test_the_workflows_own_missing_module_is_refused_about_the_declaration_and_not_a_dependency(
+    tmp_path: Path,
+) -> None:
+    """The other half of the same branch, and the two are asserted against each other.
+
+    Nothing is installable here: the declaration names a module that does not exist, so the fix is
+    the line that names it and no `[project] dependencies` entry would change anything. A refusal
+    offering an install would be the wrong file entirely - and without this case, a branch that
+    never fired would pass the one above just as happily.
+    """
+    home = _home(tmp_path)
+    _directory(home, "triage", _declaring(f"triage = {_UNIMPORTABLE!r}"))
+    found = discovered(home)
+
+    with pytest.raises(InputError) as refused:
+        load(found.points, "triage", _Workflow)
+
+    said = str(refused.value)
+    assert "loading it failed" in said
+    assert "not installed" not in said

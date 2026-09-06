@@ -1,9 +1,11 @@
 import argparse
+import asyncio
 from typing import Final
 from agl import api
 from agl.cli.commands import _said
 from agl.ports.home_layout import AglHome
 from agl.ports.ids import WorkflowName
+from agl.ports.sync import Syncer
 from agl.sdk.params import RefusingParser
 
 __all__ = ["NAME", "declare", "execute"]
@@ -27,8 +29,8 @@ def declare(commands: _Commands) -> RefusingParser:
             "pyproject.toml declaring it under the name you give here. The workspace is made if "
             "it is not there yet. What is written runs as it stands - `agl run <workflow>` "
             "against it does nothing and succeeds - so the first edit is yours to make rather "
-            "than a stub to fill in. Nothing is installed and there is no list in AGL to add it "
-            "to: the directory is the whole of it."
+            "than a stub to fill in. There is no list in AGL to add it to: the directory is the "
+            "whole of it, and what the workspace's workflows declare is installed on the way out."
         ),
         allow_abbrev=False,
     )
@@ -39,8 +41,8 @@ def declare(commands: _Commands) -> RefusingParser:
     )
     return parser
 
-def execute(home: AglHome, parsed: argparse.Namespace) -> int:
+def execute(home: AglHome, parsed: argparse.Namespace, *, syncer: Syncer) -> int:
     name = WorkflowName(_said(parsed, _WORKFLOW, command=NAME))
-    written = api.new_workflow(home, name)
+    written = asyncio.run(api.new_workflow(syncer, home, name))
     print(f"new wrote {written}")
     return _NOTHING_TO_REPORT

@@ -30,12 +30,14 @@ from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Final
 import pytest
+from agl.adapters.uv.fake import FakeSyncer
 from agl.cli import main
 from agl.cli.commands import run as run_command
 from agl.config import container, registry, sources
-from agl.ports.home_layout import RunScope
+from agl.ports.home_layout import RunScope, workspace_dir
 from agl.ports.ids import ProjectName, RunLabel
 from agl.ports.run import JsonValue
+from agl.ports.sync import Syncer
 from agl.ports.tree_layout import TreesRoot
 from agl.sdk.params import RefusingParser, arg
 from agl.sdk.workflow import Run, workflow
@@ -114,15 +116,22 @@ def _fakes(tmp_path: Path) -> container.FakeServices:
     """Target #8's deployment, seeded so `History` has a default ref and a commit to resolve."""
     return container.fakes(TreesRoot(tmp_path / "trees"), files={"src/a.txt": b"one\n"})
 
-def _main(harness: container.FakeServices, *argv: str) -> int:
-    """One `agl` invocation, with this module's workflows in place of what is installed."""
+def _main(harness: container.FakeServices, *argv: str, syncer: Syncer | None = None) -> int:
+    """One `agl` invocation, with this module's workflows in place of what is installed.
+
+    The installer is a fake because `agl run` installs what the workspace declares on the way past:
+    the field's own default would start uv on every invocation below, and `ELSEWHERE` is not a home
+    anything may write to.
+    """
+    installer = FakeSyncer() if syncer is None else syncer
     return main.main(
         argv,
         compose=lambda: main.Invocation(
             registered=lambda: (PROJECT, harness.services),
-        settings=SETTINGS,
-        cwd=ELSEWHERE,
-        points=POINTS,
+            settings=SETTINGS,
+            cwd=ELSEWHERE,
+            points=POINTS,
+            syncer=lambda: installer,
         ),
     )
 
@@ -350,3 +359,33 @@ def test_a_finished_run_is_named_the_way_the_refusal_names_it(
     assert _main(harness, "run", "flagged", "-n", "auth", "-r", "x") == 0
 
     assert capsys.readouterr().out == "run 'auth' finished\n"
+
+# --- the install this command folded in ----------------------------------------------------------
+
+def test_an_install_this_command_could_not_finish_stops_the_run_before_it_records_anything(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`agl run` installs what the workspace declares, and a refusal is exit 6 and no run at all.
+
+    There is no `agl sync` any more, so this is where an operator meets uv: the install is folded
+    into the three commands that need one and is asked for by nobody. It is scripted at the
+    workspace directory rather than unconditionally, which is what says the installer was pointed
+    at that directory and not at the project file inside it or at `workflows/` below it - a sync
+    asked for anywhere else would meet `FakeSyncer`'s unscripted answer and this run would finish.
+
+    Nothing is recorded and the workflow is not entered, which places the install above both: a run
+    that had written `run.json` first would leave a label somebody has to `agl clear` before they
+    could retry the command that failed.
+    """
+    harness = _fakes(tmp_path)
+    flagged_with.clear()
+    installer = FakeSyncer()
+    installer.answers(
+        workspace_dir(SETTINGS.home), synced=False, status=2, output="error: no solution found\n"
+    )
+
+    assert _main(harness, "run", "flagged", "-n", "auth", "-r", "x", syncer=installer) == 6
+
+    assert "error: no solution found" in capsys.readouterr().err
+    assert flagged_with == []
+    assert asyncio.run(harness.services.store.read_record(SCOPE)) is None

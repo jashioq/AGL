@@ -114,8 +114,9 @@ from agl.ports.agent import (
 )
 from agl.ports.errors import DeniedError, UpstreamUnavailable, exit_code_for
 from agl.ports.history import FileChange, History
-from agl.ports.home_layout import RunScope
+from agl.ports.home_layout import AglHome, RunScope, workspace_dir
 from agl.ports.ids import Namespace, ProjectName, RunLabel
+from agl.ports.sync import Syncer, SyncOutcome
 from agl.ports.tree_layout import TreesRoot
 from agl.ports.workspace import Workspace, WorkspaceProvider
 from agl.sdk._engine import preflight
@@ -403,6 +404,20 @@ class _Untouched(WorkspaceProvider):
             "turns is the last thing that can happen while the run has left nothing behind"
         )
 
+class _Installer(Syncer):
+    """A syncer that records having been asked, and starts nothing: `api.run` syncs above preflight.
+
+    A `FakeSyncer` would answer just as harmlessly and could not be asked afterwards whether it was
+    reached, which is the whole of what this is for.
+    """
+
+    def __init__(self) -> None:
+        self.asked: list[Path] = []
+
+    async def sync(self, workspace: Path) -> SyncOutcome:
+        self.asked.append(workspace)
+        return SyncOutcome(synced=True, status=0, output="")
+
 def _fakes(tmp_path: Path) -> container.FakeServices:
     """End-to-end on fakes alone: one repository seeded with a file, one store, one frozen clock."""
     return container.fakes(TreesRoot(tmp_path / "trees"), files={"src/a.txt": b"one\n"})
@@ -414,19 +429,23 @@ async def _start(
     agents: AgentRunner,
     history: History | None = None,
     opens: bool = True,
+    syncer: Syncer | None = None,
+    home: AglHome | None = None,
 ) -> None:
     """One `api.run` with this module's entry points and one substituted port - or three.
 
     `opens=False` swaps the workspace provider for the tripwire, which every test about a run that
     must not reach the repository passes. `history=` swaps the repository preflight now asks first,
-    which only the tests about that question need.
+    which only the tests about that question need. `syncer=` and `home=` are the pair `api.run`
+    installs against, left unpassed everywhere the install is not the subject: without both, the
+    run reaches no installer at all.
     """
     services = replace(harness.services, agents=agents)
     if history is not None:
         services = replace(services, history=history)
     if not opens:
         services = replace(services, workspaces=_Untouched())
-    await api.run(services, PROJECT, name, LABEL, (), points=POINTS)
+    await api.run(services, PROJECT, name, LABEL, (), syncer=syncer, home=home, points=POINTS)
 
 async def _no_record(harness: container.FakeServices) -> bool:
     """Whether this run left nothing under `AGL_HOME` - half of what "second zero" means."""
@@ -508,6 +527,54 @@ async def test_a_repository_that_can_name_no_committer_fails_at_second_zero(
     )
     assert await _no_record(harness), "a run refused at preflight left a record to be cleared"
     assert entered == [], "the workflow ran although nothing it did could have been committed"
+
+@pytest.mark.asyncio
+async def test_a_run_installs_what_the_workspace_declares_before_preflight_is_asked_anything(
+    tmp_path: Path,
+) -> None:
+    """The install `api.run` folds in sits *above* preflight, and this is where that is pinned.
+
+    It has to. `check` below reads its role factories out of the module the workflow's `def` ran
+    in, so preflight cannot be asked until `config/registry.py`'s `load` has imported that module -
+    and a workflow whose dependency is not installed yet fails that import. An install underneath
+    preflight would never run on the very machine that needed it, and the next run would fail the
+    same way: `tests/test_api.py` is where that heals, over a workflow importing what only a sync
+    puts there.
+
+    What the order does not weaken is offline, and nothing here compensates for it with a probe of
+    AGL's own. A machine with no network and no environment is refused by the install below; one
+    with an environment already gets a warning and reaches `check`, whose Claude probe is a real
+    round trip and fails loudly there.
+
+    The refusal used here is preflight's free local one, so the claim costs nothing to make: a run
+    whose commits git will not make is refused after the workspace was installed and before any
+    backend was asked.
+    """
+    entered.clear()
+    harness = _fakes(tmp_path)
+    home = AglHome(tmp_path / "home")
+    installer = _Installer()
+    probe = _Stub()
+
+    with pytest.raises(UpstreamUnavailable):
+        await _start(
+            harness,
+            "two_providers",
+            agents=probe,
+            history=_Repository(attributable=False),
+            opens=False,
+            syncer=installer,
+            home=home,
+        )
+
+    assert installer.asked == [workspace_dir(home)], (
+        "the run reached preflight without installing what the workspace declares, so a workflow "
+        "whose dependency is missing would have failed at its own import line one step earlier"
+    )
+    assert probe.asked_ready == [], (
+        "a backend was probed although preflight refused on the free local question, which is the "
+        "ordering this file's own cost argument rests on"
+    )
 
 @pytest.mark.asyncio
 async def test_check_ready_is_asked_once_per_model_and_not_once_per_role(tmp_path: Path) -> None:

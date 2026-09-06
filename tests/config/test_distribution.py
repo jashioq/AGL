@@ -125,7 +125,7 @@ def test_looking_up_the_import_package_name_raises_because_it_is_no_distribution
 #
 # Two halves of one string and they are deliberately in one module: `requirement()` composes the
 # line `config/toml_file.py` writes into a scaffold, and `unsatisfied_bound` reads that same line
-# back out of `[project] dependencies` when `config/registry.py` walks the workspace. The round
+# back out of `[tool.agl] requires` when `config/registry.py` walks the workspace. The round
 # trip at the bottom is what says they are halves of one thing rather than two similar functions.
 #
 # **`packaging` and not a string comparison, which is the whole reason this repository grew a
@@ -178,7 +178,7 @@ def test_the_bound_a_scaffold_is_given_is_one_its_own_reader_accepts() -> None:
     written = distribution.requirement()
     assert written is not None, "this tree is installed, so there is a bound to round-trip"
 
-    assert distribution.unsatisfied_bound([written]) is None
+    assert distribution.unsatisfied_bound(written) is None
 
 def test_a_bound_the_running_agl_sits_below_comes_back_as_its_specifier() -> None:
     """What the refusal is built from: the specifier, not the whole requirement and not a bool.
@@ -190,7 +190,7 @@ def test_a_bound_the_running_agl_sits_below_comes_back_as_its_specifier() -> Non
     running = Version(distribution.installed_version())
     above = f"{running.major + 1}.0.0"
 
-    assert distribution.unsatisfied_bound([f"agents-gl>={above}"]) == f">={above}"
+    assert distribution.unsatisfied_bound(f"agents-gl>={above}") == f">={above}"
 
 def test_a_bound_is_a_range_evaluated_as_versions_and_never_as_version_text() -> None:
     """The two halves of what a comparison of version text cannot do, on one running version.
@@ -210,7 +210,7 @@ def test_a_bound_is_a_range_evaluated_as_versions_and_never_as_version_text() ->
 
     running = distribution.installed_version()
     asked = {
-        specifier: distribution.unsatisfied_bound([f"{distribution.DISTRIBUTION}{specifier}"])
+        specifier: distribution.unsatisfied_bound(f"{distribution.DISTRIBUTION}{specifier}")
         for specifier in (f">={running}", f"=={running}", f">{running}", f"<{running}")
     }
 
@@ -232,37 +232,37 @@ def test_every_pep_503_spelling_of_the_distribution_names_the_same_project(spell
     matched on the exact string would pass over four of these and import the workflow anyway,
     which is the failure this whole check exists to prevent.
     """
-    assert distribution.unsatisfied_bound([f"{spelled}>=99.0.0"]) == ">=99.0.0"
+    assert distribution.unsatisfied_bound(f"{spelled}>=99.0.0") == ">=99.0.0"
 
 @pytest.mark.parametrize(
     "declared",
     [
         None,
-        [],
-        "agents-gl>=99.0.0",
+        "",
+        ["agents-gl>=99.0.0"],
         {"agents-gl": ">=99.0.0"},
-        [3],
-        [None],
-        ["httpx>=0.27", "pydantic>=2"],
-        ["agents-gl >>= 99"],
-        ['agents-gl>=99.0.0; sys_platform == "some-machine-that-is-not-this-one"'],
+        3,
+        "httpx>=0.27",
+        "agents-gl >>= 99",
+        'agents-gl>=99.0.0; sys_platform == "some-machine-that-is-not-this-one"',
     ],
 )
-def test_a_dependencies_value_declaring_no_readable_agl_bound_refuses_no_workflow(
+def test_a_requires_value_declaring_no_readable_agl_bound_refuses_no_workflow(
     declared: object,
 ) -> None:
     """Every shape that is not a bound on AGL, and all of them are silence rather than a refusal.
 
-    Three different reasons, one answer. **Nothing was said**: absent, empty, or naming other
-    distributions - which is every workflow written before the bound existed, and every one written
-    by hand. **It is not this check's file to police**: `dependencies` is PEP 621's table and uv
-    resolves every line of it, so a requirement AGL cannot parse is the installer's complaint and
-    refusing over it would make AGL a second, partial validator of somebody's project file. **It is
-    not this machine's requirement**: a marker names an environment, and deciding whether one
-    applies here is the resolver's - guessing wrong refuses a workflow that would have run.
+    Three different reasons, one answer. **Nothing was said**: absent, empty, or naming another
+    distribution - which is every workflow written before the bound existed, and every one written
+    by hand. **Nothing readable was said**: the bound exists to turn an `ImportError` on whichever
+    name moved into a sentence, so a value that will not parse as a requirement carries no claim to
+    convert, and refusing over its syntax would refuse a workflow that runs. **Nothing was said
+    about this machine**: a marker names an environment, and a table only AGL reads has no resolver
+    behind it to decide whether one applies - so AGL declines the question rather than guessing it.
 
-    The wrong container is in the list for the reader's sake: TOML admits a string and a table
-    where an array belongs, and neither is a list of requirements.
+    The wrong containers are in the list for the reader's sake. `requires` is a single string and
+    TOML admits an array, a table and an integer in the same place; the array is the shape somebody
+    carries over from `dependencies`, and it says nothing here rather than half-working.
     """
     assert distribution.unsatisfied_bound(declared) is None
 
@@ -286,4 +286,4 @@ def test_an_agl_that_is_not_installed_measures_no_bound_and_refuses_nothing(
     bound = f"{distribution.DISTRIBUTION}>=99.0.0"
     _uninstalled(monkeypatch)
 
-    assert distribution.unsatisfied_bound([bound]) is None
+    assert distribution.unsatisfied_bound(bound) is None

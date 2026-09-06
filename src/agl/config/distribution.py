@@ -43,19 +43,17 @@ def requirement() -> str | None:
     return None if running is None else f"{DISTRIBUTION}{_AT_LEAST}{running}"
 
 def unsatisfied_bound(declared: object) -> str | None:
-    """The specifier on AGL that the running AGL fails, out of a `[project] dependencies` value."""
+    """The specifier on AGL that the running AGL fails, out of a `[tool.agl] requires` value."""
+    # Silence and not a refusal: AGL running from a source tree has no version of its own to
+    # compare, and refusing on that would refuse every workflow in the workspace at once - this
+    # suite included, which is what makes the arm reachable rather than defensive.
     running = _running_version()
-    # Silence, not a refusal, in both directions. AGL running from a source tree has no version to
-    # compare and would otherwise refuse every workflow at once, this suite included; and a
-    # `dependencies` that is absent, empty or not a list is a workflow making no claim about AGL,
-    # which is every workflow written before this bound existed.
-    if running is None or not isinstance(declared, list):
+    if running is None:
         return None
-    for entry in declared:
-        bound = _bound(entry)
-        if bound is not None and not bound.specifier.contains(running):
-            return str(bound.specifier)
-    return None
+    bound = _bound(declared)
+    if bound is None or bound.specifier.contains(running):
+        return None
+    return str(bound.specifier)
 
 def _running_version() -> Version | None:
     # `UNINSTALLED` is the string that lands here, and PEP 440 admits neither its leading letter nor
@@ -69,15 +67,17 @@ def _running_version() -> Version | None:
 def _bound(entry: object) -> Requirement | None:
     if not isinstance(entry, str):
         return None
-    # An entry this cannot read is the installer's to complain about and not AGL's: uv resolves
-    # every line of that list and AGL reads one of them, so a typo in somebody's `httpx` line is
-    # not a reason to refuse the workflow.
+    # Silence rather than a refusal, and for what the bound is *for*: it turns an `ImportError` on
+    # whichever name moved into a sentence, so a value carrying no readable claim has nothing to
+    # convert. Every shape that reaches this arm is written out in
+    # `tests/config/test_distribution.py`.
     try:
         parsed = Requirement(entry)
     except InvalidRequirement:
         return None
-    # A marker goes the same way. Deciding whether `; sys_platform == "win32"` applies to this
-    # machine is the resolver's, and guessing it wrong refuses a workflow that would have run.
+    # A marker goes the same way. Nothing but AGL reads this table, so `; sys_platform == "win32"`
+    # here would be AGL deciding which machines a workflow is for - which is not what a refusal
+    # about versions can answer, and is not something `agl new` ever writes.
     if parsed.marker is not None:
         return None
     return parsed if canonicalize_name(parsed.name) == _CANONICAL else None

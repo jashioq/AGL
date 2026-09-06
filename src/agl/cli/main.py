@@ -13,7 +13,6 @@ from agl.cli.commands import init as init_command
 from agl.cli.commands import new as new_command
 from agl.cli.commands import resume as resume_command
 from agl.cli.commands import run as run_command
-from agl.cli.commands import sync as sync_command
 from agl.cli.commands import workflows as workflows_command
 from agl.cli.exit_codes import exit_status, leaves
 from agl.config import container, distribution, sources
@@ -65,9 +64,9 @@ class Invocation:
     ask: Ask = _asked
 
     # A thunk and not a built `Syncer`, for the reason `registered` is one: every invocation
-    # carries this field and one command in the grammar calls it, so a command that syncs nothing
-    # constructs nothing. It is not on `Services` and takes no project - `config/container.py`
-    # says why beside `real_syncer`.
+    # carries this field and three commands in the grammar call it, so `clear`, `init` and
+    # `workflows` construct nothing. It is not on `Services` and takes no project -
+    # `config/container.py` says why beside `real_syncer`.
     syncer: Callable[[], Syncer] = container.real_syncer
 
 type Compose = Callable[[], Invocation]
@@ -113,7 +112,6 @@ def parser() -> RefusingParser:
     init_command.declare(declared)
     new_command.declare(declared)
     workflows_command.declare(declared)
-    sync_command.declare(declared)
     return root
 
 def _compose() -> Invocation:
@@ -134,13 +132,18 @@ def _dispatch(invocation: Invocation, parsed: argparse.Namespace, tail: Sequence
             invocation.registered,
             parsed,
             tail,
+            syncer=invocation.syncer(),
             home=invocation.settings.home,
             points=invocation.points,
         )
     if command == resume_command.NAME:
         _no_tail(command, tail)
         return resume_command.execute(
-            invocation.registered, parsed, home=invocation.settings.home, points=invocation.points
+            invocation.registered,
+            parsed,
+            syncer=invocation.syncer(),
+            home=invocation.settings.home,
+            points=invocation.points,
         )
     if command == clear_command.NAME:
         _no_tail(command, tail)
@@ -150,15 +153,12 @@ def _dispatch(invocation: Invocation, parsed: argparse.Namespace, tail: Sequence
         return init_command.execute(invocation.settings, invocation.cwd, invocation.ask)
     if command == new_command.NAME:
         _no_tail(command, tail)
-        return new_command.execute(invocation.settings.home, parsed)
+        return new_command.execute(invocation.settings.home, parsed, syncer=invocation.syncer())
     if command == workflows_command.NAME:
         _no_tail(command, tail)
         return workflows_command.execute(
             invocation.settings.home, parsed, points=invocation.points
         )
-    if command == sync_command.NAME:
-        _no_tail(command, tail)
-        return sync_command.execute(invocation.settings.home, invocation.syncer())
     raise InternalError(
         f"`{_PROGRAM} {command}` reached the dispatch and there is no command by that name. The "
         f"parser admits only the subcommands declared in this module, so this is AGL's own bug "

@@ -41,12 +41,14 @@ from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Final
 import pytest
+from agl.adapters.uv.fake import FakeSyncer
 from agl.cli import main
 from agl.cli.commands import resume as resume_command
 from agl.config import container, registry, sources
 from agl.ports.agent import Claude, Restriction
-from agl.ports.home_layout import RunScope
+from agl.ports.home_layout import RunScope, workspace_dir
 from agl.ports.ids import ProjectName, RunLabel
+from agl.ports.sync import Syncer
 from agl.ports.tree_layout import TreesRoot
 from agl.sdk.params import RefusingParser, arg
 from agl.sdk.roles import Role, role
@@ -130,15 +132,22 @@ def _fakes(tmp_path: Path) -> container.FakeServices:
     """Target #8's deployment, seeded so `History` has a default ref and a commit to resolve."""
     return container.fakes(TreesRoot(tmp_path / "trees"), files={"src/a.txt": b"one\n"})
 
-def _main(harness: container.FakeServices, *argv: str) -> int:
-    """One `agl` invocation, with this module's workflows in place of what is installed."""
+def _main(harness: container.FakeServices, *argv: str, syncer: Syncer | None = None) -> int:
+    """One `agl` invocation, with this module's workflows in place of what is installed.
+
+    The installer is a fake because `agl run` and `agl resume` both install what the workspace
+    declares on the way past: the field's own default would start uv on every invocation below, and
+    `ELSEWHERE` is not a home anything may write to.
+    """
+    installer = FakeSyncer() if syncer is None else syncer
     return main.main(
         argv,
         compose=lambda: main.Invocation(
             registered=lambda: (PROJECT, harness.services),
-        settings=SETTINGS,
-        cwd=ELSEWHERE,
-        points=POINTS,
+            settings=SETTINGS,
+            cwd=ELSEWHERE,
+            points=POINTS,
+            syncer=lambda: installer,
         ),
     )
 
@@ -395,3 +404,34 @@ def test_a_run_says_nothing_because_a_label_with_a_ledger_is_refused_not_replaye
 
     assert _main(harness, "run", "stepping", "-n", "auth", "-r", "x") == 4
     assert "replayed" not in capsys.readouterr().err
+
+# --- the install this command folded in ----------------------------------------------------------
+
+def test_an_install_this_command_could_not_finish_stops_the_resume_before_it_walks(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`agl resume` installs what the workspace declares, exactly as `agl run` does, and for the
+    same reason: there is no `agl sync` to have typed first.
+
+    A resume is where it matters most. The run that left the ledger may have been started days ago
+    and on another machine's workspace, so the environment a resumed run imports from is the one it
+    has now - and a resume that walked on without installing would fail at the workflow's own
+    import line instead, naming a package rather than an install that never happened.
+
+    It is scripted at the workspace directory rather than unconditionally, which is what says the
+    installer was pointed at that directory and not at the project file inside it. The workflow is
+    not re-entered, which places the install above the walk.
+    """
+    harness = _fakes(tmp_path)
+    assert _main(harness, "run", "flagged", "-n", "auth", "-r", "add oauth") == 0
+    flagged_with.clear()
+    capsys.readouterr()
+    installer = FakeSyncer()
+    installer.answers(
+        workspace_dir(SETTINGS.home), synced=False, status=2, output="error: no solution found\n"
+    )
+
+    assert _main(harness, "resume", "auth", syncer=installer) == 6
+
+    assert "error: no solution found" in capsys.readouterr().err
+    assert flagged_with == []

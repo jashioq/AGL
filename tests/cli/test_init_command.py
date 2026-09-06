@@ -339,8 +339,12 @@ def test_the_command_starts_no_event_loop() -> None:
     """`api.init` is sync, so this module has no `asyncio.run` and does not import `asyncio`.
 
     `cli/main.py` gives that as the reason the loop belongs to the command rather than the dispatch:
-    a dispatch that awaited everything would make the two sync commands pretend otherwise. Read off
+    a dispatch that awaited everything would make a synchronous command pretend otherwise. Read off
     the source, because "it worked anyway" is true of a command that wrapped a sync call in a loop.
+
+    It is also the cheapest mechanical guard that `agl init` installs nothing. `agl new`, `agl run`
+    and `agl resume` each end in a `Syncer`, and every one of them awaits it, so a clause added
+    here would have to import `asyncio` to reach one - which is the assertion below.
     """
     source = ast.parse(inspect.getsource(init_command))
 

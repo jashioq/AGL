@@ -6,10 +6,12 @@ whether or not the base ref holds that branch's work" - and it is asked of
 branch is gone" is therefore a question about the same object `api.clear` acted on through the
 ports, rather than about a note some test double took.
 
-**What `clear` answers with is the operator's only record of what went.** `api.py` starts no output,
-so the listing has to be a value: `Cleared` pairs each checkout with the branch it was on, and
-`cli/commands/clear.py` prints it. Both halves are asserted here, because a `clear` that took
-everything and reported nothing would satisfy every other test in this module.
+**What `clear` answers with is the operator's only record of what went.** `api.py` writes no result
+to any stream - the one line it ever prints is a warning on stderr, where an install was refused
+over an environment that still stood - so the listing has to be a value: `Cleared` pairs each
+checkout with the branch it was on, and `cli/commands/clear.py` prints it. Both halves are
+asserted here, because a `clear` that took everything and reported nothing would satisfy every
+other test in this module.
 
 **Everything is `container.fakes()`** - no network, no git, no process - which is target #8, and it
 is what lets a run with a child and a grandchild in it be built, cleared and asserted in

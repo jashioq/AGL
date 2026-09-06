@@ -336,6 +336,11 @@ def test_the_command_starts_no_event_loop() -> None:
     `cli/main.py` names this command as the reason the loop belongs to the command rather than the
     dispatch: an operation that awaits nothing must not be made to pretend otherwise. Read off the
     source, because a command that wrapped a sync call in a loop would work and still be wrong.
+
+    It is also the cheapest mechanical guard that `agl workflows` installs nothing, which matters
+    most for this one: it is what an operator types after something else failed, so it has to stay
+    the command that cannot fail. A `Syncer` is awaited wherever one is reached, so a clause that
+    installed anything would have to import `asyncio` to do it.
     """
     source = ast.parse(inspect.getsource(workflows_command))
 

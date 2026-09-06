@@ -68,33 +68,48 @@ that `agl new`'s own scaffold puts on its first line. **Nothing in AGL reads it 
 other module in `src/` opens the file — delete it and every run behaves identically.
 
 **`cli/`** — argv in, exit code out. `main.py` dispatches to one module per subcommand (run,
-resume, clear, init, new, workflows, sync) and is the one place `Path.cwd()` is read. Composition
+resume, clear, init, new, workflows) and is the one place `Path.cwd()` is read. Composition
 is per-command, and every door out of the process sits behind a field on `Invocation`: the
-container behind a thunk, so `init`, `new`, `workflows` and `sync` never build one, and the
-`Syncer` behind a second, so every command but `sync` starts no installer. `points` and `ask` are
-the other two, and those four fields are the whole of what a test replaces to drive a command on
-fakes — `compose=` is the parameter declared for exactly that, which is what
+container behind a thunk, so `init`, `new` and `workflows` never build one, and the
+`Syncer` behind a second, so `clear`, `init` and `workflows` start no installer. The three that do
+are `run`, `resume` and `new`, and no grammar of AGL's asks an operator to start one. `points` and
+`ask` are the other two, and those four fields are the whole of what a test replaces to drive a
+command on fakes — `compose=` is the parameter declared for exactly that, which is what
 `tests/test_measurable_targets.py` runs every declared command through without patching a module's
 internals. **Commands stay dumb.** A command declares its own arguments, reads them off the parsed
 namespace, calls `api` and turns what comes back into output and an exit status; everything that
 decides anything is one call away. So `clear` names one `api` function rather than a worktree walk
 and a `shutil.rmtree` past the `Store` port, `init` one rather than build-tool detection and TOML
-rendering, `new` one rather than a directory tree and two rendered documents, `sync` one rather
-than an argv for an installer, and `workflows` two only because the listing and the help are two
-operations — one of them imports a package and the other must never. **Which stream a line goes to
+rendering, `new` one rather than a directory tree, two rendered documents and an argv for an
+installer, and `workflows` two only because the listing and the help are two operations — one of
+them imports a package and the other must never. **Which stream a line goes to
 is part of that turning**: what a machine consumes goes to stdout, and a note about it goes to
 stderr. So `workflows` prints a broken directory's reason on stderr, a name on stdout being a name
 `agl run` takes, and `run` and `resume` print `replayed <n> steps from cache` there for the same
 reason — the count arriving from `api` as a `Replayed`, the way `Cleared` does, rather than being
 worked out by the command. That line is silent at nought, every first run having replayed nothing,
-so its presence is the report. Each suite under `tests/cli/` scans its own command's source for the
-`api.` names it reaches, so a use case moving back into the CLI fails a test instead of passing
-review.
+so its presence is the report. **One line in AGL is written where it is decided rather than handed
+back to be turned into output, and it is the one place `api.py` writes to a stream at all**:
+`_unchanged`, which says a sync was refused, that this workspace already had an environment, and
+that the run is carrying on against it. The rule about streams holds over that line unchanged — it
+is a note about a run and not a name a machine reads, so it goes to stderr. What it does not obey
+is the turning, and deliberately: what `run` hands back it hands back after the walk, so a warning
+about the environment that run is about to import from would reach the terminal hours after the
+import it was about. Every other answer in `api.py` is a value —
+`tests/test_api.py::test_a_refused_install_over_an_environment_that_already_stood_warns_and_runs_anyway`
+pins the stream and the case, and a sync that succeeded is asserted silent on both streams. Each
+suite under `tests/cli/` scans its own command's source for the `api.` names it reaches, so a use
+case moving back into the CLI fails a test instead of passing review.
 
 **`api.py`** — AGL's operations, callable without a terminal: `run`, `resume`, `clear`, `init`,
-`new_workflow`, `list_workflows`, `workflow_help`, `sync_workspace`. The last is the odd one out
-and takes a `Syncer` rather than a `Services`: it addresses the operator's workspace, so there is
-no project to resolve and no bundle to build around one.
+`new_workflow`, `list_workflows`, `workflow_help`. Installing what a workspace declares is not one
+of them. It is `_sync_workspace`, private, with three callers — `run`, `resume` and `new_workflow`
+— because a sync is something those three *do* rather than something anybody asks for, and an
+operation nothing outside this module calls is not a surface. A `Syncer` therefore reaches `run`
+and `resume` keyword-only beside their `Services`, `None` skipping the install the way `points`
+skips the workspace walk; `new_workflow` takes one required and no `Services` at all, addressing
+the operator's workspace rather than a project, so there is nothing to resolve and no bundle to
+build around one.
 
 **`testing.py`** — The workflow author's harness: `harness(tmp_path, agent=…)` builds an all-fakes
 bundle, `run(...)` and `resume(...)` drive `api` over it, `recorded` is every journal entry,
@@ -108,34 +123,51 @@ which is what `agl new` writes. `ports/home_layout.py` composes that subtree alo
 that sits beside it. `config/registry.py` finds a workflow by **walking `workflows/`** and building
 an `EntryPoint` per declaration it reads: the class is imported and `entry_points()` is called
 nowhere in `src/`, so **no workflow is installed**, no distribution's metadata is read to find one,
-and there is still no central table to edit. `agl sync` does install into that venv — what the
+and there is still no central table to edit. An install does reach that venv — what the
 workflows *declare*, and only that: `--no-install-workspace` is what keeps the workflows themselves
 out of it, so no workflow ever has a dist-info anywhere and `import <name>` can resolve only from
-the source the operator is editing. The name `agl run` takes is the key on the left of a
-declaration rather than the directory's own, and the workspace sits on this process's import path,
-so a workflow directory imports as a top-level package named after itself. A workflow builds on
-`sdk`; `ports` sits below it and is permitted, and the authoring surface re-exports what a workflow
-speaks.
+the source the operator is editing. **Nobody types that install.** `agl new` ends with one and
+`agl run` and `agl resume` each begin with one, above the discovery that puts the venv on
+`sys.path` and well above the import of the workflow's own module — an install below that import
+would never run on the machine that needed it, the import having failed first, so the next run
+would fail identically and nothing would ever heal. `agl workflows <workflow>` is the one command
+that imports a workflow without installing first, which is why `config/registry.py`'s refusal for a
+module the workflow imports and nothing installed names what installs and what does not rather
+than a command to type: an install that was refused, one that was never asked for and a package no
+file declares are three states that reach that line as one. The workspace's own `pyproject.toml` is
+`agl new`'s to write and no other command's, so a `workflows/` assembled by hand beside no
+workspace file is refused by the installer — `adapters/uv/syncer.py` says why, uv resolving a
+project by walking *up* — rather than made on the way past. The name `agl run` takes is the key on
+the left of a declaration rather than the directory's own, and the workspace sits on this process's
+import path, so a workflow directory imports as a top-level package named after itself. A workflow
+builds on `sdk`; `ports` sits below it and is permitted, and the authoring surface re-exports what a
+workflow speaks.
 
 **One line of that project file is read by AGL as well, and it is the only version bound AGL has.**
-`[project] dependencies` carries `agents-gl>=<the version that scaffolded the workflow>`, which is
-what `agl new` writes, and `config/registry.py` reads it out of the same document on the same pass
-that reads the declaration. What it buys is one refusal in one place: a workflow written against an
+`[tool.agl] requires` carries `agents-gl>=<the version that scaffolded the workflow>`, which is what
+`agl new` writes, and `config/registry.py` reads it out of the same document on the same pass that
+reads the declaration. What it buys is one refusal in one place: a workflow written against an
 AGL this is not is refused **before `registry.load` imports its module**, naming the bound and the
 running version, where the import would instead have failed on whichever name moved — inside the
 operator's own file, about a symbol rather than about a version. `config/distribution.py` owns the
 comparison and it is `packaging`'s rather than one of version *text*, `0.0.10` being above `0.0.2`
 as versions and below it as strings. Three states are silence and each would otherwise be a false
 refusal: a workflow declaring no bound at all, which is every one written before this and every one
-written by hand; an entry that will not parse or that carries an environment marker, both of which
-are the installer's to answer for; and an AGL running from a source tree, which has no version to
-compare and would otherwise refuse every workflow in the workspace at once. An unmet bound is not a
-`BrokenWorkflow` — that directory declared a workflow, so the name stays in `agl workflows`'
-listing, which promises what a workspace declares rather than what would load. The price is that
-`dependencies` is a table uv resolves, so a sync over the workspace fetches `agents-gl` from an
-index into the venv beside the workflows; it changes no import, because `config/workspace_path.py`
-appends and the running AGL keeps resolving from the entry it already resolved from, whatever that
-venv comes to hold under the name.
+written by hand; a value that will not parse as a requirement or that carries an environment
+marker, neither of which is a readable claim to turn into a sentence; and an AGL running from a
+source tree, which has no version to compare and would otherwise refuse every workflow in the
+workspace at once. An unmet bound is not a `BrokenWorkflow` — that directory declared a workflow,
+so the name stays in `agl workflows`' listing, which promises what a workspace declares rather than
+what would load. **The table is `[tool.agl]` and not `[project] dependencies`, and that is the
+whole of what keeps the bound out of a resolution.** `dependencies` is PEP 621's own table, so a
+bound written there sends a sync after `agents-gl` and its closure, into the venv beside the
+workflows and for a distribution the running AGL already reaches through `config/workspace_path.py`
+— and on a version no index holds yet, that resolution has no solution, so the install `agl run`
+begins with is refused over a bound nothing needed to resolve. uv walks past a `[tool]` table it
+does not own, so the bound is a message to one reader and work for nobody. The whole of the price
+is that a value only AGL reads is a value only AGL could complain about, and it does not: a bound
+somebody mistyped is one of the silences above rather than an installer's error about a line it
+never saw.
 
 ## The dependency rule
 
@@ -278,10 +310,15 @@ its own I/O rather than reaching through a port: `config/toml_file.py` and `sdk/
 `prompt_file` each turn an `OSError` into an `InputError` at the line that raised it.
 `config/workspace_path.py` is the one module that neither translates nor lets one out, and it says
 so with a `suppress`: `write_editor_pth`'s file is read by an editor and by no run of AGL, so a
-failure to write it has no consequence a caller could act on, and reporting it would mean a second
+failure to write it has no consequence a caller could act on, and reporting it would mean a fourth
 field on `SyncOutcome` or the step moving into the CLI — a layer boundary moved for one rare
 editor-only diagnostic. What the silence costs is a sync that says it finished over a venv holding
-no `agl.pth`, visible in the editor and nowhere else.
+no `agl.pth`, visible in the editor and nowhere else. That port was kept to three fields a second
+time and from the other side: whether an environment stood *before* a refused sync is what decides
+between stopping the run and warning past it, and it is a fact about the workspace rather than uv's
+verdict about it — so `api._sync_workspace` stats it for itself through
+`config/workspace_path.py`'s `venv_exists`, before the installer is spawned, and `SyncOutcome`
+goes on answering for what uv said and nothing else.
 
 **`ports/errors.py` holds the one exception-to-exit-code table and `cli/exit_codes.py` consumes it
 without adding a number of its own.** An exception that is not an `AglError` arriving at the top of
@@ -520,6 +557,27 @@ The reasoning is the point — without it these get re-proposed.
   repository poisoned for every harness at once with markers that ride three channels, and it reads
   no environment variable anywhere — deliberately, because the inherited half is not a thing it
   could assert about without pinning the decision it declines to make.
+- **No network probe of AGL's own, so "offline" is only ever detected as far as a backend answers.**
+  What AGL has instead is preflight: `sdk/_engine/preflight.py`'s `check` runs from `api.run` and
+  `api.resume` and from nowhere else, and the Claude adapter's `check_ready` is a real round trip to
+  the model — so a workflow declaring a Claude role is refused with `UpstreamUnavailable`, before
+  anything is provisioned, on a machine that cannot reach the far side. A probe of AGL's own would
+  cost a reachability port, an adapter, a fake, a contract suite and two `.importlinter` edits to
+  answer a question it cannot answer honestly: a captive portal answers every request, so what such
+  a probe measures is not reachability, and the thing that has to be true is that the *agent
+  backend* will answer — which is what `check_ready` already asks. It would also break
+  `tests/test_measurable_targets.py::test_every_declared_command_runs_on_fakes_with_no_way_out`,
+  which poisons `getaddrinfo` and `gethostbyname` by name and then requires every declared command
+  to exit 0: a reach-out on the ordinary path is the one thing that test exists to catch.
+  **Two gaps follow from taking preflight as the whole answer, and both are open.** The OpenAI
+  adapter's `check_ready` spawns `codex login status`, which is local and calls nothing, so a
+  workflow declaring only OpenAI roles passes preflight on an unplugged machine and fails at its
+  first step instead. And `agl new` has no preflight at all — though it runs no agent either, so
+  what it can fail at is its install. Where the install is what meets the missing network the
+  operator still reads the right thing: with no prior environment the command stops on uv's own
+  words, and with one, the stderr warning "The layers" describes comes first and preflight refuses
+  after it. What AGL does not claim anywhere is that the internet is down. What it says is that the
+  agent backend did not answer.
 - **No CLI positionals.** `agl run <workflow>` already occupies that slot, so `arg()` refuses a
   flagless field where it is written rather than at the parse that would have gone wrong.
 - **`@workflow` takes nothing at all and is written bare.** `params=`, `name=` and `roles=` each
@@ -646,7 +704,9 @@ The reasoning is the point — without it these get re-proposed.
   which is a confirmation nobody reads. The honest ordering is the other way round — `git log
   agl/<label>` before the verb, and a listing of the branches and the checkouts after it, so what
   went is on the terminal rather than in a manual. `api.clear` therefore answers with a `Cleared`
-  rather than printing anything, `api.py` starting no output.
+  rather than printing anything, which is what every operation there does with its result: the one
+  line `api.py` writes to a stream is the refused-sync warning "The layers" argues, and that is a
+  note in the middle of a run rather than the answer a command is waiting for.
 - **No `Integrator.revert()`.** Undoing a landing that succeeded is `Workspace.restore(head)`,
   which already exists; a second spelling would be owed by every integrator.
 - **No auto-generated commit message.** The message is domain vocabulary — `implement T-01` is
