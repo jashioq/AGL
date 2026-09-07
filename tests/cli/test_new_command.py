@@ -421,7 +421,7 @@ def test_a_scaffold_says_to_open_the_workspace_and_not_the_workflow_directory(
 ) -> None:
     """The one line that came out of a debugging session rather than out of a gate.
 
-    An operator who reads `new wrote <path>` opens that path, and both PyCharm and VS Code then
+    An operator who reads `New wrote <path>` opens that path, and both PyCharm and VS Code then
     look for an interpreter at the root of what is open, find no workspace venv a level above it,
     and mark the scaffold's `from agl.sdk import ...` unresolved with nothing actually broken -
     `config/workspace_path.py`'s `write_editor_pth` has already put AGL within that venv's reach.
@@ -437,9 +437,9 @@ def test_a_scaffold_says_to_open_the_workspace_and_not_the_workflow_directory(
     assert _main(home, "new", str(TRIAGE)) == 0
 
     captured = capsys.readouterr()
-    assert f"open {workspace_dir(home)} in your editor" in captured.err
+    assert f"Open {workspace_dir(home)} in your IDE" in captured.err
     assert "not the workflow directory" in captured.err
-    assert captured.out == f"new wrote {workflow_dir(home, TRIAGE)}\n"
+    assert captured.out == f"New wrote {workflow_dir(home, TRIAGE)}\n"
 
 # --- the install that follows the scaffold ------------------------------------------------------
 

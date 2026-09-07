@@ -46,7 +46,7 @@ def declare(commands: _Commands) -> RefusingParser:
 def execute(home: AglHome, parsed: argparse.Namespace, *, syncer: Syncer) -> int:
     name = WorkflowName(_said(parsed, _WORKFLOW, command=NAME))
     written = asyncio.run(api.new_workflow(syncer, home, name))
-    print(f"new wrote {written}")
+    print(f"New wrote {written}")
     # Never on stdout, for `cli/commands/__init__.py`'s reason: what a machine consumes goes there
     # and this is a note about it. The workspace is composed from `ports/home_layout.py` rather
     # than walked up to from `written`, which would be this command deriving a layout it is handed.
@@ -58,6 +58,4 @@ def execute(home: AglHome, parsed: argparse.Namespace, *, syncer: Syncer) -> int
 # directory finds no interpreter carrying AGL. That is measured PyCharm and VS Code behaviour, and
 # the directory just written is the one an operator's instinct reaches for.
 def _where_to_open(workspace: Path) -> str:
-    return (
-        f"open {workspace} in your editor - not the workflow directory, or `agl` will not resolve."
-    )
+    return f"Open {workspace} in your IDE - not the workflow directory, or `agl` will not resolve."
