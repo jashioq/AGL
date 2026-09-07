@@ -88,8 +88,12 @@ stderr. So `workflows` prints a broken directory's reason on stderr, a name on s
 `agl run` takes, and `run` and `resume` print `replayed <n> steps from cache` there for the same
 reason — the count arriving from `api` as a `Replayed`, the way `Cleared` does, rather than being
 worked out by the command. That line is silent at nought, every first run having replayed nothing,
-so its presence is the report. **One line in AGL is written where it is decided rather than handed
-back to be turned into output, and it is the one place `api.py` writes to a stream at all**:
+so its presence is the report. `new` splits the same way and says so in a comment: the path it
+wrote is on stdout, and the line telling an operator to open the *workspace* rather than that path
+— because PyCharm and VS Code both look for an interpreter at the root of what is open, and a
+workflow directory is a level below the venv — is a note, and goes to stderr beside it. **One line
+in AGL is written where it is decided rather than handed back to be turned into output, and it is
+the one place `api.py` writes to a stream at all**:
 `_unchanged`, which says a sync was refused, that this workspace already had an environment, and
 that the run is carrying on against it. The rule about streams holds over that line unchanged — it
 is a note about a run and not a name a machine reads, so it goes to stderr. What it does not obey

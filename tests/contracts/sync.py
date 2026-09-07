@@ -53,9 +53,12 @@ not entitle anybody to believe.
    a suite cannot tell which kind of implementation it is looking at. What is asserted is that the
    field is an `int` and not a second verdict.
 
-4. **`UpstreamUnavailable` when the installer cannot be started.** Provoking it means breaking the
-   installer itself - unsetting a binary, cutting a network - and the port offers no member that
-   does any of that. A fixture for it would be asking each implementation to describe its own
+4. **Any of the three clauses where `sync` raises instead of answering.** Provoking one means
+   handing over a directory that is no workspace, or breaking the installer itself - unsetting a
+   binary, cutting a network - and the port offers no member that does any of that. Nor is the
+   first of the three any more reachable for being cheap to arrange: the port permits that raise
+   rather than requiring it, so an implementation preparing an environment elsewhere is free to
+   answer instead. A fixture for them would be asking each implementation to describe its own
    failure, which is the thing a contract suite exists not to do.
 
 5. **That a refused sync leaves the workspace as it was.** Half of a resolution is a real state of

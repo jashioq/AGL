@@ -414,6 +414,33 @@ def test_a_second_workflow_joins_the_workspace_the_first_one_made(tmp_path: Path
     assert sorted(path.name for path in workflows_dir(home).iterdir()) == ["release", "triage"]
     assert registry.names(registry.discovered(home).points) == ("release", "triage")
 
+# --- what it says on the way out ----------------------------------------------------------------
+
+def test_a_scaffold_says_to_open_the_workspace_and_not_the_workflow_directory(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The one line that came out of a debugging session rather than out of a gate.
+
+    An operator who reads `new wrote <path>` opens that path, and both PyCharm and VS Code then
+    look for an interpreter at the root of what is open, find no workspace venv a level above it,
+    and mark the scaffold's `from agl.sdk import ...` unresolved with nothing actually broken -
+    `config/workspace_path.py`'s `write_editor_pth` has already put AGL within that venv's reach.
+    So the workspace is named, and the directory not to open is named beside it, the second half
+    being the one that survives the instinct to open the path on the line above.
+
+    The workspace path is asserted with the words that follow it rather than on its own, because
+    it is a *prefix* of the workflow path: a command that printed the workflow directory twice
+    would satisfy a bare substring check and say nothing about where to open anything.
+    """
+    home = _home(tmp_path)
+
+    assert _main(home, "new", str(TRIAGE)) == 0
+
+    captured = capsys.readouterr()
+    assert f"open {workspace_dir(home)} in your editor" in captured.err
+    assert "not the workflow directory" in captured.err
+    assert captured.out == f"new wrote {workflow_dir(home, TRIAGE)}\n"
+
 # --- the install that follows the scaffold ------------------------------------------------------
 
 def test_the_installer_is_handed_the_workspace_directory_and_not_its_project_file(

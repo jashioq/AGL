@@ -1,9 +1,11 @@
 import argparse
 import asyncio
+import sys
+from pathlib import Path
 from typing import Final
 from agl import api
 from agl.cli.commands import _said
-from agl.ports.home_layout import AglHome
+from agl.ports.home_layout import AglHome, workspace_dir
 from agl.ports.ids import WorkflowName
 from agl.ports.sync import Syncer
 from agl.sdk.params import RefusingParser
@@ -45,4 +47,17 @@ def execute(home: AglHome, parsed: argparse.Namespace, *, syncer: Syncer) -> int
     name = WorkflowName(_said(parsed, _WORKFLOW, command=NAME))
     written = asyncio.run(api.new_workflow(syncer, home, name))
     print(f"new wrote {written}")
+    # Never on stdout, for `cli/commands/__init__.py`'s reason: what a machine consumes goes there
+    # and this is a note about it. The workspace is composed from `ports/home_layout.py` rather
+    # than walked up to from `written`, which would be this command deriving a layout it is handed.
+    print(_where_to_open(workspace_dir(home)), file=sys.stderr)
     return _NOTHING_TO_REPORT
+
+# The two editors an operator writes a workflow in both look for an interpreter at the root of what
+# is open, and the workspace venv sits at the workspace root - so an editor opened on the workflow
+# directory finds no interpreter carrying AGL. That is measured PyCharm and VS Code behaviour, and
+# the directory just written is the one an operator's instinct reaches for.
+def _where_to_open(workspace: Path) -> str:
+    return (
+        f"open {workspace} in your editor - not the workflow directory, or `agl` will not resolve."
+    )

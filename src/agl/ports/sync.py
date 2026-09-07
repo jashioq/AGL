@@ -23,6 +23,8 @@ class Syncer(ABC):
 
         :param workspace: the directory holding the workspace's project file, never a workflow's own
         :return: the verdict and the text reaching it; a refused sync is this rather than a raise
+        :raises NotFoundError: this is no workspace - there is no project file here to install from
         :raises UpstreamUnavailable: where the installer could not be started, so nothing was tried
+        :raises UpstreamUnexpected: the installer was started and answered in terms it cannot read
         """
         ...
