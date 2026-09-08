@@ -99,6 +99,7 @@ from agl.ports.store import Store
 from agl.ports.tree_layout import TreesRoot
 from agl.ports.workspace import Workspace, WorkspaceProvider
 from agl.sdk._engine.journal import Fingerprints, Journal
+from agl.sdk._engine.prompts import composed
 
 __all__ = ["Config", "PROGRAMMES", "Programme", "SIBLINGS", "driver_path", "main"]
 
@@ -419,6 +420,7 @@ class _Programme:
             restrictions=RESTRICTIONS,
             tools=(TOOL,),
             inputs=inputs,
+            prompt=composed(instructions, inputs),
             worker=_worker,
             commit=commit,
         )

@@ -35,7 +35,7 @@ nothing.
 `arg()`, the terminal components, `Stop`. `sdk/__init__.py` is the front door and re-exports the
 authoring surface with `__all__` typed out rather than computed; `_engine/` is the private
 machinery behind `Run` and is not on it. That underscore names the **workflow author's** surface
-and nothing narrower — `api`, `config` and `sdk`'s own modules import those seven modules freely,
+and nothing narrower — `api`, `config` and `sdk`'s own modules import those eight modules freely,
 so there is no import for a contract to forbid and this sentence is the whole of the rule, unlike
 the same underscore under `adapters/`, which means private to that package and is enforced by
 `tests/test_naming_convention.py`. Something belongs here when two workflows would otherwise

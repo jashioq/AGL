@@ -13,15 +13,16 @@ recorded result replayed for a step whose inputs were not those. Nothing re-runs
 raises; the answer is simply wrong. Both are tested as "these two must differ", which is why the
 `!=` assertions below carry a second one holding still whatever the first is not about.
 
-**Two of those agreements cannot be proved inside one interpreter, and are the reason this file
+**Three of those agreements cannot be proved inside one interpreter, and are the reason this file
 spawns processes.** A `frozenset`'s iteration order is fixed for the life of a process and one
-object's `id()` never moves while it is alive, so a same-process test of sort every set, or of no
-`repr()` shortcut, passes exactly as happily against the bug it exists to catch. Both are
-therefore run in fresh interpreters under `PYTHONHASHSEED` values measured to produce different
-iteration orders, and both carry a **second** assertion: that the thing being varied actually
-varied. Without it, a day when the seeds stop differing is a day these two tests silently stop
-proving anything while staying green - which is the move `scripts/check`'s paid-endpoint gate makes
-when it poisons the environment before running its probe rather than reading a fixture's tick.
+object's `id()` never moves while it is alive, so a same-process test of sort every set, of no
+`repr()` shortcut, or of the prompt composed out of an input carrying either, passes exactly as
+happily against the bug it exists to catch. All three are therefore run in fresh interpreters
+under `PYTHONHASHSEED` values measured to produce different iteration orders, and each carries a
+**second** assertion: that the thing being varied actually varied. Without it, a day when the seeds
+stop differing is a day these three tests silently stop proving anything while staying green -
+which is the move `scripts/check`'s paid-endpoint gate makes when it poisons the environment
+before running its probe rather than reading a fixture's tick.
 
 The counter is pinned against the arithmetic itself, `sha256(base + ":" + str(n))`, written out here
 rather than imported, so the suite is not checking the module against itself. And the fingerprint's
@@ -79,6 +80,11 @@ _RESTRICTIONS: Final[AbstractSet[Restriction]] = frozenset(
     {Restriction.NO_VCS_WRITES, Restriction.NO_NETWORK}
 )
 
+# The whole text the agent is handed. In a run `sdk/_engine/prompts.py` builds it out of the
+# instructions and the inputs, and this file spells it as a string related to neither on purpose:
+# the journal composes nothing, takes it as a term of its own, and is what this suite measures.
+_PROMPT: Final = "implement the ticket, and the ticket is written out below"
+
 def _tool(
     *,
     name: str = "report_tickets",
@@ -97,6 +103,7 @@ def _base(
     restrictions: AbstractSet[Restriction] = _RESTRICTIONS,
     tools: Sequence[Tool] | None = None,
     inputs: Mapping[str, object] = _INPUTS,
+    prompt: str = _PROMPT,
     head: str = _HEAD,
 ) -> str:
     """One base, with every term at a baseline value and any one of them overridable."""
@@ -106,6 +113,7 @@ def _base(
         restrictions=restrictions,
         tools=(_tool(),) if tools is None else tools,
         inputs=inputs,
+        prompt=prompt,
         head=head,
     )
 
@@ -265,7 +273,7 @@ def test_a_digest_is_a_filename_the_layout_will_spend_without_asking_again() -> 
     entry = step_entry(AglHome(Path("/agl-home")), _SCOPE, _STEP, digest)
     assert entry.name == f"{digest}.json"
 
-# --- Sort every set, and no `repr()` shortcut, which only a second process can prove -------------
+# --- Sort every set, no `repr()` shortcut, and the prompt built on them --------------------------
 
 # Measured on this machine while this was written: these six produce several different iteration
 # orders of `frozenset(Restriction)` between them. They are asserted to still differ, below.
@@ -279,7 +287,7 @@ from agl.sdk._engine.journal import base_of
 
 restrictions = frozenset(Restriction)
 print(base_of(instructions="review", model=Claude.SONNET, restrictions=restrictions,
-              tools=(), inputs={}, head="4a91c07f"))
+              tools=(), inputs={}, prompt="review", head="4a91c07f"))
 print(json.dumps([str(restriction) for restriction in restrictions]))
 """
 
@@ -296,10 +304,33 @@ class Finding:
     severity: int
 
 
+@dataclass(frozen=True, repr=False)
+class Findings:
+    items: list
+
+
 findings = [Finding("T-01", 3), Finding("T-02", 1)]
 print(base_of(instructions="fix", model=Claude.SONNET, restrictions=frozenset(),
-              tools=(), inputs={"findings": findings}, head="4a91c07f"))
+              tools=(), inputs={"Findings": Findings(findings)}, prompt="fix", head="4a91c07f"))
 print(repr(findings[0]))
+"""
+
+_SUBSTITUTED_INPUTS: Final = """
+import json
+from dataclasses import dataclass
+
+from agl.ports.agent import Restriction
+from agl.sdk._engine.prompts import composed
+
+
+@dataclass(frozen=True, repr=False)
+class Repairs:
+    scopes: frozenset
+
+
+repairs = Repairs(frozenset(Restriction))
+print(json.dumps(composed("fix {{Repairs}}, and not {{Decisions}}", {"Repairs": repairs})))
+print(json.dumps([str(scope) for scope in repairs.scopes]))
 """
 
 def _under_seeds(script: str) -> list[list[str]]:
@@ -347,10 +378,12 @@ def test_a_set_of_restrictions_fingerprints_the_same_in_every_process() -> None:
 def test_a_dataclass_in_inputs_fingerprints_the_same_in_every_process() -> None:
     """No `repr()` shortcut, same argument: one object's `id()` does not move while it is alive.
 
-    The tickets example passes `findings=highs`, a list of the workflow's own dataclasses, and
+    The tickets example passes `Findings(highs)` - a step's inputs are instances of the types its
+    role declared, so the list of the workflow's own dataclasses is a field one level down - and
     `repr()` is the one-line way to make that hashable. `@dataclass(repr=False)` gives these
     instances `object.__repr__`, which is what the default `repr` of anything without one embeds -
-    a heap address. The second assertion is again the non-vacuous half: a `repr()` shortcut is only
+    a heap address. The nesting is the half that says the walk recurses rather than stopping at the
+    outer type, and the second assertion is again the non-vacuous half: a `repr()` shortcut is only
     unstable if the address actually moved between these interpreters.
     """
     runs = _under_seeds(_UNPACKED_DATACLASSES)
@@ -363,6 +396,34 @@ def test_a_dataclass_in_inputs_fingerprints_the_same_in_every_process() -> None:
     assert len(reprs) > 1, (
         f"every interpreter printed the same repr - {reprs} - so the heap address did not move "
         f"and this test cannot tell a repr() shortcut apart from walking the fields"
+    )
+
+def test_a_prompt_with_a_placeholder_in_it_composes_the_same_in_every_process() -> None:
+    """The composed prompt is a term of `base_of`, so its rendering is inside the digest too.
+
+    Which makes a rendering that varies across processes a *fingerprint* that varies across
+    processes: every step misses the entry it wrote last time, replays nothing, and is paid for
+    again - the failure the whole of this file is written against, arriving through the one term
+    that is derived rather than supplied. `sdk/_engine/prompts.py` renders a substituted input
+    with `canonical_json` and never by iterating the mapping it was handed, so what is asserted
+    here is that no unstable order reached the text a second way.
+
+    The frozenset is the same lever the two tests above pull, and for the same reason: it is the
+    one thing in an input whose order a fresh interpreter can be made to change. `{{Decisions}}`
+    is in the prompt as well, unpassed, so `Not provided` is being rendered under these seeds too
+    and a constant that had turned into something derived would show here.
+    """
+    runs = _under_seeds(_SUBSTITUTED_INPUTS)
+    prompts = {lines[0] for lines in runs}
+    orders = {lines[1] for lines in runs}
+    assert len(prompts) == 1, (
+        f"{len(prompts)} different prompts over {len(_SEEDS)} interpreters: composing one reads "
+        f"something a new process spells differently, so the `prompt` term moves on its own and "
+        f"every resume re-runs every step it should have replayed"
+    )
+    assert len(orders) > 1, (
+        f"these seeds no longer vary the iteration order of frozenset(Restriction) - every one of "
+        f"them gave {orders} - so this test proves nothing and needs new seeds"
     )
 
 # --- No `repr()` shortcut, in this process: what the refusal has to say --------------------------
@@ -743,8 +804,15 @@ def test_a_set_nested_inside_inputs_is_sorted_too_and_not_only_restrictions() ->
 # --- Every term of the fingerprint, and the complement -------------------------------------------
 
 def test_every_term_of_the_role_inputs_and_head_changes_the_fingerprint() -> None:
-    """Nine terms, each varied alone. A term that stopped counting is a step that replays across
-    the edit it should have re-run for - which is the whole of what fingerprints buy."""
+    """Ten terms, each varied alone. A term that stopped counting is a step that replays across
+    the edit it should have re-run for - which is the whole of what fingerprints buy.
+
+    `prompt` is the one of the ten that is *derived* in a run - `sdk/_engine/prompts.py` builds it
+    out of the instructions and the inputs, both of which are terms already - so it separates no
+    pair they do not. What it is here for is the composition itself, which reaches the digest
+    through this term and through nothing else: `tests/sdk/test_run_step.py` is where that pairing
+    is measured against a real dispatch, and this line is what says the term is read at all.
+    """
     schema: Mapping[str, JsonValue] = {"type": "object", "properties": {"tickets": {}}}
     bases = {
         "baseline": _base(),
@@ -756,6 +824,7 @@ def test_every_term_of_the_role_inputs_and_head_changes_the_fingerprint() -> Non
         "tool payload_schema": _base(tools=(_tool(payload_schema=schema),)),
         "an input's value": _base(inputs={"request": "add oauth", "concurrent": 5}),
         "an input's key": _base(inputs={"request": "add oauth", "parallel": 4}),
+        "prompt": _base(prompt=f"{_PROMPT}, and it is the only ticket"),
         "head": _base(head="8c19f7ae4d2b0913e5f6a1c7d40b28e3f95a6d17"),
     }
     collisions = {

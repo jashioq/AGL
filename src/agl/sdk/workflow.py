@@ -65,15 +65,16 @@ class Run[P = object]:
         """
         return self.services.terminal
 
-    async def step[R](self, role: Role[R], *, commit: str | None = None, **inputs: object) -> R:
+    async def step[R](self, role: Role[R], *inputs: object, commit: str | None = None) -> R:
         """Run one step against this run's checkout, or replay its entry and pay for nothing.
 
         :param role: carries the step's name, so two calls on one role are told apart by inputs
+        :param inputs: one per accepted type, recorded under its name and filling its `{{TypeName}}`
         :param commit: given, commits whatever is dirty; omitted, resets and cleans it all away
-        :param inputs: fingerprint terms, appended to the prompt under a fixed `## Inputs` heading
         :return: the reporting tool's payload as its dataclass, or `None` for a role declaring none
+        :raises InputError: an input is of no type the role accepts, or two of them share one type
         """
-        return await self._steps.step(role, commit=commit, inputs=inputs)
+        return await self._steps.step(role, inputs, commit=commit)
 
     def worktree(self, namespace: str, base: Run[object] | str | None = None) -> Run[P]:
         """Open a child run with a checkout of its own, which is how two agents work at once.

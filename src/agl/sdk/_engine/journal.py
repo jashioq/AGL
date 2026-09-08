@@ -64,6 +64,7 @@ def base_of(
     restrictions: AbstractSet[Restriction],
     tools: Sequence[Tool],
     inputs: Mapping[str, object],
+    prompt: str,
     head: str,
 ) -> str:
     role: JsonValue = {
@@ -84,6 +85,11 @@ def base_of(
     fingerprinted: JsonValue = {
         "role": role,
         "inputs": _canonical(inputs, "inputs"),
+        # The whole text the agent is handed, which `sdk/_engine/prompts.py` builds out of the two
+        # terms above it: derived, so it separates no pair they do not, and here for one thing only
+        # - *how* they are composed is otherwise no term at all, and a rewrite of that module would
+        # replay every recorded entry against a prompt nobody was asked. `test_run_step.py` pins it.
+        "prompt": _canonical(prompt, "prompt"),
         "head": _canonical(head, "head"),
     }
     return sha256(_dumps(fingerprinted).encode("utf-8")).hexdigest()
@@ -219,6 +225,7 @@ class Journal:
         restrictions: AbstractSet[Restriction],
         tools: Sequence[Tool],
         inputs: Mapping[str, object],
+        prompt: str,
         worker: Callable[[], Awaitable[JsonValue]],
         commit: str | None = None,
     ) -> JsonValue:
@@ -229,6 +236,7 @@ class Journal:
                 restrictions=restrictions,
                 tools=tools,
                 inputs=inputs,
+                prompt=prompt,
                 head=self._last_good,
             )
             digest = self._fingerprints.digest(self._scope, name, base)

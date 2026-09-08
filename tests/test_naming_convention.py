@@ -83,7 +83,7 @@ their data, all argue about *the six*. A seventh means editing every one of thos
 count is the thing that goes stale. The strength is identical either way. So it lands here, next to
 the five other rules about what the source says.
 
-**The other half of N3 is not here and cannot be.** `sdk/_engine/`'s seven modules are imported
+**The other half of N3 is not here and cannot be.** `sdk/_engine/`'s eight modules are imported
 freely by `api`, by `config` and by `sdk`'s own modules: the underscore there names the *workflow
 author's* surface, not the framework's, so there is no import that would be a violation and nothing
 for a scan to find. It is stated in prose instead, in `ARCHITECTURE.md`'s `sdk/` paragraph. The two

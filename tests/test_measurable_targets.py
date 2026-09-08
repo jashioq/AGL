@@ -893,10 +893,16 @@ class _EightParams:
 
     request: str = arg("-r", "--request", help="what to do")
 
-@role(model=Claude.SONNET)
+@dataclass(frozen=True)
+class _Asked:
+    """The one input the probe carries, so `agl run` passes something and `resume` replays it."""
+
+    text: str
+
+@role(model=Claude.SONNET, accepts=(_Asked,))
 def _eight_role() -> Role:
     """The one role the probe runs, so `agl run` has work to do."""
-    return Role(name="only", instructions="do the work")
+    return Role(name="only", instructions="do what was asked: {{_Asked}}")
 
 @workflow
 async def probe(run: Run[_EightParams]) -> None:
@@ -905,7 +911,7 @@ async def probe(run: Run[_EightParams]) -> None:
     Module-level, because `agl.testing` resolves a workflow the way a workspace declaration is -
     `<module>:<name>` - and a workflow declared inside a function names no module attribute.
     """
-    await run.step(_eight_role(), request=run.params.request)
+    await run.step(_eight_role(), _Asked(run.params.request))
 
 _EIGHT_POINT: Final = EntryPoint(name="probe", value=f"{__name__}:probe", group=registry.GROUP)
 
@@ -1140,9 +1146,20 @@ class _RenameParams:
 
     request: str = arg("-r", "--request", help="what to do")
 
-_RENAME_PROMPT: Final = "do the work"
+_RENAME_PROMPT: Final = "do the work, in this order: {{_Order}}"
 
-@role(model=Claude.SONNET)
+@dataclass(frozen=True)
+class _Order:
+    """The one input the rename programme carries, and one class for both declarations.
+
+    Both sets of roles accept this same class, so the type name the fingerprint records is
+    identical either way and the only thing that differs between the two runs is a name nothing
+    reads. A class declared once per set would put a name back into the term.
+    """
+
+    position: int
+
+@role(model=Claude.SONNET, accepts=(_Order,))
 def _renamed(name: str) -> Role[None]:
     """One role under whichever name it is asked for, and identical in every term a fingerprint
     takes.
@@ -1171,17 +1188,18 @@ async def _renameable(
     """One programme, spelled once, parametrised by the names that are meant not to matter.
 
     Two worktrees and three roles alike but for their names, and **nothing derived from either**:
-    the inputs are plain integers, so no name reaches a fingerprint through the one door that is
-    open. That is what makes the comparison a rename rather than a change of inputs wearing one.
+    the inputs are `_Order` values holding a plain integer, one class for both declarations, so no
+    name reaches a fingerprint through the one door that is open. That is what makes the comparison
+    a rename rather than a change of inputs wearing one.
 
     No `commit=` and no `integrate()`, which is not an omission: this is the half of the target that
     holds, and the half that does not is measured by its own test below rather than by making this
     one quieter.
     """
-    await run.step(steps[0], order=1)
+    await run.step(steps[0], _Order(1))
     for index, space in enumerate(spaces):
-        await run.worktree(space).step(steps[1], order=10 + index)
-    await run.step(steps[2], order=99)
+        await run.worktree(space).step(steps[1], _Order(10 + index))
+    await run.step(steps[2], _Order(99))
 
 @workflow
 async def named_one(run: Run[_RenameParams]) -> None:
@@ -1201,10 +1219,10 @@ async def _landing(run: Run[_RenameParams], *, space: str) -> None:
     the landing for a fingerprint to be taken over the head that landing produced.
     """
     child = run.worktree(space)
-    await child.step(_renamed("work"), order=1, commit="land the work")
+    await child.step(_renamed("work"), _Order(1), commit="land the work")
     outcome = await child.integrate()
     assert not outcome.conflicted
-    await run.step(_renamed("work"), order=2)
+    await run.step(_renamed("work"), _Order(2))
 
 @workflow
 async def landing_one(run: Run[_RenameParams]) -> None:

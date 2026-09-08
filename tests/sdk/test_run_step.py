@@ -14,7 +14,7 @@ machine it runs on. The ledger is a real `FilesystemStore` for the same reason i
 "nothing under `steps/<name>/`" is a directory listing here, not a digest recomputed by the test
 from the arithmetic it is checking.
 
-Six of these are worth naming, because each is written against a failure that is silent:
+Eight of these are worth naming, because each is written against a failure that is silent:
 
   * **The entry's `head` is recorded after the commit.** "A `run.commit()` after the step
     would run *after* the entry was written, so the recorded `head` would predate the commit - and
@@ -34,11 +34,23 @@ Six of these are worth naming, because each is written against a failure that is
   * **An agent that never reports leaves no entry.** The step re-runs, which is only true if
     nothing was written; a `RoleIncompleteError` that had recorded something would be a step that
     read as done and had no result.
-  * **What the agent is asked is the role's own text plus this step's inputs.** One block of
-    canonical JSON is appended under a fixed heading rather than interpolated, and both halves of
-    that fail in silence: inputs that never arrive leave a `triage` agent triaging findings it was
-    never shown, while a template engine quietly rewrites a prompt that carries a JSON Schema. The
-    section near the bottom asserts the whole dispatched string and not a substring of it.
+  * **What the agent is asked is the role's own text with this step's inputs substituted into
+    it, and not one character the framework added around them.** A placeholder is the only route
+    an input has to the agent, so what is left to fail in silence is a template engine quietly
+    rewriting a prompt that carries a JSON Schema. The section near the bottom asserts the whole
+    dispatched string and not a substring of it.
+  * **A `{{TypeName}}` placeholder says where in that text an input goes, and a value that spells
+    one is never expanded.** The substitution is a single pass that resumes in the *original*
+    string, so an input whose own field reads `{{Decisions}}` is written out and read back by
+    nothing - which is what a `str.replace` per name would not promise, and which fails as a
+    prompt carrying an instruction the workflow never wrote. A declared type this step did not
+    pass renders `Not provided` and nothing besides: what a missing input means is a sentence the
+    prompt's author writes, and a framework wording it here would be arguing with theirs.
+  * **The address that step records at is taken over that same string.** Composition reaches a
+    digest through the `prompt` term of `base_of` and through nothing else, so a rewrite of it
+    re-runs what it changed. Without that term the rewrite is the quietest failure in this file:
+    every recorded entry keeps its address, every step replays, and the document each address
+    stands for is one nobody was ever asked.
 
 `run.activity` is here too, at the end, because this file already holds the only thing that
 dispatches to an adapter. There is little to it by design - the framework holds the last string
@@ -48,6 +60,7 @@ replayed from cache producing one at all.
 """
 
 import asyncio
+import hashlib
 import json
 import subprocess
 from collections.abc import Mapping
@@ -75,6 +88,7 @@ from agl.ports.ids import ProjectName, RunLabel, StepName
 from agl.ports.run import JsonValue
 from agl.ports.tree_layout import TreesRoot
 from agl.ports.workspace import Workspace
+from agl.sdk._engine.journal import base_of
 from agl.sdk.roles import Role, RoleIncompleteError, prompt_file, role
 from agl.sdk.tools import reporting_tool, tool
 from agl.sdk.workflow import Run
@@ -132,6 +146,54 @@ class _Asking:
 _ASK: Final = "ask_the_operator"
 """What a workflow calls its asking tool. Nothing in AGL knows the name, which is the point: the
 framework supplies no asking tool of its own, so this is a string this file chose."""
+
+@dataclass(frozen=True)
+class Ticket:
+    """One of `_role`'s declared input types, and the name a value of it is recorded under."""
+
+    name: str
+
+@dataclass(frozen=True)
+class Highs:
+    """A second declared type, so a step can carry two inputs and the order they are written in
+    can differ between two calls that mean the same thing."""
+
+    count: int
+
+@dataclass(frozen=True)
+class Urgent(Ticket):
+    """A `Ticket` a role that declared only `Ticket` still takes, since the match is `isinstance`.
+
+    No field of its own, deliberately: what separates it from its base in a fingerprint is then
+    the qualified type name `journal.py` tags the value with and nothing else, which is the half
+    that has to hold for a subclass and its base to be two steps under one key.
+    """
+
+@dataclass(frozen=True)
+class Both(Ticket, Highs):
+    """A value two unrelated declarations of `_role` both take, which is the ambiguity refusal.
+
+    Multiple inheritance is not an exotic way to reach that state - it is the only one a plain
+    class hierarchy offers, and a workflow whose `Request` is also a `Note` has written it without
+    meaning to. Neither `Ticket` nor `Highs` is below the other, so there is no narrowest match.
+    """
+
+@dataclass(frozen=True)
+class Finding:
+    """A workflow's own dataclass, nested inside a declared type rather than passed as one."""
+
+    ticket: str
+    severity: int
+
+@dataclass(frozen=True)
+class Findings:
+    """The tickets example's `highs` as a type a role can declare: the list is a field of one.
+
+    A step passes instances of the types its role accepts, so a bare `list` is not an input any
+    more - it is what one of them holds, which is also what puts a second dataclass a level down.
+    """
+
+    items: list[Finding]
 
 class _Crash(Exception):
     """What an agent dying mid-step looks like from here. Any exception would do - the walk has no
@@ -225,6 +287,13 @@ def _role(name: str, instructions: str, *, read_only: bool = False) -> Role[Summ
     `read_only` declares `NO_VCS_WRITES`, which is what an author pairs with a step
     that passes no `commit=`. Nothing checks the pairing - the framework does one predictable thing
     either way - so it is here because these tests should read the way a workflow does.
+
+    It accepts nothing, and that is what lets one factory carry a prompt written afresh at every
+    call site: `RoleFactory.__call__` requires a declaration's `accepts=` and its prompt's
+    placeholders to be the same set, so a factory declaring a type would demand that every prompt
+    written through it name that type. The four below are the input-carrying shapes, one per set of
+    accepted types, and each is spelled the way a workflow spells one - a role, its prompt, and the
+    types that prompt names.
     """
     restrictions = {Restriction.NO_VCS_WRITES} if read_only else set[Restriction]()
     return Role(
@@ -233,6 +302,42 @@ def _role(name: str, instructions: str, *, read_only: bool = False) -> Role[Summ
         restrictions=restrictions,
         tools=(REPORT,),
     )
+
+def _triage(instructions: str) -> Role[Summary]:
+    """The `Role` the four factories below return, so the one thing that differs between them is
+    the `accepts=` on their decorator - which is the half a prompt has to agree with."""
+    return Role(
+        name="triage",
+        instructions=instructions,
+        restrictions={Restriction.NO_VCS_WRITES},
+        tools=(REPORT,),
+    )
+
+@role(model=Claude.SONNET, accepts=(Ticket,))
+def _one_ticket(instructions: str) -> Role[Summary]:
+    """A role taking the base type alone, which is where a subclass of it is recorded too."""
+    return _triage(instructions)
+
+@role(model=Claude.SONNET, accepts=(Ticket, Highs))
+def _ticket_and_highs(instructions: str) -> Role[Summary]:
+    """Two unrelated declarations, so a step can carry two inputs and a `Both` can tie between
+    them - neither being below the other is what leaves an ambiguous value with no name."""
+    return _triage(instructions)
+
+@role(model=Claude.SONNET, accepts=(Findings,))
+def _findings_only(instructions: str) -> Role[Summary]:
+    """One declared type whose own field is a list of the workflow's own dataclasses."""
+    return _triage(instructions)
+
+@role(model=Claude.SONNET, accepts=(Ticket, Urgent))
+def _either_ticket(instructions: str) -> Role[Summary]:
+    """A role declaring a type and a subclass of it, so one `Urgent` matches two declarations.
+
+    `_one_ticket` declares the base alone, which is the other half of the same rule: there the
+    subclass is recorded under `Ticket`, and here under `Urgent`, because the name is the declared
+    type's and the narrowest declaration that matched is the one that supplies it.
+    """
+    return _triage(instructions)
 
 @role(model=Claude.SONNET)
 def _effect(name: str, instructions: str) -> Role[None]:
@@ -898,38 +1003,43 @@ async def test_a_roles_asking_tool_reaches_the_runner_and_its_answer_returns(
 
 # --- what the agent is actually asked -------------------------------------------------------------
 #
-# The mechanism is settled and it is not templating: "the framework appends one structured block
-# of canonical JSON under a fixed heading, and the author writes the prompt knowing inputs arrive at
-# the end". The five tests below are written against the five ways that goes wrong, and only the
-# first of them is the obvious one:
+# The mechanism is one pass of a regex and it is not a template engine. A `{{TypeName}}`
+# placeholder is filled from this step's inputs - the section after the next one takes that apart on
+# its own - and the framework puts nothing of its own anywhere around the result. The four tests
+# below are written against the four ways that goes wrong at the scale of a whole prompt:
 #
-#   * *The block never arrives.* It was the actual behaviour once: the standing
-#     `w.step(triage, findings=highs)` fingerprints the findings correctly, pays for an
-#     agent, and hands it a prompt with no findings in it. Nothing raises, the step records a
-#     result, and what the run produced is a triage of nothing.
 #   * *Something interpolates.* `_TEMPLATED` is a prompt carrying `{`, `}`, `{name}`, a JSON Schema
 #     and a `%s`, which is what these prompts really look like, and it is asserted to survive
-#     **byte-identical** in front of the block. `str.format` raises `KeyError` on it and `%` raises
-#     `TypeError` on it, so either of those two implementations is a red test rather than a subtly
-#     different prompt. The quiet third one - a `str.replace` or a regex over `{name}` - is what the
-#     byte-identity is really for, because nothing about it would raise.
-#   * *A step with no inputs is given a block anyway*: a heading over an empty object, or merely a
-#     trailing newline nobody would ever see. Asserted as equality against the role's instructions.
-#   * *The block is not canonical.* Two calls writing the same inputs in a different keyword order
-#     must compose the same text, which is `sort_keys` seen from outside the journal - and must
-#     replay, which is what the same inputs have to mean to a resume.
-#   * *A dataclass arrives as something other than its fields.* `findings=highs` is passed, so
-#     this is the shape a real workflow needs and not an exotic one.
+#     **byte-identical** with a real placeholder filled beside it. `str.format` raises `KeyError` on
+#     it and `%` raises `TypeError` on it, so either of those two implementations is a red test
+#     rather than a subtly different prompt. The quiet third one - a `str.replace` or a regex over
+#     `{name}` - is what the byte-identity is really for, because nothing about it would raise: a
+#     single `{` opens nothing here, and `{{` cannot occur in the schema either.
+#   * *A prompt comes back with something in it nobody wrote*: a heading, a blank line, one
+#     trailing newline. Asserted as equality against the role's own instructions, and asserted for
+#     a step with no inputs because that is the shape most dispatches in AGL have - every reviewer
+#     reviews the worktree and takes none at all - so a stray character there is in almost every
+#     prompt and re-runs every entry ever recorded.
+#   * *The text is a function of the call rather than of this step's inputs.* Two calls writing the
+#     same inputs in a different argument order must fill one prompt identically - the mapping is
+#     read by name and never iterated, so the order they were written in has nowhere to go - and
+#     must replay, which is what the same inputs have to mean to a resume.
+#   * *A dataclass arrives as something other than its fields.* Every input is one, so the tag and
+#     the fields are asserted where a list of them is nested a level down, which is the shape the
+#     tickets example needs and not an exotic one.
 #
 # **The expected text is spelled out here rather than imported.** A suite that called
 # `canonical_json` to check what `canonical_json` produced would agree with it whatever either of
-# them said, and the same goes twice over for the heading: it is fixed, an author writes
-# the closing paragraph of a prompt against it, and no fingerprint contains it - so respelling it is
-# a change to every prompt in AGL that nothing else in this repository can see.
+# them said.
 
-# The fixed heading, with the blank lines that separate it from the prompt above and the block
-# below - the whole of what the framework inserts between an author's text and their step's inputs.
-_HEADING: Final = "\n\n## Inputs\n\n"
+def _tagged(name: str) -> str:
+    """The `__agl_type__` tag `journal.py` writes in front of a dataclass's own fields.
+
+    The module half is read off `__name__` rather than spelled out, for the reason
+    `test_a_dataclass_input_reaches_the_agent_as_its_fields_and_its_type` gives: that string is
+    pytest's import mode talking and not this file's claim. The type name is spelled at every call.
+    """
+    return '{"__agl_type__":"' + __name__ + "." + name + '",'
 
 # A prompt written the way these prompts really are: a payload schema, a placeholder that is not
 # one, and two percent signs. `_TEMPLATED.format(**inputs)` raises `KeyError: '"type"'` and
@@ -941,68 +1051,47 @@ _TEMPLATED: Final = (
     "to. Keep 100% of the diff and write %s wherever you skipped something."
 )
 
-@dataclass(frozen=True)
-class Finding:
-    """`findings=highs`: a list of the workflow's own dataclasses, passed as one input."""
-
-    ticket: str
-    severity: int
-
 @pytest.mark.asyncio
-async def test_the_inputs_a_step_passes_are_appended_to_what_the_agent_is_asked(
-    repository: Path, tmp_path: Path, base: str
-) -> None:
-    """`**inputs` are fingerprint terms **and** they reach the agent.
-
-    Asserted as the whole dispatched string rather than as `"T-01" in asked`, because everything
-    fixed about the block is in the parts a containment check cannot see: that the role's own
-    text comes first, that one fixed heading separates the two, that the keys are sorted, and that
-    the separators are the compact ones the fingerprint was taken with.
-    """
-    record = _Agent()
-    run = _run(repository, tmp_path, base, _agent(record))
-
-    await run.step(_role("triage", "triage the findings", read_only=True), ticket="T-01", high=3)
-
-    assert record.runs == ["triage the findings" + _HEADING + '{"high":3,"ticket":"T-01"}'], (
-        "the step's inputs were fingerprinted and never shown to the agent, which is the "
-        "tickets example paying for a triage of findings it was never handed"
-    )
-
-@pytest.mark.asyncio
-async def test_a_prompt_carrying_braces_and_percent_signs_reaches_the_agent_byte_identical(
+async def test_a_schema_carrying_prompt_reaches_the_agent_untouched_beside_a_filled_placeholder(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
     """The reason for rejecting templating, written as the assertion that catches it.
 
     Two assertions where one would do, because they fail differently and both are worth reading. The
     prefix says the author's text was not touched - which is the claim - and the equality says what
-    was added is the block and only the block. A role that carries a JSON Schema is not a contrived
-    case: `roles.py` puts the prompt text in `instructions`, and a reporting role's prompt is
-    usually explaining a schema.
+    changed is the placeholder and only the placeholder. A role that carries a JSON Schema is not a
+    contrived case: `roles.py` puts the prompt text in `instructions`, and a reporting role's prompt
+    is usually explaining a schema.
+
+    An input is passed and a placeholder is written for it, so the substitution has work to do over
+    this prompt. Were nothing passed instead, an implementation that interpolated only when it had a
+    mapping to interpolate from would walk straight through the schema and the `%s` untested.
     """
     record = _Agent()
     run = _run(repository, tmp_path, base, _agent(record))
+    written = _TEMPLATED + " Fix {{Ticket}} first."
 
-    await run.step(_role("triage", _TEMPLATED, read_only=True), ticket="T-01")
+    await run.step(_one_ticket(written), Ticket("T-01"))
 
     (asked,) = record.runs
     assert asked.startswith(_TEMPLATED), (
         "the role's own instructions were rewritten on the way to the agent. Nothing may "
         "interpolate here: these prompts carry JSON Schemas, and a `{name}` in one is literal text"
     )
-    assert asked == _TEMPLATED + _HEADING + '{"ticket":"T-01"}'
+    value = _tagged("Ticket") + '"name":"T-01"}'
+    assert asked == _TEMPLATED + " Fix " + value + " first."
 
 @pytest.mark.asyncio
 async def test_a_step_with_no_inputs_is_dispatched_the_roles_instructions_and_nothing_else(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """The block is appended when there is one, and "nothing at all" when there is not.
+    """The substitution pass is the identity on a prompt with no placeholder in it.
 
     Equality and not `startswith`, because every wrong version of this passes `startswith`: a
     heading over an empty object, a blank line, one trailing newline. This is the shape most
     dispatches in AGL have - every reviewer reviews the worktree and takes no inputs at all - so a
-    stray character here is in almost every prompt, changes no fingerprint, and re-runs nothing.
+    stray character here is in almost every prompt, and since the composed text is a fingerprint
+    term it is also every recorded entry in existence missing its address and being paid for again.
     """
     record = _Agent()
     run = _run(repository, tmp_path, base, _agent(record))
@@ -1012,10 +1101,21 @@ async def test_a_step_with_no_inputs_is_dispatched_the_roles_instructions_and_no
     assert record.runs == ["review the diff"]
 
 @pytest.mark.asyncio
-async def test_the_same_inputs_in_a_different_keyword_order_compose_and_replay_the_same(
+async def test_the_same_inputs_written_in_a_different_order_compose_and_replay_the_same(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """Canonical JSON sorts keys, so the block is a function of the inputs and not of the call.
+    """Each input is keyed by its own type, so the text is a function of the inputs, not the call.
+
+    Argument order is the one thing about these two calls that differs, and there is nowhere for it
+    to go: the key is the type's name rather than the position, and the mapping those keys are in is
+    read by name and never iterated, so where each value lands is decided by where the *author* put
+    the placeholder. A matching that read positions instead would key these two calls differently
+    and still pass a containment check.
+
+    Asserted as the whole dispatched string, because everything fixed about it is in the parts a
+    containment check cannot see: that the author's own words on either side survive, that both
+    values arrive where they were asked for rather than one of them replacing the other, and that
+    the separators are the compact ones the fingerprint was taken with.
 
     The replay is the half that costs money when it is wrong, and it is also this file's answer to
     "did the fingerprint move": the entry is written by the first walk and found by the second,
@@ -1024,19 +1124,21 @@ async def test_the_same_inputs_in_a_different_keyword_order_compose_and_replay_t
     re-run every step ever recorded, and this is the cheapest place that shows.
     """
     record = _Agent()
-    role = _role("triage", "triage the findings", read_only=True)
+    role = _ticket_and_highs("triage {{Ticket}}, {{Highs}} of them high")
 
     first = _run(repository, tmp_path, base, _agent(record))
-    await first.step(role, ticket="T-01", high=3)
+    await first.step(role, Ticket("T-01"), Highs(3))
 
     second = _run(repository, tmp_path, base, _agent(record))
-    await second.step(role, high=3, ticket="T-01")
+    await second.step(role, Highs(3), Ticket("T-01"))
 
-    assert len(record.runs) == 1, "reordering two keyword arguments re-ran the agent"
-    assert record.runs[0].endswith('{"high":3,"ticket":"T-01"}'), (
-        "the block is written in the order the call wrote its keywords, so two calls carrying the "
-        "same inputs hand two different prompts to two agents - and the digest they share, which "
-        "is taken over sorted keys, says the two are one step and replays the first one's result"
+    ticket = _tagged("Ticket") + '"name":"T-01"}'
+    highs = _tagged("Highs") + '"count":3}'
+    assert len(record.runs) == 1, "reordering two arguments re-ran the agent"
+    assert record.runs == ["triage " + ticket + ", " + highs + " of them high"], (
+        "the values landed somewhere other than the placeholders the author wrote for them, so a "
+        "call that passes its inputs in one order and a call that passes them in another are two "
+        "documents, two addresses and two agents paid for one step's work"
     )
     assert len(_entries(tmp_path, "triage")) == 1
 
@@ -1044,37 +1146,315 @@ async def test_the_same_inputs_in_a_different_keyword_order_compose_and_replay_t
 async def test_a_dataclass_input_reaches_the_agent_as_its_fields_and_its_type(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """The standing `findings=highs`, which is a list of the workflow's own dataclasses.
+    """The standing `Findings(highs)`, whose one field is a list of the workflow's own dataclasses.
 
-    The `__agl_type__` tag is asserted rather than tolerated. `test_journal.py`'s qualified type
-    name puts a dataclass's own in the fingerprint at every depth, and this block is the same
-    canonical text the digest was taken over - so the tag is in front of the agent by construction,
-    and the only way it would not be is a second serialiser, free to disagree with the first about
-    what these inputs were. It reads as information rather than noise: it is the type the workflow
-    named.
+    The `__agl_type__` tag is asserted rather than tolerated, at both depths. `test_journal.py`'s
+    qualified type name puts a dataclass's own in the fingerprint at every level, and what stands
+    at the placeholder is the canonical text the digest was taken over - so the tag is in front of
+    the agent by construction, and the only way it would not be is a second serialiser, free to
+    disagree with the first about what these inputs were. It reads as information rather than
+    noise: it is the type the workflow named.
 
-    `Finding.__module__` rather than the literal `"test_run_step"`, because that string is pytest's
-    import mode talking and not this file's claim.
+    The nesting is the point rather than an elaboration: an input is an instance of a type the role
+    declared, so the list a `triage` really wants is a field of one and never an input itself. The
+    placeholder is `{{Findings}}` - the type's name, which is what a step's inputs are recorded
+    under - and the module-qualified spelling stays inside the value, where the fingerprint needs
+    it to tell two same-named types apart.
     """
     record = _Agent()
     run = _run(repository, tmp_path, base, _agent(record))
-    typed = '{"__agl_type__":"' + Finding.__module__ + '.Finding",'
+    typed = _tagged("Finding")
 
     await run.step(
-        _role("triage", "triage the findings", read_only=True),
-        findings=[Finding("T-01", 3), Finding("T-07", 5)],
+        _findings_only("triage these:\n{{Findings}}"),
+        Findings([Finding("T-01", 3), Finding("T-07", 5)]),
     )
 
-    block = (
-        '{"findings":['
+    value = (
+        _tagged("Findings")
+        + '"items":['
         + typed
         + '"severity":3,"ticket":"T-01"},'
         + typed
         + '"severity":5,"ticket":"T-07"}]}'
     )
-    assert record.runs == ["triage the findings" + _HEADING + block], (
+    assert record.runs == ["triage these:\n" + value], (
         "the findings handed to `triage` did not reach the agent asked to triage them, or they "
         "reached it as something other than the canonical text their fingerprint was taken over"
+    )
+
+# --- and the address it is recorded under ---------------------------------------------------------
+#
+# The four above are about the text. This one is about the digest, and it is the only thing that
+# makes composing a prompt a *changeable* decision rather than a one-way door.
+#
+# `base_of` hashes `role.instructions` and the inputs the step was handed, so *how* the two
+# become one document reaches no digest through either of them. Compose them some other way and
+# every entry ever recorded keeps the address it already has while standing for a prompt nobody was
+# ever asked: every step replays, none is run under the new composition, and there is no gate, no
+# assertion and no diagnostic anywhere that says so. Which is why `prompt` is a term of its own -
+# derived from two terms already there, so it separates no pair they do not and re-runs nothing by
+# itself, and read for exactly one thing: a change to the composition moves every digest.
+#
+# Recomputed here rather than pinned as a number, because a pinned digest has to be retyped on the
+# very edit it exists to fail. And fed `record.runs[0]` - the string the agent actually received -
+# rather than a second call to `composed`, so a step that hashed one text and dispatched another
+# fails here too, which no equality between two callers of one function could see.
+
+async def _unhandled(payload: Mapping[str, JsonValue]) -> ToolResult:
+    """`base_of` reads a tool's name, its description and its schema and never its handler, which
+    `tests/sdk/test_journal.py` pins - so the address below needs a callable and not this one."""
+    return ToolResult(text="")
+
+_DISPATCHED: Final = Tool(
+    name=REPORT.name,
+    description=REPORT.description,
+    payload_schema=REPORT.payload_schema,
+    handler=_unhandled,
+)
+"""`REPORT` as `steps.py` converts it on the way to an `AgentTask`: the three declared terms, and a
+handler bound at dispatch that the fingerprint does not read."""
+
+@pytest.mark.asyncio
+async def test_the_entry_a_step_records_is_addressed_by_the_prompt_the_agent_was_handed(
+    repository: Path, tmp_path: Path, base: str
+) -> None:
+    """The composition is in the digest, which is what lets it be changed at all.
+
+    One step, run for real against the real ledger, and then its address rebuilt from the outside:
+    the role's own four terms, the inputs the call passed, the head the run was cut from, and the
+    prompt read back off the agent that received it. `sha256(base + ":" + n)` is spelled out for
+    `test_journal.py`'s reason - a suite that imported the arithmetic would agree with it whatever
+    it said - and `n` is nought because this is the first call at this address.
+
+    The role's text carries a placeholder because the composition is otherwise the identity: a
+    prompt naming none of this step's inputs is dispatched exactly as it was declared, the address
+    would match whether or not the composed text reached the digest, and the guard below says so
+    rather than letting this pass for free.
+    """
+    record = _Agent()
+    role = _ticket_and_highs("triage {{Ticket}}, {{Highs}} high")
+    run = _run(repository, tmp_path, base, _agent(record))
+
+    await run.step(role, Ticket("T-01"), Highs(3))
+
+    (asked,) = record.runs
+    assert asked != role.instructions, (
+        "this step composed nothing onto its instructions, so the address below would match "
+        "whether or not the composition reaches the digest and this test would measure nothing"
+    )
+    computed = base_of(
+        instructions=role.instructions,
+        model=role.model,
+        restrictions=role.restrictions,
+        tools=(_DISPATCHED,),
+        inputs={"Ticket": Ticket("T-01"), "Highs": Highs(3)},
+        prompt=asked,
+        head=base,
+    )
+    assert _text(_one(tmp_path, "triage"), "fingerprint") == hashlib.sha256(
+        f"{computed}:0".encode()
+    ).hexdigest(), (
+        "the entry this step wrote is not addressed by the text its agent was handed, so the "
+        "composition has left the fingerprint - and the next change to it will replay every "
+        "recorded step in existence against a prompt none of them was ever asked"
+    )
+
+# --- and where in the prompt an input goes --------------------------------------------------------
+#
+# `{{TypeName}}` is where the author says a value belongs, filled from the mapping this step's
+# inputs were keyed into. Four things about it are decisions rather than details, and each one is a
+# test below:
+#
+#   * **The grammar is exactly `{{`, a dotted Python name, `}}`, with no whitespace inside the
+#     braces.** `{Ticket}` opens nothing, `{{Ticket}` closes nothing, and `{{ two words }}` is
+#     prose - the name is compared against a `__qualname__`, which never has a space in it, so a
+#     spelling that had to be trimmed first would be a second spelling of one placeholder with
+#     nothing holding the two together. One spelling can be widened later without breaking a prompt
+#     anybody wrote; two cannot be narrowed. `{{ Ticket }}` is the one near-miss that is not pinned
+#     here: padded braces are what every templating engine spells a substitution as, so a prompt
+#     carrying one is refused where it is declared rather than delivered as prose, and
+#     `tests/sdk/test_roles.py` is where that refusal is measured.
+#   * **A value that spells a placeholder is written out and never expanded.** One `re.sub`, which
+#     resumes at the end of each match in the *original* string, so nothing the substitution wrote
+#     is ever scanned. The test hands `Ticket` a field whose text is `{{Highs}}` and passes a real
+#     `Highs` in the same call, so a second pass would have something to find and would find it.
+#   * **A declared type this step did not pass renders `Not provided`.** Those two words, asserted
+#     as the whole dispatched string, because every editorialising version of it - a parenthesis, a
+#     full stop, "no value was supplied" - passes a containment check and argues with the sentence
+#     the prompt's author wrote underneath.
+#   * **The name is the declared type's and not the instance's.** An `Urgent` handed to a role that
+#     accepts `Ticket` fills `{{Ticket}}`, and the same value handed to a role that accepts both
+#     fills `{{Urgent}}` instead, because the narrowest declaration that matched is the one that
+#     names it. Keyed off the instance, the author's own input would vanish from the prompt while
+#     the ledger went on recording that inputs were supplied. The two refusals that rule needs -
+#     no narrowest match, and two values landing under one name - are with the other input
+#     refusals at the bottom of this file.
+
+@pytest.mark.asyncio
+async def test_a_placeholder_is_replaced_by_the_canonical_text_of_the_input_it_names(
+    repository: Path, tmp_path: Path, base: str
+) -> None:
+    """One value, in the middle of a sentence, spelled the way the fingerprint spells it.
+
+    The substituted text is `canonical_json` of that one input and not a second rendering of it:
+    the same serialiser, the same separators and the same `__agl_type__` tag the `inputs` term is
+    hashed over, which is what keeps there from being two answers in this repository to "what was
+    this value". A readable second spelling would be free to disagree with the first, and both of
+    them are hashed now - the mapping through `inputs` and the substitution through `prompt`.
+
+    Asserted as the whole string, for the reason the four tests above are: what is fixed about
+    this is the parts a containment check cannot see - that the author's own words on either side
+    survive untouched, and that the value arrives where they put it rather than at the end.
+    """
+    record = _Agent()
+    run = _run(repository, tmp_path, base, _agent(record))
+
+    await run.step(_one_ticket("Fix {{Ticket}} today."), Ticket("T-01"))
+
+    value = _tagged("Ticket") + '"name":"T-01"}'
+    assert record.runs == ["Fix " + value + " today."], (
+        "the placeholder was not filled with this step's input, so the author put the value "
+        "where they wanted it and the agent was handed the sentence with a gap in it"
+    )
+
+@pytest.mark.asyncio
+async def test_a_declared_type_this_step_did_not_pass_renders_exactly_the_two_words(
+    repository: Path, tmp_path: Path, base: str
+) -> None:
+    """`accepts=` is a permission, so a placeholder with nothing behind it is a reachable state.
+
+    What it renders is `Not provided` and nothing else, because the prompt's author is the one who
+    knows what missing means - "if it is missing, work it out" and "if it is missing, stop" are
+    both real endings, and a framework that explained the absence would be arguing with whichever
+    one is written under it.
+
+    Equality against the role's own text with the two words in it, which also says the second
+    thing: the words stand exactly where the placeholder did, with no punctuation, no line and no
+    apology of the framework's own around them.
+    """
+    record = _Agent()
+    run = _run(repository, tmp_path, base, _agent(record))
+
+    await run.step(_findings_only("The findings are:\n{{Findings}}"))
+
+    assert record.runs == ["The findings are:\nNot provided"]
+
+@pytest.mark.asyncio
+async def test_an_input_whose_own_text_spells_a_placeholder_is_written_out_and_not_expanded(
+    repository: Path, tmp_path: Path, base: str
+) -> None:
+    """The one pass, measured where a second pass would have something to find.
+
+    `Ticket`'s field is the literal text `{{Highs}}` and a real `Highs` is passed in the same call,
+    so an implementation that replaced one name at a time - `str.replace` in a loop is the obvious
+    one - would fill the ticket first and then expand what it had just written. What reaches the
+    agent would carry a value the workflow put nowhere, at a spot in the prompt the author marked
+    for something else, and nothing about it raises: the step runs, records and replays.
+
+    `re.sub` resumes at the end of each match in the string it was handed, so what a replacement
+    writes is never part of what is scanned. That is the whole of the guarantee, and it holds by
+    construction rather than by an escape or a check.
+    """
+    record = _Agent()
+    run = _run(repository, tmp_path, base, _agent(record))
+
+    await run.step(
+        _ticket_and_highs("ticket {{Ticket}}, count {{Highs}}"),
+        Ticket("{{Highs}}"),
+        Highs(3),
+    )
+
+    ticket = _tagged("Ticket") + '"name":"{{Highs}}"}'
+    highs = _tagged("Highs") + '"count":3}'
+    assert record.runs == ["ticket " + ticket + ", count " + highs], (
+        "a substituted value was scanned again, so an input's own text became a second "
+        "placeholder and put some other input where the workflow never asked for it"
+    )
+
+@pytest.mark.asyncio
+async def test_braces_that_are_not_a_placeholder_are_left_in_the_prompt_untouched(
+    repository: Path, tmp_path: Path, base: str
+) -> None:
+    """The grammar's negative half, which is what lets a prompt carry a payload schema.
+
+    `{Ticket}` opens nothing here, `{{Ticket}` closes nothing, and `{{ two words }}` is prose that
+    happens to sit between braces - the byte-identity test above makes that claim against a whole
+    realistic prompt, and this one makes it about the grammar in isolation. The engines an author
+    might be quoting are still quotable: a filter, a block tag or a sentence between `{{` and `}}`
+    reaches the agent as it was written.
+
+    The one near-miss that is *not* here is `{{ Ticket }}`, and its absence is the decision:
+    padding the braces is what every templating engine spells a substitution as, so it is refused
+    at the declaration rather than delivered as prose - `tests/sdk/test_roles.py` is where that is
+    measured, and this test could not declare the role it would need.
+
+    All three survive verbatim, and the real one beside them is filled, so this fails as "the
+    grammar moved" rather than as "nothing was substituted at all".
+    """
+    record = _Agent()
+    run = _run(repository, tmp_path, base, _agent(record))
+    written = "{Ticket} {{ two words }} {{Ticket} {{Ticket}}"
+
+    await run.step(_one_ticket(written), Ticket("T-01"))
+
+    value = _tagged("Ticket") + '"name":"T-01"}'
+    assert record.runs == ["{Ticket} {{ two words }} {{Ticket} " + value], (
+        "the placeholder grammar takes something other than `{{Name}}` with no space in it, so "
+        "an author's literal braces are being rewritten and the declaration-time scan that has to "
+        "agree with this one is reading a different language"
+    )
+
+@pytest.mark.asyncio
+async def test_a_subclass_of_a_declared_type_fills_that_declarations_own_placeholder(
+    repository: Path, tmp_path: Path, base: str
+) -> None:
+    """`_one_ticket` accepts `Ticket`; an `Urgent` is one, and `{{Ticket}}` is where it goes.
+
+    Keyed off the instance instead, this value would land under `Urgent`, `{{Ticket}}` would
+    render `Not provided`, and the ledger would go on recording that an input was supplied - the
+    author's own value gone from the prompt with the entry saying otherwise, which is a step paid
+    for and answered without the thing it was about.
+
+    Nothing is collapsed by the shared key: `Urgent` adds no field, so the qualified type name
+    `journal.py` writes inside the value is the *only* difference between it and its base, and it
+    is asserted here in front of the agent. `Ticket("T-01")` and `Urgent("T-01")` are therefore
+    two canonical texts, two `inputs` terms and two digests under one name.
+    """
+    record = _Agent()
+    run = _run(repository, tmp_path, base, _agent(record))
+
+    await run.step(_one_ticket("Fix {{Ticket}}."), Urgent("T-01"))
+
+    value = _tagged("Urgent") + '"name":"T-01"}'
+    assert record.runs == ["Fix " + value + "."], (
+        "a subclass of a declared type did not fill that type's placeholder, so a role declaring "
+        "a base cannot be handed anything below it without the prompt losing the value"
+    )
+
+@pytest.mark.asyncio
+async def test_a_value_matching_a_type_and_its_subclass_is_recorded_under_the_narrower(
+    repository: Path, tmp_path: Path, base: str
+) -> None:
+    """Two declarations match, and the one further down wins - the only answer that is not a coin.
+
+    `_either_ticket` accepts `Ticket` and `Urgent` both. An `Urgent` is an instance of each, so
+    something has to choose, and choosing the base would make the narrower declaration
+    unreachable: no value could ever land under `Urgent`, and a prompt writing `{{Urgent}}` would
+    read `Not provided` forever with nothing anywhere saying why. The narrower is also the more
+    informative of the two, and it is the one the author went to the trouble of declaring.
+
+    Both placeholders are in the prompt, so this says where the value went *and* where it did not.
+    """
+    record = _Agent()
+    run = _run(repository, tmp_path, base, _agent(record))
+
+    await run.step(_either_ticket("base {{Ticket}} / derived {{Urgent}}"), Urgent("T-01"))
+
+    value = _tagged("Urgent") + '"name":"T-01"}'
+    assert record.runs == ["base Not provided / derived " + value], (
+        "a value matching a declared type and a subclass of it was recorded under the base, which "
+        "leaves the subclass declared, matchable and impossible to ever record anything under"
     )
 
 # --- a prompt that came out of a file ------------------------------------------------------------
@@ -1450,3 +1830,165 @@ async def test_the_step_refuses_the_same_name_again_before_it_provisions_anythin
 
     assert record.runs == []
     assert not (tmp_path / "trees").exists(), "a refused step name provisioned a checkout anyway"
+
+@pytest.mark.asyncio
+async def test_an_input_of_an_undeclared_type_names_both_sides_and_spends_nothing(
+    repository: Path, tmp_path: Path, base: str
+) -> None:
+    """`accepts=` is the whole list, so a value of no type on it has no name to be recorded under.
+
+    Both halves are asserted because a message carrying one of them leaves the author guessing at
+    the other: what was handed over is on the call site's line, and what the role declared is on a
+    decorator in some other module. A refusal naming only the first is the one that reads as a
+    framework being fussy rather than as two lines that disagree.
+
+    The check runs above `Capabilities.require` and above the journal, so a mistake in a workflow's
+    own call costs neither a probe of a backend nor a checkout - which is what the last two
+    assertions are for. It is the step-name test above making its argument about the other refusal
+    that can be settled from the call alone: a run that cannot record a step should not pay for one.
+    """
+    record = _Agent()
+    run = _run(repository, tmp_path, base, _agent(record))
+
+    with pytest.raises(InputError) as refusal:
+        await run.step(_ticket_and_highs("triage {{Ticket}} and {{Highs}}"), Summary("nope"))
+
+    assert "Summary" in str(refusal.value), "the refusal did not name the type that was passed"
+    assert "['Highs', 'Ticket']" in str(refusal.value), (
+        "the refusal did not name what the role accepts, which is the half that is not on screen "
+        "at the line the author has to change"
+    )
+    assert record.runs == []
+    assert not (tmp_path / "trees").exists(), "a refused input provisioned a checkout anyway"
+
+@pytest.mark.asyncio
+async def test_two_inputs_of_one_type_are_refused_rather_than_one_replacing_the_other(
+    repository: Path, tmp_path: Path, base: str
+) -> None:
+    """One key per type, so a second value of a type has nowhere to go but over the first.
+
+    What this refuses is not a lost argument, which would be loud enough on its own. The dropped
+    value reaches no fingerprint, so two calls differing only in it share one digest and the second
+    replays the first's recorded result - a value handed back for work never done, which is the one
+    failure `sdk/_engine/journal.py`'s canonicaliser is built to make unreachable.
+    """
+    record = _Agent()
+    run = _run(repository, tmp_path, base, _agent(record))
+    role = _one_ticket("triage {{Ticket}}")
+
+    with pytest.raises(InputError, match="two Ticket values"):
+        await run.step(role, Ticket("T-01"), Ticket("T-07"))
+
+    assert record.runs == []
+    assert not (tmp_path / "trees").exists()
+
+@pytest.mark.asyncio
+async def test_a_role_no_factory_built_accepts_nothing_and_the_refusal_says_where_to_declare(
+    repository: Path, tmp_path: Path, base: str
+) -> None:
+    """A hand-built `Role` carries no `accepts`, for the reason it carries no model.
+
+    `RoleFactory.__call__` binds both, and it binds them there so that preflight can read them off
+    the factory without calling it - so the refusal has to say which line is missing rather than
+    only that something is. A reader told "this role accepts nothing" goes looking for a field of
+    `Role`, which is exactly the place the declaration deliberately is not.
+
+    The role below names no model either, and this refusal is still the one that arrives: the
+    inputs are checked from the call alone, above the first thing that reads `role.model`.
+    """
+    record = _Agent()
+    run = _run(repository, tmp_path, base, _agent(record))
+    bare = Role[Summary](name="triage", instructions="triage the findings", tools=(REPORT,))
+
+    with pytest.raises(InputError) as refusal:
+        await run.step(bare, Ticket("T-01"))
+
+    assert "accepts nothing at all" in str(refusal.value)
+    assert "@role(model=..., accepts=(Ticket,))" in str(refusal.value)
+    assert record.runs == []
+
+@pytest.mark.asyncio
+async def test_an_input_matching_two_unrelated_declared_types_is_refused_and_not_keyed_by_either(
+    repository: Path, tmp_path: Path, base: str
+) -> None:
+    """Two declarations match and neither is below the other, so there is no name to record it as.
+
+    Every other tie in this scheme has an answer that is not a coin toss - a subclass and its base
+    resolve to the subclass, which the section on placeholders measures. This one has none: `Both`
+    is a `Ticket` and a `Highs`, and picking either would be a rule living in the framework about
+    which of the workflow's own types the step meant. Picked silently, the wrong placeholder is
+    the one that fills and the right one reads `Not provided`, with the step paid for either way.
+
+    The refusal names both candidates, because the value's own type is on the call site's line and
+    the two it collided with are on a decorator in some other module.
+    """
+    record = _Agent()
+    run = _run(repository, tmp_path, base, _agent(record))
+
+    with pytest.raises(InputError) as refusal:
+        await run.step(
+            _ticket_and_highs("triage {{Ticket}} and {{Highs}}"), Both(count=3, name="T-01")
+        )
+
+    assert "['Highs', 'Ticket']" in str(refusal.value), (
+        "the refusal did not name the declarations that tied, which is the half not on screen at "
+        "the line the author has to change"
+    )
+    assert "Both" in str(refusal.value)
+    assert record.runs == []
+    assert not (tmp_path / "trees").exists(), "an ambiguous input provisioned a checkout anyway"
+
+@pytest.mark.asyncio
+async def test_a_subclass_and_its_declared_base_land_under_one_name_and_are_refused(
+    repository: Path, tmp_path: Path, base: str
+) -> None:
+    """The collision the declared-type key creates, and it is the same refusal as two of one type.
+
+    `_one_ticket` accepts `Ticket` alone, so a `Ticket` and an `Urgent` are both recorded under
+    `Ticket` - one key, two values, and the second would take the first's place in the fingerprint
+    and in the prompt. That is the two-of-one-type refusal above reached by a second road, and
+    the guard has to fire on this one too or keying by the declared type bought a silent drop
+    where there was none.
+
+    The message is asserted for the clause that is new: a reader handed "two Ticket values" while
+    holding a `Ticket` and an `Urgent` needs to be told that the second is recorded as the first.
+    """
+    record = _Agent()
+    run = _run(repository, tmp_path, base, _agent(record))
+    role = _one_ticket("triage {{Ticket}}")
+
+    with pytest.raises(InputError, match="two Ticket values") as refusal:
+        await run.step(role, Ticket("T-01"), Urgent("T-07"))
+
+    assert "subclass of Ticket is recorded under Ticket" in str(refusal.value)
+    assert record.runs == []
+    assert not (tmp_path / "trees").exists()
+
+@pytest.mark.asyncio
+async def test_a_declaration_whose_prompt_and_accepts_disagree_is_refused_before_a_step_spends(
+    repository: Path, tmp_path: Path, base: str
+) -> None:
+    """A role knows both halves, so the two are compared where they are written and nowhere later.
+
+    `run.step` is never entered: the refusal is raised while its first argument is being built, so
+    there is no step name to resolve, no fingerprint to look up, no checkout to cut and no agent to
+    dispatch to - which is what the last two assertions say, in the shape the input refusals above
+    say it. That is a stronger claim than "it happens early": a declaration this run never reaches
+    is refused all the same, because the factory is what checks it.
+
+    The half asserted here that `tests/sdk/test_roles.py` cannot make is the spend. The half made
+    there and not here is the message, which names the placeholders, the accepted types and the
+    line each of them is written on.
+    """
+    record = _Agent()
+    run = _run(repository, tmp_path, base, _agent(record))
+
+    @role(model=Claude.SONNET, accepts=(Ticket,))
+    def _disagreeing() -> Role[Summary]:
+        return _triage("triage the findings")
+
+    with pytest.raises(InputError, match="Ticket"):
+        await run.step(_disagreeing(), Ticket("T-01"))
+
+    assert record.runs == []
+    assert not (tmp_path / "trees").exists(), "a refused declaration provisioned a checkout anyway"

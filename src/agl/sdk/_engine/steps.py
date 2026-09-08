@@ -1,20 +1,19 @@
 import asyncio
-from collections.abc import Mapping
-from typing import Final, cast
+from collections.abc import Mapping, Sequence
+from typing import cast
 from agl.ports.agent import AgentOutcome, AgentTask, StopReason, Tool, ToolResult
 from agl.ports.home_layout import RunScope
 from agl.ports.ids import Namespace, StepName
 from agl.ports.run import JsonValue
 from agl.ports.workspace import Workspace
-from agl.sdk._engine.journal import Fingerprints, Journal, canonical_json
-from agl.sdk._engine.preflight import Capabilities
+from agl.sdk._engine.journal import Fingerprints, Journal
+from agl.sdk._engine.preflight import Capabilities, checked_inputs
+from agl.sdk._engine.prompts import composed
 from agl.sdk._engine.services import Services
 from agl.sdk.roles import Role, RoleIncompleteError
 from agl.sdk.tools import ReportingTool
 
 __all__ = ["Steps"]
-
-_INPUTS_HEADING: Final = "## Inputs"
 
 class Steps:
     def __init__(
@@ -49,9 +48,10 @@ class Steps:
         self._activity = line
 
     async def step[R](
-        self, role: Role[R], *, commit: str | None, inputs: Mapping[str, object]
+        self, role: Role[R], passed: Sequence[object], *, commit: str | None
     ) -> R:
         step = StepName(role.name)
+        inputs = checked_inputs(role, passed, step=str(step))
         await self._capabilities.require(self._services.agents, role, step=str(step))
         journal, workspace = await self._namespace()
 
@@ -64,12 +64,13 @@ class Steps:
             else:
                 tools.append(declared)
         offered = tuple(tools)
+        prompt = composed(role.instructions, inputs)
 
         async def _worker() -> JsonValue:
             try:
                 outcome = await self._services.agents.run(
                     AgentTask(
-                        instructions=_composed(role.instructions, inputs),
+                        instructions=prompt,
                         workspace=workspace.path,
                         model=role.model,
                         restrictions=frozenset(role.restrictions),
@@ -88,6 +89,7 @@ class Steps:
             restrictions=role.restrictions,
             tools=offered,
             inputs=inputs,
+            prompt=prompt,
             worker=_worker,
             commit=commit,
         )
@@ -155,11 +157,6 @@ class _Capture[P]:
 
     def read(self, value: object) -> P:
         return self._declaration.read(value)
-
-def _composed(instructions: str, inputs: Mapping[str, object]) -> str:
-    if not inputs:
-        return instructions
-    return "\n\n".join((instructions, _INPUTS_HEADING, canonical_json(inputs)))
 
 def _namespace_of(scope: RunScope) -> Namespace | None:
     return scope.namespaces[-1] if scope.namespaces else None

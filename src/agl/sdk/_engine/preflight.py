@@ -1,13 +1,13 @@
 import sys
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from types import MappingProxyType, ModuleType
 from typing import Any, Final
 from agl.ports.agent import AgentRunner, Capability, ModelId, Provider
-from agl.ports.errors import DeniedError, InternalError, UpstreamUnavailable
+from agl.ports.errors import DeniedError, InputError, InternalError, UpstreamUnavailable
 from agl.ports.history import History
 from agl.sdk.roles import Role, RoleFactory
 
-__all__ = ["Capabilities", "check"]
+__all__ = ["Capabilities", "check", "checked_inputs"]
 
 type _Declaration = Callable[..., object]
 
@@ -16,6 +16,12 @@ _FROM_TOOLS: Final = (
     f"`sdk/roles.py` folds it in at declaration time, so there is no line in the workflow to go "
     f"looking for. Either this role names a model whose backend can call a tool, or it offers none "
     f"- and a role with no tools is an effect step, whose result is `null`"
+)
+
+_FROM_NO_DECLARATION: Final = (
+    ". This role accepts nothing at all, which is what a `Role(...)` built by hand carries: the "
+    "declaration is bound onto a `Role` by `RoleFactory.__call__`, so one that no factory was "
+    "called for holds none - and a factory written `@role(model=...)` declares none either"
 )
 
 # `adapters/openai/runner.py`'s `check_ready` spawns one local process and pays nothing;
@@ -39,6 +45,27 @@ class Capabilities:
         if missing:
             raise DeniedError(_unmet(step, role, missing, held))
 
+def checked_inputs(
+    role: Role[object], passed: Sequence[object], *, step: str
+) -> Mapping[str, object]:
+    inputs: dict[str, object] = {}
+    for value in passed:
+        matched = tuple(declared for declared in role.accepts if isinstance(value, declared))
+        if not matched:
+            raise InputError(_unaccepted(step, role, value))
+        narrowest = _narrowest(matched)
+        if narrowest is None:
+            raise InputError(_ambiguous(step, value, matched))
+        # The declared type's name and not the instance's: `_engine/prompts.py` fills a `{{Name}}`
+        # from this mapping, and the name an author can write there is the one the role declared.
+        # The concrete type is not lost - `_engine/journal.py`'s canonicaliser tags the value with
+        # its own `module.qualname`, so a subclass fingerprints apart from the base it lands under.
+        name = narrowest.__qualname__
+        if name in inputs:
+            raise InputError(_passed_twice(step, name))
+        inputs[name] = value
+    return inputs
+
 async def check(runner: AgentRunner, history: History, declared_by: _Declaration) -> None:
     try:
         await history.check_committer_identity()
@@ -53,6 +80,15 @@ async def check(runner: AgentRunner, history: History, declared_by: _Declaration
             raise UpstreamUnavailable(
                 _not_ready(unavailable, factory, declared_by.__module__)
             ) from unavailable
+
+def _narrowest(matched: Sequence[type[object]]) -> type[object] | None:
+    if not matched:
+        return None
+    below = matched[0]
+    for declared in matched[1:]:
+        if issubclass(declared, below):
+            below = declared
+    return below if all(issubclass(below, declared) for declared in matched) else None
 
 def _cost_of(factory: RoleFactory[..., Any]) -> int:
     return _PROBE_COST[factory.model.provider]
@@ -125,3 +161,42 @@ def _unmet(
     if Capability.TOOL_CALLING in missing and role.tools:
         message += _FROM_TOOLS
     return message
+
+def _unaccepted(step: str, role: Role[object], value: object) -> str:
+    offered = type(value).__qualname__
+    accepted = sorted(declared.__qualname__ for declared in role.accepts)
+    message = (
+        f"step {step!r} was handed a {offered}, and the role it names accepts {accepted}. An input "
+        f"is matched to a declared type by `isinstance` and recorded under that type's name, so "
+        f"one nothing declared has no name to go under: it would reach neither the fingerprint "
+        f"nor the agent, and the step would be paid for and answered without it. `accepts=` is "
+        f"declared on the role's factory - `@role(model=..., accepts=({offered},))` - and never "
+        f"on the `Role` itself, so that preflight can read it without calling the factory"
+    )
+    if not role.accepts:
+        message += _FROM_NO_DECLARATION
+    return message
+
+def _ambiguous(step: str, value: object, matched: Sequence[type[object]]) -> str:
+    offered = type(value).__qualname__
+    both = sorted(declared.__qualname__ for declared in matched)
+    return (
+        f"step {step!r} was handed a {offered}, which is an instance of {both} - every one of the "
+        f"types the role it names accepts that could take it, and none of them a subclass of the "
+        f"rest. An input is recorded under the name of the declared type it matched, so a value "
+        f"matching two unrelated declarations has no single name to go under, and choosing one "
+        f"here would be a rule living in the framework about which of the author's own types this "
+        f"step meant. Accept the one this role reads, or make one of them a subclass of the other "
+        f"- a value matching both then goes under the narrower, which is a declared answer"
+    )
+
+def _passed_twice(step: str, name: str) -> str:
+    return (
+        f"step {step!r} was handed two {name} values, and a step's inputs are recorded one per "
+        f"declared type, under the name of the type each was matched to - so a subclass of {name} "
+        f"is recorded under {name} as well. The second would take the first's place in the "
+        f"fingerprint and in the prompt, so one of the two would be paid for and never read - and "
+        f"two calls differing only in the value that was dropped would share a digest, the second "
+        f"replaying the first's result. A role that needs two of something declares one type "
+        f"holding both"
+    )

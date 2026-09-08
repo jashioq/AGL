@@ -133,20 +133,41 @@ class Findings:
 
 REPORT: Final = reporting_tool("report_findings", "report what the review found", Findings)
 
-@role(model=Claude.SONNET)
+@dataclass(frozen=True)
+class Request:
+    """What the run was asked for, as a type a role declares: an input is an instance of one."""
+
+    text: str
+
+@dataclass(frozen=True)
+class Note:
+    """A review's findings handed back to the role that implements, on the second pass."""
+
+    text: str
+
+@role(model=Claude.SONNET, accepts=(Note,))
 def implement() -> Role:
     """An effect role: no reporting tool, so the step's result is `null` and its effect is
-    commits."""
-    return Role(name="implement", instructions="implement what the request asks for")
+    commits.
 
-@role(model=OpenAI.SOL)
+    `accepts=(Note,)` is a permission and not a demand: `demo` steps this role twice, once with
+    nothing and once with the note the review produced, and both are calls this declaration allows.
+    The prompt names `{{Note}}` all the same, because the declaration is checked against the prompt
+    and not against a call - the first step renders `Not provided` there and the second the note.
+    """
+    return Role(
+        name="implement",
+        instructions="implement what the request asks for. Earlier findings: {{Note}}",
+    )
+
+@role(model=OpenAI.SOL, accepts=(Request,))
 def review() -> Role[Findings]:
     """A reporting role, on the other provider - `fix`'s shape: Claude implements, OpenAI
     reviews. Paired below with a step that passes no `commit=`, which is what a read-only role is
     owed."""
     return Role(
         name="review",
-        instructions="review the worktree and report what you found",
+        instructions="review the worktree against {{Request}} and report what you found",
         restrictions={Restriction.NO_VCS_WRITES},
         tools=[REPORT],
     )
@@ -242,9 +263,9 @@ async def demo(run: Run[DemoParams]) -> None:
     naming a third step. Their inputs differ, so they are two digests.
     """
     await run.step(implement(), commit=f"implement {run.params.request}")
-    findings = await run.step(review(), request=run.params.request)
+    findings = await run.step(review(), Request(run.params.request))
     if findings.high:
-        await run.step(implement(), note=findings.summary, commit="address the review")
+        await run.step(implement(), Note(findings.summary), commit="address the review")
 
 @workflow
 async def asking(run: Run[DemoParams]) -> None:

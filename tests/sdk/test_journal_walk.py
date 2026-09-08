@@ -101,6 +101,7 @@ from agl.ports.store import Store
 from agl.ports.tree_layout import TreesRoot
 from agl.ports.workspace import Workspace
 from agl.sdk._engine.journal import Entry, Fingerprints, Journal, base_of, read_entry
+from agl.sdk._engine.prompts import composed
 
 # Every test below is async and marked one by one rather than through a module-level `pytestmark`,
 # matching `test_journal_entries.py`: `asyncio_mode = "strict"` turns a missing marker into a test
@@ -187,6 +188,11 @@ async def _step(
 
     The role arrives spread across keywords because `Role` did not exist yet when this was
     written; this helper is the shape `Run.step` has, one layer up.
+
+    `prompt` is composed here rather than passed, because that is what the layer above does with
+    the two terms in front of it: `sdk/_engine/steps.py` builds one string, dispatches it and
+    fingerprints it. A helper that spelled some other text would still walk, and every address it
+    computed would be one no run has ever written to.
     """
     return await journal.step(
         name,
@@ -195,6 +201,7 @@ async def _step(
         restrictions=RESTRICTIONS,
         tools=(TOOL,),
         inputs=inputs,
+        prompt=composed(instructions, inputs),
         worker=worker,
         commit=commit,
     )
@@ -215,6 +222,7 @@ def _digest(
         restrictions=RESTRICTIONS,
         tools=(TOOL,),
         inputs=inputs,
+        prompt=composed(instructions, inputs),
         head=head,
     )
     return hashlib.sha256(f"{base}:{count}".encode()).hexdigest()

@@ -15,6 +15,7 @@ from agl.ports.agent import (
 )
 from agl.ports.errors import InputError, UpstreamUnexpected
 from agl.ports.ids import StepName
+from agl.sdk._engine.prompts import check_placeholders
 from agl.sdk.tools import ReportingTool
 
 __all__ = [
@@ -37,6 +38,8 @@ class Role[P = None]:
     instructions: str
 
     _model: ModelId | None = None
+
+    _accepts: tuple[type[object], ...] = ()
 
     restrictions: AbstractSet[Restriction] = frozenset()
 
@@ -94,6 +97,14 @@ class Role[P = None]:
             )
         return self._model
 
+    @property
+    def accepts(self) -> tuple[type[object], ...]:
+        """Which input types a step may pass it, bound by its factory rather than written here.
+
+        :return: the declared types, matched by `isinstance`; empty for a role that takes no inputs
+        """
+        return self._accepts
+
 class RoleFactory[**P, R]:
     __name__: str
     __qualname__: str
@@ -102,27 +113,41 @@ class RoleFactory[**P, R]:
 
     model: ModelId
 
-    def __init__(self, declaration: Callable[P, Role[R]], model: ModelId) -> None:
+    accepts: tuple[type[object], ...]
+
+    def __init__(
+        self, declaration: Callable[P, Role[R]], model: ModelId, accepts: tuple[type[object], ...]
+    ) -> None:
         update_wrapper(self, declaration)
         self._declaration = declaration
         self.name = declaration.__name__
         self.model = model
+        self.accepts = accepts
 
     def __call__(self, *args: P.args, **kwargs: P.kwargs) -> Role[R]:
-        return replace(self._declaration(*args, **kwargs), _model=self.model)
+        built = replace(
+            self._declaration(*args, **kwargs), _model=self.model, _accepts=self.accepts
+        )
+        # Here and not in `Role.__post_init__`: the `Role` a declaration returns carries no
+        # `_accepts` yet - the `replace` above is what stamps it - so a check there would refuse
+        # every role a factory is part-way through building. This is the first moment a prompt and
+        # the declaration that fills it are on one object.
+        check_placeholders(self.name, built.name, built.instructions, self.accepts)
+        return built
 
 class _RoleDecorator(Protocol):
     def __call__[**P, R](self, declaration: Callable[P, Role[R]], /) -> RoleFactory[P, R]: ...
 
-def role(*, model: ModelId) -> _RoleDecorator:
-    """Declare a role factory, naming the model here so preflight can read it without calling it.
+def role(*, model: ModelId, accepts: Sequence[type[object]] = ()) -> _RoleDecorator:
+    """Declare a role factory, naming the model and the inputs so preflight reads both uncalled.
 
     :param model: fingerprinted into every step this role runs, and asked about before step one
-    :return: a decorator binding the model onto each `Role` its function returns
+    :param accepts: types a step may pass; the prompt must name each as `{{TypeName}}` and no other
+    :return: a decorator binding the model and the accepted types onto each `Role` it returns
     """
 
     def decorate[**P, R](declaration: Callable[P, Role[R]]) -> RoleFactory[P, R]:
-        return RoleFactory(declaration, model)
+        return RoleFactory(declaration, model, tuple(accepts))
 
     return decorate
 

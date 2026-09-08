@@ -124,6 +124,7 @@ _OFF_THE_SURFACE: Final[Mapping[str, str]] = {
     "surface a workflow author imports",
     "agl.sdk._engine.journal": "internal, for the same reason",
     "agl.sdk._engine.steps": "internal, for the same reason",
+    "agl.sdk._engine.prompts": "internal, for the same reason",
     "agl.sdk._engine.worktrees": "internal, for the same reason",
     "agl.sdk._engine.integration": "internal, for the same reason",
     "agl.sdk._engine.preflight": "internal, for the same reason",

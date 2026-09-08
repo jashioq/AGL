@@ -1,7 +1,7 @@
 """What a `Role` declaration promises: a name, four terms, a model from its factory, and one typed
 result per step.
 
-Five properties carry this suite.
+Seven properties carry this suite.
 
 **A role is declared by a `@role(model=…)` factory and the model is nowhere in the `Role(...)`**,
 which reaches this file in two ways. The two roles it measures are built by factories at the top,
@@ -24,6 +24,14 @@ mypy learns to infer that shape, the ignore goes stale and this suite says so. T
 that do work are asserted beside it, and the explicit parameter is checked in both directions -
 `Role[Findings]` accepted, `Role[Tickets]` refused - because an explicit parameter that was believed
 rather than checked would be worse than no fallback at all.
+
+**A declaration's `accepts=` and its prompt's placeholders are the same set, and the factory call
+is where that is settled.** Both directions refuse: a `{{Name}}` no declaration can fill, and a
+declared type no placeholder names. The section that measures it also measures where it fires -
+at the call and not at the decoration, since `@role` has no prompt to read - and the one near-miss
+that is refused rather than delivered, `{{ Request }}`, which every templating engine spells as a
+substitution and this one spells as prose. `tests/sdk/test_run_step.py` holds the half that cannot
+be made here: that a refused declaration cuts no checkout and dispatches to no agent.
 
 **Every refusal is an `InputError` pinned by the part of its message a reader acts on next**, since
 that reader is a workflow author looking for the line they wrote. `tests/sdk/test_tools.py` and
@@ -62,6 +70,7 @@ from agl.ports.agent import (
 from agl.ports.errors import EXIT_CODES, AglError, InputError, UpstreamError, exit_code_for
 from agl.ports.run import JsonValue
 from agl.sdk._engine.journal import base_of
+from agl.sdk._engine.prompts import composed
 from agl.sdk.roles import Role, RoleIncompleteError, prompt_file, role
 from agl.sdk.tools import ReportingTool, reporting_tool
 
@@ -69,6 +78,12 @@ _HEAD: Final = "4a91c07f2b3e8d15c6a0b7f31d92e8054c6a0f13"
 
 _REVIEW: Final = "Review the worktree against the spec and report what you found."
 _IMPLEMENT: Final = "Implement the ticket. Run the tests until they pass."
+
+# The same prompt with `{{Request}}` in it, and it is a second constant rather than an edit to the
+# first because `RoleFactory.__call__` refuses a declaration whose prompt and whose `accepts=`
+# disagree: every factory here that accepts nothing needs a prompt naming nothing, and the two that
+# declare `accepts=(Request,)` need one that names it.
+_REVIEW_REQUEST: Final = "Review the worktree against {{Request}} and report what you found."
 
 # What a prompt file holds, for the `prompt_file` section below: a `prompts/decompose.md`,
 # written out so that "the text arrived" and "a path arrived" cannot be confused for each other.
@@ -94,6 +109,13 @@ class Tickets:
     """A second payload type, so the wrong explicit parameter has something to be wrong with."""
 
     ids: list[str]
+
+@dataclass(frozen=True)
+class Request:
+    """An input type, which is the other direction from a payload: one is what a step is handed
+    and the other is what it produces, and only the payload is a parameter of `Role`."""
+
+    text: str
 
 REPORT: Final = reporting_tool("report_findings", "report what the review found", Findings)
 REPORT_TICKETS: Final = reporting_tool("report_tickets", "report the tickets you propose", Tickets)
@@ -176,6 +198,10 @@ def _base[P](built: Role[P], *, model: ModelId | None = None) -> str:
         restrictions=built.restrictions,
         tools=tools,
         inputs={},
+        # Through `composed` rather than spelled as the instructions: a role here whose prompt
+        # names an accepted type composes to that text with `Not provided` at the placeholder, so
+        # a second spelling of the empty-inputs case would be one this layer never produces.
+        prompt=composed(built.instructions, {}),
         head=_HEAD,
     )
 
@@ -184,20 +210,25 @@ def _review() -> Role[Findings]:
     the model their decorator binds - which is what makes the model term measurable at all."""
     return Role(
         name="review",
-        instructions=_REVIEW,
+        instructions=_REVIEW_REQUEST,
         restrictions={Restriction.NO_VCS_WRITES, Restriction.NO_FILE_WRITES},
         tools=[REPORT],
         requires={Capability.SHELL},
     )
 
-@role(model=OpenAI.SOL)
+@role(model=OpenAI.SOL, accepts=(Request,))
 def reviewer() -> Role[Findings]:
     """A reporting role, declared the one way a role is declared."""
     return _review()
 
-@role(model=Claude.OPUS)
+@role(model=Claude.OPUS, accepts=(Request,))
 def _reviewer_on_claude() -> Role[Findings]:
-    """`reviewer()` with one term different, and that term is on the decorator: the model."""
+    """`reviewer()` with one term different, and that term is on the decorator: the model.
+
+    `accepts=` is repeated rather than dropped, and repeating it is what keeps the pair usable:
+    the two factories share one `Role`, so a declaration accepting nothing beside a prompt naming
+    `{{Request}}` is refused at the call - and a difference in `accepts` would put a second
+    difference between them where the whole point is that there is one."""
     return _review()
 
 @role(model=Claude.OPUS)
@@ -221,14 +252,14 @@ def _unservable() -> Role:
     requires at the first step it is handed to."""
     return Role(name="review", instructions=_REVIEW, requires=frozenset(Capability))
 
-@role(model=Claude.HAIKU)
+@role(model=Claude.HAIKU, accepts=(Request,))
 def _never_called_factory() -> Role:
     """A factory whose body would fail the suite if anything ever ran it.
 
     It exists to make "preflight never invokes the function" a measured fact rather than a
-    promise: the two attributes below are read off this object, and the `raise` is what would say
-    so if reading one had cost a call."""
-    raise AssertionError("a factory was invoked to read the `(name, model)` it carries")
+    promise: the attributes read off this object below are all read off the factory, and the
+    `raise` is what would say so if reading one had cost a call."""
+    raise AssertionError("a factory was invoked to read a declaration it carries uncalled")
 
 # --- `@role(model=…)`: what the decorator registers, and where the model lives --------------------
 #
@@ -284,13 +315,42 @@ def test_a_role_that_never_went_through_a_factory_refuses_to_name_a_model() -> N
     assert "@role(model=" in str(refusal.value)
     assert "review" in str(refusal.value)
 
-def test_replace_on_a_built_role_carries_the_model_across() -> None:
-    """`_model` is an `init` field rather than `init=False`, and this is the difference: `replace`
-    copies init fields and re-defaults the rest, so a role that went through a factory and then
-    through a `replace` still knows what runs it. With `init=False` the model would be silently
-    dropped and the refusal would arrive at the step instead of at the line."""
+def test_the_factory_binds_the_types_its_decorator_accepts() -> None:
+    """`accepts=` sits beside `model=` for the same reason and travels the same way: one
+    declaration on the decorator, nowhere in the `Role(...)` the function returns, and on the value
+    that comes back all the same. A factory that declares none binds the empty tuple."""
+    assert reviewer().accepts == (Request,)
+    assert implementer().accepts == ()
+
+def test_the_accepted_types_are_readable_without_invoking_the_factory() -> None:
+    """The half of `accepts=` that decides where it is declared: something has to read it uncalled.
+
+    `_never_called_factory`'s body raises, so this is measured rather than described - the same
+    instrument the model is read through one test above, and the same reason. A declaration on the
+    `Role` instead would be unreadable without arguments nobody at that point has.
+    """
+    assert _never_called_factory.accepts == (Request,)
+
+def test_a_role_that_never_went_through_a_factory_accepts_nothing() -> None:
+    """A bare `Role(...)` accepts nothing, where a bare `Role(...)` *names* nothing and refuses.
+
+    The two are deliberately not the same shape. There is no model a step could fall back on, so
+    reading one has to raise; there is a sound reading of no declared inputs, which is that this
+    role takes none - and the step that hands it one is where that becomes an error, with the type
+    that was passed in hand to name.
+    """
+    assert Role(name="review", instructions=_REVIEW).accepts == ()
+
+def test_replace_on_a_built_role_carries_the_model_and_the_accepted_types_across() -> None:
+    """`_model` and `_accepts` are `init` fields rather than `init=False`, and this is the
+    difference: `replace` copies init fields and re-defaults the rest, so a role that went through
+    a factory and then through a `replace` still knows what runs it and what it takes. With
+    `init=False` both would be silently dropped and the refusal would arrive at the step instead of
+    at the line - and for `accepts` the refusal would name the wrong cause, since a role that
+    accepts nothing is a legal role rather than a broken one."""
     assert replace(REVIEWER, name="second_opinion").model is OpenAI.SOL
     assert replace(REVIEWER, tools=()).model is OpenAI.SOL
+    assert replace(REVIEWER, name="second_opinion").accepts == (Request,)
 
 def test_the_override_surface_is_the_factorys_own_parameter_list() -> None:
     """A rejected member, measured as a type error rather than as an argument.
@@ -326,6 +386,121 @@ def test_the_factory_keeps_the_declarations_name_and_docstring() -> None:
     assert implementer.__doc__ is not None
     assert "effect role" in implementer.__doc__
     assert implementer.__module__ == __name__
+
+# --- `accepts=` and the prompt are one declaration, and they are compared ------------------------
+#
+# A role knows both halves - the types it accepts and the text an agent is handed - and they are
+# two spellings of one decision. `sdk/_engine/prompts.py` fills a `{{TypeName}}` from the mapping
+# `checked_inputs` keys a step's inputs into, so a placeholder is the only route an input has to
+# the agent and a declared type is the only thing that can supply one. Either half without the
+# other fails in silence and costs money: a placeholder no declaration can fill renders
+# `Not provided` at every step for ever, and an accepted type no placeholder names is validated,
+# keyed, fingerprinted and then dropped out of the prompt, so the step is paid for and answered
+# without the thing it was about.
+#
+# The comparison is set equality and is made in `RoleFactory.__call__`, which is where the two
+# halves first meet: `accepts=` is on the decorator, the prompt is what the decorated function
+# returns, and the `replace` in that method is what puts them on one object. It is not a check
+# against what a *call* passes - `accepts` is a permission and a step may pass a subset, including
+# none, which is what `Not provided` is for.
+
+def test_a_placeholder_naming_a_type_the_factory_does_not_accept_is_refused() -> None:
+    """The typo and the leftover, which are one shape: a name nothing can ever be recorded under.
+
+    Nothing at run time would say so. The step composes, dispatches, records and replays, and the
+    agent is handed `Not provided` where the author put a value - so this is refused at the
+    declaration or it is not refused at all.
+    """
+
+    @role(model=Claude.SONNET)
+    def misspelled() -> Role:
+        return Role(name="review", instructions="review against {{Requst}}")
+
+    with pytest.raises(InputError) as refusal:
+        misspelled()
+    assert "['Requst']" in str(refusal.value), "the refusal did not name the placeholder it found"
+    assert "accepts []" in str(refusal.value), "the refusal did not name the other side"
+
+def test_an_accepted_type_no_placeholder_names_is_refused_at_the_declaration() -> None:
+    """The forgotten placeholder and the stale declaration, which are also one shape.
+
+    This is the direction that costs the most and shows the least: the value is matched, keyed and
+    hashed into the step's digest, so two calls differing only in it are two addresses over one
+    prompt - each paid for, neither replaying the other, and the agent never told what it was
+    triaging.
+    """
+
+    @role(model=Claude.SONNET, accepts=(Request,))
+    def forgetful() -> Role:
+        return Role(name="review", instructions=_REVIEW)
+
+    with pytest.raises(InputError) as refusal:
+        forgetful()
+    assert "['Request']" in str(refusal.value), "the refusal did not name the accepted type"
+    assert "the placeholders in its instructions are []" in str(refusal.value)
+
+def test_padded_braces_are_refused_and_the_message_spells_the_one_that_works() -> None:
+    """`{{ Request }}` is the reflex, and the strict grammar's one real cost without this refusal.
+
+    Jinja, Handlebars, Mustache and Vue all pad the braces, so this is what an author types before
+    they have read anything. It matches nothing here: it is not substituted, and the scan above
+    does not see it either - so the sets agree, the declaration passes, and the prompt reaches a
+    model with the author's own markup in it. Refused, and the message carries the spelling that
+    works rather than only the rule.
+    """
+
+    @role(model=Claude.SONNET, accepts=(Request,))
+    def padded() -> Role:
+        return Role(name="review", instructions="review against {{ Request }}")
+
+    with pytest.raises(InputError) as refusal:
+        padded()
+    assert "['{{ Request }}']" in str(refusal.value), "the refusal did not quote what was written"
+    assert "['{{Request}}']" in str(refusal.value), "the refusal did not spell the one that works"
+
+def test_braces_that_are_not_nearly_a_placeholder_leave_a_declaration_alone() -> None:
+    """The other side of that refusal, and what keeps it from being a rule about braces.
+
+    Only a padded *name* is refused. A prompt quoting a template engine's own syntax - a block
+    tag, a filter, an empty pair - or simply writing a sentence between braces is a prompt AGL has
+    no opinion about, so the one unwritable text is the one spelling whose author certainly meant
+    a placeholder.
+    """
+
+    @role(model=Claude.SONNET)
+    def bracketed() -> Role:
+        return Role(name="review", instructions="never write {{#each x}}, {{ a | b }}, {{}} or {}")
+
+    assert bracketed().instructions.endswith("or {}")
+
+def test_the_two_halves_are_compared_at_the_factory_call_and_not_at_the_decoration() -> None:
+    """Where the check goes, measured as the moment it fires rather than described.
+
+    `@role` has no prompt to read - the text is what the decorated function returns, and
+    `prompt_file` reads it per call - so a decoration that refused would be refusing something it
+    had not seen. The declaration below is therefore legal to write and refused to call, and both
+    halves are asserted: a check moved up to the decorator fails the first line, and one moved
+    down to `run.step` fails the second.
+    """
+
+    @role(model=Claude.SONNET, accepts=(Request,))
+    def deferred() -> Role:
+        return Role(name="review", instructions=_REVIEW)
+
+    assert deferred.accepts == (Request,)
+    with pytest.raises(InputError):
+        deferred()
+
+def test_a_role_built_by_hand_is_not_checked_because_no_factory_stamped_its_accepts() -> None:
+    """The seam this check has, stated as a test rather than left to be discovered.
+
+    A bare `Role(...)` carries no `accepts` and never went through the method that compares the
+    two halves, so a placeholder in one stands unrefused - and renders `Not provided`, since
+    `checked_inputs` refuses every input such a role is handed anyway. It is the same seam
+    `Role.model` has, and the same reason: `RoleFactory.__call__` is where a declaration is
+    completed, so a value that skipped it is a value nothing declared.
+    """
+    assert Role(name="review", instructions="review against {{Request}}").accepts == ()
 
 # --- the name, which is the address and not a term ------------------------------------------------
 #
@@ -373,7 +548,11 @@ def test_a_role_holds_the_declared_terms_and_nothing_else() -> None:
     recorded under and the model its factory bound. Slotted, so an attribute nobody declared cannot
     be attached to one - and a `Role` carried a sixth field, `on_question`, until a question became
     an ordinary tool; the `__dict__` refusal is what says a deleted field cannot be set back on."""
-    assert (REVIEWER.name, REVIEWER.instructions, REVIEWER.model) == ("review", _REVIEW, OpenAI.SOL)
+    assert (REVIEWER.name, REVIEWER.instructions, REVIEWER.model) == (
+        "review",
+        _REVIEW_REQUEST,
+        OpenAI.SOL,
+    )
     with pytest.raises(AttributeError):
         object.__getattribute__(REVIEWER, "__dict__")
 
@@ -454,7 +633,7 @@ def test_editing_the_prompt_moves_the_steps_fingerprint() -> None:
     you must not replay what the old wording produced. This is what a role holding a *filename*
     could not do - the filename would be unchanged, the digest would match, and the stale result
     would come back as a cache hit with nothing to notice it."""
-    edited = replace(REVIEWER, instructions=_REVIEW + " Check the tests too.")
+    edited = replace(REVIEWER, instructions=_REVIEW_REQUEST + " Check the tests too.")
     assert _base(REVIEWER) != _base(edited)
 
 @pytest.mark.parametrize("blank", ["", "   ", "\n\t"])

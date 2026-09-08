@@ -148,14 +148,21 @@ def _tool[P](
         handler=handler,
     )
 
+_INSTRUCTIONS: Final = "review the worktree"
+
 def _base(tool: Tool) -> str:
-    """One step's base fingerprint, with every term but the tool held still."""
+    """One step's base fingerprint, with every term but the tool held still.
+
+    `prompt` is the instructions again, which is what `sdk/_engine/prompts.py` composes out of a
+    step passing no inputs - so nothing here moves when the tool does, which is the point.
+    """
     return base_of(
-        instructions="review the worktree",
+        instructions=_INSTRUCTIONS,
         model=Claude.SONNET,
         restrictions=frozenset(),
         tools=(tool,),
         inputs={},
+        prompt=_INSTRUCTIONS,
         head=_HEAD,
     )
 
