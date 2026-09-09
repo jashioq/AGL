@@ -33,7 +33,6 @@ __all__ = [
     "answering",
     "harness",
     "over",
-    "reports",
 ]
 
 _PROJECT: Final = "project"
@@ -193,21 +192,8 @@ def over(
 def answering(responses: Sequence[Press | int] = ()) -> ScriptedTerminal:
     return container.answering(responses)
 
-def a_run[P](
-    harness: Harness,
-    params: P,
-    *,
-    base: str = _BASE,
-    activity: str | None = None,
-) -> Run[P]:
-    run: Run[P] = Run(
-        params=params, services=harness.fakes.services, scope=harness.scope, base=base
-    )
-    reports(run, activity)
-    return run
-
-def reports(run: Run[object], activity: str | None) -> None:
-    run._steps._activity = activity
+def a_run[P](harness: Harness, params: P, *, base: str = _BASE) -> Run[P]:
+    return Run(params=params, services=harness.fakes.services, scope=harness.scope, base=base)
 
 def _innermost(namespaces: Sequence[Namespace]) -> str | None:
     if not namespaces:

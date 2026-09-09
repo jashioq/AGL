@@ -223,10 +223,11 @@ anything here changes.
 **A view is a function, and `show` registers the function and its arguments rather than the
 `Screen` they produce.** The adapter's redraw loop invokes a registered view again every frame,
 compares the `Screen` it returns against the last one, and writes only on a change — so handing a
-view the live dict of child runs is how a dashboard stays current, and a workflow re-`show`s only
-to put a *different* view on screen. Every component is a frozen dataclass with value equality
-because that comparison is the whole reason per-frame re-invocation is cheap: the expensive part is
-the write, and the write is skipped when nothing moved.
+view an object the workflow goes on writing to, a list a role's reporter appends to among them, is
+how a dashboard stays current, and a workflow re-`show`s only to put a *different* view on screen.
+Every component is a frozen dataclass with value equality because that comparison is the whole
+reason per-frame re-invocation is cheap: the expensive part is the write, and the write is skipped
+when nothing moved.
 
 `Screen`, `Rows`, `Row`, `Text`, `Choice` and `TextInput` live in `ports/terminal.py` and not
 beside the authors who write views, because `Terminal.show` takes a view returning a `Screen[T]`
@@ -284,17 +285,25 @@ nothing across the refusals they have to read. A `show` outside it is `InternalE
 is annotated `-> None` on the port and suppressing an exception means returning something truthy,
 so no conforming terminal can swallow a workflow's `Stop`.
 
-**Agent activity is one string, held and handed back, and never written down.** Each adapter
-formats its own line — `Bash: ./gradlew build`, `Edit: domain/usecase.kt` — and the router passes
-it through untouched: no `Activity` type, no shared verb taxonomy, no framework lookup table, so no
-later backend has to map its vocabulary onto another's and the cost is cosmetic inconsistency
-between them. `Steps` holds the cell and `run.activity` reads it through a property; one `Steps`
-per namespace means a child reports its own steps and not its parent's. It is `None` when nothing
-is running, cleared in a `finally` around the dispatch alone — an assignment does not suspend, so a
-`CancelledError` cannot land between deciding to clear the cell and clearing it. A replayed step
-has no activity at all, structurally rather than by a check: `on_activity` is passed inside the
-worker, and a hit returns the stored value without building one. Nothing about activity reaches an
-`Entry`, a fingerprint or the store.
+**Agent activity is one string, handed straight to the role's own reporter and never written down.**
+Each adapter formats its own line — `Bash: ./gradlew build`, `Edit: domain/usecase.kt` — and the
+router passes it through untouched: no `Activity` type, no shared verb taxonomy, no framework lookup
+table, so no later backend has to map its vocabulary onto another's and the cost is cosmetic
+inconsistency between them. Where a line goes is `Role.on_activity`, a field of the role the step is
+taken with, and `Steps.step` hands it to the dispatch unwrapped: the framework keeps no copy, so
+there is nothing for it to read back and nothing for it to clear. **Nothing clears when a step ends,
+and the last line stands until the next one arrives** — `ActivityReporter` is
+`Callable[[str], None]` and holds no value meaning *finished*, so there is no end-of-step call to
+make and a board goes on showing the last line of the last watched step for as long as the workflow
+leaves it there. A stale line between steps is the promise rather than a defect. A replayed step has
+no activity at all, structurally rather than by a check: `on_activity` travels on the dispatch, and
+a hit returns the stored value without making one, which
+`tests/sdk/test_run_step.py::test_a_step_replayed_from_cache_never_calls_the_roles_activity_reporter`
+measures. Nothing about activity reaches an `Entry`, a fingerprint or the store, and
+`tests/sdk/test_roles.py::test_the_activity_reporter_a_role_carries_is_no_term_of_a_steps_digest` is
+what holds that. One reporter is one callable wherever it is stepped: a parent and a child taking
+the *same* role object report into it alike, and telling them apart is the workflow's business
+rather than the framework's — "Deliberately not built" carries what that costs.
 
 ## Errors at the boundary
 
@@ -540,6 +549,35 @@ The reasoning is the point — without it these get re-proposed.
   stored status would be a second source of truth that nothing updates.
 - **No `presentation/` layer or `Display` port.** A shared abstraction would be the intersection
   of a terminal and a browser, which is a worse terminal and a worse browser.
+- **No `Run.activity`, and no cell for one to read.** What an agent is doing goes to
+  `Role.on_activity`, the workflow author's own callable, and `Steps.step` hands it to the dispatch
+  unwrapped — the framework holds nothing, so there is no property to read it back off and no
+  `finally` to clear. The alternative is the cell AGL had: one per `Steps`, read through
+  `run.activity`, which handed a workflow a partition for free, a child reporting its own steps and
+  not its parent's. **That partition is the whole of what the field costs.** Activity identity is
+  the callable a role carries, so N worktrees stepping one role object — or roles built with one
+  reporter between them — report into it alike, with nothing on the line to say which agent said
+  it, and telling them apart means a reporter per child, which means a factory parameter:
+  `implement(watch=…)` in `tests/test_testing.py` is the shape. The `split` workflow AGL used to
+  ship is what makes that concrete rather than hypothetical — it opened a worktree per chunk, its
+  board took `Mapping[str, Run]` and found each row by the key the child was opened under, and
+  `implementer` took no parameter at all, so today it would have to grow one. What the cell charges
+  in return it charges on every workflow: a mutable field behind a frozen `Run`, a lifetime the
+  framework decides and has to clear correctly under cancellation, and a reader that must be told
+  what `None` means between steps. A reporter raises none of those, and the one thing it does leave
+  an author to know — that nothing clears it — is written into "The terminal" and onto the field.
+- **No harness helper for watching a run, and no way to make a live `Run` report.** A test that
+  wants an agent's lines writes `dataclasses.replace(role, on_activity=lines.append)`, or declares
+  the reporter as a factory parameter the way `tests/test_testing.py`'s `implement` does, and reads
+  the list afterwards. Those two are the whole of what a helper could be, under a longer name: the
+  framework holds no activity, so there is nothing for one to reach into and nothing to make a live
+  `Run` report with. What makes this worth writing down rather than leaving obvious is where such a
+  helper would land. `testing.py`'s `__all__` is checked by `ruff`'s `F822` for definedness and
+  by nothing at all for completeness or for use, which makes it the cheapest surface in this
+  repository to add to and the one place a name goes on standing without a caller. And the need is
+  not a test's in the first place: what an author watches a run on is built inside their workflow,
+  so the spelling already sanctioned is a factory parameter typed `ActivityReporter` — which is why
+  `sdk/__init__.py` re-exports that alias, so the annotation costs no import from `agl.ports`.
 - **No config-level model override.** The choice is semantic — this role touches sensitive code,
   that one needs judgement — so it is bound by `@role(model=…)`; an override buys only *why is my
   Opus role running GPT-5?*

@@ -11,6 +11,7 @@ from agl.sdk.errors import (
 )
 from agl.sdk.params import arg
 from agl.sdk.roles import (
+    ActivityReporter,
     Capability,
     Claude,
     ModelId,
@@ -53,6 +54,7 @@ from agl.sdk.workflow import (
 )
 
 __all__ = [
+    "ActivityReporter",
     "AglError",
     "Capability",
     "Choice",

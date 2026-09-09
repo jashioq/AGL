@@ -31,11 +31,6 @@ class Steps:
         self._capabilities = capabilities
         self._opened: tuple[Journal, Workspace] | None = None
         self._opening = asyncio.Lock()
-        self._activity: str | None = None
-
-    @property
-    def activity(self) -> str | None:
-        return self._activity
 
     @property
     def last_good(self) -> str:
@@ -43,9 +38,6 @@ class Steps:
 
     async def landing(self) -> tuple[Journal, Workspace]:
         return await self._namespace()
-
-    def _report(self, line: str) -> None:
-        self._activity = line
 
     async def step[R](
         self, role: Role[R], passed: Sequence[object], *, commit: str | None
@@ -67,19 +59,16 @@ class Steps:
         prompt = composed(role.instructions, inputs)
 
         async def _worker() -> JsonValue:
-            try:
-                outcome = await self._services.agents.run(
-                    AgentTask(
-                        instructions=prompt,
-                        workspace=workspace.path,
-                        model=role.model,
-                        restrictions=frozenset(role.restrictions),
-                        tools=offered,
-                    ),
-                    on_activity=self._report,
-                )
-            finally:
-                self._activity = None
+            outcome = await self._services.agents.run(
+                AgentTask(
+                    instructions=prompt,
+                    workspace=workspace.path,
+                    model=role.model,
+                    restrictions=frozenset(role.restrictions),
+                    tools=offered,
+                ),
+                on_activity=role.on_activity,
+            )
             return None if capture is None else capture.reported(outcome)
 
         value = await journal.step(

@@ -4,7 +4,7 @@
 
 **So this file is deliberately not a fixture.** Everything above the first test is what a workflow
 author writes and nothing else: a params dataclass of `arg()` fields, a payload dataclass, a
-reporting tool, three roles, a screen, and three `@workflow` functions. Every import of AGL is one
+reporting tool, three roles, two screens, and four `@workflow` functions. Every import of AGL is one
 line - `agl.sdk` for the workflow and `agl.testing` for the test - and nothing here reaches into
 `agl.ports`, `agl.sdk._engine`, `agl.config` or `agl.adapters` except in the two places that are
 about the escape hatch and say so, plus `tree_layout.run_branch` in the last section, which has to
@@ -85,6 +85,7 @@ from agl.ports.agent import AgentOutcome, StopReason
 from agl.ports.errors import InputError
 from agl.ports.tree_layout import TreesRoot, run_branch
 from agl.sdk import (
+    ActivityReporter,
     Choice,
     Claude,
     OpenAI,
@@ -146,7 +147,7 @@ class Note:
     text: str
 
 @role(model=Claude.SONNET, accepts=(Note,))
-def implement() -> Role:
+def implement(*, watch: ActivityReporter | None = None) -> Role:
     """An effect role: no reporting tool, so the step's result is `null` and its effect is
     commits.
 
@@ -154,10 +155,15 @@ def implement() -> Role:
     nothing and once with the note the review produced, and both are calls this declaration allows.
     The prompt names `{{Note}}` all the same, because the declaration is checked against the prompt
     and not against a call - the first step renders `Not provided` there and the second the note.
+
+    `watch` is `decide(ask=...)`'s shape one field over and is there for the same reason: what an
+    author watches a run on is built inside their workflow, so a reporter cannot be written at this
+    level either. Omitted, the role reports to nobody, which is how `demo` and `landing` step it.
     """
     return Role(
         name="implement",
         instructions="implement what the request asks for. Earlier findings: {{Note}}",
+        on_activity=watch,
     )
 
 @role(model=OpenAI.SOL, accepts=(Request,))
@@ -253,6 +259,17 @@ def approve(question: Question) -> Screen[Answer]:
         responses=[Choice(option, value=Answer(option)) for option in question.options],
     )
 
+def a_board(lines: list[str], request: str) -> Screen:
+    """The other screen: what the run was asked for, and what its agent last said it was doing.
+
+    Passive - no responses - so it goes in the slot and nobody is waited for. It takes the author's
+    own list and not the `Run`, and that is the whole of what there is to know about watching one: a
+    reporter writes wherever the workflow points it, and the framework keeps no copy for a `Run` to
+    hand back. Blank until something is reported, an empty cell being the honest thing to show for
+    an agent that has not said anything yet.
+    """
+    return Screen(Rows([Row("request", request), Row("agent", lines[-1] if lines else "")]))
+
 @workflow
 async def demo(run: Run[DemoParams]) -> None:
     """Implement, then review what was implemented, and repair what the review found.
@@ -300,6 +317,19 @@ async def landing(run: Run[DemoParams]) -> None:
     verdict = outcome.verdict
     gated.append((outcome.conflicted, "" if verdict is None else verdict.output))
 
+@workflow
+async def watching(run: Run[DemoParams]) -> None:
+    """One step with the board up, which is the whole of how a workflow watches its own agent.
+
+    The board goes up before the step and is never shown again: `show` registers this function
+    against the list rather than the `Screen` it returns here, so the line the step reports reaches
+    a screen put up while there was nothing on it, with no second `show` and no notification of any
+    kind. That registration is `tests/sdk/test_run_terminal.py`'s claim; what this workflow adds is
+    the shape it has from the side an author writes it on.
+    """
+    await run.terminal.show(a_board, lines=watched, request=run.params.request)
+    await run.step(implement(watch=watched.append), commit=f"implement {run.params.request}")
+
 asked: Final[list[Question]] = []
 """Every question this file's workflows were asked, at module level because the workflows are:
 an entry point imports a module and reads an attribute in it, and sees no local of a test."""
@@ -319,6 +349,13 @@ Two plain values and not the `Integration` itself, for `answers`' reason: what a
 on is what their own workflow saw, and a framework type parked at module level here would be a
 name this file has to import in order to read a `bool` and a `str` back out of it."""
 
+watched: Final[list[str]] = []
+"""Every line `watching`'s agent reported, as the reporter its role carries was handed them.
+
+The workflow's own cell and not the framework's: there is nowhere else one could be, `Role` being
+the only thing that carries a reporter and `run.step` handing it to the adapter unwrapped. A list
+rather than the one string a board shows, so that "in the order they arrived" stays sayable."""
+
 # --- the agent, which is the author's own function -------------------------------------------
 
 SUMMARY: Final = "one thing worth changing"
@@ -328,6 +365,15 @@ NOT_YET: Final = "not yet"
 LANDED: Final = "landed.py"
 """What `landing`'s agent writes into the child's checkout, so `commit=` records something and the
 integration has work to carry. Top level in the tree, there being no directory to make first."""
+
+EDITING: Final = "Edit: src/a.py"
+"""What this file's implementer says it is doing, in the shape a serving adapter's own line has.
+
+Named where the review's is left a literal, because this one is spelled at both ends - the agent
+that reports it and the board that shows it - and two copies are free to disagree. `translate.py`
+in each agent adapter is where the real ones are formed, a tool's name and its subject, and nothing
+between there and a board parses one: what is on screen is what the backend said, character for
+character."""
 
 def _agent(seen: list[str], *, high: int = 0) -> Agent:
     """What every role's agent does, and a record of which of them ran.
@@ -354,7 +400,7 @@ def _agent(seen: list[str], *, high: int = 0) -> Agent:
                 says="reviewed it",
             )
         seen.append("effect")
-        return Reply(activity=["Edit: src/a.py"], says="implemented it")
+        return Reply(activity=[EDITING], says="implemented it")
 
     return agent
 
@@ -401,6 +447,7 @@ def _nothing_carried_over() -> None:
     asked.clear()
     answers.clear()
     gated.clear()
+    watched.clear()
 
 def _steps(recorded: tuple[Recorded, ...]) -> list[str]:
     """Which steps recorded something, in the order they did it."""
@@ -849,12 +896,13 @@ async def test_two_harnesses_in_one_directory_are_told_apart_by_project_and_labe
     assert record["label"] == FIRST_RUN
     assert record["params"] == {"request": "add oauth"}
 
-# --- `a_run`, and what a `Reply` alone does not do -----------------------------------------------
+# --- `a_run`, a board, and what a `Reply` alone does not do --------------------------------------
 #
-# Two things an author meets once they go past a workflow that merely runs: showing their own
-# board, which needs a live `Run` and cannot have one from `agl.sdk`; and testing a `commit=`,
-# where an agent scripted only as a `Reply` leaves nothing for the framework to commit. Both are
-# documented in `agl/testing.py`, and these are the claims those documents make.
+# Three things an author meets once they go past a workflow that merely runs: getting a live `Run`
+# to hand their own code, which needs a `Services` and a `RunScope` that are not on the authoring
+# surface; putting a board up, where the two spellings that carry a line are theirs at both ends and
+# the framework holds nothing in between; and testing a `commit=`, where an agent scripted only as a
+# `Reply` leaves nothing for the framework to commit.
 
 SEED: Final[Mapping[str, bytes]] = {"src/a.py": b"pass\n"}
 """The repository every run in this section starts from, so that "nothing was committed" is a
@@ -864,21 +912,8 @@ WRITTEN: Final = "implemented.py"
 """What the implementer in this section leaves in its checkout - the side effect a `Reply` has no
 field for and a real agent would have had."""
 
-ACTIVITY: Final = "Edit: src/a.py"
-"""A line in the serving adapter's own words, which is the only kind there is."""
-
 ELSEWHERE: Final = "b7c1d4f09a2e63518cd047fb29e15a83d604c7f2"
 """A head of the caller's own choosing, to tell `base=` from the default `a_run` falls back to."""
-
-def a_board(run: Run, request: str) -> Screen:
-    """A workflow author's board: what was asked for, and what the agent is doing about it.
-
-    Above the tests with the workflows, because it is the same kind of thing - a view is a pure
-    function of its arguments, and this is what `a_run` exists so that somebody can call. Passive:
-    no responses, so `show` would drop it in the slot and answer immediately without waiting for
-    anyone. It takes the `Run` and not `run.activity`, which is the whole point.
-    """
-    return Screen(Rows([Row("request", request), Row("agent", run.activity or "")]))
 
 def _writing(seen: list[str]) -> Agent:
     """`_agent`'s replies, plus the file an implementer would have left in the checkout.
@@ -919,8 +954,8 @@ def test_a_run_is_built_over_the_harnesss_own_bundle_and_its_own_address(tmp_pat
 
     Asserted by identity, because "the same bundle" is the property and not "an equal one": a
     factory that built a second `FakeServices` would give an author a `Run` whose terminal, store
-    and repository were not the ones their harness reads back afterwards, and every assertion in a
-    board test would be about a bundle nothing else touches.
+    and repository were not the ones their harness reads back afterwards, and every assertion they
+    made after calling their own code would be about a bundle nothing else touches.
     """
     harness = testing.harness(tmp_path, files=SEED)
 
@@ -931,67 +966,8 @@ def test_a_run_is_built_over_the_harnesss_own_bundle_and_its_own_address(tmp_pat
     assert run.scope is harness.scope
     assert run.terminal is harness.fakes.services.terminal
 
-def test_a_run_reports_the_activity_it_was_built_with_and_nothing_otherwise(tmp_path: Path) -> None:
-    """`activity=` is the harness's one write of the engine's cell; `None` is the ordinary value.
-
-    `run.activity` is a property over `Steps._activity`, which only an adapter reporting from inside
-    a live step writes for real - so without this keyword a board could only ever be tested empty,
-    and with it the two states a board renders are both reachable from a supported spelling.
-    """
-    harness = testing.harness(tmp_path)
-
-    assert testing.a_run(harness, DemoParams(request="add oauth")).activity is None
-    assert testing.a_run(harness, DemoParams(request="add oauth"), activity=ACTIVITY).activity == (
-        ACTIVITY
-    )
-
-def test_a_board_is_a_function_of_the_run_it_is_handed(tmp_path: Path) -> None:
-    """What `a_run` is for: calling a view, and comparing the `Screen` it answered with.
-
-    The empty cell is the one worth writing out in full, because it is what a board renders
-    whenever nothing is running and it is the state an `activity=` keyword alone can reach.
-    """
-    harness = testing.harness(tmp_path)
-    idle = testing.a_run(harness, DemoParams(request="add oauth"))
-    working = testing.a_run(harness, DemoParams(request="add oauth"), activity=ACTIVITY)
-
-    assert a_board(idle, "add oauth") == Screen(
-        Rows([Row("request", "add oauth"), Row("agent", "")])
-    )
-    assert a_board(working, "add oauth") != a_board(idle, "add oauth")
-
-def test_reports_moves_a_board_that_is_already_up(tmp_path: Path) -> None:
-    """`reports` is the half of the reach a constructor argument cannot express.
-
-    The design is that `show` registers a view and its arguments and invokes them again every
-    frame, so the claim is about **one** `Run`: read it, report something, read it again, and the
-    two screens differ. A board that read `run.activity` once and cached it against the object it
-    was handed satisfies everything `a_run(activity=...)` can ask on its own and fails here, which
-    is why the two functions exist rather than one.
-
-    The equality half is the other thing the terminal needs: two calls with nothing reported in
-    between must compare equal, because that comparison is how the redraw loop decides to write
-    nothing at all. And `reports(run, None)` is the step ending - the state a replayed step is in
-    for the whole of its life, where reporting anything would be a lie.
-    """
-    harness = testing.harness(tmp_path)
-    run = testing.a_run(harness, DemoParams(request="add oauth"), activity=ACTIVITY)
-    first = a_board(run, "add oauth")
-
-    testing.reports(run, "Bash: pytest -q")
-    second = a_board(run, "add oauth")
-
-    assert first != second
-    assert second == a_board(run, "add oauth")
-
-    testing.reports(run, None)
-
-    assert a_board(run, "add oauth") == Screen(
-        Rows([Row("request", "add oauth"), Row("agent", "")])
-    )
-
 @pytest.mark.asyncio
-async def test_a_run_built_for_a_view_starts_where_it_was_told_and_records_nothing(
+async def test_a_run_an_author_was_handed_starts_where_it_was_told_and_records_nothing(
     tmp_path: Path,
 ) -> None:
     """The other half of what `a_run` promises: `base=`, and that none of this is a run.
@@ -999,8 +975,8 @@ async def test_a_run_built_for_a_view_starts_where_it_was_told_and_records_nothi
     The default base is a well-formed sha naming no state the bundle holds, which is honest because
     nothing built here takes a step - so the assertion worth writing is that a caller who does have
     a head gets theirs. And nothing is written anywhere: no record at the scope, no entry on the
-    ledger. A factory that had quietly opened a workspace or written a record would make a board
-    test into a run, and the author's next `harness.run` would meet a label already in use.
+    ledger. A factory that had quietly opened a workspace or written a record would make a test of
+    the author's own code into a run, and their next `harness.run` would meet a label in use.
     """
     harness = testing.harness(tmp_path, files=SEED)
 
@@ -1013,10 +989,43 @@ async def test_a_run_built_for_a_view_starts_where_it_was_told_and_records_nothi
     assert await harness.fakes.store.read_record(harness.scope) is None
 
 @pytest.mark.asyncio
+async def test_a_watched_roles_reporter_feeds_the_board_the_line_its_agent_reported(
+    tmp_path: Path,
+) -> None:
+    """A dashboard end to end, in the two spellings an author has and with nothing between them.
+
+    `Reply`'s activity is what their agent says it is doing and `Role.on_activity` is where that
+    line arrives. Both are theirs, the framework holds no copy of what passes between them, and no
+    `Run` is anywhere on the path - so the two screens below are the whole claim: the empty one is
+    taken before the run, from the same view over the same list, and what separates them is a line
+    that came out of an agent.
+
+    Nothing here is about drawing one. `show` registers a view and its arguments, the redraw loop
+    and the diff belong to the adapter, and `HeadlessTerminal` drops a passive screen and answers
+    at once - so what a run proves is that the line arrived and that a board built from the list
+    reads it. Which is also why the reporter is the assertion and not `harness.recorded`: activity
+    reaches no entry, no fingerprint and no store, so the ledger of this run says nothing about it.
+    """
+    harness = testing.harness(tmp_path, agent=_agent([]), files=SEED)
+    idle = a_board(watched, "add oauth")
+
+    await harness.run(watching, "-r", "add oauth")
+
+    assert watched == [EDITING], (
+        "the line this file's own agent reported is not what its role's reporter was handed. A "
+        "`Reply`'s activity is performed through the fake's own `report`, and a step hands the "
+        "adapter the reporter its role carries and wraps it in nothing"
+    )
+    assert idle == Screen(Rows([Row("request", "add oauth"), Row("agent", "")]))
+    assert a_board(watched, "add oauth") == Screen(
+        Rows([Row("request", "add oauth"), Row("agent", EDITING)])
+    )
+
+@pytest.mark.asyncio
 async def test_an_agent_that_only_replies_leaves_every_commit_message_with_nothing_to_carry(
     tmp_path: Path,
 ) -> None:
-    """The trap `agl/testing.py` documents, made into the failure it actually produces.
+    """The trap a `Reply` sets under a `commit=`, made into the failure it actually produces.
 
     A `Reply` has no member that touches the worktree, and `commit_all` is "a no-op when nothing is
     dirty, returning the unchanged head" - so a step passing `commit="implement add oauth"` over an
@@ -1051,6 +1060,6 @@ async def test_an_agent_that_only_replies_leaves_every_commit_message_with_nothi
         "could have produced - a `Reply` has no member that writes a file"
     )
     assert _on_the_branch(working) == {**SEED, WRITTEN: b"what the implementer wrote\n"}, (
-        "the run whose agent wrote into `task.workspace` did not commit it, so the one line "
-        "`agl/testing.py` tells an author to add does not in fact reach the branch"
+        "the run whose agent wrote into `task.workspace` did not commit it, so the one line an "
+        "author has to add for a `commit=` to carry anything does not in fact reach the branch"
     )

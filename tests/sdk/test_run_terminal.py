@@ -35,12 +35,13 @@ checked by deleting the line and watching them fail. A resumed run shows the sam
 showed, and there is nothing weaker than a `show` that can tell whether a terminal was entered.
 
 **A view's arguments are registered, not evaluated.** The port promises that `show` keeps the
-function and its arguments and that the loop invokes it again per frame, which is what makes
-`Text(run.activity)` live and what lets a workflow pass the live dict of child runs. What this layer
-could get wrong is handing the terminal something else - a `Screen` already computed, a copy of the
-arguments, a wrapper that normalises them - so `_Recording` below keeps what arrived, the test
-mutates the workflow's own object afterwards and invokes the view again. It is deliberately not a
-redraw loop: one invocation by hand is the whole of the claim being made here.
+function and its arguments and that the loop invokes it again per frame, which is what makes a
+`Text` over whatever a role's `on_activity` last wrote live and what lets a workflow pass the live
+dict of child runs. What this layer could get wrong is handing the terminal something else - a
+`Screen` already computed, a copy of the arguments, a wrapper that normalises them - so
+`_Recording` below keeps what arrived, the test mutates the workflow's own object afterwards and
+invokes the view again. It is deliberately not a redraw loop: one invocation by hand is the whole
+of the claim being made here.
 
 `container.fakes()` builds a `HeadlessTerminal`, which no-ops a passive `Screen` and refuses a
 `Screen[T]` with `UpstreamUnavailable`, and that is what the port-level assertions drive; the three

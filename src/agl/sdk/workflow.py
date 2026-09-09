@@ -50,14 +50,6 @@ class Run[P = object]:
         )
 
     @property
-    def activity(self) -> str | None:
-        """What the agent serving this run is doing, for a view the terminal redraws every frame.
-
-        :return: the adapter's own line, or `None` between steps and on a step replayed from cache
-        """
-        return self._steps.activity
-
-    @property
     def terminal(self) -> Terminal:
         """The display this run shows on, and the same object for every run in the tree.
 

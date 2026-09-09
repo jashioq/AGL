@@ -52,11 +52,11 @@ Eight of these are worth naming, because each is written against a failure that 
     every recorded entry keeps its address, every step replays, and the document each address
     stands for is one nobody was ever asked.
 
-`run.activity` is here too, at the end, because this file already holds the only thing that
-dispatches to an adapter. There is little to it by design - the framework holds the last string
-it was handed and hands it back - so what the tests are written against is the two ways it
-could be wrong that nobody would see - a line surviving the step that produced it, and a step
-replayed from cache producing one at all.
+`Role.on_activity` is here too, at the end, because this file already holds the only thing that
+dispatches to an adapter. There is nothing to it by design - the role's own reporter is what
+reaches the adapter and the framework keeps no copy of what it says - so what the tests are
+written against are the two ways that could be wrong and nobody would see: a line rewritten on
+its way through, and a step replayed from cache calling a reporter at all.
 """
 
 import asyncio
@@ -734,15 +734,10 @@ def _blocks(record: _Agent, running: asyncio.Event, writes: Mapping[str, bytes])
     `running` is set once the leavings are on disk, so the test cancels at a point it chose rather
     than at one it hoped for: before it is set there is nothing to wipe, and after it the agent is
     suspended and will stay that way until the task around it is torn down.
-
-    It reports an activity line on its way in, so that the cell that is `None` when nothing is
-    running has something in it at the moment the cancellation lands. Without that the assertion
-    about it afterwards would be true of an implementation that never set it either.
     """
 
     async def _script(conversation: Conversation) -> AgentOutcome:
         record.runs.append(conversation.task.instructions)
-        conversation.report("Bash: ./gradlew build")
         for name, content in writes.items():
             target = conversation.task.workspace / name
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -814,7 +809,6 @@ async def test_a_cancelled_step_still_wipes_the_worktree_and_records_nothing(
     assert _git(workspace.path, "status", "--porcelain") == ""
     assert _git(workspace.path, "rev-parse", "HEAD").strip() == base
     assert _entries(tmp_path, "review") == [], "a cancelled step was recorded as done"
-    assert run.activity is None, "a cancelled step left its last activity line standing"
 
 @pytest.mark.asyncio
 async def test_a_cancelled_step_with_commit_still_commits_and_still_records_nothing(
@@ -1650,87 +1644,59 @@ async def test_two_roles_differing_only_in_case_do_not_replay_each_others_entrie
     assert len(record.runs) == 2, "one of the two steps was never dispatched to an agent"
     assert len(_recorded(tmp_path, "Review", "review")) == 2
 
-# --- `run.activity` ------------------------------------------------------------------------------
+# --- `Role.on_activity` --------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_activity_is_the_adapters_own_last_line_and_is_gone_when_the_step_ends(
+async def test_a_roles_activity_reporter_is_handed_the_adapters_own_lines_in_order(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """The framework holds the last string it was handed and hands it back, and that is all.
+    """The role's own reporter is what reaches the dispatch, and a line arrives unedited.
 
-    The two lines are read from *inside* the run, because that is the only place there is anything
-    to read - `None` when nothing is running means an assertion after the step can only ever see
-    `None`. They are deliberately spelled the documented way, tool name and target, to make
-    the point that nothing here parsed either one: no `Activity` type, no verb taxonomy, no lookup
-    table, so what comes back is what the adapter said, character for character.
-
-    **And it is cleared when the step ends**, which is the half that fails silently. A line left
-    standing describes work that finished minutes ago, on a screen redrawn every frame, and
-    nothing anywhere raises about it.
+    The two lines are spelled the documented way, tool name and target, to make the point that
+    nothing here parsed either one: no `Activity` type, no verb taxonomy, no lookup table, so what
+    the reporter is handed is what the adapter said, character for character and in that order.
+    The framework keeps no copy of any of it, so this list is the only place a line ever lands -
+    which is also why the assertion is on what the reporter recorded and not on the `Run`.
     """
     record = _Agent()
-    seen: list[str | None] = []
-    run: Run[None] | None = None
+    seen: list[str] = []
 
     async def _reports(conversation: Conversation) -> AgentOutcome:
-        assert run is not None, "the script ran before the `Run` it reads existed"
         record.runs.append(conversation.task.instructions)
-        seen.append(run.activity)
         conversation.report("Bash: ./gradlew build")
-        seen.append(run.activity)
         conversation.report("Edit: domain/usecase.kt")
-        seen.append(run.activity)
         record.results.append(await conversation.call(REPORT.name, {"text": "done"}))
         return AgentOutcome(stop_reason=StopReason.COMPLETED, text="")
 
     run = _run(repository, tmp_path, base, _reports)
+    watching = replace(_role("review", "review", read_only=True), on_activity=seen.append)
 
-    assert await run.step(_role("review", "review", read_only=True)) == Summary("done")
+    assert await run.step(watching) == Summary("done")
 
-    assert seen == [None, "Bash: ./gradlew build", "Edit: domain/usecase.kt"], (
-        "the activity a step reported is not what came back out of `run.activity`: either an "
-        "adapter's line was rewritten on its way through, or the cell is not the most recent one"
-    )
-    assert run.activity is None, (
-        "the last line of a finished step is still there. `None` means nothing is running, "
-        "and a view re-invoked every frame will go on reporting a build that ended long ago"
+    assert seen == ["Bash: ./gradlew build", "Edit: domain/usecase.kt"], (
+        "what the adapter reported is not what the role's reporter was handed: either a line was "
+        "rewritten on its way through, or one of them never arrived at all"
     )
 
 @pytest.mark.asyncio
-async def test_a_step_that_raises_leaves_no_activity_behind_and_a_replayed_one_reports_none(
+async def test_a_step_replayed_from_cache_never_calls_the_roles_activity_reporter(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """The two endings that are not "it returned", and the one that cannot report at all.
+    """A replayed step has no activity at all, structurally rather than by a check.
 
-    An agent that died mid-`Bash` is not still running `Bash`, so the cell is cleared on the way
-    out of a dispatch that raised exactly as on the way out of one that returned. (The cancelled
-    ending is asserted where the cancellation is, beside the wipe it shares a `finally` with.)
+    The second walk below is handed a script that reports on its very first line and is never
+    called at all, which is the whole mechanism: the reporter travels on the dispatch, a replay
+    hit returns the stored value without dispatching, and so there is no call that could produce a
+    line. Nothing about it is written down, which is the other half of the same sentence and is
+    why it cannot come back off the ledger either.
 
-    **A step replayed from cache has no activity at all, correctly, since nothing is running.**
-    The second walk below is handed a script that reports on its very first line and is
-    never called at all, which is the whole mechanism: activity comes from a callback passed on the
-    dispatch, a replay hit returns the stored value without dispatching, and so there is no call
-    that could produce a line. Nothing about it is written down, which is the other half of the
-    same sentence and is why it cannot come back off the ledger either.
+    The reporter arrives through `replace` rather than through `_role`, and that is load-bearing:
+    `tests/sdk/test_roles.py` pins `on_activity` as no term of a step's digest, so the watched role
+    and the plain one above it are one address and the second walk is a hit rather than a miss.
     """
     record = _Agent()
+    seen: list[str] = []
 
-    async def _dies(conversation: Conversation) -> AgentOutcome:
-        record.runs.append(conversation.task.instructions)
-        conversation.report("Bash: ./gradlew build")
-        raise _Crash("the agent died mid-step")
-
-    dying = _run(repository, tmp_path, base, _dies)
-
-    with pytest.raises(_Crash):
-        await dying.step(_role("review", "review", read_only=True))
-
-    assert dying.activity is None, (
-        "an agent that died mid-`Bash` left `Bash` on the board. The cell is cleared on every exit "
-        "from the dispatch and not only on the one that returned"
-    )
-
-    # And now a walk that records something, followed by one that replays it.
     fresh = _run(repository, tmp_path, base, _agent(record))
     assert await fresh.step(_role("review", "review", read_only=True)) == Summary("review #0")
 
@@ -1740,11 +1706,12 @@ async def test_a_step_that_raises_leaves_no_activity_behind_and_a_replayed_one_r
         return AgentOutcome(stop_reason=StopReason.COMPLETED, text="")
 
     replaying = _run(repository, tmp_path, base, _shouts)
-    assert await replaying.step(_role("review", "review", read_only=True)) == Summary("review #0")
+    watching = replace(_role("review", "review", read_only=True), on_activity=seen.append)
+    assert await replaying.step(watching) == Summary("review #0")
 
-    assert len(record.runs) == 2, "the replay dispatched an agent, so it proves nothing about this"
-    assert replaying.activity is None, (
-        "a step replayed from cache produced an activity line. Nothing was running, so there was "
+    assert len(record.runs) == 1, "the replay dispatched an agent, so it proves nothing about this"
+    assert seen == [], (
+        "a step replayed from cache reported an activity line. Nothing was running, so there was "
         "nothing to report - and activity is never persisted, so nothing could have come back"
     )
 

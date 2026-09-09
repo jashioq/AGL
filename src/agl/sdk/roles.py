@@ -6,6 +6,7 @@ from functools import update_wrapper
 from pathlib import Path
 from typing import Protocol
 from agl.ports.agent import (
+    ActivityReporter,
     Capability,
     Claude,
     ModelId,
@@ -19,6 +20,7 @@ from agl.sdk._engine.prompts import check_placeholders
 from agl.sdk.tools import ReportingTool
 
 __all__ = [
+    "ActivityReporter",
     "Capability",
     "Claude",
     "ModelId",
@@ -46,6 +48,9 @@ class Role[P = None]:
     tools: Sequence[Tool | ReportingTool[P]] = ()
 
     requires: AbstractSet[Capability] = frozenset()
+
+    on_activity: ActivityReporter | None = None
+    """Each line as the agent works, nothing when a step ends: the last stands until the next."""
 
     def __post_init__(self) -> None:
         StepName(self.name)

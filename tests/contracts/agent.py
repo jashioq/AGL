@@ -401,7 +401,7 @@ class AgentContract(AgentPreflightContract, AgentHermeticityContract):
     async def test_an_activity_reporter_that_raises_ends_the_run_with_its_own_exception(
         self, runner: AgentRunner, model: ModelId, tmp_path: Path
     ) -> None:
-        """The port's rule about a broken reporter, which used to be four implementations agreeing.
+        """The port's rule about a failing reporter, which used to be four implementations agreeing.
 
         `on_activity` is the caller's code and it can hit a bug - a dashboard that has gone away, a
         `KeyError` in somebody's formatting. The port settles what an adapter does about it, and
@@ -410,15 +410,17 @@ class AgentContract(AgentPreflightContract, AgentHermeticityContract):
 
         **Why that and not the swallow.** Activity is decoration - live-only, never persisted, and
         a run that dies because a progress line could not be drawn has lost real work for a
-        cosmetic reason. Against which: the framework's own reporter is a single assignment, so a
-        reporter that raises is a *broken* one and the trade is not "a step or a progress line" but
-        "a bug that says so or a bug that does not, on every step, for the length of a run"; the
-        clause above says the same of a **tool handler**, which is the closest neighbour there is -
-        the other piece of caller code an adapter invokes during a run, ending it with its own
-        exception for its own reasons; terminal views are decoration by the same definition and
-        what a view raises comes straight out; and a step that dies is a step the journal never
-        recorded, so a resume replays everything before it. `ports/agent.py` carries the argument
-        in full.
+        cosmetic reason. And the caller is not the framework: what an adapter is handed is
+        `Role.on_activity`, the workflow author's own function, passed straight through by
+        `sdk/_engine/steps.py` and wrapped by nothing - so a `KeyError` in somebody's format string
+        ends the step after the agent has been paid for and before the entry is written, and the
+        resume re-buys it. The decision stands anyway, and on three grounds. The clause above says
+        the same of a **tool handler**, which is the closest neighbour there is - the other piece
+        of author code an adapter invokes during a run, ending it with its own exception for its
+        own reasons; terminal views are decoration by the same definition and what a view raises
+        comes straight out; and the swallow's price is paid on every line for the length of a run,
+        by a reporter nothing ever mentions again. `ports/agent.py`'s `:param on_activity:` states
+        the rule; this is the argument for it.
 
         The tool handler is cited here and `on_question` is not, although `on_question` raising
         ended a run too and used to be the evidence this paragraph gave. It was a callback on its

@@ -54,7 +54,8 @@ import importlib
 import json
 import sys
 from collections.abc import Mapping, Sequence
-from dataclasses import FrozenInstanceError, dataclass, replace
+from dataclasses import FrozenInstanceError, dataclass, fields, replace
+from inspect import Parameter, signature
 from pathlib import Path
 from typing import Final, assert_type, cast
 import pytest
@@ -138,6 +139,15 @@ def _plain(name: str) -> Tool:
         payload_schema={"type": "object", "properties": {}},
         handler=_never_called,
     )
+
+def _note(line: str) -> None:
+    """The shape `Role.on_activity` holds: one line in, nothing back, and nothing awaited.
+
+    It raises rather than doing nothing, for `_never_called_factory`'s reason further down: no
+    agent runs in this suite, so anything calling it would be reporting activity that never
+    happened, and a reporter that passed quietly would let that go green.
+    """
+    raise AssertionError(f"a role's activity reporter was called by something: {line!r}")
 
 def _reporting_of[P](role: Role[P]) -> ReportingTool[P] | None:
     """The scan `Run.step` makes to decide which of the two step kinds this is.
@@ -1162,6 +1172,33 @@ def test_it_carries_a_message_and_nothing_else() -> None:
 
 # --- the terms a role contributes to a step's fingerprint ----------------------------------------
 
+def test_a_role_declares_exactly_these_eight_fields_and_derives_its_model_and_accepts() -> None:
+    """The list the tests below divide, read off the class rather than restated in prose here.
+
+    `tests/sdk/test_workflow.py` reads `fields(Workflow)` for the reason it gives there - a second
+    field arriving has to fail a line rather than pass one - and the reason is sharper here. Four
+    of these eight are terms of `base_of` and the rest reach a digest through something else or not
+    at all, so a ninth added without a decision about which it is joins the last group by default:
+    silently, and looking right. `slots=True` refuses the attribute nobody declared and has nothing
+    at all to say about a declared one.
+
+    `model` and `accepts` are properties over `_model` and `_accepts`, which is the difference
+    between what a factory stamps on and what a call site may write: `Role(model=…)` is not a
+    spelling, and the two `isinstance` checks are what say the readers are still derived.
+    """
+    assert [held.name for held in fields(Role)] == [
+        "name",
+        "instructions",
+        "_model",
+        "_accepts",
+        "restrictions",
+        "tools",
+        "requires",
+        "on_activity",
+    ]
+    assert isinstance(vars(Role)["model"], property)
+    assert isinstance(vars(Role)["accepts"], property)
+
 def test_the_four_terms_of_a_role_are_the_four_base_of_takes() -> None:
     """Not a restatement of `base_of`: the measurement is that a role's own fields are exactly what
     `Run.step` hands it, so a role is fingerprinted with nothing derived on the way."""
@@ -1169,6 +1206,55 @@ def test_the_four_terms_of_a_role_are_the_four_base_of_takes() -> None:
     assert _base(REVIEWER) != _base(_reviewer_on_claude())
     assert _base(REVIEWER) != _base(replace(REVIEWER, restrictions=frozenset()))
     assert _base(REVIEWER) != _base(replace(REVIEWER, tools=()))
+
+def test_the_activity_reporter_a_role_carries_is_no_term_of_a_steps_digest() -> None:
+    """The guard that comes back with the field, and it stood here once under `on_question`.
+
+    A reporter is built per call, closing over whatever is watching this run, so a digest reading
+    one would differ from itself on the next call and every entry ever recorded would miss. That is
+    `tests/sdk/test_journal.py`'s argument about `Tool.handler`, one layer up and about a field of
+    a role rather than a member of a tool.
+
+    Both spellings are here because each checks a different half. `dataclasses.replace` takes its
+    changes as `Any`, so the constructor is the only line mypy reads the annotation at; `replace`
+    is what holds every other term still. And the inequality keeps the equality honest - `_base`
+    has to be seen separating two roles before "these two agree" says anything about the reporter.
+    """
+    declared = Role(name="review", instructions=_REVIEW, on_activity=_note)
+    assert declared.on_activity is _note
+
+    watching = replace(REVIEWER, on_activity=_note)
+    assert _base(watching) == _base(REVIEWER)
+    assert _base(replace(REVIEWER, restrictions=frozenset())) != _base(REVIEWER), (
+        "`_base` does not separate two roles differing in a term it takes, so the agreement above "
+        "holds of any pair at all and measures nothing about the reporter"
+    )
+
+def test_base_of_names_its_seven_terms_and_takes_no_role_at_all() -> None:
+    """Why a field added to `Role` is out of the digest by construction and needs no denylist.
+
+    `Run.step` destructures the role two hops above `base_of`, which names every term it takes
+    keyword-only and holds no parameter a whole `Role` could arrive through. So `on_activity` - and
+    whatever is declared beside it later - is excluded by a signature rather than by a rule
+    somebody has to remember to extend, and the test above measures a consequence of this one.
+
+    Read off `signature` and not off the source, because a `**params` added here would leave these
+    seven names exactly where a reader finds them while reopening the door underneath.
+    """
+    taken = signature(base_of).parameters
+    assert list(taken) == [
+        "instructions",
+        "model",
+        "restrictions",
+        "tools",
+        "inputs",
+        "prompt",
+        "head",
+    ]
+    assert all(held.kind is Parameter.KEYWORD_ONLY for held in taken.values()), (
+        "`base_of` has a parameter that is not keyword-only, so what a role contributes is no "
+        "longer the seven terms named above and a value can reach it without being named"
+    )
 
 def test_a_roles_reporting_tool_reaches_the_digest_through_its_derived_schema() -> None:
     """The cascade, one link out from `tests/sdk/test_tools.py`: change what the agent
