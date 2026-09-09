@@ -60,11 +60,11 @@ class Run[P = object]:
     async def step[R](self, role: Role[R], *inputs: object, commit: str | None = None) -> R:
         """Run one step against this run's checkout, or replay its entry and pay for nothing.
 
-        :param role: carries the step's name, so two calls on one role are told apart by inputs
+        :param role: names the step; two calls on it are two entries, neither replaying the other
         :param inputs: one per accepted type, recorded under its name and filling its `{{TypeName}}`
         :param commit: given, commits whatever is dirty; omitted, resets and cleans it all away
         :return: the reporting tool's payload as its dataclass, or `None` for a role declaring none
-        :raises InputError: an input is of no type the role accepts, or two of them share one type
+        :raises InputError: nothing accepts an input, two share a type, or one will not canonicalise
         """
         return await self._steps.step(role, inputs, commit=commit)
 

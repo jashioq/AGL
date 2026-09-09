@@ -35,7 +35,10 @@ __all__ = [
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Role[P = None]:
+    """What one step asks of one agent: a name, a prompt, tools, restrictions and a watcher."""
+
     name: str
+    """The `steps/<name>/` directory its entries file under, matched with the case folded away."""
 
     instructions: str
 
@@ -88,7 +91,7 @@ class Role[P = None]:
     def model(self) -> ModelId:
         """Which model runs this role, bound by its factory rather than written on the `Role`.
 
-        :return: the model, which is a fingerprint term and decides the provider; never `None`
+        :return: the model and so the provider; a fingerprint term, so changing it replays nothing
         :raises InputError: this `Role` came from a bare `Role(...)` no factory bound a model to
         """
         if self._model is None:
@@ -111,6 +114,8 @@ class Role[P = None]:
         return self._accepts
 
 class RoleFactory[**P, R]:
+    """What `@role` returns: a declaration, plus the name, model and types read without calling."""
+
     __name__: str
     __qualname__: str
 

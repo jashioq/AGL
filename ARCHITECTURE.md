@@ -285,6 +285,36 @@ nothing across the refusals they have to read. A `show` outside it is `InternalE
 is annotated `-> None` on the port and suppressing an exception means returning something truthy,
 so no conforming terminal can swallow a workflow's `Stop`.
 
+**The last frame a workflow puts up is drawn by the teardown, because by then nothing else is left
+to draw it.** Drawing is a task on a timer, so whatever a workflow does between the loop's last
+pass and its own return — the line it writes into a live argument, the closing summary it `show`s —
+has not been drawn when the terminal is handed back, and nothing later draws it: on a console that
+animates, `Live.stop` repaints the renderable it was last handed rather than rendering anything
+new, and on one that appends there is no `Live` at all and the frame is simply never printed.
+`RichTerminal.__aexit__` therefore draws once more, and where it does that is load-bearing in both
+directions — after the redraw task is cancelled and gathered, so the loop cannot race the write,
+and before `Screens.close()`, which empties the slot and would leave the same call blanking the
+display rather than writing to it. One call covers both ways a frame can be outstanding, and
+neither of them is a `Screen` held back to be replayed: a mutated argument, because the view is
+invoked again, and a `show` the loop never reached, because `show` registers into the slot and
+`Screens.displayed` is what the draw reads. It goes through the ordinary diff, so a board that did
+not move writes nothing, and it sits inside the same `try` as the rest of the teardown, because the
+run that ends badly is the run whose display most needs handing back — so a run that ends in an
+exception ends on its last board too.
+`tests/adapters/test_rich_terminal.py::test_the_final_frame_is_rendered_from_the_view_again_rather_than_lost_at_teardown`
+and `::test_a_run_that_ends_in_a_stop_still_leaves_its_last_board_on_screen` are those two cases,
+and `::test_an_appending_log_takes_the_final_frame_once_and_only_when_it_changed` is the same frame
+on `_display.py`'s other display path, where drawing twice is not free: a run whose output is redirected to
+a file gets one extra line at the end of its log for a board that moved on the way out, and nothing
+at all for a board that did not.
+
+**That is `RichTerminal`'s promise and deliberately not the port's.** `HeadlessTerminal` and
+`ScriptedTerminal` draw nothing and so have nothing to flush, and a member on `Terminal` would make
+the fix something a caller opts into, for a race that AGL's own teardown causes. What it decides
+for a workflow author is that nothing is owed on the way out: a sleep before a workflow's last line
+buys nothing here and never did — the frame it would be waiting for is drawn by the teardown either
+way — so a workflow carrying one should drop it.
+
 **Agent activity is one string, handed straight to the role's own reporter and never written down.**
 Each adapter formats its own line — `Bash: ./gradlew build`, `Edit: domain/usecase.kt` — and the
 router passes it through untouched: no `Activity` type, no shared verb taxonomy, no framework lookup
@@ -304,6 +334,219 @@ measures. Nothing about activity reaches an `Entry`, a fingerprint or the store,
 what holds that. One reporter is one callable wherever it is stepped: a parent and a child taking
 the *same* role object report into it alike, and telling them apart is the workflow's business
 rather than the framework's — "Deliberately not built" carries what that costs.
+
+**Watching a run is four pieces and the workflow author writes all four**, the framework supplying
+none of them: somewhere to keep what is reported, a view that reads it, a factory parameter that
+carries the reporter into the role, and one `show` before the step.
+
+```python
+from agl.sdk import ActivityReporter, Claude, Role, Row, Rows, Run, Screen, role, workflow
+
+lines: list[str] = []                                   # the author's own cell
+
+def a_board(lines: list[str], request: str) -> Screen:  # a pure view of its arguments
+    return Screen(Rows([Row("request", request), Row("agent", lines[-1] if lines else "")]))
+
+@role(model=Claude.SONNET)                              # the reporter is a factory parameter
+def implement(*, watch: ActivityReporter | None = None) -> Role:
+    return Role(name="implement", instructions="do what the request asks", on_activity=watch)
+
+@workflow
+async def watching(run: Run[Params]) -> None:           # show once, before the step
+    await run.terminal.show(a_board, lines=lines, request=run.params.request)
+    await run.step(implement(watch=lines.append), commit=f"implement {run.params.request}")
+```
+
+`Params` is the workflow's own params dataclass, and that single `show` is the whole of the wiring:
+it registers the function and the list rather than the screen they make, so the line the step
+reports reaches a board that was put up while there was nothing on it, with no second `show` and no
+notification of any kind —
+`tests/sdk/test_run_terminal.py::test_show_registers_the_view_and_its_arguments_rather_than_a_screen`
+is that half on its own. The reporter cannot be written beside the role for the same reason an
+asking tool cannot: it closes over something the workflow owns, which is what a factory parameter
+is for, and `implement(watch=…)` is deliberately the shape of `tests/test_testing.py`'s
+`decide(ask=…)`, one field over. `ActivityReporter` is re-exported from `agl.sdk` so that the annotation costs no import
+from `agl.ports`. That same file's
+`test_a_watched_roles_reporter_feeds_the_board_the_line_its_agent_reported` is this workflow end to
+end against an agent reporting one line, and is the shape to copy.
+
+**A board over a resumed run is blank until the first step that actually runs.** That follows from
+the replay rule above rather than being a second rule — a hit never dispatches, so there is nothing
+for a reporter to be handed — but it is worth its own sentence, because what it looks like from a
+terminal is a display that has stopped working. A workflow whose first three steps all replay shows
+an empty cell where the first walk showed three agents' worth of lines, and the first thing to move
+it is step four.
+
+**A view and a reporter are both author code running inside AGL, and they are contained
+differently — which is the whole of what to be careful about.** A view is invoked again for every
+frame it is on screen, so it must be pure and cheap — `ports/terminal.py`'s `:param view:` is where
+that is written — and `RichTerminal` contains what one raises at both moments the port leaves open:
+the invocation `show` makes for itself raises at the workflow's own call site and registers nothing
+(`tests/adapters/test_rich_terminal.py::test_a_view_that_raises_the_first_time_raises_at_the_workflow_s_own_call_site`),
+and a view that starts raising later becomes a frame naming it and the failure while the loop
+carries on drawing (`::test_a_view_that_starts_raising_becomes_a_frame_and_the_loop_carries_on_drawing`).
+A reporter is contained nowhere. It is called synchronously from inside the dispatch, while the
+agent's own message stream is being read, so it must not block; and what it raises comes back out
+of `AgentRunner.run` in place of an `AgentOutcome` with nothing wrapping it, which means a
+`KeyError` in a format string ends the step *after* the agent has been paid for and *before* the
+entry is written, so the resume buys that step over again. Keep a reporter total — `lines.append`,
+not a formatter.
+`tests/contracts/agent.py::test_an_activity_reporter_that_raises_ends_the_run_with_its_own_exception`
+is the rule and carries the argument for preferring it to the swallow; "Errors at the boundary" is
+where such an exception goes from there.
+
+**What is guaranteed is short and every part of it is pinned; what is left to the author is
+longer.** A line reaches `role.on_activity` unedited and in the order the adapter reported it
+(`tests/sdk/test_run_step.py::test_a_roles_activity_reporter_is_handed_the_adapters_own_lines_in_order`);
+a replayed step never calls it; none of it reaches an `Entry`, a fingerprint or the store; and a
+reporter's exception is not swallowed — the tests holding those three are named above. Left to the
+author entirely: where a line is kept and for how long, whether it is ever cleared, how N agents
+are told apart, and what a board shows for a cell nothing has written to yet. AGL holds no opinion
+about any of them, which is why there is nothing in `src/` to read one off.
+
+## Typed step inputs
+
+**A role declares the types it can be handed, its prompt names each one as `{{TypeName}}`, and a
+step passes values.** The declaration is `@role(model=…, accepts=(Ticket, Decisions))` and never
+anything written on the `Role` that function returns: `accepts=` sits on the decorator beside
+`model=` and travels the same way, held as a plain attribute of the `RoleFactory` and stamped onto
+each built `Role` by `RoleFactory.__call__`. That is what makes a declaration readable without
+being called — what `sdk/_engine/preflight.py` already spends on `model=`, and what
+`tests/sdk/test_roles.py::test_the_accepted_types_are_readable_without_invoking_the_factory` pins
+for `accepts=`, against a factory whose body raises. What a call passes is positional and unnamed:
+`preflight.py`'s `checked_inputs` matches each value to a declared type by `isinstance` and records
+it under that type's `__qualname__`, so argument order reaches neither the mapping, the prompt nor
+the digest, and there is no keyword for a caller to get wrong.
+
+**`accepts=` is a permission at a step and a demand at a declaration.** A step may pass any subset
+of the declared types, in any order, including none of them; a declaration must name every one of
+them in its prompt and no others. Those two sentences are not in tension, because they are about
+different things. What a role can *ever* be handed is static, written twice by the author — once as
+types, once as placeholders — and `sdk/_engine/prompts.py`'s `check_placeholders` compares the two
+for set equality at the factory call. What a given round *did* hand it is dynamic, and a declared
+type this round left out renders `Not provided`. The demand is what makes the permission safe: every
+input that survives `checked_inputs` necessarily has a placeholder to land in, so no value can be
+validated, keyed, fingerprinted and then dropped out of the text the agent reads — the failure that
+costs the most and shows the least, a step paid for and answered without the thing it was about.
+`tests/sdk/test_roles.py::test_a_placeholder_naming_a_type_the_factory_does_not_accept_is_refused`
+and `::test_an_accepted_type_no_placeholder_names_is_refused_at_the_declaration` are the two
+directions of the demand, and `tests/test_testing.py`'s `demo` workflow is the permission being
+spent: it steps one role twice, once with an input and once with none.
+
+**The grammar is `{{`, a dotted Python name, `}}`, and nothing else between the braces.**
+`prompts.py` spells the name once as `_NAME` and builds both of its patterns from it, so the grammar
+`composed` fills and the grammar `check_placeholders` reads cannot drift into two languages. Dotted,
+because a nested class's `__qualname__` is `Outer.Inner` and that is the key its values are recorded
+under. **Padded braces are refused at the declaration.** `{{ Ticket }}` is how Jinja, Handlebars,
+Mustache and Vue all spell a substitution, so it is the reflex an author types before they have read
+anything, and it is the one near-miss with no symptom at all: it substitutes nothing, and the scan
+comparing the prompt against `accepts=` does not see it either, so the two sets agree, the
+declaration passes and the author's own markup reaches the model. `_PADDED` is that same name with
+the braces allowed to be padded, and the refusal reports only the matches whose text is not already
+the tight spelling, so `{{ Ticket }}`, `{{Ticket }}` and `{{ Ticket}}` are refused and `{{Ticket}}`
+is not.
+`tests/sdk/test_roles.py::test_padded_braces_are_refused_and_the_message_spells_the_one_that_works`
+holds it. **Every other brace shape is left as literal text, deliberately.** `{{}}`,
+`{{ two words }}`, `{{ x | filter }}`, `{{#each x}}`, `{Ticket}` and `{{Ticket}` all reach the
+agent as they were written, so a prompt may quote another template engine, or a payload schema,
+with no escape hatch to learn —
+`tests/sdk/test_roles.py::test_braces_that_are_not_nearly_a_placeholder_leave_a_declaration_alone`
+is that at the declaration and
+`tests/sdk/test_run_step.py::test_braces_that_are_not_a_placeholder_are_left_in_the_prompt_untouched`
+is it in a dispatched prompt. That a quoted schema cannot spell a placeholder by accident is
+structural rather than lucky: `{{` cannot occur in JSON at all, a `{` there being followed by a
+key's quote or by `}`.
+
+**A declared type this round did not pass renders `Not provided`, which is a designed state and not
+an error.** Exactly those two words, with no punctuation, no line and no apology of the framework's
+own around them. What a missing input means is the prompt author's to write — "if it is missing,
+work it out" and "if it is missing, stop" are both real endings, and a framework sentence there
+would argue with whichever one they wrote underneath it. `_MISSING` in `prompts.py` is the whole of
+it, and
+`tests/sdk/test_run_step.py::test_a_declared_type_this_step_did_not_pass_renders_exactly_the_two_words`
+asserts the composed prompt as a whole string, which pins the absence of anything around the words
+as well as the words.
+
+**A substituted value is its canonical JSON and not a second rendering of it.** `composed` calls
+`sdk/_engine/journal.py`'s `canonical_json` — sorted keys, `(",", ":")` separators, `ensure_ascii`,
+a dataclass tagged with `__agl_type__` naming its own concrete `module.qualname` — so what stands at
+a placeholder is byte for byte the text that value contributes to the `inputs` term. A readable
+second spelling would be a second answer in this repository to "what was this value", free to
+disagree with the first, and both are hashed now: the mapping through `inputs`, and the composed
+text through `prompt`. That composed text is itself a term of `base_of` alongside the `instructions`
+and the `inputs` it is built from, so it separates no pair those two do not, and a rewrite of how
+they are composed cannot replay a recorded entry against a prompt nobody was asked for.
+
+```python
+@dataclass(frozen=True)                     # `Ticket` and `Decisions` are the workflow's own,
+class Ticket:                               # in a module that imports as the package `triage`
+    ref: str
+    summary: str
+    blocked: bool
+
+@role(model=Claude.OPUS, accepts=(Ticket, Decisions))
+def implement() -> Role:
+    return Role(
+        name="implement",
+        instructions="Fix this ticket:\n{{Ticket}}\n\nDecisions already taken:\n{{Decisions}}",
+    )
+
+await run.step(implement(), Ticket("T-01", "login 500s", blocked=False))
+```
+
+The agent reads exactly this, and so does the `prompt` term of that step's digest:
+
+```
+Fix this ticket:
+{"__agl_type__":"triage.Ticket","blocked":false,"ref":"T-01","summary":"login 500s"}
+
+Decisions already taken:
+Not provided
+```
+
+**The name a value is recorded under is the matched declaration's and never the instance's**,
+resolved to the unique most-derived match by `preflight.py`'s `_narrowest`. An `Urgent(Ticket)`
+handed to a role that accepts `Ticket` therefore fills `{{Ticket}}`; keyed off the instance it would
+land under `Urgent`, `{{Ticket}}` would render `Not provided`, and the ledger would go on recording
+that an input was supplied. Nothing is collapsed by the shared key, because the `__agl_type__` tag
+inside the value names the concrete type: `Ticket("T-01")` and `Urgent("T-01")` are two canonical
+texts, two `inputs` terms and two digests under one name. Where two declared types match and neither
+is below the other there is no answer the framework is entitled to pick, so `_ambiguous` refuses,
+naming both and recommending that the author make one a subclass of the other.
+
+**What `accepts=` refuses, and when, follows from what is readable at each moment.** At the
+**decoration**, at module import and genuinely before anything is spent, `sdk/roles.py`'s
+`_check_accepted_types` refuses an entry that is not a class — a string, an instance, `None`, and a
+parameterised generic or a union, neither of which is an instance of `type` in CPython — and two
+entries whose `__qualname__` collide. It can run there because `accepts=` is the decorator's own
+argument. **A base declared beside its own subclass is two names and is not a collision**: it is the
+shape `_ambiguous` recommends, so refusing it would delete a documented answer. Duplicate is defined
+on the name rather than on identity, because the dangerous case is not one type written twice but
+two different classes sharing a name — a `Ticket` in each of two of an author's own modules — where
+the declaration passes in silence, either value alone fills the single slot, and passing both is
+refused with a sentence about subclasses that is false of it. At the **factory call**,
+`check_placeholders` makes the set-equality comparison; it cannot move up to the decorator, which
+has no prompt to read, the text being what the decorated function returns.
+`tests/sdk/test_roles.py::test_the_two_halves_are_compared_at_the_factory_call_and_not_at_the_decoration`
+measures that moment rather than describing it. At the **step**, `checked_inputs` refuses a value no
+declaration matches, one matching two unrelated declarations and two values landing under one name,
+and `canonical_json` refuses a value it cannot walk. A dataclass is the ordinary input and the tag
+is why, but the serialiser takes a mapping, a sequence, a set, a string, a number, a bool or `None`
+as well — so that last refusal is narrower than "not a dataclass" and wider than "not JSON", a set
+being emitted sorted rather than in iteration order. A `Path` field is the ordinary way to meet it,
+and it comes from the serialiser rather than from the match. **Two shapes get past every one of
+these and both are open:** `typing.Any` and a `Protocol` that is not `@runtime_checkable` are
+classes, so `_check_accepted_types` takes them, and `isinstance` then raises a bare `TypeError` at
+the first step that passes a value. That is not an `AglError`, so it leaves on exit 70 — and
+because it was raised inside AGL's own code, `cli/main.py` finds no frame AGL called out to and
+prints `_OUR_BUG`, telling an author to report a bug about a line they wrote. Catching either needs
+a probe call rather than a predicate.
+
+**An accepted type deliberately kept out of the prompt is unspellable, and nothing wants one.** Set
+equality refuses it in the `_unnamed` direction, so the cache-buster — a value declared and passed
+only to move a digest — cannot be written. Nothing reaches for one either: what a round counter
+threaded through `accepts=` would buy, the ordinal already gives, and that argument is written out
+in "Invariants where a mistake is silent" beside the ordinal itself.
 
 ## Errors at the boundary
 
@@ -393,6 +636,10 @@ all go, and none of it is on the ledger either: an entry is still written, and t
 is the one the worktree was restored to. Nothing checks the pairing. A step whose role can touch
 the worktree must pass `commit=`. A step that legitimately omits it is one whose role declares
 `Restriction.NO_FILE_WRITES` — a reviewer, a planner — and that pairing is the author's to keep.
+A step that did not come back takes the restore whatever `commit=` said, which is the one place the
+wipe is loud rather than silent: it writes no entry, so the checkout has to end at a head the
+ledger still names, and a commit there would stand on the branch under a message claiming a step
+that never finished.
 
 **A landing must be handed back to the parent's chain.** `Integration._conclude` in
 `sdk/_engine/integration.py` settles a clean landing with `self._journal.advance(head)`. A child's
@@ -411,11 +658,12 @@ on that landing too.
 `sdk/_engine/integration.py` are the two verbs a workflow calls on a live conflict, and each reaches
 an `Integrator` that may raise — `land` refuses over unrecorded work in the target, which is exactly
 what a person editing that checkout at a refusal screen leaves behind. `integrate()` guards its own
-construction with `except BaseException: lease.release()`, and `api.run` sweeps with `finally:
-leases.release_all()`; neither covers a raise out of a verb called on an object the workflow is
-already holding. The target's lease and its namespace's step lock then stay taken for the life of
-the process, and the next landing into that parent blocks inside `Leases.claim` — a hang rather than
-a failure, with nothing raised and no predicate to ask. So both verbs settle on the way out, and the
+construction with `except BaseException: lease.release()`, and `api._walk` sweeps with `finally:
+leases.release_all()` on behalf of both `run` and `resume`; neither covers a raise out of a verb
+called on an object the workflow is already holding. The target's lease and its namespace's step
+lock then stay taken for the life of the process, and the next landing into that parent blocks
+inside `Leases.claim` — a hang rather than a failure, with nothing raised and no predicate to ask.
+So both verbs settle on the way out, and the
 tests in `tests/sdk/test_run_integrate.py` bound the claim that follows rather than awaiting it.
 Settling is also what ends the workflow's own loop: `Integration.conflicted` is *is there a conflict
 here that has not settled*, so `while outcome.conflicted:` terminates for every path out of a hold
@@ -435,7 +683,8 @@ integrator over the same repository. Two consequences follow from `MERGE_HEAD` b
 a landing held in one run's `_base` is invisible to every other run, which is the isolation the
 trees layout is built on, and only a merge is ever a hold, so a rebase or a cherry-pick somebody
 left in the target is not something `abort` will touch. The run lock is the same primitive
-answering a different question — `_trees.run_lock` is a non-blocking `flock` on `.trees/<label>/`,
+answering a different question — `_trees.run_lock` is a non-blocking `flock` on the directory
+`ports/tree_layout.py`'s `run_trees_dir` composes, one per run and holding every checkout of it,
 taken by `run` and `resume` for the life of the process and briefly by `clear`, so a `clear` aimed
 at a live run refuses at once rather than waiting hours for a lock or taking its checkouts away
 underneath it. Both refuse the recorded alternative for the reason `ports/run.py` has no
@@ -444,15 +693,48 @@ drops when its holder dies is the one kind no crash can falsify.
 
 **A workflow branches only on step results.** Resume is not a continuation — `api.resume`
 re-invokes the workflow from its first line in a fresh process, so every line runs again and only
-`run.step(...)` short-circuits. It fingerprints the role, its tools, the inputs and the head the
-previous step ended at, appends an ordinal for repeats, and looks it up. A hit returns the
-recorded value; **a miss just runs the step — a miss is not an error, it is the definition of a
-new step**, so divergence has nothing to raise. Branch on wall-clock time, an environment
-variable, a directory listing, randomness or a mutable global, and a resume can take another path:
-paid-for work is silently redone, and where an off-branch fingerprint happens to match, a recorded
-result comes back for a call that never produced it. The ordinal is never persisted — it is
-rebuilt by re-walking — so order counts too: swap two same-fingerprint steps and each returns the
-other's answer.
+`run.step(...)` short-circuits. It fingerprints the role, its tools, the inputs, the prompt those
+two compose into and the head the previous step ended at, appends an ordinal for repeats, and looks
+it up. A hit returns the recorded value; **a miss just runs the step — a miss is not an error, it
+is the definition of a new step**, so divergence has nothing to raise. Branch on wall-clock time,
+an environment variable, a directory listing, randomness or a mutable global, and a resume can take
+another path: paid-for work is silently redone, and where an off-branch fingerprint happens to
+match, a recorded result comes back for a call that never produced it. The ordinal is never
+persisted — it is rebuilt by re-walking — so order counts too: swap two same-fingerprint steps and
+each returns the other's answer.
+
+**A repeat call needs no discriminator of its own, and adding one buys nothing.** The ordinal is
+counted per `(scope, folded step name, base)` and `Fingerprints.digest` is
+`sha256(base + ":" + n)`, so it is a fact about how many times that address has already been taken
+and reads nothing else about the call. `Journal.step` computes the address before it reads, and
+claims it on a hit and after an entry is written — never on a step that raised — so a crashed
+attempt consumes no slot and the retry is still `n = 0`. Within one walk a step therefore never
+replays an entry that walk wrote: a hit is always against an earlier walk, and a loop stepping one
+role three times over an unmoved head is three steps and three entries, replayed in order on the
+next walk.
+`tests/sdk/test_journal_walk.py::test_a_retry_loop_with_nothing_varying_counts_up_and_replays_in_order`
+is that claim end to end,
+`tests/sdk/test_journal.py::test_a_retry_loop_in_one_scope_counts_up_so_it_cannot_hit_its_own_cache`
+is the arithmetic under it, and
+`tests/sdk/test_journal_walk.py::test_a_step_that_raised_claims_no_slot_and_its_retry_lands_at_n_zero`
+is the crash. A round counter threaded through `accepts=` to keep the iterations apart is therefore
+machinery for nothing, and it is not free: set equality would demand a `{{RoundCounter}}` in the
+prompt as well.
+
+**`head` is the chain the ledger names and never the head the worktree is on, and only a step that
+commits moves it.** `Journal`'s `last_good` starts at the namespace's base, becomes the head the
+entry it hit records on a replay, becomes `Workspace.head()` after a step ends — which for a step
+with no `commit=` is the head it was just restored to, so such a step leaves the chain exactly
+where it found it — and is moved by nothing else but `Integration._conclude`'s `advance`. It cuts
+both ways and both ways are quiet. Work landing in the repository behind the journal's back moves
+no digest at all, which is what
+`tests/sdk/test_journal_walk.py::test_a_base_that_advanced_between_runs_does_not_invalidate_earlier_steps`
+holds, and editing a commit's *message* moves none either, the message being no term —
+`::test_changing_only_the_commit_message_does_not_invalidate_the_entry`. But a committing step that
+re-runs and ends at a different commit moves the digest of **every** later step in its namespace,
+each of which then misses with nothing about it changed: a resume that re-buys the first step
+re-buys the rest of that namespace with it. `Workspace.commit_all` makes no commit where nothing is
+staged, so a step that re-ran and changed nothing is the case where the chain holds.
 
 **Fingerprint canonicalisation must be order-stable.** `_canonical` walks a value before
 `json.dumps(..., sort_keys=True)` hashes it with SHA-256. Mappings get sorted keys; lists and
@@ -462,7 +744,45 @@ not stable across processes. Get it wrong and a step fingerprints differently in
 resumes it — and a miss is not an error, so nothing complains: the run wipes the worktree, re-runs
 every step it had already recorded, finishes, and returns the right answer, the symptoms being the
 bill and the wall clock. Hence tests that spawn interpreters under several `PYTHONHASHSEED`
-values; an in-process one passes just as happily against the bug.
+values; an in-process one passes just as happily against the bug. The prompt an agent is handed is
+a term as well, so the rule reaches `sdk/_engine/prompts.py` too: `composed` never iterates the
+mapping it is given — only `name in inputs` and `inputs[name]` — so every byte it emits is either
+the constant `Not provided` or one value's `canonical_json`, and there is no second serialiser and
+no second order for one to come out in.
+`tests/sdk/test_journal.py::test_a_prompt_with_a_placeholder_in_it_composes_the_same_in_every_process`
+is one of those, and it renders a filled placeholder and an unfilled one in the same prompt so that
+neither half can go unmeasured.
+
+**Nothing a substitution writes is ever scanned again.** `composed` is a single `re.sub` pass, and
+`re.sub` resumes at the end of each match in the string it was handed, so a value whose own text
+spells `{{Decisions}}` is written out and never looked at. Replace that pass with the obvious
+`str.replace` per name in a loop and the guarantee goes with nothing to announce it: the first
+value written expands on the next name's turn, the agent is handed some other input at a spot the
+author marked for something else, and the step runs, records and replays. There is no escape
+character, no marker and no check to keep in step — the property is the shape of the pass — so the
+one thing standing under it is
+`tests/sdk/test_run_step.py::test_an_input_whose_own_text_spells_a_placeholder_is_written_out_and_not_expanded`,
+which passes a `Ticket` whose field is literally `{{Highs}}` with a real `Highs` beside it.
+
+**A declaration is compared with its prompt in `RoleFactory.__call__`, and two shapes go round
+that.** `check_placeholders` runs there because that is where `accepts=` and the prompt first sit
+on one object, so a `Role` reaching a step by any other route carries an unchecked pair. A bare
+`Role(...)` is the closed one, and for a stronger reason than that it declares nothing: it carries
+no model either, `Role.model` raises `InputError`, and `Steps.step` reads that property through
+`Capabilities.require` — so such a role cannot be stepped at all, and an unfillable placeholder in
+it is text nobody is ever handed.
+`tests/sdk/test_roles.py::test_a_role_that_never_went_through_a_factory_refuses_to_name_a_model`
+and `::test_a_role_built_by_hand_is_not_checked_because_no_factory_stamped_its_accepts` are its two
+halves. **The open one is `replace(role, instructions=…)`.** `replace` on a `Role` is otherwise a
+sanctioned spelling — "Deliberately not built" below sends a test that wants to watch a run to
+`replace(role, on_activity=…)` — and `_model` and `_accepts` are `init` fields precisely so that a
+replaced role carries its declaration across. `Role.__post_init__` runs again; the comparison does
+not, because it lives on the factory's call. So a prompt edited that way can drop a placeholder
+while the role goes on accepting the type, and the value is then matched, keyed and hashed through
+`inputs` while reaching no text the agent reads: two calls differing only in it are two addresses
+over one prompt, each paid for and neither replaying the other. The same edit in the other
+direction adds a placeholder nothing can fill, which renders `Not provided` at every step for ever.
+The supported path for a prompt that varies is a parameter on the decorated factory.
 
 **A payload class's identity travels only inside its schema's `title`.** `_object_schema` in
 `sdk/tools.py` writes `"title": f"{kind.__module__}.{kind.__qualname__}"` at every depth, and
@@ -754,10 +1074,10 @@ The reasoning is the point — without it these get re-proposed.
   infers `Role[Findings]` while `run.step` returns `None` and the `.summary` after it is an
   `AttributeError` with mypy clean. And the distinction the merge would erase is not conventional.
   A reporting tool's payload is the only value a tool call can put on the journal —
-  `sdk/_engine/steps.py`'s `return None if capture is None else capture.reported(outcome)` is the
-  whole of it, and that value becomes `Entry.value`; every other tool answers with a `ToolResult`
-  that each adapter turns into content for the model and that reaches no store. One class buries
-  that in `handler is None`.
+  `sdk/_engine/steps.py`'s `_worker` answers with `capture.reported(outcome)` where a reporting tool
+  was declared and with `None` where none was, and that value becomes `Entry.value`; every other
+  tool answers with a `ToolResult` that each adapter turns into content for the model and that
+  reaches no store. One class buries that in `handler is None`.
 - **No safe mode on `agl clear`.** It takes the whole run — every checkout, every branch, the run's
   own included, and the records — whether the work is uncommitted, committed and unlanded, or
   already in the base ref, and no flag changes that. The obvious alternative is a `git branch -d`

@@ -92,8 +92,8 @@ def reporting_tool[P](name: str, description: str, payload: type[P]) -> Reportin
     """Declare the tool a step reports its result through; without one a step's result is `None`.
 
     :param name: what the agent calls it; a fingerprint term, and unique among the role's tools
-    :param description: what the agent reads to decide to call it; a fingerprint term as well
-    :param payload: dataclass the result is read back as; its derived schema is a fingerprint term
+    :param description: what the agent reads to decide to call it; edit one and no entry replays
+    :param payload: dataclass the result is read back as; its derived schema is a term as well
     :return: a declaration to put on a role, which may carry one reporting tool at most
     :raises InputError: at declaration time - an empty string, or a payload shape JSON refuses
     """

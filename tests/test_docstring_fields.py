@@ -202,7 +202,7 @@ OVERLOAD_DECORATOR: Final = "overload"
 
 # Floors, in the spirit of the hermeticity test's `sessions >= 2`. Every assertion below is silent
 # about a file holding nothing to complain about, so each walk is asserted to have found the tree it
-# was pointed at. Measured today: 235 modules under `src/` and `tests/`, and 79 public callables on
+# was pointed at. Measured today: 233 modules under `src/` and `tests/`, and 89 public callables on
 # the documented surface. Both numbers are floors and not measurements.
 FILES_TODAY: Final = 150
 PUBLIC_CALLABLES_TODAY: Final = 60
@@ -576,7 +576,7 @@ def test_every_docstring_field_block_in_this_repository_agrees_with_its_signatur
 
     assert not problems, "\n\n".join(problems)
     assert walked >= FILES_TODAY, (
-        f"only {walked} module(s) were found under {TREES} below {REPO_ROOT}, and there were 235 "
+        f"only {walked} module(s) were found under {TREES} below {REPO_ROOT}, and there were 233 "
         f"when this was written. Every assertion above is silent about a module holding no "
         f"docstring, so a walk that found none of them would be green and checking nothing"
     )
@@ -603,7 +603,7 @@ def test_every_public_callable_in_sdk_and_ports_carries_a_docstring_of_its_own()
     assert not undocumented, _went_undocumented(sorted(undocumented))
     assert walked >= PUBLIC_CALLABLES_TODAY, (
         f"only {walked} public callable(s) were found under {DOCUMENTED_PACKAGES}, and there were "
-        f"79 when this was written. Nothing above is exempt, so this assertion is the only thing "
+        f"89 when this was written. Nothing above is exempt, so this assertion is the only thing "
         f"standing between a walk that found nothing and a green run"
     )
 

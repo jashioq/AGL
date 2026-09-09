@@ -7,10 +7,11 @@ into the workflow.
 
 **This release ships no workflows.** The ones AGL runs are the ones you write. `agl new <name>`
 writes a workflow into your own workspace under AGL_HOME — a directory holding a module and a
-pyproject.toml, which runs as it stands — and `agl run <name>` runs it; `agl workflows` lists what
-that workspace declares. AGL reads workflows from there and from nowhere else: the `agl.workflows`
-entry-point group is the table key each workflow directory's own pyproject.toml writes, rather than
-a group a distribution installed beside AGL registers into.
+pyproject.toml, which runs as it stands — and `agl run <name>` runs it against a repository, which
+`agl init` registers from inside once; `agl workflows` lists what that workspace declares. AGL
+reads workflows from there and from nowhere else: the `agl.workflows` entry-point group is the
+table key each workflow directory's own pyproject.toml writes, rather than a group a distribution
+installed beside AGL registers into.
 
 A workflow that imports nothing beyond `agl` needs no environment of its own and runs as it stands.
 One declaring third-party dependencies in its own pyproject.toml just works too: AGL keeps the
@@ -50,7 +51,7 @@ install` sidesteps it by fetching a matching interpreter itself.
 
 ## Status
 
-Early. 0.0.2 is a name claim rather than a release, and the surface may still change.
+Early, and the surface may still change.
 
 ## Licence
 

@@ -421,7 +421,9 @@ def _building() -> Agent:
 
 def _asking_agent(seen: list[str]) -> Agent:
     """An agent that stops to ask before it reports. The question is this file's, the answer is
-    the workflow's, and what a `Reply` cannot do is read one - see `agl.sdk.testing`.
+    the workflow's, and what a `Reply` cannot do is read one: `agl.sdk.testing`'s `Agent` is handed
+    a task and answers with one whole `Reply`, and `config/container.py`'s `_performs` awaits that
+    reply before it makes the first call - so no call's answer is back yet when the agent is asked.
 
     **A question is a `Call` and no longer a field of its own.** `Reply.asks` existed while AGL
     supplied an asking tool to every task; a workflow supplies its own now, so asking is calling it
@@ -523,8 +525,9 @@ async def test_the_answer_returns_into_the_same_session(tmp_path: Path) -> None:
     **This is the escape hatch, used as an escape hatch.** A `Reply` is computed before the run and
     has nowhere to put an answer, so an agent whose next move depends on one is a raw `Script`
     through `container.fakes(claude=...)` - and `over()` is what keeps such a bundle inside the
-    harness rather than outside it. `agl.sdk.testing` states the limitation and names this way
-    round it; this test is what proves the way round works.
+    harness rather than outside it. The limitation is the `Agent` type in `agl.sdk.testing`, which
+    takes a task and answers with a `Reply`; nothing in `src/` names a way round it, and this test
+    is what proves that this one works.
 
     **Two seams in one test, and only one of them is the escape hatch.** The bundle is composed by
     hand because the agent has to branch on an answer; the *terminal* is `answering([1])`, the
@@ -685,9 +688,9 @@ def _negotiating() -> Script:
     """A raw script that reads the answer it was given and reports it. The escape hatch itself.
 
     `Conversation` is `adapters/claude_code/fake.py`'s and is reached here, in a test, on purpose:
-    it is what `container.fakes(claude=...)` takes and the thing `agl.sdk.testing` says a `Reply`
-    cannot do. The whole of what it adds over a `Reply` is the line that branches on what the call
-    came back with - and that is still the limitation, a `Reply` being computed before the run
+    it is what `container.fakes(claude=...)` takes, and branching on what a call came back with is
+    the thing `agl.sdk.testing`'s `Agent` type has no room for. That line is the whole of what it
+    adds over a `Reply` - and that is still the limitation, a `Reply` being computed before the run
     whether its calls ask a person something or not.
     """
 
