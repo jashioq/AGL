@@ -14,7 +14,7 @@ machine it runs on. The ledger is a real `FilesystemStore` for the same reason i
 "nothing under `steps/<name>/`" is a directory listing here, not a digest recomputed by the test
 from the arithmetic it is checking.
 
-Eight of these are worth naming, because each is written against a failure that is silent:
+Ten of these are worth naming, because each is written against a failure that is silent:
 
   * **The entry's `head` is recorded after the commit.** "A `run.commit()` after the step
     would run *after* the entry was written, so the recorded `head` would predate the commit - and
@@ -24,16 +24,28 @@ Eight of these are worth naming, because each is written against a failure that 
   * **A step without `commit=` leaves no untracked file behind.** A reset-only implementation
     passes every weaker version of this, which is why the agent writes both a tracked edit and a
     new file and why `git status --porcelain` is asked rather than inferred.
-  * **The commit-or-wipe runs when a step raises.** Otherwise a failed reviewer's scratch files sit
-    in the checkout its own retry works in, and the next agent reviews them.
-  * **The commit-or-wipe also runs, to the end, when a step is cancelled** - the same ending
-    through the one door a `finally` does not close by itself. It is the hardest of these to write
-    honestly, because the bug it is written against is timing-shaped and a test that waited would
-    watch the wipe finish and call that a pass. `_cancelled` and the section it heads say how that
-    is avoided; nothing between the cancellation and the assertions is allowed to `await`.
+  * **An ending runs when a step raises, and it is the wipe whatever `commit=` said.** The wipe is
+    what keeps a failed reviewer's scratch files out of the checkout its own retry works in. What
+    refusing the *commit* keeps out is subtler and is the half a person sees: no entry names that
+    commit, so it stands on `agl/<label>` under a message claiming a step that never finished, and
+    `integrate()` lands out of a branch rather than out of a chain.
+  * **The same ending runs, to the end, when a step is cancelled** - through the one door a
+    `finally` does not close by itself. It is the hardest of these to write honestly, because the
+    bug it is written against is timing-shaped and a test that waited would watch the wipe finish
+    and call that a pass. `_cancelled` and the section it heads say how that is avoided; nothing
+    between the cancellation and the assertions is allowed to `await`.
+  * **A `Stop` out of a tool handler is neither of those and gets the same ending.** It is the only
+    `Stop` this code path ever sees - one raised between steps arrives after `run.step` has already
+    returned - and it is a run being ended rather than a step being finished.
   * **An agent that never reports leaves no entry.** The step re-runs, which is only true if
     nothing was written; a `RoleIncompleteError` that had recorded something would be a step that
     read as done and had no result.
+  * **A role with no reporting tool is refused when the backend says it stopped the agent at a
+    limit.** That role's every step records `null`, so `null` cannot also be what a curtailed one
+    records: success and being cut off would be one entry, and every later resume would replay the
+    curtailment as a completed step without ever running the agent again. The stop reason is the
+    only evidence there is, so a backend that names no reason is recorded rather than refused - the
+    fix reaches exactly as far as the backend answers.
   * **What the agent is asked is the role's own text with this step's inputs substituted into
     it, and not one character the framework added around them.** A placeholder is the only route
     an input has to the agent, so what is left to fail in silence is a template engine quietly
@@ -82,7 +94,7 @@ from agl.ports.agent import (
     Tool,
     ToolResult,
 )
-from agl.ports.errors import InputError
+from agl.ports.errors import InputError, Stop
 from agl.ports.home_layout import AglHome, RunScope, step_dir
 from agl.ports.ids import ProjectName, RunLabel, StepName
 from agl.ports.run import JsonValue
@@ -644,7 +656,13 @@ async def test_changing_only_the_commit_message_does_not_invalidate_the_entry(
     subject = _git(repository, "log", "-1", "--format=%s", recorded).strip()
     assert subject == "implement T-01"
 
-# --- the endings run when a step raises ----------------------------------------------------------
+# --- the ending a step that did not come back gets -----------------------------------------------
+#
+# One ending runs on every path out of the worker, and which of the two it is turns on whether the
+# worker came back. `commit=` is the ending of a step that *finished*; a step that raised, was
+# cancelled or hit a `Stop` wrote no entry, so `last_good` still names this namespace's head and
+# the checkout is put back to it. Each of the three doors has a test below, and the assertion they
+# share is the pair - the branch is where the ledger says, and `steps/<name>/` is empty.
 
 @pytest.mark.asyncio
 async def test_the_wipe_runs_when_a_step_raises_and_no_entry_is_written(
@@ -670,39 +688,46 @@ async def test_the_wipe_runs_when_a_step_raises_and_no_entry_is_written(
     assert _entries(tmp_path, "review") == [], "a step that raised was recorded as done"
 
 @pytest.mark.asyncio
-async def test_a_step_that_raises_with_commit_commits_anyway_and_still_records_nothing(
+async def test_a_step_that_raises_with_commit_wipes_rather_than_committing_and_records_nothing(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """The other ending, on the same path: `commit=` given, the framework commits either way.
+    """`commit=` names the ending of a step that *finished*, and a step that raised did not.
 
-    "No check of what the role declared, and no comparison of HEAD before and after" - one
-    predictable thing per `commit=`, and the exception does not make it two. What keeps this from
-    stranding a half-finished commit is the rule beside it: no entry means `last_good` never
-    advanced, so the next attempt's unconditional pre-run restore puts the branch back before it.
+    One ending runs on every path and the `finally` is what makes that so; which of the two it is
+    depends on the worker having come back. The other reading - one predictable thing per
+    `commit=`, exception or no exception - is refused by the very thing that would make its commit
+    harmless: `last_good` never advanced, so nothing on the ledger names that commit. It is not
+    undone, only *usually* stepped over, and what runs next in this namespace decides. Two things
+    do not step over it - `integrate()` lands out of the branch the commit is on, and a run that
+    ends here leaves it standing on `agl/<label>`, which is the branch a person harvests.
+
+    The wipe is the same one `commit=None` gets, so the contamination half is unchanged: an
+    untracked file is asserted gone, not merely a tracked edit reverted.
     """
     record = _Agent()
-    run = _run(
-        repository,
-        tmp_path,
-        base,
-        _agent(record, writes={FEATURE: b"half a route\n"}, raises=True),
-    )
+    left = {FEATURE: b"half a route\n", SCRATCH: b"half a thought\n"}
+    run = _run(repository, tmp_path, base, _agent(record, writes=left, raises=True))
 
     with pytest.raises(_Crash):
         await run.step(_role("implement", "implement T-01"), commit="implement T-01")
 
     workspace = await _checkout(repository, tmp_path, base)
-    committed = _git(workspace.path, "rev-parse", "HEAD").strip()
-    assert committed != base
-    assert FEATURE in _tree(repository, committed)
-    assert _entries(tmp_path, "implement") == []
-
-    # And the retry restores past it, which is what makes the commit above harmless rather than a
-    # half-done step nobody can see: `last_good` is chained from entries, and there are none.
-    reporting = _run(repository, tmp_path, base, _agent(record))
-    await reporting.step(_role("implement", "implement T-01"), commit="implement T-01")
-    assert _git(workspace.path, "rev-parse", "HEAD").strip() == base
+    assert _git(workspace.path, "rev-parse", "HEAD").strip() == base, (
+        "a step that raised committed anyway, so `agl/auth` carries a commit under this step's own "
+        "message that no entry records - and a run that ends here leaves it on the branch"
+    )
     assert not (workspace.path / FEATURE).exists()
+    assert not (workspace.path / SCRATCH).exists()
+    assert _git(workspace.path, "status", "--porcelain") == ""
+    assert _entries(tmp_path, "implement") == [], "a step that raised was recorded as done"
+
+    # And the retry is unaffected: the address the failure would have used is still free, so a walk
+    # whose agent survives lands its entry there and its commit on top of the same base.
+    reporting = _run(repository, tmp_path, base, _agent(record, writes={FEATURE: b"the route\n"}))
+    await reporting.step(_role("implement", "implement T-01"), commit="implement T-01")
+    recorded = _text(_one(tmp_path, "implement"), "head")
+    assert _git(repository, "rev-parse", f"{recorded}^").strip() == base
+    assert FEATURE in _tree(repository, recorded)
 
 # --- the endings run when a step is cancelled ----------------------------------------------------
 #
@@ -811,21 +836,22 @@ async def test_a_cancelled_step_still_wipes_the_worktree_and_records_nothing(
     assert _entries(tmp_path, "review") == [], "a cancelled step was recorded as done"
 
 @pytest.mark.asyncio
-async def test_a_cancelled_step_with_commit_still_commits_and_still_records_nothing(
+async def test_a_cancelled_step_with_commit_wipes_rather_than_committing_and_records_nothing(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """The other ending, through the same door: "one predictable thing either way".
+    """A `commit=` step torn down mid-flight takes the wipe, through the same shielded ending.
 
-    `commit=` given, the framework commits whatever is dirty - and a cancellation does not make
-    that two things any more than an exception did. What keeps the commit from stranding a
-    half-finished step is the rule beside it, which is also asserted: no entry means `last_good`
-    never advanced, so the next attempt's unconditional pre-run restore puts the branch back past
-    it.
+    An agent that is being cancelled is part-way through its work by definition, so this is the
+    clearest case of the rule the raise path states: `commit=` is what a step that finished ends
+    with, and this one did not finish. The shield is still what the test is written against - the
+    wipe has to run *to the end* while cancellations keep arriving - and the untracked file is
+    where a half-run wipe shows, `reset --hard` reverting the tracked half on its own.
     """
     record = _Agent()
     running = asyncio.Event()
     workspace = await _checkout(repository, tmp_path, base)
-    blocked = _blocks(record, running, {FEATURE: b"half a route\n"})
+    left = {FEATURE: b"half a route\n", SCRATCH: b"half a thought\n"}
+    blocked = _blocks(record, running, left)
     run = _run(repository, tmp_path, base, blocked)
 
     step = asyncio.create_task(
@@ -834,14 +860,54 @@ async def test_a_cancelled_step_with_commit_still_commits_and_still_records_noth
     await running.wait()
     await _cancelled(step)
 
-    committed = _git(workspace.path, "rev-parse", "HEAD").strip()
-    assert committed != base, (
-        "a cancelled step with `commit=` committed nothing. The ending did not run: the framework "
-        "does one predictable thing per `commit=`, and being torn down is not a third one"
+    assert _git(workspace.path, "rev-parse", "HEAD").strip() == base, (
+        "a cancelled step committed what an agent was half way through, under a message naming "
+        "the whole of the step, and left it on the branch with no entry recording any of it"
     )
-    assert FEATURE in _tree(repository, committed)
+    assert not (workspace.path / SCRATCH).exists(), (
+        "a cancelled step left its untracked file in the checkout. The ending did not run to the "
+        "end: `restore` is `reset --hard` and then `clean -fd`, and a cancellation delivered "
+        "between the two leaves exactly this behind for the next step's agent to work on top of"
+    )
+    assert not (workspace.path / FEATURE).exists()
     assert _git(workspace.path, "status", "--porcelain") == ""
     assert _entries(tmp_path, "implement") == []
+
+# --- the third door: a `Stop` out of the workflow's own tool handler ------------------------------
+
+@pytest.mark.asyncio
+async def test_a_stop_from_a_tool_handler_wipes_the_step_and_commits_nothing(
+    repository: Path, tmp_path: Path, base: str
+) -> None:
+    """The one `Stop` this ending ever sees, and it is a run ending rather than a step finishing.
+
+    A `Stop` a workflow raises between its own steps never reaches here: the step before it has
+    already returned, ended and recorded. What can reach here is a handler the workflow hung on a
+    role, because a handler runs inside the agent's session - the fake stashes what it raises and
+    lets it out of `AgentRunner.run`, which is what both real adapters' `Caller` does too.
+
+    It takes the wipe for the reason the other two doors do rather than by a rule of its own: the
+    entry is what says a step happened, and no path that writes none leaves a commit behind.
+    """
+    record = _Agent()
+
+    async def _abandons(asked: _Asking) -> ToolResult:
+        record.asked.append(asked.question)
+        raise Stop("the person running this asked for the whole run to end")
+
+    asking = tool(_ASK, "ask the person running this task", _Asking, _abandons)
+    left = {FEATURE: b"half a route\n", SCRATCH: b"half a thought\n"}
+    run = _run(repository, tmp_path, base, _agent(record, writes=left, asks="Carry on?"))
+
+    with pytest.raises(Stop, match="whole run to end"):
+        await run.step(_deciding(ask=asking), commit="decide T-01")
+
+    assert record.asked == ["Carry on?"], "the handler this test is about was never reached"
+    workspace = await _checkout(repository, tmp_path, base)
+    assert _git(workspace.path, "rev-parse", "HEAD").strip() == base
+    assert not (workspace.path / FEATURE).exists()
+    assert not (workspace.path / SCRATCH).exists()
+    assert _entries(tmp_path, "decide") == []
 
 # --- the reporting tool, and the second call -----------------------------------------------------
 
@@ -890,7 +956,15 @@ async def test_a_malformed_payload_is_rejected_back_to_the_agent_and_not_raised(
     assert "a string" in record.results[0].text
     assert len(record.runs) == 1
 
-# --- an effect step ------------------------------------------------------------------------------
+# --- an effect step, and the one thing its outcome is read for ------------------------------------
+#
+# A role with no reporting tool has no way to say it finished, so `null` is what every one of its
+# steps records and the commits are the whole of the result. That is what makes `stop_reason` load
+# bearing here and nowhere else: an agent the backend cut off mid-work would record the same `null`
+# under the same fingerprint as one that finished, and the entry is not merely wrong once - a
+# resume finds it, replays it, and never runs that step again. The refusal is bounded on both
+# sides, and the bounds are two of the four tests below: a backend that names no stop reason is
+# recorded, and a reporting tool that fired is the step being finished whatever came after it.
 
 @pytest.mark.asyncio
 async def test_an_effect_step_records_a_null_value_and_the_commits_are_the_result(
@@ -900,8 +974,7 @@ async def test_an_effect_step_records_a_null_value_and_the_commits_are_the_resul
 
     The role declares no tools at all, which means the task carries none - and the script therefore
     could not call one if it wanted to, `Conversation.call` refusing a tool the task did not
-    declare. Nothing about the outcome is read: an effect step's agent is judged by what is in the
-    commit.
+    declare. The agent is judged by what is in the commit and by nothing it said.
     """
     record = _Agent()
     run = _run(
@@ -917,6 +990,95 @@ async def test_an_effect_step_records_a_null_value_and_the_commits_are_the_resul
     assert entry["value"] is None, "an effect step recorded something other than null"
     assert FEATURE in _tree(repository, _text(entry, "head"))
     assert len(record.runs) == 1
+
+@pytest.mark.asyncio
+async def test_an_effect_step_stopped_at_the_backends_limit_raises_and_records_nothing(
+    repository: Path, tmp_path: Path, base: str
+) -> None:
+    """The one outcome a role with no reporting tool cannot survive, because `null` already means
+    the ordinary thing.
+
+    A reporting role tells these two apart for free: the payload arrived or it did not, and
+    `_Capture.reported` raises on the second. An effect role has no such moment, so the backend
+    saying it stopped the agent against its will is the only evidence there is that the work may be
+    half done - and an entry written over it is not a wrong answer once, it is a wrong answer
+    every time, since the fingerprint is the same one a finished run would have produced and every
+    later resume replays it without paying an agent to find out.
+
+    The message and the ending are both asserted, because a refusal that recorded nothing and left
+    a commit on the branch would be the same lie one step further along.
+    """
+    record = _Agent()
+    said = "I had written the route and was part way through its tests"
+    run = _run(
+        repository,
+        tmp_path,
+        base,
+        _agent(
+            record,
+            reports=False,
+            writes={FEATURE: b"half a route\n"},
+            stop=StopReason.LIMIT,
+            says=said,
+        ),
+    )
+
+    with pytest.raises(RoleIncompleteError) as raised:
+        await run.step(_effect("implement", "implement T-01"), commit="implement T-01")
+
+    assert "raise the limit" in str(raised.value)
+    assert said in str(raised.value), "the one thing the agent did say was dropped from the report"
+    assert _entries(tmp_path, "implement") == [], (
+        "a curtailed effect step recorded `null`, which is what a finished one records - so the "
+        "ledger holds no difference between the two and a resume replays this as done"
+    )
+    workspace = await _checkout(repository, tmp_path, base)
+    assert _git(workspace.path, "rev-parse", "HEAD").strip() == base
+    assert not (workspace.path / FEATURE).exists()
+
+@pytest.mark.asyncio
+async def test_an_effect_step_whose_backend_named_no_reason_is_recorded_rather_than_refused(
+    repository: Path, tmp_path: Path, base: str
+) -> None:
+    """How far the refusal reaches, which is exactly as far as a backend answers.
+
+    `AgentOutcome.stop_reason` is optional and `None` is not evidence of anything -
+    `adapters/openai/_session.py` produces it for every run that was not positively reported
+    complete, so refusing on it would refuse ordinary effect steps against that backend and refuse
+    nothing against the other. The cost is stated rather than hidden: this is the case where a
+    curtailed step still records `null`, and no gate anywhere can tell.
+    """
+    record = _Agent()
+    run = _run(
+        repository,
+        tmp_path,
+        base,
+        _agent(record, reports=False, writes={FEATURE: b"the callback route\n"}, stop=None),
+    )
+
+    await run.step(_effect("implement", "implement T-01"), commit="implement T-01")
+
+    entry = _one(tmp_path, "implement")
+    assert entry["value"] is None
+    assert FEATURE in _tree(repository, _text(entry, "head"))
+
+@pytest.mark.asyncio
+async def test_a_reporting_step_that_reported_before_its_limit_is_recorded_rather_than_refused(
+    repository: Path, tmp_path: Path, base: str
+) -> None:
+    """The other side of the same line: a reporting tool that fired is the step being finished.
+
+    An agent that reports and is then cut off has already produced the one value a step can put on
+    the journal, so the limit it went on to reach says nothing about the result. Refusing here
+    would throw away work that was paid for and complete, which is why `sdk/_engine/steps.py` reads
+    the stop reason only where there is no reporting tool to read instead.
+    """
+    record = _Agent()
+    run = _run(repository, tmp_path, base, _agent(record, stop=StopReason.LIMIT))
+
+    assert await run.step(_role("review", "review", read_only=True)) == Summary("review #0")
+
+    assert _one(tmp_path, "review")["value"] == {"text": "review #0"}
 
 # --- a known hole: a role may promise a payload and declare nothing that can produce one ----------
 #

@@ -39,15 +39,26 @@ are the same objects and nothing has to be run to make one.
 whole of the group rule's first clause is that a failure inside a chunk costs what that failure
 costs in a sequential workflow, so the test that says so runs both and compares them - a pair of
 tests each pinning 6 would go on passing in a world where one of the two had quietly become 70.
+
+**A 70 says AGL had no name for what was raised, and never whose fault it was**, so the line under
+the traceback is the only thing that answers the second question - and it used to answer it wrong
+in every case. AGL runs code somebody else wrote in more places than a workflow's own function, and
+each of them reaches `main`'s last clause as the object it raised: `tests/contracts/agent.py`
+requires an adapter to let what a tool handler and what an activity reporter raise out untouched,
+and every terminal invokes a view for itself. Four workflows below raise from four of those
+boundaries and a fifth raises inside an adapter with nothing of anybody else's under it, and what
+each of those tests asserts is which frame the message named - because "exit 70 with a traceback"
+is identical across all five.
 """
 
 import ast
 import asyncio
 import inspect
+from collections.abc import Callable
 from dataclasses import dataclass
 from importlib.metadata import EntryPoint
 from pathlib import Path
-from typing import Final
+from typing import Final, cast
 import pytest
 from agl.adapters.uv.fake import FakeSyncer
 from agl.cli import main
@@ -62,6 +73,9 @@ from agl.ports.home_layout import RunScope
 from agl.ports.ids import ProjectName, RunLabel
 from agl.ports.sync import Syncer
 from agl.ports.tree_layout import TreesRoot
+from agl.sdk.roles import Claude, Role, role
+from agl.sdk.terminal import Screen
+from agl.sdk.tools import ToolResult, tool
 from agl.sdk.workflow import Run, Stop, workflow
 
 # `agl init` is the one command that reads `settings` and `cwd`, and no invocation below is one -
@@ -91,6 +105,12 @@ UNREACHABLE: Final = "the agent backend could not be reached"
 UNPARSEABLE: Final = "the agent finished with no reporting-tool payload"
 TAKEN: Final = "another run holds the integration lease on agl/auth"
 UNTRANSLATED: Final = "a chunk's adapter forgot to translate this"
+
+# What the three author-code boundaries below raise. Each is a sentence a workflow author's own bug
+# would have left behind, because what those tests read is which of the three the message named.
+IN_A_REPORTER: Final = "the dashboard this role reports into has gone away"
+IN_A_TOOL: Final = "the approval service this handler asks is down"
+IN_A_VIEW: Final = "this view divided by a count nobody had yet"
 
 # What each workflow was handed, at module level because the workflows have to be: `EntryPoint.load`
 # imports a module and reads an attribute in it, and sees no local of this module's functions.
@@ -177,6 +197,64 @@ async def chunked_bug(run: Run[NoParams]) -> None:
     async with asyncio.TaskGroup() as chunks:
         chunks.create_task(_chunk(ValueError(UNTRANSLATED)))
 
+def _watching(line: str) -> None:
+    """A role's `on_activity`, which is the workflow author's own function and can have a bug."""
+    raise RuntimeError(IN_A_REPORTER)
+
+@dataclass(frozen=True)
+class Note:
+    """The tool payload below, one required field so the fake fills it from the derived schema."""
+
+    text: str
+
+async def _noting(note: Note) -> ToolResult:
+    """A tool handler, which is the other piece of author code an adapter invokes mid-run."""
+    raise KeyError(IN_A_TOOL)
+
+def _drawing() -> Screen[None]:
+    """A view, which every terminal invokes for itself - here the headless one the fakes carry."""
+    raise ValueError(IN_A_VIEW)
+
+@role(model=Claude.OPUS)
+def watching() -> Role[None]:
+    """A role reporting into `_watching`, so the fake's first activity line is what raises."""
+    return Role(name="watching", instructions="do the thing", on_activity=_watching)
+
+@role(model=Claude.OPUS)
+def noting() -> Role[None]:
+    """A role carrying one tool, which `unscripted` calls for every tool a task declares."""
+    return Role(
+        name="noting",
+        instructions="do the thing",
+        tools=(tool("note", "write a note down", Note, _noting),),
+    )
+
+@workflow
+async def in_a_reporter(run: Run[NoParams]) -> None:
+    """The reporter raises inside the adapter's session, one call below `run.step`."""
+    await run.step(watching(), commit="watched")
+
+@workflow
+async def in_a_tool(run: Run[NoParams]) -> None:
+    """The handler raises inside the adapter's session, two calls below `run.step`."""
+    await run.step(noting(), commit="noted")
+
+@workflow
+async def in_a_view(run: Run[NoParams]) -> None:
+    """The view raises inside the terminal, which is a boundary no step is anywhere near."""
+    await run.terminal.show(_drawing)
+
+@workflow
+async def in_agl(run: Run[NoParams]) -> None:
+    """The other half of the split, fabricated: an adapter raising with nothing of ours under it.
+
+    `show` is annotated as taking a view and the `cast` is what gets an object past that, which is
+    the only way to reach the arm from out here - a genuine bug inside an adapter cannot be asked
+    for. What arrives is a `TypeError` raised at `adapters/rich_terminal/headless.py`'s own `view(
+    **params)`, with no frame under it at all, which is exactly the shape `_OUR_BUG` describes.
+    """
+    await run.terminal.show(cast("Callable[..., Screen[None]]", object()))
+
 def _point(name: str, attribute: str) -> EntryPoint:
     """A `probe = "agl.workflows.probe:probe"` line, pointed at this module instead."""
     return EntryPoint(name=name, value=f"{__name__}:{attribute}", group=registry.GROUP)
@@ -193,6 +271,10 @@ POINTS: Final = (
     _point("halting_together", "halting_together"),
     _point("halting_and_failing", "halting_and_failing"),
     _point("chunked_bug", "chunked_bug"),
+    _point("in_a_reporter", "in_a_reporter"),
+    _point("in_a_tool", "in_a_tool"),
+    _point("in_a_view", "in_a_view"),
+    _point("in_agl", "in_agl"),
 )
 
 def _fakes(tmp_path: Path) -> container.FakeServices:
@@ -260,6 +342,26 @@ def _clauses() -> list[str]:
             assert isinstance(handler.type, ast.Name), f"unreadable clause at {handler.lineno}"
             caught.append(handler.type.id)
     return caught
+
+def _under_the_traceback(printed: str) -> str:
+    """`main`'s own lines out of a stderr that also holds a stack, which names every frame itself.
+
+    The whole of what the attribution tests assert is which frame the *message* named, and a stack
+    printed above it names all of them - so a test reading the two together would pass against a
+    message that named the wrong one, or against one that named none at all. `main` prefixes each
+    line it writes with the program name and the frames it does not, which is the whole of the
+    split. `_severally`'s head line arrives here too and names no frame.
+    """
+    return "\n".join(line for line in printed.splitlines() if line.startswith("agl: "))
+
+def _misattributed(expected: str, printed: str) -> str:
+    """What a boundary test says when the message named some other frame, or named none."""
+    return (
+        f"the run failed inside {expected}, which is this module's code and not AGL's, and the "
+        f"line under the traceback did not name it. An operator reads that line to know whether "
+        f"the fault is theirs, and the boundaries this module drives are one call apart from each "
+        f"other:\n{printed}"
+    )
 
 # --- the four acceptance criteria ----------------------------------------------------------------
 
@@ -509,19 +611,30 @@ def test_an_untranslated_exception_in_a_chunk_keeps_the_traceback_it_would_have_
 ) -> None:
     """The same defect inside a group: the fix is not to stop catching but to stop hiding.
 
-    A leaf nobody translated is our bug wherever it was raised, so it resolves to 70 and it keeps
-    the one part of a bug worth having. The traceback is printed for that leaf and for no other -
-    a well-worded refusal beside it is the message, and a stack under a sentence a person can act on
-    is how `_cmd_run` used to make every failure look the same.
+    A leaf nobody translated resolves to 70 and it keeps the one part of a bug worth having. The
+    traceback is printed for that leaf and for no other - a well-worded refusal beside it is the
+    message, and a stack under a sentence a person can act on is how `_cmd_run` used to make every
+    failure look the same.
+
+    **The attribution is per leaf and this is where that is visible.** A chunk raises inside
+    `_chunk`, which is this module's code and not AGL's, so what the line beside the traceback
+    names is that function - not "AGL's own bug", which is what a group used to be told wholesale.
+    A run that fans out can hold a workflow's own failure beside an adapter's, and one line for the
+    group would have to be wrong about one of them.
     """
     harness = _fakes(tmp_path)
 
     assert _main(harness, "run", "chunked_bug", "-n", "auth") == 70
 
     captured = capsys.readouterr()
+    under = _under_the_traceback(captured.err)
     assert "Traceback" in captured.err
     assert UNTRANSLATED in captured.err
-    assert "AGL's own bug" in captured.err
+    assert "_chunk" in under, _misattributed("_chunk", captured.err)
+    assert "AGL's own bug" not in under, (
+        "a chunk of this module raised and the group was reported as AGL's, which is the whole of "
+        "what a leaf-by-leaf attribution exists to stop"
+    )
     assert captured.out == ""
 
 # --- refusals a user can provoke, and the one that is ours ---------------------------------------
@@ -578,19 +691,28 @@ def test_an_unexpected_exception_exits_seventy_with_its_traceback(
     """The old defect answered: `_cmd_run` ended in a bare `except Exception` rendering any bug
     as `error: <str>`, so the traceback - the only part of a bug worth having - was thrown away.
 
-    Anything that is not an `AglError` reaching the top is a translation an adapter did not perform,
-    which is our bug, which is 70 (`cli/exit_codes.py` argues both halves). The traceback is printed
-    because that is what "file a bug" needs, and the sentence after it is what tells the reader the
-    bug is not theirs.
+    Anything that is not an `AglError` reaching the top resolves to 70, because AGL has no name for
+    it and `cli/exit_codes.py` argues why a script cannot act on the two halves differently. The
+    traceback is printed because that is what a report needs.
+
+    **What the exit code does not say is whose the fault was**, and the line under the traceback is
+    where that is answered. `exploding` raises in the workflow's own function, so the attribution
+    names that function and this run is nobody's bug to report - the sentence it used to print here
+    told whoever wrote the workflow to file a bug against AGL about their own `raise`.
     """
     harness = _fakes(tmp_path)
 
     assert _main(harness, "run", "exploding", "-n", "auth") == 70
 
     captured = capsys.readouterr()
+    under = _under_the_traceback(captured.err)
     assert "Traceback" in captured.err
     assert "an adapter forgot to translate this" in captured.err
-    assert "AGL's own bug" in captured.err
+    assert "exploding" in under, _misattributed("exploding", captured.err)
+    assert "AGL's own bug" not in under, (
+        "a workflow's own `raise` was reported as AGL's, which is what sent whoever wrote it to "
+        "file a bug about a line they had written themselves"
+    )
     assert captured.out == ""
 
 def test_help_still_exits_zero_through_system_exit(tmp_path: Path) -> None:
@@ -646,6 +768,98 @@ def test_a_version_flag_after_a_command_is_the_workflows_and_not_agls(
     assert _main(harness, "run", "probe", "-n", "auth", "--version") == 2
 
     assert "--version" in capsys.readouterr().err
+
+# --- whose code raised, which a 70 cannot say and the line under the traceback must --------------
+
+def test_a_roles_activity_reporter_that_raises_is_the_frame_the_message_names(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The boundary a reader is least likely to find on their own, and the reason for the rest.
+
+    `Role.on_activity` is the workflow author's own callable, handed to the dispatch unwrapped, and
+    `tests/contracts/agent.py` requires every adapter to let what it raises out as the object it
+    raised. So it arrives at `main` looking exactly like a bug in AGL, under a stack of frames that
+    really are AGL's - and the fault is in a function the author wrote to draw a progress line.
+
+    Read off `main`'s own line and not off the stack above it, for `_under_the_traceback`'s reason:
+    a traceback names every frame in it, so a test reading the whole of stderr would pass against a
+    message that named the wrong frame.
+    """
+    harness = _fakes(tmp_path)
+
+    assert _main(harness, "run", "in_a_reporter", "-n", "auth") == 70
+
+    captured = capsys.readouterr()
+    under = _under_the_traceback(captured.err)
+    assert IN_A_REPORTER in captured.err
+    assert "_watching" in under, _misattributed("_watching", captured.err)
+    assert "AGL's own bug" not in under
+
+def test_a_tools_handler_that_raises_is_the_frame_the_message_names(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The second boundary, one call further down: the handler an adapter invokes mid-session.
+
+    `sdk/tools.py`'s `tool()` builds the payload and then awaits the author's own handler outside
+    every guard it has, deliberately - `_instance` catches what the *payload class* raises and turns
+    it into a refusal the agent reads, and a handler that failed is the case the port says ends the
+    run. So the frame after AGL's last is `_noting` and not `tool.<locals>._called`, which is AGL's.
+    """
+    harness = _fakes(tmp_path)
+
+    assert _main(harness, "run", "in_a_tool", "-n", "auth") == 70
+
+    captured = capsys.readouterr()
+    under = _under_the_traceback(captured.err)
+    assert IN_A_TOOL in captured.err
+    assert "_noting" in under, _misattributed("_noting", captured.err)
+    assert "AGL's own bug" not in under
+
+def test_a_terminal_view_that_raises_is_the_frame_the_message_names(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The third boundary, and the one no step is anywhere near: a view, invoked by the terminal.
+
+    Every implementation of the port calls the view for itself - the headless one the fakes carry
+    calls it once to ask whether the screen is a question, and the one that draws calls it again on
+    every frame - so this is the boundary where the same author bug can arrive from a redraw loop
+    with no `run.step` on the stack at all.
+    """
+    harness = _fakes(tmp_path)
+
+    assert _main(harness, "run", "in_a_view", "-n", "auth") == 70
+
+    captured = capsys.readouterr()
+    under = _under_the_traceback(captured.err)
+    assert IN_A_VIEW in captured.err
+    assert "_drawing" in under, _misattributed("_drawing", captured.err)
+    assert "AGL's own bug" not in under
+
+def test_an_adapter_raising_with_nothing_under_it_is_still_agls_own_bug(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The other half, without which the three above would pass against a message that never says
+    it is ours.
+
+    `in_agl` reaches `adapters/rich_terminal/headless.py`'s `view(**params)` with something that is
+    not callable, so the `TypeError` is raised in AGL's own frame with nothing of anybody else's
+    under it - which is the shape a missed translation has, and the one case where "please report
+    it" is the right thing to print. It is fabricated, in
+    `tests/test_contract_firing.py`'s sense: a real bug inside an adapter cannot be asked for, and a
+    split that only ever takes one of its two arms is not a split.
+    """
+    harness = _fakes(tmp_path)
+
+    assert _main(harness, "run", "in_agl", "-n", "auth") == 70
+
+    captured = capsys.readouterr()
+    assert "Traceback" in captured.err
+    assert "AGL's own bug" in _under_the_traceback(captured.err), (
+        f"an adapter raised with no frame of anybody else's under it and AGL declined to own it. "
+        f"That is the arm `_OUR_BUG` exists for, and a message that never reaches it makes every "
+        f"70 read as somebody else's fault:\n{captured.err}"
+    )
+    assert captured.out == ""
 
 # --- the composition, and the number this module may not write -----------------------------------
 

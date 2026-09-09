@@ -14,17 +14,22 @@ its options, its one positional and its namespace - rather than off a sentence, 
 and the framework needs it independently. So it is on the generic parser, it reaches `run.json`,
 and its absence is the repository's default rather than a branch written into the CLI.
 
-**Abbreviation is off, and flag collisions are documented rather than refused.** Both are decisions
-`cli/commands/run.py` argues at length, and both have a cost that only a test can hold still: a
-prefix of a generic flag belongs to the workflow that declared it, a colliding *required* flag fails
-loudly at exit 2, and a colliding *defaulted* one silently keeps its default. The last of those is
-the price of not loading a workflow to inspect its shape, and it is pinned so that a later stage
-deciding to pay differently has to come here first.
+**Abbreviation is off, and a spelling this parser owns is refused where the workflow declares it.**
+The first makes `--fro` a flag of its own rather than a way to write `--from`; the second is what
+ended a defect this file used to pin as a decision - a workflow declaring `-n` was shadowed, loudly
+where its field was required and in silence where it had a default, because the generic parser runs
+first and the workflow's own never saw the flag. Both spellings now come from `agl.sdk.params`,
+which is also where `arg()` refuses a field that claims one, and `RESERVED_FLAGS` is compared here
+against the parser this command actually builds - so a flag added here and not to that set fails
+the build instead of quietly becoming un-refused.
 """
 
+import argparse
 import ast
 import asyncio
 import inspect
+import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from importlib.metadata import EntryPoint
 from pathlib import Path
@@ -39,7 +44,7 @@ from agl.ports.ids import ProjectName, RunLabel
 from agl.ports.run import JsonValue
 from agl.ports.sync import Syncer
 from agl.ports.tree_layout import TreesRoot
-from agl.sdk.params import RefusingParser, arg
+from agl.sdk.params import RESERVED_FLAGS, RefusingParser, arg
 from agl.sdk.workflow import Run, workflow
 
 # `agl init` is the one command that reads `settings` and `cwd`, and no invocation below is one -
@@ -67,24 +72,29 @@ class PrefixParams:
 
     fro: str = arg("--fro", help="a workflow's own flag, spelled like nobody else's")
 
+# A workflow declaring a flag `agl run` owns, written out rather than declared here: `arg()` raises
+# where it is read, so a class in this module would refuse at import and take the file's collection
+# with it. That is the refusal under test, met the way an author meets it - in a file of their own.
+RESERVING: Final = "reserving"
+
+RESERVING_SOURCE: Final = '''from dataclasses import dataclass
+from agl.sdk import Run, arg, workflow
+
 @dataclass(frozen=True)
-class RequiredCollisionParams:
-    """A workflow declaring `-n`, which the generic parser also spells. Required, so it is loud."""
+class Colliding:
+    """A note the author wanted `-n` for, which is the run's own label flag."""
 
-    note: str = arg("-n", "--note", help="a note the workflow cannot run without")
+    note: str = arg("-n", "--name", default="unsaid")
 
-@dataclass(frozen=True)
-class DefaultedCollisionParams:
-    """The same collision with a default, which is the half that goes quiet. See the docstring."""
-
-    note: str = arg("-n", "--note", default="unsaid", help="a note the workflow can do without")
+@workflow
+async def reserving(run: Run[Colliding]) -> None:
+    """Never entered: the module raises while `EntryPoint.load` is importing it."""
+'''
 
 # What each workflow was handed. Module level for `EntryPoint.load`'s reason: it imports a module
 # and reads an attribute in it, so a workflow declared inside a test function is unreachable.
 flagged_with: Final[list[FlaggedParams]] = []
 prefixed_with: Final[list[PrefixParams]] = []
-required_with: Final[list[RequiredCollisionParams]] = []
-defaulted_with: Final[list[DefaultedCollisionParams]] = []
 
 @workflow
 async def flagged(run: Run[FlaggedParams]) -> None:
@@ -96,32 +106,28 @@ async def prefixed(run: Run[PrefixParams]) -> None:
     """Records `--fro`, the flag `allow_abbrev=True` would have handed to `--from` instead."""
     prefixed_with.append(run.params)
 
-@workflow
-async def required(run: Run[RequiredCollisionParams]) -> None:
-    """Never reached: its `-n` is required and the generic parser took the line's only one."""
-    required_with.append(run.params)
-
-@workflow
-async def defaulted(run: Run[DefaultedCollisionParams]) -> None:
-    """Reached, and holding its default, because the generic parser answered its `-n` first."""
-    defaulted_with.append(run.params)
-
 def _point(name: str) -> EntryPoint:
     """A registration line, pointed at this module: a name, a `module:attr`, and a group."""
     return EntryPoint(name=name, value=f"{__name__}:{name}", group=registry.GROUP)
 
-POINTS: Final = tuple(_point(name) for name in ("flagged", "prefixed", "required", "defaulted"))
+POINTS: Final = tuple(_point(name) for name in ("flagged", "prefixed"))
 
 def _fakes(tmp_path: Path) -> container.FakeServices:
     """Target #8's deployment, seeded so `History` has a default ref and a commit to resolve."""
     return container.fakes(TreesRoot(tmp_path / "trees"), files={"src/a.txt": b"one\n"})
 
-def _main(harness: container.FakeServices, *argv: str, syncer: Syncer | None = None) -> int:
+def _main(
+    harness: container.FakeServices,
+    *argv: str,
+    syncer: Syncer | None = None,
+    points: tuple[EntryPoint, ...] = POINTS,
+) -> int:
     """One `agl` invocation, with this module's workflows in place of what is installed.
 
     The installer is a fake because `agl run` installs what the workspace declares on the way past:
     the field's own default would start uv on every invocation below, and `ELSEWHERE` is not a home
-    anything may write to.
+    anything may write to. `points` is a parameter for the one workflow that cannot live here - the
+    module it is declared in raises while it is being imported, which is the whole of that test.
     """
     installer = FakeSyncer() if syncer is None else syncer
     return main.main(
@@ -130,7 +136,7 @@ def _main(harness: container.FakeServices, *argv: str, syncer: Syncer | None = N
             registered=lambda: (PROJECT, harness.services),
             settings=SETTINGS,
             cwd=ELSEWHERE,
-            points=POINTS,
+            points=points,
             syncer=lambda: installer,
         ),
     )
@@ -141,11 +147,17 @@ def _record(harness: container.FakeServices) -> dict[str, JsonValue]:
     assert record is not None, "no run.json was written for this run"
     return record
 
-def _run_parser() -> RefusingParser:
-    """The `run` subparser alone, built the way `main.parser()` builds it, for inspection."""
+type _Commands = argparse._SubParsersAction[RefusingParser]
+
+def _declared(declare: Callable[[_Commands], RefusingParser]) -> RefusingParser:
+    """One subparser alone, built the way `main.parser()` builds it, for inspection."""
     root = RefusingParser(prog="agl", allow_abbrev=False)
     commands = root.add_subparsers(dest="command", required=True, parser_class=RefusingParser)
-    return run_command.declare(commands)
+    return declare(commands)
+
+def _options(parser: RefusingParser) -> set[str]:
+    """Every option string a parser answers to, `argparse`'s own `-h`/`--help` among them."""
+    return {flag for action in parser._actions for flag in action.option_strings}
 
 # --- the generic parser, and what it deliberately does not hold ----------------------------------
 
@@ -156,12 +168,11 @@ def test_the_generic_parser_holds_three_arguments_and_no_workflows_flag() -> Non
     inventing a positional" is refused in `arg()` because this position is already spent - plus the
     `-h` every parser carries. A flag belonging to one workflow would show up in this set.
     """
-    parser = _run_parser()
+    parser = _declared(run_command.declare)
 
-    options = {flag for action in parser._actions for flag in action.option_strings}
     positionals = [action.dest for action in parser._actions if not action.option_strings]
 
-    assert options == {"-h", "--help", "-n", "--name", "--from"}
+    assert _options(parser) == {"-h", "--help", "-n", "--name", "--from"}
     assert positionals == ["workflow"]
 
 def test_abbreviation_is_off_on_the_root_parser_and_on_the_subparser() -> None:
@@ -172,7 +183,7 @@ def test_abbreviation_is_off_on_the_root_parser_and_on_the_subparser() -> None:
     `--hel` is eaten - value and all - by a generic flag it merely starts with.
     """
     assert main.parser().allow_abbrev is False
-    assert _run_parser().allow_abbrev is False
+    assert _declared(run_command.declare).allow_abbrev is False
 
 def test_a_workflows_flags_are_left_in_the_tail_and_never_in_the_namespace() -> None:
     """The composition of the two parsers, in one line of argv: what the generic side keeps, and
@@ -278,7 +289,7 @@ def test_without_from_the_base_ref_is_the_repositorys_and_not_the_clis(tmp_path:
 
     assert _record(harness)["base_ref"] == asyncio.run(harness.services.history.default_ref())
 
-# --- flag collisions: the decision, and both halves of what it costs ------------------------------
+# --- the flags this parser owns, which no workflow may declare -----------------------------------
 
 def test_a_prefix_of_a_generic_flag_belongs_to_the_workflow_that_declared_it(
     tmp_path: Path,
@@ -307,42 +318,48 @@ def test_an_abbreviation_of_a_generic_flag_is_not_a_way_to_spell_it(tmp_path: Pa
 
     assert _main(harness, "run", "flagged", "-n", "auth", "-r", "x", "--fro", "main") == 2
 
-def test_a_workflow_declaring_a_generic_spelling_is_shadowed_loudly_when_it_is_required(
-    tmp_path: Path,
-) -> None:
-    """The collision decision's loud half, and the reason it is survivable.
+def test_the_reserved_set_is_every_option_string_this_parser_answers_to() -> None:
+    """The seam the refusal rests on, read off the parser object rather than off a sentence.
 
-    Neither `sdk/params.py` nor this layer refuses a workflow that declares `-n`: refusing would
-    mean loading the workflow to look at its params, which is the first line of `api.run`
-    re-implemented in a command, which `ARCHITECTURE.md`'s "Commands stay dumb" forbids. So the
-    generic parser wins - it runs first - and the workflow's required flag is simply never given a
-    value, which `sdk/params.py` refuses by name at exit 2 before anything runs. The user is told
-    which flag went missing.
+    `sdk/params.py` cannot import a command - the layering runs the other way - so `RESERVED_FLAGS`
+    lives there and `cli/commands/run.py` declares `-n/--name` and `--from` from it, which leaves
+    `argparse`'s own `-h`/`--help` as the one part of the set nothing there constructs. This is what
+    holds that part, and what makes an argument added to this command and not to the set a failure
+    rather than a spelling that silently stopped being refused.
+
+    `run` alone, and the other tail-less five are not an omission: `run` is the only command that
+    hands a workflow argv at all. `agl resume` reads the parameters back out of the record and
+    `main._no_tail` refuses anything else on that line, so its own `-h`/`--help` - the whole of what
+    it owns, pinned in `tests/cli/test_resume_command.py` - is nobody's to collide with. Reserving
+    the union would take a spelling away from every workflow the day `resume` grew a flag.
     """
-    required_with.clear()
-    harness = _fakes(tmp_path)
+    assert RESERVED_FLAGS == _options(_declared(run_command.declare))
 
-    assert _main(harness, "run", "required", "-n", "auth") == 2
-
-    assert required_with == []
-
-def test_a_workflow_declaring_a_generic_spelling_keeps_its_default_when_it_has_one(
-    tmp_path: Path,
+def test_a_workflow_declaring_a_flag_agl_run_owns_refuses_the_run_that_named_it(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The quiet half, which is the whole of what the decision costs. Pinned so it stays known.
+    """What the two shadowing tests here became, driven from where an author actually meets it.
 
-    A colliding flag with a default cannot report that it was shadowed: `-n auth` was consumed by
-    the generic parser, the workflow's parser never saw it, and `default=SUPPRESS` leaves the
-    dataclass's own value in place. The run proceeds with `note="unsaid"`. A later stage that
-    decides to spend a registry load on refusing collisions changes this test first.
+    A required `-n` used to fail at exit 2 saying the flag the operator *had* typed was missing, and
+    a defaulted one used to keep its default with nothing said on either stream. Both are gone in
+    one place: `arg()` refuses the spelling, so the workflow's own module raises while
+    `EntryPoint.load` is importing it - above the record, above the checkout, and naming the flag
+    and the set it belongs to. `registry.load` catches `ImportError` and `AttributeError` and this
+    is neither, so the `InputError` reaches `main` as itself and leaves on `InputError`'s own code.
     """
-    defaulted_with.clear()
     harness = _fakes(tmp_path)
+    written = tmp_path / "workspace"
+    written.mkdir()
+    (written / f"{RESERVING}.py").write_text(RESERVING_SOURCE, encoding="utf-8")
+    sys.path.insert(0, str(written))
+    # Not `_point`, whose value names *this* module: what has to be imported is the file above.
+    declared = EntryPoint(name=RESERVING, value=f"{RESERVING}:{RESERVING}", group=registry.GROUP)
 
-    assert _main(harness, "run", "defaulted", "-n", "auth") == 0
+    status = _main(harness, "run", RESERVING, "-n", "auth", points=(declared,))
 
-    assert defaulted_with == [DefaultedCollisionParams(note="unsaid")]
-    assert _record(harness)["label"] == "auth"
+    assert status == 2
+    assert "owns -n/--name" in capsys.readouterr().err
+    assert asyncio.run(harness.services.store.read_record(SCOPE)) is None
 
 # --- what the command says when it worked --------------------------------------------------------
 

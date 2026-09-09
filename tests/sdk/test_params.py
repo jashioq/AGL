@@ -29,7 +29,15 @@ import pytest
 from agl.ports.errors import InputError
 from agl.ports.ids import RunLabel
 from agl.ports.run import RunSpec
-from agl.sdk.params import RefusingParser, arg, from_json, parse, parser_for, to_json
+from agl.sdk.params import (
+    RESERVED_FLAGS,
+    RefusingParser,
+    arg,
+    from_json,
+    parse,
+    parser_for,
+    to_json,
+)
 
 @dataclass(frozen=True)
 class TicketsParams:
@@ -145,6 +153,31 @@ def test_a_flag_is_a_dash_and_a_letter_or_two_dashes_and_a_name(flag: str) -> No
 def test_the_spellings_a_workflow_may_actually_want(flag: str) -> None:
     """The other half of the allowlist: refusing too much would be as bad as refusing too little."""
     assert arg(flag) is not None
+
+@pytest.mark.parametrize("flag", sorted(RESERVED_FLAGS))
+def test_a_flag_agl_run_owns_is_refused_where_the_workflow_declares_it(flag: str) -> None:
+    """Every spelling of the set and not one example, because the set is what the message lists.
+
+    `agl run` hands a workflow the flags its own parser did not recognise, so a spelling that parser
+    *does* recognise never arrives: a required field was told it was missing under the flag somebody
+    had typed, and a defaulted one kept its default with nothing said at all. Neither is reachable
+    now - the declaration is where it stops, so the author reads it once rather than an operator
+    reading a wrong sentence every run.
+    """
+    with pytest.raises(InputError, match="owns -n/--name"):
+        arg(flag)
+
+@pytest.mark.parametrize("flag", ["--fro", "--nam", "--hel", "-N", "--Name", "--from-here"])
+def test_a_spelling_that_merely_resembles_a_reserved_flag_is_the_workflows_to_take(
+    flag: str,
+) -> None:
+    """The refusal is the five spellings and nothing around them, which two decisions make safe.
+
+    Abbreviation is off on both parsers, so `--fro` is a flag and not a way to write `--from`; and
+    `argparse` matches an option string exactly, so `-N` and `--Name` are as free as `-r`. A refusal
+    reaching either would take spellings away over a resemblance that changes nothing.
+    """
+    assert arg(flag, default="") is not None
 
 def test_an_unsupported_field_type_is_refused_by_name() -> None:
     """The message names the field and the annotation, because those are what has to be changed."""

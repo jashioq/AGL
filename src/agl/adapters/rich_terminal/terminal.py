@@ -152,6 +152,11 @@ class RichTerminal(Terminal):
             if self._reads is not None:
                 self._reads.shutdown(wait=False, cancel_futures=True)
                 self._reads = None
+            # `Live.stop` repaints the renderable it was last handed and renders nothing new, so
+            # without this the frame the loop had not reached yet dies with it. Drawn after the
+            # gather so the loop cannot race the write, and before `close`, which empties the slot
+            # and would leave this nothing to draw.
+            self._draw()
             self._screens.close()
         finally:
             self._display.stop()

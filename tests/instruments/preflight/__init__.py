@@ -1,4 +1,4 @@
-"""Three workflow *modules* for `tests/sdk/test_preflight.py`, because a namespace is the claim.
+"""Four workflow *modules* for `tests/sdk/test_preflight.py`, because a namespace is the claim.
 
 A workflow's roles are the `@role(model=…)` factories bound in the module its `def` was executed
 in, and also those bound in any module bound there. That is one declaration and not two, which is
@@ -9,7 +9,7 @@ namespace. Four of that suite's claims therefore cannot be made inside it:
 models, which is the right shape for the claims about dedup and ordering and the wrong shape for
 every claim about what a namespace does *not* contain, or about how a factory reaches it.
 
-So they live here, as three modules that are each nothing but the thing they are about:
+So they live here, as four modules that are each nothing but the thing they are about:
 
   * `unstaffed` - no role factory at all, so preflight asks no backend anything: what keeps a
     workflow that runs no agent runnable on a machine with no harness.
@@ -21,6 +21,9 @@ So they live here, as three modules that are each nothing but the thing they are
     scan found nothing, asked nobody, and the run died at its first step. Its role lives one file
     over in `roles.py`, which is a module and not a fifth workflow - the binding is what is being
     measured, so there has to be something to bind.
+  * `prebuilt` - a `Role` already built, imported by name from `prebuilt_roles.py`, so the
+    namespace binds neither a factory nor a module. It reads like `qualified` and is the opposite
+    verdict: a supported shape, pinned rather than closed, for the reasons its test carries.
 
 They are modules on disk rather than `types.ModuleType` values built in a fixture, because what is
 being measured is what an author's own file does to a namespace. A synthetic module would need its

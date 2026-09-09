@@ -31,6 +31,14 @@ gaps; these are the ones a rich console over a buffer can close, in the order th
     (the headless rule is phrased on input rather than on a TTY for exactly that reason), and it
     takes the other of `_display.py`'s two paths - no `Live`, no redirection, a frame printed for
     every change and none for a screen that did not change.
+  * **The frame the loop never reached.** Not in that suite's list either, and invisible to it
+    twice over: nothing there looks at a display, and `written` is cleared on the way out, so a
+    driver has nothing left to report once `__aexit__` has run. Drawing is a task on a timer, so
+    whatever a workflow does between the last tick and its own return has not been drawn when the
+    terminal is torn down - and `Live.stop` repaints the renderable it was last handed rather than
+    rendering anything new. That is a workflow's closing board lost to a race no workflow can win
+    from outside, so the teardown draws once more, and the three tests for it read the console's
+    own bytes *after* the context has closed.
 
 Three more sit beside those and are decisions this adapter made that nothing else would notice: a
 view that starts raising becomes a frame rather than a dead repaint task, a person mistyping is
@@ -631,6 +639,69 @@ async def test_the_streams_are_put_back_when_the_run_ends_in_the_exception_it_wa
         f"reports a failure must not be the path that breaks the reporting"
     )
 
+async def test_the_final_frame_is_rendered_from_the_view_again_rather_than_lost_at_teardown(
+    terminal: RichTerminal, output: io.StringIO
+) -> None:
+    """The frame the loop never reached, and the only thing that can carry it to a person.
+
+    Drawing is a task on a timer, so a workflow's last move - the line it writes into its board
+    before returning - sits in a live argument that nothing has drawn yet. Cancelling that task and
+    stopping the display loses it: `Live.stop` repaints the renderable it was last handed and
+    renders nothing new, so what somebody is left looking at is the frame before the last one. A
+    run's closing board is exactly the frame they read, which is what makes this the one worth
+    catching.
+
+    **The mutation is the last statement in the block, and that is what makes this a test rather
+    than a race.** No `await` follows it, and `__aexit__` cancels both tasks before reaching its own
+    first suspension point, so the redraw loop provably never runs again: an implementation that
+    draws only on the timer cannot pass this by being quick.
+
+    **What is asserted is that the view was invoked again, not that a screen was replayed.** The
+    only thing that moved is the mapping `show` was handed - no `Screen` carrying `EDITING` has ever
+    existed anywhere, and the terminal's own record still holds the one carrying `READING`. A
+    teardown that repainted its last `Screen` would put `READING` on the console a second time and
+    fail here, which is the whole reason a view is a function and `show` registers it.
+    """
+    rows = {TICKET: READING}
+    async with terminal as term:
+        await term.show(board, rows=rows)
+        await _drawn(term, Rows([Row(TICKET, READING)]))
+        rows[TICKET] = EDITING
+
+    assert EDITING in output.getvalue(), (
+        f"a workflow moved its board and returned, and the console holds {output.getvalue()!r}. "
+        f"Nothing after the redraw loop's last pass reaches anybody unless the teardown draws one "
+        f"more frame, so what a run ends by saying - the summary, the count that landed, the last "
+        f"line of the last step - is the one frame nobody ever sees"
+    )
+
+async def test_a_run_that_ends_in_a_stop_still_leaves_its_last_board_on_screen(
+    terminal: RichTerminal, output: io.StringIO
+) -> None:
+    """The same frame on the path that needs it most, which is the one an edit would guard away.
+
+    A workflow that stops itself has said something on its way out. "The run that ends badly is the
+    run whose display most needs handing back" is `ARCHITECTURE.md`'s argument for `__aexit__`
+    running on every path at all, and it reaches the final frame unchanged.
+
+    The edit this exists to catch is a plausible one: drawing only when `exc_type` is `None`, on the
+    reasoning that a traceback is about to be printed over it anyway. That throws away the board
+    saying *why* the run stopped, on the one run where somebody is going to read it.
+    """
+    rows = {TICKET: READING}
+    with pytest.raises(Stop):
+        async with terminal as term:
+            await term.show(board, rows=rows)
+            await _drawn(term, Rows([Row(TICKET, READING)]))
+            rows[TICKET] = EDITING
+            raise Stop("the workflow ended itself with its last word on the board")
+
+    assert EDITING in output.getvalue(), (
+        f"the run ended in a `Stop` and the console holds {output.getvalue()!r}. The final frame "
+        f"is drawn inside the same `try` the rest of the teardown is in, so it is not something "
+        f"that happens only when nothing went wrong"
+    )
+
 async def test_a_console_that_cannot_animate_still_gets_every_frame_that_changed_and_no_others(
     keys: Typing,
 ) -> None:
@@ -673,6 +744,53 @@ async def test_a_console_that_cannot_animate_still_gets_every_frame_that_changed
             "redirects for a terminal, and this path uses no `Live` at all, so anything moving "
             "here is this adapter taking over something it was never handed"
         )
+
+async def test_an_appending_log_takes_the_final_frame_once_and_only_when_it_changed() -> None:
+    """The teardown's frame on `_display.py`'s other path, where drawing twice is not free.
+
+    An animating display overwrites its own region, so a closing frame identical to the last one
+    costs a repaint nobody can see. A log appends, and there is no `Live.stop` on this path at all:
+    the same frame written again is a duplicated line at the bottom of every redirected run's
+    output. So the teardown's draw goes through the same diff the loop's does rather than writing
+    outright, and this is the only thing that would notice if it stopped.
+
+    Both readings of that one comparison, because each looks fine if only the other is checked - a
+    teardown that writes nothing at all passes the first half perfectly.
+    `test_a_console_that_cannot_animate_still_gets_every_frame_that_changed_and_no_others` sees
+    neither: it reads its log from inside the context and never looks again after it closes.
+
+    A fresh `Typing` for each of the two terminals rather than the fixture's one: `__aexit__` stops
+    the keyboard it was given and a stopped one stays stopped, so two terminals in a single test
+    cannot share one and have the second read anything.
+    """
+    still = io.StringIO()
+    async with RichTerminal(Console(file=still, width=_WIDTH), Typing()) as term:
+        await term.show(dashboard, line=RUNNING)
+        await _drawn(term, Text(RUNNING))
+        settled = still.getvalue()
+
+    assert still.getvalue() == settled, (
+        f"closing over a screen that had not moved appended "
+        f"{still.getvalue().removeprefix(settled)!r} to the log. That frame was already its last "
+        f"line, so every run whose output is redirected to a file would end with the same line "
+        f"printed twice"
+    )
+
+    moved = io.StringIO()
+    rows = {TICKET: READING}
+    async with RichTerminal(Console(file=moved, width=_WIDTH), Typing()) as term:
+        await term.show(board, rows=rows)
+        await _drawn(term, Rows([Row(TICKET, READING)]))
+        printed = moved.getvalue()
+        rows[TICKET] = EDITING
+
+    appended = moved.getvalue().removeprefix(printed)
+    assert appended.count(EDITING) == 1, (
+        f"a board that moved on the way out appended {appended!r}, which holds {EDITING!r} "
+        f"{appended.count(EDITING)} time(s) rather than once. None of it is a workflow's last word "
+        f"going missing; two of it is the teardown writing past the diff, on the one frame anybody "
+        f"reads after the run is over"
+    )
 
 async def test_a_view_that_starts_raising_becomes_a_frame_and_the_loop_carries_on_drawing(
     terminal: RichTerminal, output: io.StringIO

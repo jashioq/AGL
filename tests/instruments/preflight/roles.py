@@ -8,7 +8,8 @@ else. The second is the spelling `qualified.py` measures, and it needs a module 
 
 `OpenAI.TERRA` is named by no other module `tests/sdk/test_preflight.py` drives, so a `check_ready`
 for it can only have come from here, reached through the module binding next door. `Claude.HAIKU`
-is `late.py`'s for the same reason and the two must stay distinct.
+is `late.py`'s for the same reason and `Claude.SONNET` is `prebuilt_roles.py`'s; the three must
+stay distinct.
 """
 
 from agl.sdk import OpenAI, Role, role

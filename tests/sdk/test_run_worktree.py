@@ -31,9 +31,10 @@ Five of these are worth naming, because each is written against a failure that i
     is, and only one of the two orders is the obvious one to write.
   * **A child starts at its parent's *logical* head.** "The starting head is chained
     logically, not read from disk". The branch can be ahead of the chain with nothing journalled -
-    a step that raised after `commit=` does it today and `integrate()` will do it deliberately - so
-    a child cut from where the branch actually is inherits work the run has no record of, and the
-    parent's next fingerprint miss restores past it.
+    `Journal.step` commits before it writes the entry, so a process killed between the two comes
+    back to exactly that, and a commit somebody made on `agl/<label>` by hand is the same state
+    from outside - so a child cut from where the branch actually is inherits work the run has no
+    record of, and the parent's next fingerprint miss restores past it.
   * **A reopened namespace replays instead of re-cutting.** "An existing name reopens rather
     than recreates, which is what makes replay work". An implementation that quietly re-provisioned
     would pass every test that only asks whether opening twice raises, and would destroy the
@@ -94,9 +95,6 @@ class Summary:
     text: str
 
 REPORT: Final = reporting_tool("report", "report what you did", Summary)
-
-class _Crash(Exception):
-    """What an agent dying mid-step looks like from here. Any exception would do."""
 
 # --- the repository, the bundle, and the run -----------------------------------------------------
 
@@ -181,17 +179,11 @@ class _Agent:
         self.results: list[ToolResult] = []
         """Every answer the reporting tool gave, refusals included."""
 
-def _agent(
-    record: _Agent, *, writes: Mapping[str, bytes] = _NOTHING, dies_once: bool = False
-) -> Script:
+def _agent(record: _Agent, *, writes: Mapping[str, bytes] = _NOTHING) -> Script:
     """One agent's conduct, in the only vocabulary the port has.
 
     Writing to `task.workspace` with the stdlib is the script's own code and not the adapter's,
     which is what lets a fake agent leave real files in a real worktree for `commit=` to record.
-
-    `dies_once` raises on the **first** dispatch only, which is the arrangement one test below
-    needs: a step that raised after `commit=` moves the branch and journals nothing, and the child
-    cut afterwards has to be served by an agent that works.
     """
 
     async def _script(conversation: Conversation) -> AgentOutcome:
@@ -200,8 +192,6 @@ def _agent(
             target = conversation.task.workspace / name
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(content)
-        if dies_once and len(record.runs) == 1:
-            raise _Crash("the agent died mid-step")
         payload = {"text": f"{conversation.task.instructions} #0"}
         record.results.append(await conversation.call(REPORT.name, payload))
         return AgentOutcome(stop_reason=StopReason.COMPLETED, text="")
@@ -246,6 +236,10 @@ def _head(tmp_path: Path, step: str, *namespaces: str) -> str:
 def _trees_dir(tmp_path: Path) -> Path:
     """`.trees/auth/` - every checkout belonging to this run, and nothing else."""
     return tmp_path / "trees" / "auth"
+
+def _base_checkout(tmp_path: Path) -> Path:
+    """`.trees/auth/_base/` - the run's own checkout, on the branch children are cut from."""
+    return _trees_dir(tmp_path) / "_base"
 
 def _branches(repository: Path) -> list[str]:
     """Every branch in the repository, fully qualified, asked of git rather than of the layout."""
@@ -780,39 +774,49 @@ async def test_a_child_cut_from_a_ref_string_starts_where_that_ref_points(
 async def test_a_child_is_cut_from_the_chain_and_not_from_where_the_branch_actually_is(
     repository: Path, tmp_path: Path, base: str
 ) -> None:
-    """"The starting head is chained logically, not read from disk", at the earliest moment a run
-    can produce the divergence.
+    """"The starting head is chained logically, not read from disk", over three distinct commits.
 
-    A step that raised after `commit=` is the case: the framework does one predictable thing per
-    `commit=` "on success and on failure alike", so the commit lands and the branch moves - and no
-    entry is written, because "a step is done when its file is there". The run's chain is therefore
-    still at its base while `agl/auth` is a commit ahead of it, with nothing journalled in between.
-    `integrate()` produces the same divergence deliberately and much more often.
+    The framework leaves this window itself and cannot close it: `Journal.step` commits and *then*
+    writes the entry, so a process killed between the two comes back to `agl/auth` standing a
+    commit past the last head anything recorded. A commit somebody made on that branch by hand is
+    the same state reached from outside, and is what is arranged here, because arranging the kill
+    would be `tests/sdk/test_kill_and_resume.py`'s whole apparatus for one line of setup.
 
     A child cut from `agl/auth` by name - the ordinary way to describe it, and which
     `WorkspaceProvider.open` still accepts - would inherit a commit this run has no record of. The
     parent's next fingerprint miss then restores to the chain, *before* that commit, and the child
     is left working on top of something the run has just deleted.
+
+    **Three distinct commits are what makes this non-vacuous**, and they are why a step runs first:
+    the run's pinned base, the head that step recorded, and the branch tip.
+    `test_a_child_starts_at_the_parents_logical_head_and_not_at_the_runs_base` separates the base
+    from the chain, so an implementation reading `self._base` fails that one; nothing but a branch
+    standing past the chain separates the chain from the branch, and the assertion here is that the
+    child was cut from the chain.
     """
     record = _Agent()
-    dying = _agent(record, writes={FEATURE: b"half a route\n"}, dies_once=True)
-    run = _run(repository, tmp_path, base, dying)
+    run = _run(repository, tmp_path, base, _agent(record, writes={FEATURE: b"the route\n"}))
 
-    with pytest.raises(_Crash):
-        await run.step(_role("implement", "implement it"), commit="implement it")
+    await run.step(_role("implement", "implement it"), commit="implement it")
+    chained = _head(tmp_path, "implement")
 
+    checkout = _base_checkout(tmp_path)
+    (checkout / SIDEQUEST).write_bytes(b"work no entry records\n")
+    _git(checkout, "add", SIDEQUEST)
+    _git(checkout, "commit", "-q", "-m", "a commit the ledger never saw")
     moved = _git(repository, "rev-parse", "refs/heads/agl/auth").strip()
-    assert moved != base and _entries(tmp_path, "implement") == []
+    assert len({base, chained, moved}) == 3, "the three commits this test separates are not three"
 
     child = run.worktree("T-01")
     await child.step(_role("review", "review", read_only=True))
 
-    assert _head(tmp_path, "review", "T-01") == base, (
+    assert _head(tmp_path, "review", "T-01") == chained, (
         "the child was cut from where the branch physically is rather than from the run's chain, "
         "so it inherited a commit no entry records - and the parent's next fingerprint miss "
         "restores past that commit and deletes it out from under the child"
     )
-    assert not (_trees_dir(tmp_path) / "T-01" / FEATURE).exists()
+    assert (_trees_dir(tmp_path) / "T-01" / FEATURE).is_file()
+    assert not (_trees_dir(tmp_path) / "T-01" / SIDEQUEST).exists()
 
 # --- the name is opaque --------------------------------------------------------------------------
 

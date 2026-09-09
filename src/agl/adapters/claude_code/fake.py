@@ -30,7 +30,7 @@ _ROUNDS: Final = 8
 
 _OPENING: Final = "Read: the task AGL's Claude Code fake was given"
 
-_PLACEHOLDER: Final = "AGL's Claude Code fake produced this: no model was involved."
+_FILLER: Final = "AGL's Claude Code fake produced this: no model was involved."
 
 _CLOSING: Final = (
     "AGL's Claude Code fake ran this task with a script where the model would be. It read nothing "
@@ -97,7 +97,7 @@ async def unscripted(conversation: Conversation) -> AgentOutcome:
     for declared in conversation.task.tools:
         if conversation.failure is not None:
             break
-        said = _PLACEHOLDER
+        said = _FILLER
         for _ in range(_ROUNDS):
             conversation.report(f"{declared.name}: {said}")
             result = await conversation.call(declared.name, _payload(declared.payload_schema, said))

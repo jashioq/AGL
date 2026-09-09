@@ -248,10 +248,16 @@ class Journal:
                 return entry.value
 
             await self._workspace.restore(self._last_good)
+            returned = False
             try:
                 result = await worker()
+                returned = True
             finally:
-                await self._end(commit)
+                # The wipe, not the commit, until the worker has come back: a step that did not
+                # come back writes no entry, so `last_good` still names this namespace's head. A
+                # commit here would stand on the branch under a message claiming a step that never
+                # finished, and `sdk/_engine/integration.py` lands out of a branch, not a chain.
+                await self._end(commit if returned else None)
 
             _check_result(result, f"step {name}'s result")
             head = await self._workspace.head()

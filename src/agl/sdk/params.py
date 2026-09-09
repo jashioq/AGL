@@ -9,11 +9,41 @@ from agl.ports.errors import InputError
 from agl.ports.run import JsonValue
 from agl.sdk._declarations import annotations_of, named
 
-__all__ = ["RefusingParser", "arg", "from_json", "parse", "parser_for", "to_json"]
+__all__ = [
+    "RESERVED_FLAGS",
+    "RUN_BASE_REF_FLAGS",
+    "RUN_LABEL_FLAGS",
+    "RefusingParser",
+    "arg",
+    "from_json",
+    "parse",
+    "parser_for",
+    "to_json",
+]
 
 _METADATA_KEY: Final = "agl.sdk.params"
 
 _FLAG_CHARACTERS: Final = frozenset(ascii_letters + digits + "-_")
+
+# `cli/commands/run.py` declares its own two arguments from these rather than spelling them itself,
+# which is what keeps the flag and the refusal below one constant apart instead of two literals a
+# rename could separate. It is the direction the dependency rule leaves: `cli` may import `sdk`.
+RUN_LABEL_FLAGS: Final = ("-n", "--name")
+
+RUN_BASE_REF_FLAGS: Final = ("--from",)
+
+# `argparse` adds these to every parser that does not turn `add_help` off, and `agl run`'s does
+# not - so they are that command's without being declared anywhere in it.
+_RUN_HELP_FLAGS: Final = ("-h", "--help")
+
+# `agl run` is the whole of it because it is the only command that hands a workflow argv at all,
+# and `tests/cli/test_run_command.py` compares this set against the parser it actually builds - so
+# an argument added there and not here fails the build rather than becoming quietly un-refused.
+RESERVED_FLAGS: Final = frozenset(RUN_LABEL_FLAGS + RUN_BASE_REF_FLAGS + _RUN_HELP_FLAGS)
+
+_RUN_OWNS: Final = ", ".join(
+    "/".join(spellings) for spellings in (RUN_LABEL_FLAGS, RUN_BASE_REF_FLAGS, _RUN_HELP_FLAGS)
+)
 
 _PARSEABLE: Final = (str, int, float)
 
@@ -46,7 +76,7 @@ def arg(*flags: str, default: Any = MISSING, help: str = "") -> Any:
     :param default: omitted makes the flag required, and a `bool` field must declare `default=False`
     :param help: the line `agl workflows <workflow>` prints beside the flag; cosmetic elsewhere
     :return: a `dataclasses.field` carrying the declaration, assigned to the annotated field
-    :raises InputError: no flags, a spelling `argparse` cannot take, or a default of another type
+    :raises InputError: no flags, a spelling `agl run` owns or `argparse` refuses, or a bad default
     """
     if not flags:
         raise InputError(
@@ -233,4 +263,10 @@ def _unusable_flag(flag: str) -> str | None:
                 f"it holds {character!r} at position {index}, and a flag may hold only letters "
                 f"A-Z a-z, digits, '-' and '_'"
             )
+    if flag in RESERVED_FLAGS:
+        return (
+            f"`agl run` owns {_RUN_OWNS} and hands a workflow only what it did not recognise "
+            f"itself, so this spelling would be taken off the line before the workflow's own "
+            f"parser saw it. Every other spelling is a workflow's to take"
+        )
     return None

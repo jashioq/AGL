@@ -32,7 +32,7 @@ _LABEL_CALLING: Final = "Calling"
 
 _OPENING: Final = "Reading: the task AGL's Codex fake was given"
 
-_PLACEHOLDER: Final = "AGL's Codex fake produced this: no model was involved."
+_FILLER: Final = "AGL's Codex fake produced this: no model was involved."
 
 _CLOSING: Final = (
     "AGL's Codex fake ran this task with a script where the model would be. It read nothing in the "
@@ -99,7 +99,7 @@ async def unscripted(conversation: Conversation) -> AgentOutcome:
     for declared in conversation.task.tools:
         if conversation.failure is not None:
             break
-        said = _PLACEHOLDER
+        said = _FILLER
         for _ in range(_ROUNDS):
             conversation.report(f"{_LABEL_CALLING}: {declared.name}")
             result = await conversation.call(declared.name, _payload(declared.payload_schema, said))

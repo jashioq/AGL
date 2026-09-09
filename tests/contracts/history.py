@@ -553,11 +553,12 @@ class HistoryContract(HistoryChangeContract):
     ) -> None:
         """The one member here that asks about now rather than about the past, and its true case.
 
-        `Journal._ending` commits the agent's work at the end of every step that declares `commit=`,
-        and `Workspace.commit_all` invents no identity to do it with - so an implementation that
-        cannot attribute a commit refuses in a `finally`, after a paid turn and before an entry
-        exists. `sdk/_engine/preflight.py` asks this first, before it asks any backend anything,
-        because it is free and local and because a resume cannot repair the step it protects.
+        `Journal._ending` commits the agent's work at the end of every step that declares `commit=`
+        and came back, and `Workspace.commit_all` invents no identity to do it with - so an
+        implementation that cannot attribute a commit refuses in a `finally`, after a paid turn and
+        before an entry exists. `sdk/_engine/preflight.py` asks this first, before it asks any
+        backend anything, because it is free and local and because a resume cannot repair the step
+        it protects.
 
         **The arrangement is the premise and is asserted before the question is put.** A recorded
         state is proof this repository *can* be committed into, and a repository that can be

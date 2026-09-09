@@ -37,11 +37,12 @@ that one person updated both at once.
 ## What `sdk/params.py` costs, and why it is the only partial one
 
 Five of the six submodules put their whole `__all__` on the door. `sdk/params.py` puts one name of
-six, and the other five are framework: `parse` is what `api.run` does to argv, `from_json` what
+nine, and the other eight are framework: `parse` is what `api.run` does to argv, `from_json` what
 `api.resume` does to a record, `parser_for` and `RefusingParser` what `agl workflows <name>`
-formats, `to_json` what the record is written with. An author declares fields with `arg()` and reads
+formats, `to_json` what the record is written with, and the three flag constants what
+`cli/commands/run.py` builds its own parser from. An author declares fields with `arg()` and reads
 `run.params`. So the door takes `arg` and the drift check for that module is written the other way
-round - the five are named in `_ABSENT`, so adding a seventh name to `sdk/params.py` and leaving it
+round - the eight are named in `_ABSENT`, so adding a tenth name to `sdk/params.py` and leaving it
 unclassified fails here.
 
 ## And a fifth claim, about the facade that takes part of its port
@@ -100,13 +101,20 @@ _NOT_ON_THE_ERROR_FACADE: Final[Mapping[str, str]] = {
 
 # Names a submodule in `_DOOR` exports that the door deliberately does not, each with the reason.
 # `sdk/__init__.py` argues them at length; this is the machine-checkable half, and it is what makes
-# a *seventh* name in `sdk/params.py` a failure rather than a silent omission.
+# a *tenth* name in `sdk/params.py` a failure rather than a silent omission.
 _ABSENT: Final[Mapping[str, str]] = {
     "parse": "what `api.run` does to argv; an author declares fields and reads `run.params`",
     "from_json": "what `api.resume` rebuilds a params instance from the record with",
     "to_json": "what `api.run` writes `RunSpec.params` with",
     "parser_for": "what `agl workflows <name>` formats, and what a caller inspecting a parser uses",
     "RefusingParser": "the parser type `parser_for` returns, for the same two callers",
+    "RUN_LABEL_FLAGS": "the CLI's: `cli/commands/run.py` declares `-n/--name` from it, and an "
+    "author meets those spellings as the refusal `arg()` raises rather than as a name to import",
+    "RUN_BASE_REF_FLAGS": "the CLI's, for the same reason - `--from` is the framework's run "
+    "parameter and no workflow's",
+    "RESERVED_FLAGS": "the set `arg()` refuses a field's flag against, and what "
+    "`tests/cli/test_run_command.py` compares the two parsers to; a workflow author reads the "
+    "refusal, never the set",
 }
 
 # Modules under `agl.sdk` that are not part of the authoring surface at all. Not in `_DOOR`, so
@@ -174,7 +182,7 @@ def test_every_authoring_name_a_submodule_exports_is_on_the_door() -> None:
 
     Five of the six submodules put their whole surface on the door, so this is what notices a tenth
     terminal component or a second declaration helper. `sdk/params.py` is the partial one and its
-    five framework names are in `_ABSENT` with a reason each, so it is checked here too - just from
+    eight framework names are in `_ABSENT` with a reason each, so it is checked here too - just from
     the other side.
     """
     door = _exported(agl.sdk)

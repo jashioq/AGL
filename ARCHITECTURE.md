@@ -34,12 +34,12 @@ nothing.
 `@role`, `Tool` and the `tool()` and `reporting_tool()` that derive one from a payload dataclass,
 `arg()`, the terminal components, `Stop`. `sdk/__init__.py` is the front door and re-exports the
 authoring surface with `__all__` typed out rather than computed; `_engine/` is the private
-machinery behind `Run` and is not on it. That underscore names the **workflow author's** surface
-and nothing narrower — `api`, `config` and `sdk`'s own modules import those eight modules freely,
-so there is no import for a contract to forbid and this sentence is the whole of the rule, unlike
-the same underscore under `adapters/`, which means private to that package and is enforced by
-`tests/test_naming_convention.py`. Something belongs here when two workflows would otherwise
-write it themselves.
+machinery behind `Run` and five of `Run`'s public fields have types defined there. That underscore
+names the **workflow author's** surface and nothing narrower — `api`, `config` and `sdk`'s own
+modules import those eight modules freely, so there is no import for a contract to forbid and this
+sentence is the whole of the rule, unlike the same underscore under `adapters/`, which means
+private to that package and is enforced by `tests/test_naming_convention.py`. Something belongs
+here when two workflows would otherwise write it themselves.
 
 **`config/`** — Settings and the composition root. `sources.py` resolves flags > env > file >
 defaults once into an immutable object, `toml_file.py` is the only module that knows TOML,
@@ -335,11 +335,33 @@ goes on answering for what uv said and nothing else.
 
 **`ports/errors.py` holds the one exception-to-exit-code table and `cli/exit_codes.py` consumes it
 without adding a number of its own.** An exception that is not an `AglError` arriving at the top of
-the CLI is a translation that did not happen in our code, so it exits 70 — the same answer
-`exit_code_for` gives an `AglError` on a branch nobody mapped, because the two are one fault seen
-from either side and a script cannot act on them differently. Resolution walks the class tree
-rather than indexing the table, so a workflow's own `ReviewNotConverging(Stop)` exits 7 without
-appearing anywhere, and there is no clause order for a handler to get wrong.
+the CLI is one AGL has no name for, so it exits 70 — the same answer `exit_code_for` gives an
+`AglError` on a branch nobody mapped, because the two are one fault seen from either side and a
+script cannot act on them differently. Resolution walks the class tree rather than indexing the
+table, so a workflow's own `ReviewNotConverging(Stop)` exits 7 without appearing anywhere, and
+there is no clause order for a handler to get wrong.
+
+**That 70 says AGL had no name for what was raised and never says whose code raised it, so the line
+printed under the traceback is what answers the second question.** It has to, because *not an
+`AglError`* is two faults and not one: an adapter that let something through untranslated, and a
+bug in code the workflow author wrote — which AGL runs in more places than the workflow's own
+function. `Role.on_activity`, a `Tool.handler`, a terminal view, a `TextInput.maps`, a role
+factory's declaration, a params dataclass and the workflow's own module at import are each invoked
+from inside AGL's call stack, and every one of them reaches the top as the object it raised,
+`tests/contracts/agent.py` requiring exactly that of the first two. `cli/main.py`'s `_called_frame`
+therefore walks the traceback for the frame after the **last** one of AGL's own — the callable AGL
+handed control to, the reset on each of AGL's frames being what makes it the last rather than the
+first — and names its file, line and qualified name; where there is no such frame, AGL's own code
+is what raised and `_OUR_BUG` is what prints. **The frame is the whole of the attribution.** Nothing
+is wrapped, no boundary is marked, and no exception is mutated on its way out, so a workflow's own
+`Stop` subclass still reaches `exit_status` as itself and the contract suite's rule about an
+adapter is untouched. What that costs is the case where the callable AGL called is neither AGL's nor
+the author's — `EntryPoint.load` on a workflow module that raises while importing — where the frame
+named is `importlib`'s and the author's is one line further down, which is why the message says to
+read the frames after the one it names rather than claiming that one is yours.
+`tests/cli/test_main.py` drives the workflow's own function and three of those boundaries, and
+fabricates the other arm — an adapter raising with nothing under it — because a real bug inside one
+cannot be asked for and a split that only ever takes one of its two arms is not a split.
 
 **A `TaskGroup` hands back several answers at once, so a group has its own rule**: unwrap a
 single-exception group and map its leaf; several leaves whose codes agree take that code; leaves

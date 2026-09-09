@@ -351,6 +351,88 @@ def test_a_role_that_never_went_through_a_factory_accepts_nothing() -> None:
     """
     assert Role(name="review", instructions=_REVIEW).accepts == ()
 
+def test_a_non_class_in_accepts_is_refused_at_the_decoration_that_declared_it() -> None:
+    """The decorator holds `accepts=` and nothing else has to happen for it to be readable, so a
+    thing that is not a class is refused here rather than one call later.
+
+    That moment is the whole difference from the two-halves comparison below: `@role` has no prompt
+    to read, so `check_placeholders` cannot run until the declaration has been called, and this can.
+    Left to that call, the entry reaches `kind.__qualname__` as a `str`, an instance or a `None` and
+    the author is handed an `AttributeError` naming an attribute rather than their own line.
+
+    **The `type: ignore` is half the assertion**, on `test_the_override_surface_is_the_factorys_own_
+    parameter_list`'s argument: `accepts` is `Sequence[type[object]]`, so `--strict` already refuses
+    this at the call site and `warn_unused_ignores` fails the build if it ever stops doing so. The
+    runtime refusal is the half that holds for a workflow whose author ignored it or ran no mypy.
+
+    A parameterised generic is caught by the same test rather than by a second one: `list[str]` is
+    not an instance of `type`, and `isinstance` raises `TypeError` on it rather than answering.
+    """
+    with pytest.raises(InputError) as refusal:
+
+        @role(model=Claude.SONNET, accepts=("Request",))  # type: ignore[arg-type]
+        def spelled() -> Role:
+            return Role(name="review", instructions=_REVIEW)
+
+    assert "'Request'" in str(refusal.value), "the refusal did not quote the entry as written"
+    assert "has to be a class" in str(refusal.value)
+
+def test_two_accepted_types_sharing_one_qualname_are_refused_as_one_key_not_two_types() -> None:
+    """Duplicate means *one key*, because the key is what `accepts=` buys: a type's `__qualname__`.
+
+    An input is recorded under the name of the type it matched, a prompt fills `{{Name}}` from that
+    mapping, and `check_placeholders` compares a set of those names against the placeholders - so
+    two entries under one name are one slot everywhere. Declaring both is unrefusable at every later
+    moment: the placeholder scan reads one name where two were declared and passes, a step passing
+    one value fills the slot with whichever matched, and a step passing both is refused by
+    `_passed_twice` with a sentence about subclasses that is false of two unrelated classes.
+
+    Two classes really do share a `__qualname__` whenever they are written in two modules - a
+    `Ticket` in each of two of an author's own files is the shape - which is why this is keyed on
+    the name rather than on identity, and why the same type twice is the easy half rather than the
+    interesting one. Built here by calling one function twice, which is the same collision in the
+    one form a single module can hold.
+    """
+
+    def declared() -> type[object]:
+        class Request:
+            """A second class of that name, and a distinct value from the one beside it."""
+
+        return Request
+
+    first, second = declared(), declared()
+    assert first is not second
+    assert first.__qualname__ == second.__qualname__
+
+    with pytest.raises(InputError) as refusal:
+
+        @role(model=Claude.SONNET, accepts=(first, second))
+        def colliding() -> Role:
+            return Role(name="review", instructions=_REVIEW)
+
+    assert "Request" in str(refusal.value), "the refusal did not name the key the two collided on"
+
+def test_a_subclass_declared_beside_its_base_is_two_names_and_is_not_refused() -> None:
+    """The shape the rule above must not take away, and the reason it is keyed on the name.
+
+    `sdk/_engine/preflight.py`'s `_ambiguous` tells an author to make one accepted type a subclass
+    of the other, a value matching both then going under the narrower - so a base declared beside
+    its own subclass is advice this file gives, not a duplicate. Two names, two placeholders, two
+    keys, and `_narrowest` decides between them at the step.
+
+    Read off the factory rather than out of a call, because the decoration is the moment under test
+    and a call would bring the placeholder comparison in with it.
+    """
+
+    class Urgent(Request):
+        """A subclass of an accepted type, which is a second name and therefore a second key."""
+
+    @role(model=Claude.SONNET, accepts=(Request, Urgent))
+    def triaging() -> Role:
+        return Role(name="review", instructions=_REVIEW)
+
+    assert triaging.accepts == (Request, Urgent)
+
 def test_replace_on_a_built_role_carries_the_model_and_the_accepted_types_across() -> None:
     """`_model` and `_accepts` are `init` fields rather than `init=False`, and this is the
     difference: `replace` copies init fields and re-defaults the rest, so a role that went through

@@ -34,9 +34,15 @@ and also the ones bound in any module bound there. This file is *one* namespace,
 factories bound directly over two models - the right shape for dedup and ordering, and the wrong
 shape for every claim about what a namespace does not hold or about how a factory reaches it.
 `tests/instruments/preflight/` is where those live, one module each: no factory at all, a factory
-written below the workflow function, and a factory reached only as `roles.implementer()` through a
-bound module. A fourth - a factory imported and never used - went with the shipped workflow whose
-role it imported; the section that used to read it says what is unmeasured in its absence.
+written below the workflow function, a factory reached only as `roles.implementer()` through a
+bound module, and a `Role` already built and imported by name with no factory beside it. Another -
+a factory imported and never used - went with the shipped workflow whose role it imported; the
+section that used to read it says what is unmeasured in its absence.
+
+**The last of those four is the one claim here that pins a gap rather than closing one.** A built
+`Role` in a namespace demands nothing of preflight, and that is a verdict rather than an omission:
+the scan is over declarations, and reading values instead has no stopping point. Its test carries
+the whole argument, including what the shape costs and which half of it could not be probed at all.
 
 **The two halves are tested against each other, not separately.** The interesting case is a role
 that *passes* preflight and must still be refused: `implementer(ask=tool)` is the spelling for a
@@ -276,6 +282,7 @@ POINTS: Final = (
     _point("unstaffed", "instruments.preflight.unstaffed:unstaffed"),
     _point("late", "instruments.preflight.late:late"),
     _point("qualified", "instruments.preflight.qualified:qualified"),
+    _point("prebuilt", "instruments.preflight.prebuilt:prebuilt"),
 )
 
 # --- the runner this file drives preflight with --------------------------------------------------
@@ -765,6 +772,59 @@ async def test_a_module_qualified_workflow_passes_on_the_model_reached_through_t
     )
     assert [task.model for task in stub.ran] == [OpenAI.TERRA]
     assert entered == ["qualified"]
+
+@pytest.mark.asyncio
+async def test_a_role_a_module_binds_already_built_is_no_declaration_preflight_can_read(
+    tmp_path: Path,
+) -> None:
+    """**A supported shape, pinned so that it stops reading as an oversight.**
+
+    `instruments/preflight/prebuilt.py` writes `from .prebuilt_roles import IMPLEMENTER`, so its
+    namespace holds a `Role` carrying `Claude.SONNET` and no `RoleFactory` and no module. The scan
+    finds nothing, no backend is asked anything, and the step runs on a model nobody probed - here
+    against a stub that would have refused every model it was asked about, so the empty
+    `asked_ready` is the claim and the completed dispatch is what stops it being vacuous.
+
+    **Why this is not `qualified.py`'s hole with a new hat.** Preflight scans *declarations*: a
+    `@role(model=…)` factory carries a model readable without calling it, which is the whole reason
+    `RoleFactory.model` exists and the reason `Role.model` is not a field an author writes. A `Role`
+    is what a declaration produces, and reading values rather than declarations has no stopping
+    point - `ROLES = [implementer()]` is the next complaint, and a dataclass holding one is the one
+    after. `ARCHITECTURE.md`'s "Preflight's registry scan is best-effort; containment at every step
+    is the guarantee" is the sentence this sits under, and its enumerated silent half already names
+    a factory "built at run time by a call".
+
+    **The other half of the shape cannot be probed at all**, which is what makes skipping it correct
+    rather than merely tolerated: a `Role(...)` built by hand carries no model, and
+    `test_a_role_that_never_went_through_a_factory_refuses_to_name_a_model` in
+    `tests/sdk/test_roles.py` is where `Role.model`'s refusal is pinned. There is nothing for
+    `check_ready` to be asked about.
+
+    **And three of the four ways to reach a built role are already covered.** `@role` beside the
+    binding, `from .roles import implementer` before a call, and `from . import roles` each leave a
+    factory or a module in the namespace the scan reads. Only importing the built value hides it,
+    which is the one spelling that imports a role in place of its declaration.
+
+    What it costs is the accepted one, and it is the same one
+    `test_a_role_built_inside_a_workflow_is_checked_at_the_step_it_is_handed_to` writes down: a
+    record and a checkout exist by the time the step refuses, so such a run needs an `agl clear`
+    where one refused at second zero does not.
+    """
+    entered.clear()
+    harness = _fakes(tmp_path)
+    stub = _Stub(ready=False)
+
+    await _start(harness, "prebuilt", agents=stub)
+
+    assert stub.asked_ready == [], (
+        "preflight probed a backend for a role its workflow's module holds as a built value, which "
+        "is a declaration the scan is not written to read"
+    )
+    assert [task.model for task in stub.ran] == [Claude.SONNET], (
+        "the run did not reach the step, so the empty probe list above is about a run that never "
+        "needed a backend rather than about a role the scan did not see"
+    )
+    assert entered == ["prebuilt"]
 
 # --- half one: the over-approximation, which is documented behaviour -----------------------------
 #

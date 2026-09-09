@@ -123,6 +123,10 @@ class RoleFactory[**P, R]:
     def __init__(
         self, declaration: Callable[P, Role[R]], model: ModelId, accepts: tuple[type[object], ...]
     ) -> None:
+        # Here and not beside the `check_placeholders` call below: `accepts=` is the decorator's
+        # own argument and is answerable at the decoration, where a prompt is not - the text is
+        # what the declaration returns, so nothing has read one until it has been called.
+        _check_accepted_types(declaration.__name__, accepts)
         update_wrapper(self, declaration)
         self._declaration = declaration
         self.name = declaration.__name__
@@ -147,7 +151,7 @@ def role(*, model: ModelId, accepts: Sequence[type[object]] = ()) -> _RoleDecora
     """Declare a role factory, naming the model and the inputs so preflight reads both uncalled.
 
     :param model: fingerprinted into every step this role runs, and asked about before step one
-    :param accepts: types a step may pass; the prompt must name each as `{{TypeName}}` and no other
+    :param accepts: classes with distinct names; the prompt names each `{{TypeName}}` and no other
     :return: a decorator binding the model and the accepted types onto each `Role` it returns
     """
 
@@ -203,6 +207,35 @@ def prompt_file(path: str | Path) -> str:
 
 class RoleIncompleteError(UpstreamUnexpected):
     ...
+
+def _check_accepted_types(factory: str, accepts: tuple[type[object], ...]) -> None:
+    # A parameterised generic and a union are not instances of `type` in CPython, so `list[str]`
+    # and `int | str` are refused by this one test alongside a string, an instance and `None`.
+    unusable = sorted(repr(entry) for entry in accepts if not isinstance(entry, type))
+    if unusable:
+        raise InputError(
+            f"the role factory {factory!r} declares {unusable} in `accepts=`, and every entry "
+            f"there has to be a class. An input is matched to a declared type by `isinstance` and "
+            f"recorded under that type's `__qualname__`, so an entry that is not a class can "
+            f"neither match a value nor name the `{{{{TypeName}}}}` a match would fill. Write the "
+            f"class itself - `accepts=(Ticket,)`, never `accepts=('Ticket',)` and never "
+            f"`accepts=(Ticket(),)`"
+        )
+    names = [kind.__qualname__ for kind in accepts]
+    collided = sorted({name for name in names if names.count(name) > 1})
+    if collided:
+        raise InputError(
+            f"the role factory {factory!r} declares more than one `accepts=` entry under each of "
+            f"{collided}. A step's inputs are recorded one per declared type, under that type's "
+            f"`__qualname__`, and a prompt fills a `{{{{TypeName}}}}` from that one key - so two "
+            f"entries sharing a name are one slot, only one of them can ever be filled, and the "
+            f"scan comparing `accepts=` against the prompt reads one name where two were "
+            f"declared. Two classes written in two modules, or in two functions, share a "
+            f"`__qualname__`, so this is as often a collision as a repetition: declare one entry "
+            f"per name, renaming a class where both of them are really wanted. A subclass needs "
+            f"no entry of its own - it is matched under the base already declared - and one "
+            f"declared beside its base is a different name and is not this"
+        )
 
 def _beside_the_caller(caller: Mapping[str, object], asked: Path) -> Path:
     declared = caller.get("__file__")

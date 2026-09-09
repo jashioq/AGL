@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from importlib.metadata import EntryPoint
 from pathlib import Path
 from traceback import print_exception
+from types import TracebackType
 from typing import Final
 from agl.api import Ask
 from agl.cli import commands
@@ -14,7 +15,7 @@ from agl.cli.commands import new as new_command
 from agl.cli.commands import resume as resume_command
 from agl.cli.commands import run as run_command
 from agl.cli.commands import workflows as workflows_command
-from agl.cli.exit_codes import exit_status, leaves
+from agl.cli.exit_codes import exit_code_for, exit_status, leaves
 from agl.config import container, distribution, sources
 from agl.config.schema import Settings
 from agl.ports.errors import AglError, InputError, InternalError, Stop
@@ -33,10 +34,16 @@ _VERSION: Final = "--version"
 
 _DESCRIPTION: Final = "Run AI agent workflows against a code repository."
 
+# The import package, which is what a frame's `__name__` says it belongs to. Spelled again rather
+# than shared with `_PROGRAM`: an import statement says `agl`, a person types `agl` and PyPI holds
+# `agents-gl` - three names for three things, and `config/distribution.py` argues the third.
+_PACKAGE: Final = "agl"
+
 _OUR_BUG: Final = (
-    "that traceback is AGL's own bug and not something you did wrong. An adapter is meant to "
-    "translate what it catches into an `agl.ports.errors` class at its boundary, and one did not - "
-    "so nothing above it could report the failure in words. Please report it with the lines above"
+    "that traceback is AGL's own bug and not something you did wrong: it was raised inside AGL's "
+    "own code rather than inside anything AGL called out to. An adapter is meant to translate what "
+    "it catches into an `agl.ports.errors` class at its boundary, and one did not - so nothing "
+    "above it could report the failure in words. Please report it with the lines above"
 )
 
 def _asked(prompt: str) -> str:
@@ -86,7 +93,7 @@ def main(argv: Sequence[str] | None = None, *, compose: Compose | None = None) -
         return _concurrent(concurrent)
     except Exception as bug:
         print_exception(bug, file=sys.stderr)
-        print(f"{_PROGRAM}: {_OUR_BUG}", file=sys.stderr)
+        print(f"{_PROGRAM}: {_attributed(bug)}", file=sys.stderr)
         return exit_status(bug)
 
 def parser() -> RefusingParser:
@@ -188,7 +195,10 @@ def _concurrent(group: ExceptionGroup[Exception]) -> int:
         _, untranslated = failed.split(AglError)
         if untranslated is not None:
             print_exception(untranslated, file=sys.stderr)
-            print(f"{_PROGRAM}: {_OUR_BUG}", file=sys.stderr)
+            # One line per leaf and not one for the group: a run that fanned out can hold a
+            # workflow's own failure beside an adapter's, and those are two different faults.
+            for leaf in leaves(untranslated):
+                print(f"{_PROGRAM}: {_attributed(leaf)}", file=sys.stderr)
         print(f"{_PROGRAM}: {_severally(group)}", file=sys.stderr)
     return exit_status(group)
 
@@ -209,3 +219,40 @@ def _severally(group: ExceptionGroup[Exception]) -> str:
         f"of them was the real one, so read this {status} as 'these disagreed' and not as its "
         f"usual 'file a bug'. All of them, with the status each resolves to on its own:\n{named}"
     )
+
+def _attributed(error: Exception) -> str:
+    called = _called_frame(error)
+    if called is None:
+        return _OUR_BUG
+    code = called.tb_frame.f_code
+    return (
+        f"that traceback was not raised by AGL's own code: `{code.co_qualname}` at "
+        f"{code.co_filename}:{called.tb_lineno} is the last frame AGL called out to, and every "
+        f"frame after it in the traceback above ran outside AGL. A workflow's own function is not "
+        f"the only place AGL runs code somebody else wrote - a role's activity reporter, a tool's "
+        f"handler and a terminal view are each invoked from inside AGL as well, and what any of "
+        f"them raises comes out of the run as the object it raised. So read the frames after that "
+        f"one: where they are yours, so is the fault, and there is nothing here to report. Where "
+        f"none of them is, an adapter called out and let what came back through untranslated, and "
+        f"that half is AGL's - please report that with the lines above. Either way the exception "
+        f"resolves to exit {exit_code_for(InternalError)}, which says AGL had no name for it "
+        f"rather than whose the fault was"
+    )
+
+# The reset on every frame of AGL's own is what makes this the frame after the *last* of them: a
+# workflow calls back into AGL and AGL calls back out again, so the *first* non-AGL frame is the
+# workflow's own line whatever raised, and answering with that one would blame a workflow for
+# every failure under it.
+def _called_frame(error: Exception) -> TracebackType | None:
+    beyond: TracebackType | None = None
+    frame = error.__traceback__
+    while frame is not None:
+        beyond = None if _ours(frame) else beyond or frame
+        frame = frame.tb_next
+    return beyond
+
+def _ours(frame: TracebackType) -> bool:
+    named = frame.tb_frame.f_globals.get("__name__")
+    if not isinstance(named, str):
+        return False
+    return named == _PACKAGE or named.startswith(f"{_PACKAGE}.")

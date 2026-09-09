@@ -69,7 +69,11 @@ class Steps:
                 ),
                 on_activity=role.on_activity,
             )
-            return None if capture is None else capture.reported(outcome)
+            if capture is not None:
+                return capture.reported(outcome)
+            if outcome.stop_reason is StopReason.LIMIT:
+                raise RoleIncompleteError(_curtailed(str(step), outcome))
+            return None
 
         value = await journal.step(
             step,
@@ -155,6 +159,18 @@ def _unreported(tool: str, outcome: AgentOutcome) -> str:
         f"the agent finished without ever calling {tool!r}, so this step produced no result: "
         f"nothing was recorded and it will run again on the next attempt. {_because(outcome)} It "
         f"said this instead of reporting: {outcome.text!r}"
+    )
+
+def _curtailed(step: str, outcome: AgentOutcome) -> str:
+    return (
+        f"the backend stopped the agent for step {step!r} against its will - turns, tokens, time "
+        f"or budget - so it may have got part of the way through what it was asked and no "
+        f"further. This role reports through no tool, so it had no way to say it had finished and "
+        f"the ledger has nothing to tell a curtailed step from a completed one by: recording it "
+        f"would write an entry every resume replays as though the work had been done. Nothing was "
+        f"recorded and it will run again on the next attempt - raise the limit, or give the role a "
+        f"reporting tool so that finishing is something it has to say. It said this before it was "
+        f"stopped: {outcome.text!r}"
     )
 
 def _because(outcome: AgentOutcome) -> str:

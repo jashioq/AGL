@@ -8,7 +8,7 @@ from agl.cli.commands import Registered, _print_replays, _said
 from agl.ports.home_layout import AglHome
 from agl.ports.ids import RunLabel
 from agl.ports.sync import Syncer
-from agl.sdk.params import RefusingParser
+from agl.sdk.params import RUN_BASE_REF_FLAGS, RUN_LABEL_FLAGS, RefusingParser
 
 __all__ = ["NAME", "declare", "execute"]
 
@@ -19,9 +19,6 @@ _LABEL: Final = "label"
 # `--from` would otherwise land on the attribute `from`, a keyword and unreachable except by
 # `getattr`.
 _BASE_REF: Final = "base_ref"
-
-_LABEL_FLAGS: Final = ("-n", "--name")
-_BASE_REF_FLAGS: Final = ("--from",)
 
 _NOTHING_TO_REPORT: Final = 0
 
@@ -46,15 +43,18 @@ def declare(commands: _Commands) -> RefusingParser:
         metavar="<workflow>",
         help="the workflow to run, named as its own pyproject.toml declares it, not as a directory",
     )
+    # Both spellings come from `agl.sdk.params`, where `arg()` refuses a workflow field that
+    # declares one of them: a flag this parser owns is taken off the line before the workflow's own
+    # parser ever sees it, so the two must not be able to disagree about which flags those are.
     parser.add_argument(
-        *_LABEL_FLAGS,
+        *RUN_LABEL_FLAGS,
         dest=_LABEL,
         metavar="<label>",
         required=True,
         help="this run's name: its record under AGL_HOME and the branch agl/<label>",
     )
     parser.add_argument(
-        *_BASE_REF_FLAGS,
+        *RUN_BASE_REF_FLAGS,
         dest=_BASE_REF,
         metavar="<ref>",
         help="the ref this run's work starts from (default: the repository's own default branch)",
