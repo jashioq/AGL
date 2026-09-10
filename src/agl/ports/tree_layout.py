@@ -26,6 +26,8 @@ _BRANCH_SEPARATOR: Final = "/"
 
 @dataclass(frozen=True, slots=True)
 class TreesRoot:
+    """Where working checkouts live: one absolute path, and never where AGL keeps its own state."""
+
     path: Path
 
     def __post_init__(self) -> None:

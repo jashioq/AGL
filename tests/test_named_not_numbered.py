@@ -160,8 +160,8 @@ JOURNAL_HEADINGS: Final = (
 # How a heading is written in this suite: three dashes, the name, dashes to the right margin.
 HEADING_MARK: Final = "# --- "
 
-# The floor, in the spirit of the hermeticity test's `sessions >= 2`. 108 modules under `src/` and
-# 126 under `tests/` when this was written; 150 is a floor and not a measurement, so an ordinary
+# The floor, in the spirit of the hermeticity test's `sessions >= 2`. 100 modules under `src/` and
+# 133 under `tests/` when this was written; 150 is a floor and not a measurement, so an ordinary
 # edit never moves it and a walk that found the wrong directory cannot clear it.
 FILES_TODAY: Final = 150
 
@@ -315,7 +315,7 @@ def test_no_module_in_src_or_tests_cites_a_number_that_can_be_deleted_quietly() 
 
     assert not problems, "\n\n".join(problems)
     assert walked >= FILES_TODAY, (
-        f"only {walked} module(s) were found under {TREES} below {REPO_ROOT}, and there were 234 "
+        f"only {walked} module(s) were found under {TREES} below {REPO_ROOT}, and there were 233 "
         f"when this was written. Every assertion above is silent about a module holding no "
         f"citation, so a walk that found none of them would be green and checking nothing"
     )

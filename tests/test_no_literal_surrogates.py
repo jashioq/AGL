@@ -5,7 +5,7 @@
 *literal* crashes `mypy --strict` outright.** A `Final` keeps its value as a `Literal` type, mypy
 writes that type into its own cache as UTF-8, a lone surrogate has no UTF-8 encoding, and the
 process exits with `INTERNAL ERROR` naming no file at all. That is the types gate failing with the
-worst diagnostic in the build: no line, no module, no clue which of 234 files moved.
+worst diagnostic in the build: no line, no module, no clue which of 233 files moved.
 
 That comment is necessary and it is not sufficient, which is what this file is.
 
@@ -109,8 +109,8 @@ SURROGATE_LAST: Final = 0xDFFF
 # bare `StrEnum` imported from it are the same declaration.
 ENUM_BASES: Final = frozenset({"Enum", "StrEnum", "IntEnum", "IntFlag", "Flag", "ReprEnum"})
 
-# The floor, in the spirit of the hermeticity test's `sessions >= 2`. 105 modules under `src/` and
-# 126 under `tests/` when this was written; 150 is a floor and not a measurement, so an ordinary
+# The floor, in the spirit of the hermeticity test's `sessions >= 2`. 100 modules under `src/` and
+# 133 under `tests/` when this was written; 150 is a floor and not a measurement, so an ordinary
 # edit never moves it and a walk that found the wrong directory cannot clear it.
 FILES_TODAY: Final = 150
 
@@ -275,7 +275,7 @@ def test_no_lone_surrogate_is_written_where_mypy_would_cache_it_as_a_literal() -
 
     assert not problems, "\n\n".join(problems)
     assert walked >= FILES_TODAY, (
-        f"only {walked} module(s) were found under {TREES} below {REPO_ROOT}, and there were 231 "
+        f"only {walked} module(s) were found under {TREES} below {REPO_ROOT}, and there were 233 "
         f"when this was written. Every assertion above is silent about a module holding no "
         f"surrogate, so a walk that found none of them would be green and checking nothing"
     )

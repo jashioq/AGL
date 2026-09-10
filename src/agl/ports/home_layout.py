@@ -58,6 +58,8 @@ _INTERPRETER_CHARACTERS: Final = _INTERPRETER_FIRST | frozenset("0123456789._-")
 
 @dataclass(frozen=True, slots=True)
 class AglHome:
+    """Where AGL keeps its own state: one absolute path, and never where code is checked out."""
+
     path: Path
 
     def __post_init__(self) -> None:
@@ -69,6 +71,8 @@ class AglHome:
 
 @dataclass(frozen=True, slots=True)
 class RunScope:
+    """Which run, and how deep in it: a project, a label, and the namespaces entered so far."""
+
     project: ProjectName
     label: RunLabel
     namespaces: tuple[Namespace, ...] = ()

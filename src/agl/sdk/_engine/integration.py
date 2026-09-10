@@ -55,8 +55,9 @@ class Lease:
         self._released = False
 
     def release(self) -> None:
-        # Idempotent because `release_all` runs from `api.run`'s `finally` over whatever is already
-        # ending the run, and `asyncio.Lock.release` on a lock nobody holds raises `RuntimeError`.
+        # Idempotent because `release_all` runs from `api._walk`'s `finally` over whatever is
+        # already ending the walk, and `asyncio.Lock.release` on a lock nobody holds raises
+        # `RuntimeError`.
         if self._released:
             return
         self._released = True

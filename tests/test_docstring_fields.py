@@ -162,6 +162,7 @@ artefact in the same file can be compared against it.
 """
 
 import ast
+import difflib
 import re
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
@@ -630,8 +631,9 @@ def test_an_overload_stub_docstring_never_reaches_the_function_at_run_time() -> 
 # ---------------------------------------------------------------------------------------------
 # Non-vacuity: the scans on fabricated source, one case per rule and one per decision, so that a
 # rewrite which broke them into always answering "nothing here" fails below instead of passing
-# over the whole tree. `_WORKED` is the block from CLAUDE.md's own convention, and every violating
-# case below is that same block with one thing changed.
+# over the whole tree. `_WORKED` is the block from CLAUDE.md's own convention - held to that by
+# `test_claude_md_the_source_and_this_file_hold_one_worked_example_between_them` and not by this
+# sentence - and every violating case below is that same block with one thing changed.
 # ---------------------------------------------------------------------------------------------
 
 _WORKED: Final = '''
@@ -640,11 +642,114 @@ def tool(name: str, description: str, payload: type, handler: object) -> Tool:
 
     :param name: what the agent calls it; must be unique within a role
     :param description: what the agent is told the tool is for
-    :param payload: dataclass the arguments are built into; its schema is a fingerprint term
-    :param handler: awaited with the built payload once the agent calls the tool
+    :param payload: dataclass the arguments are built into; edit a field and no entry replays
+    :param handler: awaited with the built payload; no fingerprint term, so an edit re-runs nothing
     :return: a tool ready to go on a role
     """
 '''
+
+# The two files `_WORKED` is a copy of, by their path below `REPO_ROOT`, and the callable all three
+# of them write. `CLAUDE.md` is where the convention is stated; `src/` is what an author hovers.
+_WORKED_EXAMPLE_LAW: Final = "CLAUDE.md"
+_WORKED_EXAMPLE_SOURCE: Final = "src/agl/sdk/tools.py"
+_WORKED_EXAMPLE_SYMBOL: Final = "tool"
+
+# A fenced Python block: ```python alone on a line, source, then ``` at the start of a line.
+_PYTHON_FENCE: Final = re.compile(r"^```python\n(.*?)^```", re.MULTILINE | re.DOTALL)
+
+def _worked_example(source: str, shown: str) -> tuple[str, list[str]]:
+    """One copy of the worked example: the docstring it writes and the parameters it names.
+
+    The docstring comes back through `ast.get_docstring`, which cleans with `inspect.cleandoc`, so
+    the common left margin of the continuation lines is the one thing normalised away. That margin
+    says where a copy sits rather than what it says, and the cleaned text is what a tooltip renders
+    - which is the whole of what the block exists for. Everything else is compared as written: a
+    second space inside a field line is a difference and is reported as one.
+
+    Annotations are not read. `_WORKED` writes simplified ones on purpose, so that its snippet
+    needs no import to parse, and the parameter names are what every `:param:` line hangs on.
+    """
+    written = [
+        node
+        for node in ast.parse(source).body
+        if isinstance(node, ast.FunctionDef) and node.name == _WORKED_EXAMPLE_SYMBOL
+    ]
+    assert len(written) == 1, (
+        f"{shown} writes {len(written)} module-level `def {_WORKED_EXAMPLE_SYMBOL}`, and the "
+        f"worked example is exactly one of them. Nothing below can compare three copies of a "
+        f"block while one of the three is missing or doubled"
+    )
+    docstring = ast.get_docstring(written[0])
+    assert docstring is not None, (
+        f"{shown} writes `{_WORKED_EXAMPLE_SYMBOL}` with no docstring at all, and the docstring "
+        f"is the whole of what the worked example is"
+    )
+    return docstring, _expected(written[0], method=False)
+
+def _fenced_worked_example(markdown: str) -> str:
+    """The one fenced Python block in `CLAUDE.md` writing the worked example, as source text."""
+    fenced: list[str] = [
+        match.group(1)
+        for match in _PYTHON_FENCE.finditer(markdown)
+        if f"def {_WORKED_EXAMPLE_SYMBOL}" in match.group(1)
+    ]
+    assert len(fenced) == 1, (
+        f"{_WORKED_EXAMPLE_LAW} holds {len(fenced)} fenced Python block(s) writing "
+        f"`def {_WORKED_EXAMPLE_SYMBOL}`, and the docstring convention is written around one. If a "
+        f"second one belongs there, this extraction has to be told which is the worked example"
+    )
+    return fenced[0]
+
+def _a_copy_of_the_worked_example_moved(shown: str, part: str, written: str, copied: str) -> str:
+    diff = "".join(
+        difflib.unified_diff(
+            f"{written}\n".splitlines(keepends=True),
+            f"{copied}\n".splitlines(keepends=True),
+            fromfile=f"{_WORKED_EXAMPLE_SOURCE}::{_WORKED_EXAMPLE_SYMBOL}",
+            tofile=shown,
+        )
+    )
+    return (
+        f"{shown} and {_WORKED_EXAMPLE_SOURCE} no longer write one {part}:\n"
+        f"\n"
+        f"{diff}\n"
+        f"The worked example is written out three times and the three are one text. "
+        f"{_WORKED_EXAMPLE_LAW} states the convention and has to show it, "
+        f"{_WORKED_EXAMPLE_SOURCE} is the callable an author hovers, and `_WORKED` in this file is "
+        f"what every fabricated case below mutates. Edit one and the other two are stale in the "
+        f"same instant: the law illustrates a block the code does not write, and the cases below "
+        f"mutate a block that exists nowhere. The edit goes in all three."
+    )
+
+def test_claude_md_the_source_and_this_file_hold_one_worked_example_between_them() -> None:
+    """`_WORKED` above, `CLAUDE.md`'s fenced block and `tool`'s own docstring, compared.
+
+    Three copies exist because each is load-bearing where it sits and none can be a reference to
+    another. `CLAUDE.md` states the convention and has to show it, and a document cannot import a
+    docstring. Every fabricated case below is `_WORKED` with one thing changed, and a fixture that
+    read its own text off disk at run time would mutate whatever the source happened to say rather
+    than the block the cases were written against - which is the same reason `_WORKED` is a literal
+    here. And the source is the only one of the three an author ever hovers, which is what makes
+    the other two worth keeping honest at all.
+
+    So there is no single source to collapse them into, and what is left is to compare them. The
+    comparison is over the two things all three genuinely share, the cleaned docstring and the
+    parameter names in signature order, and a failure names the copy that moved and diffs it.
+    """
+    law = (REPO_ROOT / _WORKED_EXAMPLE_LAW).read_text(encoding="utf-8")
+    source = (REPO_ROOT / _WORKED_EXAMPLE_SOURCE).read_text(encoding="utf-8")
+    docstring, parameters = _worked_example(source, _WORKED_EXAMPLE_SOURCE)
+    for shown, copied in (
+        (f"{_WORKED_EXAMPLE_LAW}'s fenced example", _fenced_worked_example(law)),
+        (f"`_WORKED` in tests/{Path(__file__).name}", _WORKED),
+    ):
+        held, named = _worked_example(copied, shown)
+        assert held == docstring, _a_copy_of_the_worked_example_moved(
+            shown, "docstring", docstring, held
+        )
+        assert named == parameters, _a_copy_of_the_worked_example_moved(
+            shown, "parameter list", "\n".join(parameters), "\n".join(named)
+        )
 
 def _one_problem(source: str, *, documented: bool = False) -> str:
     """The single problem a fabricated snippet is written to produce, asserted to be single."""
@@ -664,8 +769,8 @@ def test_the_scan_reports_a_parameter_renamed_without_the_docstring_following_it
 def test_the_scan_reports_a_parameter_the_block_never_names_at_all() -> None:
     """A parameter added to the signature and not to the block: the line is simply missing."""
     assert "missing ['handler']" in _one_problem(
-        _WORKED.replace("    :param handler: awaited with the built payload once the agent calls "
-                        "the tool\n", "")
+        _WORKED.replace("    :param handler: awaited with the built payload; no fingerprint "
+                        "term, so an edit re-runs nothing\n", "")
     )
 
 def test_the_scan_reports_a_param_line_naming_something_that_is_not_a_parameter() -> None:

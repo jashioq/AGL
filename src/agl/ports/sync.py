@@ -6,6 +6,8 @@ __all__ = ["SyncOutcome", "Syncer"]
 
 @dataclass(frozen=True, slots=True)
 class SyncOutcome:
+    """Everything an install hands back: whether it synced, its exit status, and its output."""
+
     synced: bool
 
     status: int
@@ -17,6 +19,8 @@ class SyncOutcome:
 # appends the venv's site-packages *ahead* of it - so an installed copy of a workflow would resolve
 # in front of the source the operator is editing.
 class Syncer(ABC):
+    """Every install behind one port: one workspace to install into, and the verdict it gave."""
+
     @abstractmethod
     async def sync(self, workspace: Path) -> SyncOutcome:
         """Install what the workspace's workflows declare, and report what the installer said.

@@ -7,6 +7,8 @@ from agl.ports.run import JsonValue
 __all__ = ["Store"]
 
 class Store(ABC):
+    """Everything AGL records, behind one port: a record per run, and an entry per step run."""
+
     @abstractmethod
     async def read_record(self, scope: RunScope) -> dict[str, JsonValue] | None:
         """What this run was asked to do, as it was written down.

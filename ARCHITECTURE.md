@@ -517,14 +517,15 @@ naming both and recommending that the author make one a subclass of the other.
 **What `accepts=` refuses, and when, follows from what is readable at each moment.** At the
 **decoration**, at module import and genuinely before anything is spent, `sdk/roles.py`'s
 `_check_accepted_types` refuses an entry that is not a class — a string, an instance, `None`, and a
-parameterised generic or a union, neither of which is an instance of `type` in CPython — and two
-entries whose `__qualname__` collide. It can run there because `accepts=` is the decorator's own
-argument. **A base declared beside its own subclass is two names and is not a collision**: it is the
-shape `_ambiguous` recommends, so refusing it would delete a documented answer. Duplicate is defined
-on the name rather than on identity, because the dangerous case is not one type written twice but
-two different classes sharing a name — a `Ticket` in each of two of an author's own modules — where
-the declaration passes in silence, either value alone fills the single slot, and passing both is
-refused with a sentence about subclasses that is false of it. At the **factory call**,
+parameterised generic or a union, neither of which is an instance of `type` in CPython — a class
+`isinstance` will not take as its second argument, and two entries whose `__qualname__` collide. It
+can run there because `accepts=` is the decorator's own argument. **A base declared beside its own
+subclass is two names and is not a collision**: it is the shape `_ambiguous` recommends, so refusing
+it would delete a documented answer. Duplicate is defined on the name rather than on identity,
+because the dangerous case is not one type written twice but two different classes sharing a name —
+a `Ticket` in each of two of an author's own modules — where the declaration passes in silence,
+either value alone fills the single slot, and passing both is refused with a sentence about
+subclasses that is false of it. At the **factory call**,
 `check_placeholders` makes the set-equality comparison; it cannot move up to the decorator, which
 has no prompt to read, the text being what the decorated function returns.
 `tests/sdk/test_roles.py::test_the_two_halves_are_compared_at_the_factory_call_and_not_at_the_decoration`
@@ -534,13 +535,24 @@ and `canonical_json` refuses a value it cannot walk. A dataclass is the ordinary
 is why, but the serialiser takes a mapping, a sequence, a set, a string, a number, a bool or `None`
 as well — so that last refusal is narrower than "not a dataclass" and wider than "not JSON", a set
 being emitted sorted rather than in iteration order. A `Path` field is the ordinary way to meet it,
-and it comes from the serialiser rather than from the match. **Two shapes get past every one of
-these and both are open:** `typing.Any` and a `Protocol` that is not `@runtime_checkable` are
-classes, so `_check_accepted_types` takes them, and `isinstance` then raises a bare `TypeError` at
-the first step that passes a value. That is not an `AglError`, so it leaves on exit 70 — and
-because it was raised inside AGL's own code, `cli/main.py` finds no frame AGL called out to and
-prints `_OUR_BUG`, telling an author to report a bug about a line they wrote. Catching either needs
-a probe call rather than a predicate.
+and it comes from the serialiser rather than from the match. **Two shapes are classes `isinstance`
+will not take, and a call and not a predicate is what catches them:** `typing.Any` and a `Protocol`
+that is not `@runtime_checkable` are both instances of `type`, so the class test above hands them
+straight through, and `isinstance` then refuses either as its second argument whatever the first one
+is. Nothing on the class marks it and `mypy --strict` accepts both where a `Sequence[type[object]]`
+is wanted, so neither the annotation nor the type checker is a gate here and there is no predicate
+to write. `_matchable` calls `isinstance` against a throwaway `object()` once per entry and refuses
+what raises `TypeError` — the same call `checked_inputs` will make, so it answers with the fact
+rather than with a guess at it, and a metaclass that discriminates on the value rather than on the
+type is the one shape it can be wrong about. Measured, that costs under a tenth of a microsecond per
+entry for an ordinary class and about 1.4 for a runtime-checkable protocol, once at import. Left to
+the step it would be a bare `TypeError` raised from inside AGL, which is not an `AglError`: it would
+leave on exit 70 under a traceback of AGL's frames and CPython's, telling an author to report a bug
+about a line they wrote.
+`tests/sdk/test_roles.py::test_a_class_that_isinstance_refuses_is_caught_at_the_decoration_by_a_probe_call`
+holds it, and `::test_a_runtime_checkable_protocol_is_left_alone_because_the_probe_call_answers`
+holds the shape it must not take away — a refusal keyed on `Protocol`, or on anything else readable
+off the class, would delete that one along with the two it was aimed at.
 
 **An accepted type deliberately kept out of the prompt is unspellable, and nothing wants one.** Set
 equality refuses it in the `_unnamed` direction, so the cache-buster — a value declared and passed

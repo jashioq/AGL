@@ -6,6 +6,8 @@ from agl.ports.ids import Namespace, RunLabel
 __all__ = ["Workspace", "WorkspaceProvider"]
 
 class WorkspaceProvider(ABC):
+    """Every checkout behind one port: open one, take it back, discard the work, hold the run."""
+
     @abstractmethod
     async def open(self, label: RunLabel, namespace: Namespace | None, base: str) -> Workspace:
         """Provision an isolated place for these identifiers, or hand back the one already there.
@@ -47,6 +49,8 @@ class WorkspaceProvider(ABC):
         ...
 
 class Workspace(ABC):
+    """One checkout to work in: its path, its branch, and the head it commits or restores to."""
+
     @property
     @abstractmethod
     def path(self) -> Path:

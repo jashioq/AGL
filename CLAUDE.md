@@ -108,8 +108,8 @@ def tool[P](
 
     :param name: what the agent calls it; must be unique within a role
     :param description: what the agent is told the tool is for
-    :param payload: dataclass the arguments are built into; its schema is a fingerprint term
-    :param handler: awaited with the built payload once the agent calls the tool
+    :param payload: dataclass the arguments are built into; edit a field and no entry replays
+    :param handler: awaited with the built payload; no fingerprint term, so an edit re-runs nothing
     :return: a tool ready to go on a role
     """
 ```
@@ -133,8 +133,8 @@ def tool[P](
   walk from passing as a documented tree is the floor `PUBLIC_CALLABLES_TODAY` in
   `tests/test_docstring_fields.py`. A dunder is out, because a name syntax invokes is never hovered.
 - **D7. Everywhere else in `src/`, C4's one line and no field block.** `adapters/`, `config/`,
-  `cli/`, `workflows/`, `api.py` and `testing.py` take a one-line summary only where the signature
-  does not already say it. `sdk/_engine/` takes nothing at all: nobody hovers it from outside.
+  `cli/`, `api.py` and `testing.py` take a one-line summary only where the signature does not
+  already say it. `sdk/_engine/` takes nothing at all: nobody hovers it from outside.
 - **D8. The description earns its place** — a constraint, a lifetime, a unit, a consequence — and
   is never a restatement of the name. This is C1's spirit surviving the inversion, and it is the
   half no gate reads.

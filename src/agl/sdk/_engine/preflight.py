@@ -171,7 +171,7 @@ def _unaccepted(step: str, role: Role[object], value: object) -> str:
         f"one nothing declared has no name to go under: it would reach neither the fingerprint "
         f"nor the agent, and the step would be paid for and answered without it. `accepts=` is "
         f"declared on the role's factory - `@role(model=..., accepts=({offered},))` - and never "
-        f"on the `Role` itself, so that preflight can read it without calling the factory"
+        f"on the `Role` itself, so the declaration is readable without calling the factory"
     )
     if not role.accepts:
         message += _FROM_NO_DECLARATION
@@ -196,7 +196,7 @@ def _passed_twice(step: str, name: str) -> str:
         f"declared type, under the name of the type each was matched to - so a subclass of {name} "
         f"is recorded under {name} as well. The second would take the first's place in the "
         f"fingerprint and in the prompt, so one of the two would be paid for and never read - and "
-        f"two calls differing only in the value that was dropped would share a digest, the second "
+        f"two walks differing only in the value that was dropped would share a digest, the second "
         f"replaying the first's result. A role that needs two of something declares one type "
         f"holding both"
     )

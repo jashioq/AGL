@@ -18,34 +18,34 @@ __all__ = [
 ]
 
 class AglError(Exception):
-    ...
+    """The base of AGL's own errors: an adapter translates whatever it caught into one of these."""
 
 class InputError(AglError):
-    ...
+    """What AGL was given cannot be used: the value has to change before the call can succeed."""
 
 class NotFoundError(AglError):
-    ...
+    """What was named is not there: name something that exists, or make it before asking for it."""
 
 class ConflictError(AglError):
-    ...
+    """What is there already disagrees with the call: AGL refuses rather than write over it."""
 
 class DeniedError(AglError):
-    ...
+    """A refusal that stands until something changes, so a retry alone is refused the same way."""
 
 class UpstreamError(AglError):
-    ...
+    """Whatever failed beyond a port: a subclass says whether the far side may answer later."""
 
 class UpstreamUnavailable(UpstreamError):
-    ...
+    """A state of the world and not a fault in the call: the same call may get past it later."""
 
 class UpstreamUnexpected(UpstreamError):
-    ...
+    """The far side answered in terms the adapter cannot read, which no retry of the call fixes."""
 
 class Stop(AglError):
-    ...
+    """A workflow ending its own run: subclass it freely, the exit code resolves up the tree."""
 
 class InternalError(AglError):
-    ...
+    """An invariant of AGL's own broke, so the fault is here and not in anything a caller wrote."""
 
 EXIT_CODES: Final[Mapping[type[AglError], int]] = MappingProxyType(
     {

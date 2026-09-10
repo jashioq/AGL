@@ -18,10 +18,14 @@ __all__ = [
 
 @dataclass(frozen=True, slots=True)
 class Text:
+    """A component that is one string: what a bare `str` becomes wherever a component is taken."""
+
     value: str
 
 @dataclass(frozen=True, slots=True, init=False)
 class Row:
+    """One line of cells, every one a `Text`: a bare `str` among them is coerced on the way in."""
+
     cells: tuple[Text, ...]
 
     def __init__(self, *cells: str | Text) -> None:
@@ -29,6 +33,8 @@ class Row:
 
 @dataclass(frozen=True, slots=True, init=False)
 class Rows:
+    """Several rows as one component: drawn in the order given, with no header and no widths."""
+
     rows: tuple[Row, ...]
 
     def __init__(self, rows: Sequence[Row]) -> None:
@@ -38,12 +44,16 @@ type Component = Text | Row | Rows
 
 @dataclass(frozen=True, slots=True)
 class Choice[T]:
+    """One answer a person can pick: the label they see, and the value `show` hands back for it."""
+
     label: str
 
     value: T
 
 @dataclass(frozen=True, slots=True)
 class TextInput[T]:
+    """One answer a person types: the label they see, and the mapping from their text to `T`."""
+
     label: str
 
     maps: Callable[[str], T] = field(compare=False, repr=False)
@@ -52,6 +62,8 @@ type Response[T] = Choice[T] | TextInput[T]
 
 @dataclass(frozen=True, slots=True, init=False)
 class Screen[T = None]:
+    """What a person is shown: a body, plus responses - with none it is a board, not a question."""
+
     body: Component
 
     responses: tuple[Response[T], ...]
@@ -64,6 +76,8 @@ def _coerced[C: Component](value: str | C) -> Text | C:
     return Text(value) if isinstance(value, str) else value
 
 class Terminal(ABC):
+    """The one way a workflow reaches a person: boards replace one another, questions queue."""
+
     @abstractmethod
     async def show[T](
         self,

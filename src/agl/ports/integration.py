@@ -7,6 +7,8 @@ __all__ = ["Conflict", "IntegrationOutcome", "Integrator"]
 
 @dataclass(frozen=True, slots=True)
 class Conflict:
+    """Why nothing landed: the colliding paths and a summary, outliving the hold it explains."""
+
     paths: tuple[str, ...]
 
     summary: str
@@ -26,6 +28,8 @@ class Conflict:
 
 @dataclass(frozen=True, slots=True)
 class IntegrationOutcome:
+    """Everything a landing hands back: a head, or the conflict that stopped it, and never both."""
+
     head: str | None = None
 
     conflict: Conflict | None = None
@@ -53,6 +57,8 @@ class IntegrationOutcome:
         return self.conflict is not None
 
 class Integrator(ABC):
+    """Every landing behind one port: put the work in, look again, or give up the hold it left."""
+
     @abstractmethod
     async def land(self, source: Workspace, target: Workspace) -> IntegrationOutcome:
         """Put what `source` holds into `target`, and say whether it went in.

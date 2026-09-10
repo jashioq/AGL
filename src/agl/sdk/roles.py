@@ -153,7 +153,7 @@ class _RoleDecorator(Protocol):
     def __call__[**P, R](self, declaration: Callable[P, Role[R]], /) -> RoleFactory[P, R]: ...
 
 def role(*, model: ModelId, accepts: Sequence[type[object]] = ()) -> _RoleDecorator:
-    """Declare a role factory, naming the model and the inputs so preflight reads both uncalled.
+    """Declare a role factory, naming the model and the inputs so both are readable uncalled.
 
     :param model: fingerprinted into every step this role runs, and asked about before step one
     :param accepts: classes with distinct names; the prompt names each `{{TypeName}}` and no other
@@ -211,7 +211,7 @@ def prompt_file(path: str | Path) -> str:
     return text
 
 class RoleIncompleteError(UpstreamUnexpected):
-    ...
+    """The agent produced no result: nothing was recorded, so the next attempt runs the step."""
 
 def _check_accepted_types(factory: str, accepts: tuple[type[object], ...]) -> None:
     # A parameterised generic and a union are not instances of `type` in CPython, so `list[str]`
@@ -225,6 +225,21 @@ def _check_accepted_types(factory: str, accepts: tuple[type[object], ...]) -> No
             f"neither match a value nor name the `{{{{TypeName}}}}` a match would fill. Write the "
             f"class itself - `accepts=(Ticket,)`, never `accepts=('Ticket',)` and never "
             f"`accepts=(Ticket(),)`"
+        )
+    # `typing.Any` and a `Protocol` written without `@runtime_checkable` are instances of `type`,
+    # so the test above takes both, and CPython's `isinstance` then refuses either as its second
+    # argument whatever the first one is. Nothing on the class marks it and `mypy --strict` passes
+    # either at the call site, so calling `isinstance` is the only test there is.
+    unmatchable = sorted(repr(entry) for entry in accepts if not _matchable(entry))
+    if unmatchable:
+        raise InputError(
+            f"the role factory {factory!r} declares {unmatchable} in `accepts=`, and `isinstance` "
+            f"refuses each of them as its second argument. An input is matched to a declared type "
+            f"by `isinstance`, so an entry that call will not take matches no value at all - left "
+            f"to the step it raises a bare `TypeError` from inside AGL at the first step that "
+            f"passes one, with whatever ran before that step already paid for. `typing.Any` is one "
+            f"of these and a `Protocol` declared without `@runtime_checkable` is the other: write "
+            f"`@runtime_checkable` above the protocol, or declare the class an input really is"
         )
     names = [kind.__qualname__ for kind in accepts]
     collided = sorted({name for name in names if names.count(name) > 1})
@@ -241,6 +256,13 @@ def _check_accepted_types(factory: str, accepts: tuple[type[object], ...]) -> No
             f"no entry of its own - it is matched under the base already declared - and one "
             f"declared beside its base is a different name and is not this"
         )
+
+def _matchable(entry: type[object]) -> bool:
+    try:
+        isinstance(object(), entry)
+    except TypeError:
+        return False
+    return True
 
 def _beside_the_caller(caller: Mapping[str, object], asked: Path) -> Path:
     declared = caller.get("__file__")

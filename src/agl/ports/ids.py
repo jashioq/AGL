@@ -128,6 +128,8 @@ class _Name:
 
 @dataclass(frozen=True, slots=True)
 class RunLabel(_Name):
+    """One run, by the name an operator gave it: a directory in the trees root and a branch."""
+
     _KIND: ClassVar[str] = "run label"
     _RESERVED: ClassVar[Mapping[str, str]] = {
         _collision_key(_CHILD_BRANCH_INFIX): (
@@ -140,6 +142,8 @@ class RunLabel(_Name):
 
 @dataclass(frozen=True, slots=True)
 class Namespace(_Name):
+    """One child worktree of a run: the trees root is flat, so a name is taken run-wide."""
+
     _KIND: ClassVar[str] = "namespace"
     _RESERVED: ClassVar[Mapping[str, str]] = {
         _collision_key(_BASE_WORKTREE_DIRNAME): (
@@ -151,14 +155,20 @@ class Namespace(_Name):
 
 @dataclass(frozen=True, slots=True)
 class ProjectName(_Name):
+    """One registered project: also its settings file's stem, so `.toml` counts in its length."""
+
     _KIND: ClassVar[str] = "project name"
 
 @dataclass(frozen=True, slots=True)
 class StepName(_Name):
+    """One step of a workflow: the `steps/<name>/` its entries file under, case folded away."""
+
     _KIND: ClassVar[str] = "step name"
 
 @dataclass(frozen=True, slots=True)
 class WorkflowName(_Name):
+    """One workflow, and the module `agl run` imports: so an identifier, and never a keyword."""
+
     _KIND: ClassVar[str] = "workflow name"
 
     def _also_unusable(self) -> str | None:

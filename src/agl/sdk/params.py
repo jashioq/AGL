@@ -57,6 +57,8 @@ class _Declared:
     help: str
 
 class RefusingParser(argparse.ArgumentParser):
+    """A parser that raises where `argparse` would exit: a bad flag leaves on AGL's own code."""
+
     def error(self, message: str) -> NoReturn:
         """Raise where `argparse` would exit, so a refusal goes through AGL's own exit-code table.
 

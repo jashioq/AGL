@@ -34,11 +34,12 @@ gaps; these are the ones a rich console over a buffer can close, in the order th
   * **The frame the loop never reached.** Not in that suite's list either, and invisible to it
     twice over: nothing there looks at a display, and `written` is cleared on the way out, so a
     driver has nothing left to report once `__aexit__` has run. Drawing is a task on a timer, so
-    whatever a workflow does between the last tick and its own return has not been drawn when the
-    terminal is torn down - and `Live.stop` repaints the renderable it was last handed rather than
-    rendering anything new. That is a workflow's closing board lost to a race no workflow can win
-    from outside, so the teardown draws once more, and the three tests for it read the console's
-    own bytes *after* the context has closed.
+    whatever a workflow does between the last tick and its own return - moving a live argument, or
+    showing its closing summary outright - has not been drawn when the terminal is torn down, and
+    `Live.stop` repaints the renderable it was last handed rather than rendering anything new. That
+    is a workflow's closing board lost to a race no workflow can win from outside, so the teardown
+    draws once more, and the four tests for it read the console's own bytes *after* the context has
+    closed.
 
 Three more sit beside those and are decisions this adapter made that nothing else would notice: a
 view that starts raising becomes a frame rather than a dead repaint task, a person mistyping is
@@ -700,6 +701,45 @@ async def test_a_run_that_ends_in_a_stop_still_leaves_its_last_board_on_screen(
         f"the run ended in a `Stop` and the console holds {output.getvalue()!r}. The final frame "
         f"is drawn inside the same `try` the rest of the teardown is in, so it is not something "
         f"that happens only when nothing went wrong"
+    )
+
+async def test_a_closing_summary_shown_as_the_last_act_reaches_the_console_after_teardown(
+    terminal: RichTerminal, output: io.StringIO
+) -> None:
+    """The other shape of the frame the loop never reached: a `show` with nothing after it at all.
+
+    Every frame the three tests beside this one expect at teardown comes from a mapping that moved
+    under a view `show` had already registered, so each of them is answered by invoking again
+    whatever the loop was last drawing. A run's closing summary is not that: `show` replaces the
+    slot and returns without drawing anything, so the screen a workflow ends by putting up was
+    never part of any frame, and the registration carrying it is one the loop has never seen.
+
+    **That is what makes this a separate test rather than a fourth spelling of the first one.** The
+    edit it exists to catch is a teardown that re-renders the registration it was last showing
+    instead of reading what is displayed now: a workflow's closing summary is lost outright, and
+    all three of the others still pass, because a live argument moves *under* a registration the
+    loop already has.
+
+    The `show` is the last statement in the block, for the reason its neighbour gives: it suspends
+    at nothing, and `__aexit__` cancels both tasks before its own first suspension point, so the
+    redraw loop provably never runs again.
+
+    The console is read as a delta, so what is asserted is that those bytes arrived after the
+    workflow's last statement rather than at some point during the run.
+    """
+    async with terminal as term:
+        await term.show(dashboard, line=RUNNING)
+        await _drawn(term, Text(RUNNING))
+        printed = output.getvalue()
+
+        await term.show(dashboard, line=LANDED)
+
+    arrived = output.getvalue().removeprefix(printed)
+    assert LANDED in arrived, (
+        f"a run put its closing screen up and returned, and the console received {arrived!r} from "
+        f"there on. `show` registers a view and draws nothing, so a summary shown on the way out "
+        f"reaches a person only if the teardown renders what is displayed rather than what it was "
+        f"already displaying - and a summary is the one screen a run is read for"
     )
 
 async def test_a_console_that_cannot_animate_still_gets_every_frame_that_changed_and_no_others(

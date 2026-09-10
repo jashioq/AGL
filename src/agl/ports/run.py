@@ -38,6 +38,8 @@ _WORKFLOW_FILE: Final = "the workflow file"
 
 @dataclass(frozen=True, slots=True)
 class WireShape:
+    """One wire schema: the whole key set a document carries, and the nouns its refusals use."""
+
     keys: tuple[str, ...]
 
     document: str
@@ -117,6 +119,8 @@ def wire_moment(moment: datetime) -> str:
 
 @dataclass(frozen=True, slots=True)
 class RunSpec:
+    """One run as `run.json` holds it: the workflow, the base it cut from, its params and label."""
+
     workflow: str
 
     workflow_digests: Mapping[str, str]

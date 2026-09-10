@@ -1997,7 +1997,7 @@ async def test_two_inputs_of_one_type_are_refused_rather_than_one_replacing_the_
     """One key per type, so a second value of a type has nowhere to go but over the first.
 
     What this refuses is not a lost argument, which would be loud enough on its own. The dropped
-    value reaches no fingerprint, so two calls differing only in it share one digest and the second
+    value reaches no fingerprint, so two walks differing only in it share one digest and the second
     replays the first's recorded result - a value handed back for work never done, which is the one
     failure `sdk/_engine/journal.py`'s canonicaliser is built to make unreachable.
     """
@@ -2017,10 +2017,10 @@ async def test_a_role_no_factory_built_accepts_nothing_and_the_refusal_says_wher
 ) -> None:
     """A hand-built `Role` carries no `accepts`, for the reason it carries no model.
 
-    `RoleFactory.__call__` binds both, and it binds them there so that preflight can read them off
-    the factory without calling it - so the refusal has to say which line is missing rather than
-    only that something is. A reader told "this role accepts nothing" goes looking for a field of
-    `Role`, which is exactly the place the declaration deliberately is not.
+    `RoleFactory.__call__` binds both, and it binds them there so they are readable off the factory
+    without calling it - so the refusal has to say which line is missing rather than only that
+    something is. A reader told "this role accepts nothing" goes looking for a field of `Role`,
+    which is exactly the place the declaration deliberately is not.
 
     The role below names no model either, and this refusal is still the one that arrives: the
     inputs are checked from the call alone, above the first thing that reads `role.model`.

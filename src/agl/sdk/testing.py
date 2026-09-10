@@ -12,6 +12,8 @@ _NO_PAYLOAD: Final[Mapping[str, JsonValue]] = MappingProxyType({})
 
 @dataclass(frozen=True, slots=True)
 class Call:
+    """One tool call an `Agent` makes: the name the role declared it under, and the arguments."""
+
     tool: str
 
     payload: Mapping[str, JsonValue] = _NO_PAYLOAD
@@ -30,6 +32,8 @@ class Call:
 
 @dataclass(frozen=True, slots=True)
 class Reply:
+    """One `Agent`'s answer to a task: its calls, its activity, what it says and why it stopped."""
+
     calls: Sequence[Call] = ()
 
     activity: Sequence[str] = ()

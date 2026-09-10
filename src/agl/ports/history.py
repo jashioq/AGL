@@ -6,6 +6,8 @@ from agl.ports.errors import InternalError
 __all__ = ["ChangeKind", "FileChange", "History"]
 
 class ChangeKind(StrEnum):
+    """How one file differs between two states: a rename alone carries the name it had before."""
+
     ADDED = "added"
     MODIFIED = "modified"
     DELETED = "deleted"
@@ -13,6 +15,8 @@ class ChangeKind(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class FileChange:
+    """One file changed between two states: its path, how it changed, and a rename's old name."""
+
     path: str
 
     kind: ChangeKind
@@ -42,6 +46,8 @@ class FileChange:
             )
 
 class History(ABC):
+    """Everything AGL reads out of a repository: refs, ancestry and diffs, and no writes at all."""
+
     @abstractmethod
     async def default_ref(self) -> str:
         """Where a run starts from when the user names none. Only the repository knows this.

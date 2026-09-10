@@ -25,10 +25,14 @@ __all__ = [
 ]
 
 class Provider(StrEnum):
+    """Which backend serves a model: never chosen directly, but read off a `ModelId`'s prefix."""
+
     CLAUDE = "claude"
     OPENAI = "openai"
 
 class ModelId(StrEnum):
+    """Every model AGL can be asked for, as one type: `Claude` and `OpenAI` hold the members."""
+
     @property
     def provider(self) -> Provider:
         """Which backend serves this model, read off the prefix before the colon.
@@ -47,34 +51,46 @@ class ModelId(StrEnum):
             ) from error
 
 class Claude(ModelId):
+    """Every model the Claude provider serves: nothing is substituted for one it cannot run."""
+
     OPUS = "claude:opus"
     SONNET = "claude:sonnet"
     HAIKU = "claude:haiku"
 
 class OpenAI(ModelId):
+    """Every model the OpenAI provider serves: nothing is substituted for one it cannot run."""
+
     SOL = "openai:sol"
     TERRA = "openai:terra"
     LUNA = "openai:luna"
 
 class Restriction(StrEnum):
+    """What an agent may not do: a backend enforces each its own way, and tells the model so."""
+
     NO_VCS_WRITES = "no_vcs_writes"
     NO_FILE_WRITES = "no_file_writes"
     NO_SHELL = "no_shell"
     NO_NETWORK = "no_network"
 
 class Capability(StrEnum):
+    """What a backend can do at all: a role wanting one the backend lacks is refused, not run."""
+
     FILE_EDIT = "file_edit"
     SHELL = "shell"
     TOOL_CALLING = "tool_calling"
 
 @dataclass(frozen=True, slots=True)
 class ToolResult:
+    """What a tool handler answers with: the text the model reads, and whether it was refused."""
+
     text: str
 
     rejected: bool = False
 
 @dataclass(frozen=True, slots=True)
 class Tool:
+    """What an agent may call: a name unique to its role, a description, a schema and a handler."""
+
     name: str
 
     description: str
@@ -104,6 +120,8 @@ def check_tool_declaration(name: str, description: str) -> None:
 
 @dataclass(frozen=True, slots=True)
 class AgentTask:
+    """One dispatch to one agent: what to do, where, on what model, and under what restrictions."""
+
     instructions: str
 
     workspace: Path
@@ -136,12 +154,16 @@ class AgentTask:
             )
 
 class StopReason(StrEnum):
+    """Why an agent stopped where it did: it ended its own turn, or a backend limit cut it off."""
+
     COMPLETED = "completed"
 
     LIMIT = "limit"
 
 @dataclass(frozen=True, slots=True)
 class AgentOutcome:
+    """Everything an agent run hands back: its closing message, and why it stopped, if it said."""
+
     stop_reason: StopReason | None
 
     text: str
@@ -149,6 +171,8 @@ class AgentOutcome:
 type ActivityReporter = Callable[[str], None]
 
 class AgentRunner(ABC):
+    """Every agent backend behind one port: what it can do, whether it is ready, and one run."""
+
     @abstractmethod
     async def capabilities(self, model: ModelId) -> frozenset[Capability]:
         """What this backend can do when serving a model, compared against a role at preflight.

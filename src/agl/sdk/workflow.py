@@ -22,6 +22,8 @@ __all__ = ["Conflict", "Namespace", "Run", "Stop", "VerifierOutcome", "Workflow"
 
 @dataclass(frozen=True, slots=True)
 class Run[P = object]:
+    """The one object a workflow is handed: its params, its terminal, its steps and worktrees."""
+
     params: P
 
     services: Services
@@ -137,6 +139,8 @@ class _NoParams:
 
 @dataclass(frozen=True, slots=True)
 class Workflow[P = object]:
+    """What `@workflow` returns: the function, plus the params class read off its annotation."""
+
     fn: _Function[P]
 
     @property

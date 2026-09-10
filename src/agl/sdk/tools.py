@@ -38,6 +38,8 @@ _METADATA_KEY: Final = "agl.sdk.tools"
 
 @dataclass(frozen=True, slots=True)
 class ReportingTool[P]:
+    """What `reporting_tool` returns: a name, a description, a payload class and its schema."""
+
     name: str
 
     description: str
@@ -109,8 +111,8 @@ def tool[P](
 
     :param name: what the agent calls it; must be unique within a role
     :param description: what the agent is told the tool is for
-    :param payload: dataclass the arguments are built into; its schema is a fingerprint term
-    :param handler: awaited with the built payload once the agent calls the tool
+    :param payload: dataclass the arguments are built into; edit a field and no entry replays
+    :param handler: awaited with the built payload; no fingerprint term, so an edit re-runs nothing
     :return: a tool ready to go on a role
     """
     _check_payload(payload, name)

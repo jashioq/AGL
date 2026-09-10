@@ -57,7 +57,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import FrozenInstanceError, dataclass, fields, replace
 from inspect import Parameter, signature
 from pathlib import Path
-from typing import Final, assert_type, cast
+from typing import Any, Final, Protocol, assert_type, cast, runtime_checkable
 import pytest
 from agl.ports.agent import (
     Capability,
@@ -376,6 +376,73 @@ def test_a_non_class_in_accepts_is_refused_at_the_decoration_that_declared_it() 
 
     assert "'Request'" in str(refusal.value), "the refusal did not quote the entry as written"
     assert "has to be a class" in str(refusal.value)
+
+def test_a_class_that_isinstance_refuses_is_caught_at_the_decoration_by_a_probe_call() -> None:
+    """The other half of "every entry has to be a class": some classes `isinstance` will not take.
+
+    `typing.Any` and a `Protocol` written without `@runtime_checkable` are both instances of
+    `type`, so the test above hands them straight through, and `isinstance` then refuses either as
+    its second argument whatever the first one is. Nothing on the class marks it and `mypy
+    --strict` accepts both where a `Sequence[type[object]]` is wanted, so there is no predicate to
+    write and no `type: ignore` to pair this with - the annotation is not the gate here and neither
+    is the type checker. Calling `isinstance` is the test, and it is the call `checked_inputs`
+    makes at every step.
+
+    Left to that step it is a bare `TypeError` raised from inside AGL, which is not an `AglError`:
+    it leaves on exit 70 under a traceback of AGL's own frames and CPython's, which is the shape
+    `cli/main.py` prints when it has no name for something - a workflow author being told to report
+    a bug about a line they wrote.
+    """
+
+    class SupportsText(Protocol):
+        """The shape of an input, with no `@runtime_checkable` above it - which is the spelling an
+        author reaches for first and the one `isinstance` will not answer about."""
+
+        text: str
+
+    with pytest.raises(InputError) as anything:
+
+        @role(model=Claude.SONNET, accepts=(Any,))
+        def untyped() -> Role:
+            return Role(name="review", instructions=_REVIEW)
+
+    assert "typing.Any" in str(anything.value), "the refusal did not name the entry as written"
+    assert "isinstance" in str(anything.value), "the refusal did not name what will not take it"
+
+    with pytest.raises(InputError) as structural:
+
+        @role(model=Claude.SONNET, accepts=(SupportsText,))
+        def shaped() -> Role:
+            return Role(name="review", instructions=_REVIEW)
+
+    assert "SupportsText" in str(structural.value), "the refusal did not name the entry"
+    assert "@runtime_checkable" in str(structural.value), "the refusal did not name the fix"
+
+def test_a_runtime_checkable_protocol_is_left_alone_because_the_probe_call_answers() -> None:
+    """The shape the rule above must not take away, and the reason it is a call and not a rule.
+
+    `@runtime_checkable` is the whole difference: with it `isinstance` answers about a protocol, so
+    one is a declared type like any other and a step may hand it a value that structurally matches.
+    A refusal keyed on `Protocol` - or on `typing`, or on anything else a predicate could read off
+    the class - would delete this along with the two it was aimed at. The `isinstance` beside the
+    factory is the same question the probe asked, spelled the way a step asks it.
+
+    Read off the factory rather than out of a call, because the decoration is the moment under test
+    and a call would bring the placeholder comparison in with it.
+    """
+
+    @runtime_checkable
+    class SupportsText(Protocol):
+        """The same shape one test above, and the decorator is the only line that differs."""
+
+        text: str
+
+    @role(model=Claude.SONNET, accepts=(SupportsText,))
+    def shaped() -> Role:
+        return Role(name="review", instructions=_REVIEW)
+
+    assert shaped.accepts == (SupportsText,)
+    assert isinstance(Request("review the diff"), SupportsText)
 
 def test_two_accepted_types_sharing_one_qualname_are_refused_as_one_key_not_two_types() -> None:
     """Duplicate means *one key*, because the key is what `accepts=` buys: a type's `__qualname__`.
