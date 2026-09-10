@@ -7,7 +7,7 @@ name = "agents-gl"
 # 0.0.1 and not 0.1.0: the first upload is a name claim rather than a release. A version number on
 # PyPI is spent permanently - yanking a release does not free the number for reuse - so the one
 # that buys the name sits below anything an operator would read as a first version of the software.
-version = "0.0.4"
+version = "0.0.5"
 description = "A framework for running AI agent workflows against code repositories."
 # This file rendered *is* the body of the PyPI project page; there is no other prose on it.
 readme = "README.md"
