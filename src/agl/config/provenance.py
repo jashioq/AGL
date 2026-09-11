@@ -1,15 +1,15 @@
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Final
 from agl.config.workflow_files import content_hash, digested, digests
 from agl.ports.errors import InputError
 from agl.ports.fetch import FetchedFile
 from agl.ports.get_request import RepositoryAtRef, RequestedWorkflow
+from agl.ports.home_layout import PROVENANCE_FILE
 
 __all__ = [
-    "PROVENANCE_FILE",
     "Provenance",
     "fetched_hash",
     "parsed_provenance",
@@ -17,10 +17,6 @@ __all__ = [
     "read_provenance",
     "rendered",
 ]
-
-# JSON, which no import statement resolves and no reader of a pyproject.toml opens, and led by a dot
-# the way `api.py`'s `.agl-trees` is: AGL's bookkeeping, in a directory of the workflow's own files.
-PROVENANCE_FILE: Final = ".agl-provenance.json"
 
 _OWNER: Final = "owner"
 _REPO: Final = "repo"
@@ -108,8 +104,8 @@ def parsed_provenance(path: Path, content: bytes) -> Provenance:
         repository = RepositoryAtRef(
             _text(document, _OWNER), _text(document, _REPO), _ref(document)
         )
-        directory = _text(document, _PATH)
-        workflow = RequestedWorkflow(repository, directory, f"{repository}/{directory}")
+        unspelled = RequestedWorkflow(repository, _text(document, _PATH), "")
+        workflow = replace(unspelled, spec=str(unspelled))
         return Provenance(workflow, _text(document, _COMMIT), _text(document, _CONTENT_HASH))
     except InputError as refused:
         raise InputError(_unreadable(path, str(refused))) from refused

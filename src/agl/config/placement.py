@@ -1,6 +1,7 @@
 import os
 import tempfile
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -10,16 +11,17 @@ from agl.config.toml_file import make_workspace
 from agl.ports.errors import ConflictError, InputError
 from agl.ports.fetch import FetchAnswer, FetchedFile, RefusedWorkflow
 from agl.ports.get_request import RequestedWorkflow
-from agl.ports.home_layout import AglHome, workflow_dir, workflows_dir
+from agl.ports.home_layout import (
+    STAGED_PLACING,
+    STAGED_REMOVED,
+    STAGED_REPLACED,
+    STAGING_PREFIX,
+    AglHome,
+    workflow_dir,
+    workflows_dir,
+)
 
-__all__ = ["Got", "PlacedWorkflow", "placed"]
-
-# In workflows/ itself, because `os.rename` raises `EXDEV` between two filesystems, and led by a dot
-# so no import resolves it. Nothing is written at its own root, which is where uv 0.11 and the
-# registry each look for a member's pyproject.toml - `tests/config/test_placement.py` holds both.
-_STAGING: Final = ".agl-get-"
-_PLACING: Final = "placing"
-_REPLACED: Final = "replaced"
+__all__ = ["Got", "PlacedWorkflow", "Removed", "placed", "removed"]
 
 # The modes git checks a file out with, before the umask takes its share.
 _REGULAR: Final = 0o666
@@ -34,6 +36,9 @@ class PlacedWorkflow:
     workflow: RequestedWorkflow
 
     directory: Path
+
+    commit: str
+    """The full object id of the commit its files were taken from, which its provenance records."""
 
 @dataclass(frozen=True, slots=True)
 class Got:
@@ -56,6 +61,15 @@ class Got:
     def refused(self) -> tuple[RefusedWorkflow, ...]:
         """Every refusal, whichever phase made it: what the command's exit status is read from."""
         return (*self.unfetched, *self.unplaceable, *self.unwritten)
+
+@dataclass(frozen=True, slots=True)
+class Removed:
+    """An entry taken out of workflows/: where it stood, and whatever of it the delete left."""
+
+    entry: Path
+
+    leftover: Path | None
+    """The dot-led directory holding what could not be deleted, `None` where nothing was left."""
 
 def placed(
     home: AglHome,
@@ -89,27 +103,52 @@ def _placement(home: AglHome, placeable: PlaceableWorkflow) -> PlacedWorkflow | 
     if placeable.existing is None and destination.exists(follow_symlinks=False):
         return RefusedWorkflow(workflow, ConflictError(_appeared(workflow, destination)))
     try:
-        with tempfile.TemporaryDirectory(
-            prefix=_STAGING, dir=workflows_dir(home), ignore_cleanup_errors=True
-        ) as staging:
-            _swap(Path(staging), placeable, destination)
+        with _staged(home) as staging:
+            _swap(staging, placeable, destination)
     except OSError as error:
         return RefusedWorkflow(workflow, InputError(_unwritten(workflow, destination, error)))
-    return PlacedWorkflow(workflow, destination)
+    return PlacedWorkflow(workflow, destination, placeable.commit)
+
+# One rename takes the entry out of every reader's sight at once, a link as the link and never what
+# it names. A delete made in place and stopped part-way leaves a directory with files in it and no
+# project file, and uv 0.11 refuses every sync of the workspace over one of those.
+def removed(home: AglHome, entry: Path) -> Removed:
+    """`entry` moved out of workflows/ in one rename and then deleted, as far as it would go."""
+    try:
+        with _staged(home) as staging:
+            os.rename(entry, staging / STAGED_REMOVED)
+    except OSError as error:
+        raise InputError(_unremoved(entry, error)) from error
+    return Removed(entry, staging if staging.exists() else None)
+
+@contextmanager
+def _staged(home: AglHome) -> Iterator[Path]:
+    # In workflows/ itself, because `os.rename` raises `EXDEV` between two filesystems.
+    with tempfile.TemporaryDirectory(
+        prefix=STAGING_PREFIX, dir=workflows_dir(home), ignore_cleanup_errors=True
+    ) as staging:
+        yield Path(staging)
 
 def _swap(staging: Path, placeable: PlaceableWorkflow, destination: Path) -> None:
-    placing = staging / _PLACING
+    placing = staging / STAGED_PLACING
     _write(placing, placeable.files)
-    replaced = staging / _REPLACED
+    existing = placeable.existing
+    if existing is None:
+        os.rename(placing, destination)
+        return
+    replaced = staging / STAGED_REPLACED
     # Moved aside rather than removed: a rename moves a link or a file as itself and never walks
     # into what it names, and removing the staging directory disposes of it afterwards.
-    if placeable.existing is not None:
-        os.rename(placeable.existing, replaced)
     try:
+        os.rename(existing, replaced)
         os.rename(placing, destination)
-    except OSError:
-        if placeable.existing is not None:
-            os.rename(replaced, placeable.existing)
+    # Anything at all, a Ctrl-C included: whatever leaves here unhandled takes what was moved aside
+    # with it, the staging directory being removed on the way out. Which renames happened is read
+    # off disk rather than remembered, because CPython raises a Ctrl-C between any two bytecodes -
+    # as readily just after a rename returns as just before one starts.
+    except BaseException:
+        if placing.exists(follow_symlinks=False) and replaced.exists(follow_symlinks=False):
+            os.rename(replaced, existing)
         raise
 
 def _write(directory: Path, files: Mapping[str, FetchedFile]) -> None:
@@ -133,3 +172,6 @@ def _unwritten(workflow: RequestedWorkflow, destination: Path, error: OSError) -
         f"{workflow} could not be placed at {destination}: {error}. Nothing of it is left where uv "
         f"or `agl workflows` would read it"
     )
+
+def _unremoved(entry: Path, error: OSError) -> str:
+    return f"{entry} could not be removed: {error}. It stands where it stood, and none of it moved"

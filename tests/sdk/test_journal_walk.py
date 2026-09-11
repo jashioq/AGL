@@ -49,8 +49,8 @@ that notices:
 `advance` is the landing handed back to the parent's chain - one of `ARCHITECTURE.md`'s
 "Invariants where a mistake is silent" - and a chain that did not follow a landing means the
 parent's next fingerprint miss restores past every child that has landed and cleans the tree of it.
-That is not a re-run and not an exception - it is work gone, and one of only two places in AGL
-where a mistake costs that. So the test asserts on the *call*: what the walk after an advance asked
+That is not a re-run and not an exception - it is work gone, and that section names it among the
+paths that destroy work. So the test asserts on the *call*: what the walk after an advance asked
 its workspace to restore to.
 
 **A seventh is here because two loud failures disagreed with each other.** A lone surrogate in a
@@ -495,8 +495,9 @@ async def test_advance_moves_the_chain_to_a_landed_head_and_the_next_restore_kee
     assert chained.head == landed
     assert calls[0] == ("restore", landed), (
         f"the pre-run restore targeted {calls[0][1]!r}, a commit from before the landing: that is "
-        f"`reset --hard` and `clean -fd` over every child that had landed, which is one of the "
-        f"three paths in this design that destroy work rather than costing a re-run"
+        f"`reset --hard` and `clean -fd` over every child that had landed - one of the paths "
+        f"ARCHITECTURE.md's \"Invariants where a mistake is silent\" names as destroying work "
+        f"rather than costing a re-run"
     )
     assert (raw.path / "src" / "landed.txt").read_bytes() == b"from T-01\n"
 

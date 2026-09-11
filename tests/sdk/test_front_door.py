@@ -50,7 +50,7 @@ unclassified fails here.
 `sdk/errors.py` arrived late and is whole-on-the-door like the other four, so the four claims
 above cover it - but it is the first facade whose *port* module it takes only part of, `ports/
 errors.py` holding the hierarchy and the exit-code table both. That cut is checked separately and
-in both directions, over `ports.errors.__all__` rather than over a list here, so a tenth class on
+in both directions, over `ports.errors.__all__` rather than over a list here, so a class added to
 the hierarchy fails on the commit that adds it. `Stop` is the interesting entry: it is in the
 hierarchy, it is on the door, and it gets there through `sdk/workflow.py` instead - which is a
 claim worth pinning rather than a gap, one name having one import path into one front door.
@@ -87,13 +87,15 @@ _DOOR: Final[Mapping[str, frozenset[str] | None]] = {
 # That facade is the one whose port module holds two vocabularies rather than one - "the `AglError`
 # hierarchy ... **and** the one exception -> exit-code table in the codebase" - so it is the one
 # facade that takes a part, and this is the machine-checkable half of the argument it makes for
-# where the cut falls. It is also what makes a *tenth* class on the hierarchy a failure here rather
+# where the cut falls. It is also what makes a class added to the hierarchy a failure here rather
 # than a name an author quietly imports from `agl.ports` instead.
 _NOT_ON_THE_ERROR_FACADE: Final[Mapping[str, str]] = {
     "EXIT_CODES": "the CLI's half of `ports/errors.py`: an exit code is what a process answers "
     "with, and `cli/exit_codes.py` re-exports that table and holds none of its own",
     "exit_code_for": "the CLI's, for the same reason, and the only supported way to read that "
     "table",
+    "DisagreeingRefusals": "the CLI's as well: the code a command exits with where the refusals it "
+    "went on past disagree, read out of that table and never raised, so no run holds one to catch",
     "Stop": "already on the door through `sdk/workflow.py`, beside the `Run` it is raised out of "
     "- the surface is `Run`'s six members, plus `Stop` - one name does not get two import paths "
     "into one door",

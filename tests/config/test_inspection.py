@@ -47,12 +47,12 @@ from typing import Final
 import pytest
 from agl.config.distribution import DISTRIBUTION, installed_version
 from agl.config.inspection import Inspection, PlaceableWorkflow, inspected
-from agl.config.provenance import PROVENANCE_FILE, parsed_provenance, placed_hash, read_provenance
+from agl.config.provenance import parsed_provenance, placed_hash, read_provenance
 from agl.config.registry import GROUP, discovered
 from agl.ports.errors import AglError, ConflictError, InputError, NotFoundError
 from agl.ports.fetch import FetchAnswer, FetchedFile, FetchedWorkflow, RefusedWorkflow
-from agl.ports.get_request import RepositoryAtRef, RequestedWorkflow
-from agl.ports.home_layout import AglHome, workflows_dir
+from agl.ports.get_request import GetRequest, RequestedWorkflow
+from agl.ports.home_layout import PROVENANCE_FILE, AglHome, workflows_dir
 
 _SHA: Final = "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d"
 
@@ -68,9 +68,10 @@ def _home(tmp_path: Path) -> AglHome:
     return AglHome(tmp_path / "home")
 
 def _requested(name: str, *, owner: str = _OWNER, ref: str | None = None) -> RequestedWorkflow:
-    repository = RepositoryAtRef(owner, _REPO, ref)
-    directory = f"workflows/mine/{name}"
-    return RequestedWorkflow(repository, directory, f"{repository}/{directory}")
+    """Parsed, so that its `spec` is the one `parsed_provenance` rebuilds: the argument alone."""
+    at = "" if ref is None else f"@{ref}"
+    (workflow,) = GetRequest.parsed([f"{owner}/{_REPO}/workflows/mine/{name}{at}"]).workflows
+    return workflow
 
 def _pyproject(
     name: str, *, project: str = "", declares: str | None = None, tables: str = ""
@@ -232,6 +233,22 @@ def test_a_project_file_discovery_would_call_broken_is_refused_before_placement(
 
     assert "jashioq/myrepo/workflows/mine/triage/pyproject.toml" in said
     assert phrase in said
+
+def test_a_file_downloaded_at_a_ref_is_named_by_its_repository_and_directory_alone(
+    tmp_path: Path,
+) -> None:
+    """An argument writes its ref last, so a file's path spelled from one would run through the ref.
+
+    `.../triage@release/1.0/pyproject.toml` reads as a directory `triage@release` holding one named
+    `1.0`, and the repository holds neither.
+    """
+    asked = _requested("triage", ref="release/1.0")
+    fetched = _download("triage", b"[project\n", workflow=asked)
+
+    said = _refused(_one(fetched, _home(tmp_path)), InputError)
+
+    assert "jashioq/myrepo/workflows/mine/triage/pyproject.toml is not valid TOML" in said
+    assert "@release/1.0" not in said
 
 def test_a_workflow_needing_an_agl_this_is_not_is_refused_naming_both_versions(
     tmp_path: Path,

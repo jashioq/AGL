@@ -7,6 +7,7 @@ __all__ = [
     "AglError",
     "ConflictError",
     "DeniedError",
+    "DisagreeingRefusals",
     "InputError",
     "InternalError",
     "NotFoundError",
@@ -44,6 +45,9 @@ class UpstreamUnexpected(UpstreamError):
 class Stop(AglError):
     """A workflow ending its own run: subclass it freely, the exit code resolves up the tree."""
 
+class DisagreeingRefusals(AglError):
+    """Refusals whose codes differ, from one command that went on past each: read every reason."""
+
 class InternalError(AglError):
     """An invariant of AGL's own broke, so the fault is here and not in anything a caller wrote."""
 
@@ -55,6 +59,7 @@ EXIT_CODES: Final[Mapping[type[AglError], int]] = MappingProxyType(
         DeniedError: 5,
         UpstreamError: 6,
         Stop: 7,
+        DisagreeingRefusals: 8,
         InternalError: 70,
     }
 )

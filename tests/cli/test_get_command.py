@@ -1,4 +1,4 @@
-"""`agl get <owner/repo[@ref]/path> ...`: the command, its summary, its streams and its exit status.
+"""`agl get <owner/repo/path[@ref]> ...`: the command, its summary, its streams and its exit status.
 
 `api.get` decides; this command parses the arguments before anything is fetched, hands `api.get` a
 printer for the summary, and turns the refusals into an exit status. `tests/test_get.py` holds the
@@ -17,9 +17,9 @@ holds; everything else is a note about one it does not, and goes to stderr with 
 **The exit status.** A decline is the operator's answer, not a failure, so a command whose every
 workflow was placed or declined exits 0 - under `< /dev/null` too, where every question is declined
 and nothing is placed, which a script reads off an empty stdout. A refusal moves the status, and
-several resolve by `cli/exit_codes.py`'s leaf agreement: the code they share, or 70 with a line
-saying what that 70 means. A sync that raises after the placing exits 6 through `main`, the summary
-having gone out first.
+several resolve by `cli/commands/__init__.py`'s `_refusal_status`: the code they share, or 8 where
+they differ - never `exit_status`'s 70, which would say AGL broke. A sync that raises after the
+placing exits 6 through `main`, the summary having gone out first.
 
 **Every door out is substituted through `main.Invocation`**: the fetcher, the syncer and, where a
 test answers for the operator, `confirm`. Where it does not, `sys.stdin` is replaced and the real
@@ -42,11 +42,18 @@ from agl.adapters.github.fake import FakeFetcher
 from agl.adapters.github.fetcher import GitHubFetcher
 from agl.adapters.uv.fake import FakeSyncer
 from agl.cli import main
+from agl.cli.commands import _refusal_status
 from agl.cli.commands import get as get_command
 from agl.config import registry, sources
 from agl.config.provenance import placed_hash, read_provenance
 from agl.config.questions import Confirm
-from agl.ports.errors import NotFoundError, UpstreamUnavailable
+from agl.ports.errors import (
+    AglError,
+    InputError,
+    NotFoundError,
+    UpstreamUnavailable,
+    UpstreamUnexpected,
+)
 from agl.ports.fetch import FetchedFile, Fetcher
 from agl.ports.get_request import RepositoryAtRef
 from agl.ports.home_layout import (
@@ -70,6 +77,8 @@ TRIAGE: Final = WorkflowName("triage")
 
 _REPOSITORY: Final = RepositoryAtRef("jashioq", "myrepo", None)
 _NOWHERE: Final = RepositoryAtRef("octo", "nope", None)
+_DOWN: Final = RepositoryAtRef("octo", "down", None)
+_GARBLED: Final = RepositoryAtRef("octo", "garbled", None)
 
 _SHA: Final = "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d"
 
@@ -190,7 +199,8 @@ def _get_parser() -> RefusingParser:
     [
         "jashioq",
         "jashioq/myrepo",
-        "jashioq/myrepo@/workflows/triage",
+        "jashioq/myrepo/workflows/triage@",
+        "jashioq/myrepo@v1.2.0/workflows/triage",
         "jashioq/myrepo/workflows/triage,,lint",
         "jashioq/myrepo/workflows/my-flow",
     ],
@@ -200,9 +210,11 @@ def test_an_argument_that_does_not_parse_exits_two_before_anything_is_fetched(
 ) -> None:
     """Exit 2 naming the argument, nothing asked of the fetcher, and AGL_HOME still absent.
 
-    The last argument parses as a path and names a directory that could never be imported as the
-    workflow it would be placed as - refused by the same `WorkflowName` that `agl new` refuses it
-    with. A later argument that is fine does not rescue an earlier one, since the request is one.
+    A ref written on the repository rather than last is one of these, and never a request for
+    something else. The last argument parses as a path and names a directory that could never be
+    imported as the workflow it would be placed as - refused by the same `WorkflowName` that
+    `agl new` refuses it with. A later argument that is fine does not rescue an earlier one, since
+    the request is one.
     """
     home = _home(tmp_path)
     fetcher = _serving("triage")
@@ -286,6 +298,36 @@ def test_the_summary_lines_its_columns_up_and_says_why_a_skipped_workflow_was_sk
     assert captured.err == (
         "declined  triage   jashioq/myrepo/workflows/triage  (not overridden)\n"
     )
+
+def test_a_workflow_at_a_ref_holding_a_slash_is_named_as_it_was_asked_for(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`release/1.0` written last, as a workflow's `uses:` writes it, and kept whole from there on.
+
+    One fetch at that ref, a summary line spelling the workflow the way the argument did, and a
+    provenance file recording the ref as it was written.
+    """
+    home = _home(tmp_path)
+    released = RepositoryAtRef("jashioq", "myrepo", "release/1.0")
+    fetcher = FakeFetcher()
+    fetcher.serves(
+        released,
+        {
+            "workflows/triage/pyproject.toml": FetchedFile(_pyproject("triage")),
+            "workflows/triage/__init__.py": FetchedFile(_MODULE),
+        },
+    )
+
+    status = _main(home, "get", "jashioq/myrepo/workflows/triage@release/1.0", fetcher=fetcher)
+
+    assert status == 0
+    assert [fetch.repository for fetch in fetcher.fetched] == [released]
+    assert capsys.readouterr().out == (
+        "placed    triage  jashioq/myrepo/workflows/triage@release/1.0\n"
+    )
+    recorded = read_provenance(workflow_dir(home, TRIAGE))
+    assert recorded is not None
+    assert recorded.workflow.repository == released
 
 def test_a_declined_dependency_question_says_so_and_never_prints_a_dependency_raw(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
@@ -383,13 +425,32 @@ def test_one_failed_download_says_why_once_naming_every_workflow_it_refused(
     assert err.count("codeload has no public repository octo/nope") == 1
     assert "a, b, c: codeload has no public repository octo/nope" in err
 
-def test_refusals_that_disagree_exit_seventy_with_a_line_saying_what_that_means(
+def test_two_refusals_of_different_classes_that_share_a_code_exit_with_that_code(
+    tmp_path: Path,
+) -> None:
+    """Two downloads refused apart, one unanswered and one unreadable: two classes, one code, 6.
+
+    Agreement is about the code a script reads and never about the class or the count, so a command
+    that was refused one way twice does not read as one refused two ways.
+    """
+    home = _home(tmp_path)
+    fetcher = FakeFetcher()
+    fetcher.refuses(_DOWN, UpstreamUnavailable("codeload did not answer for octo/down"))
+    fetcher.refuses(_GARBLED, UpstreamUnexpected("codeload answered octo/garbled unreadably"))
+
+    status = _main(home, "get", "octo/down/flows/a", "octo/garbled/flows/b", fetcher=fetcher)
+
+    assert status == 6
+
+def test_refusals_that_disagree_exit_eight_rather_than_seventy_or_either_ones_code(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A repository that is not there is 3 and a download that is no workflow is 2, so: 70.
+    """A repository that is not there is 3 and a download that is no workflow is 2, so: 8.
 
-    That is `cli/exit_codes.py`'s rule for leaves that disagree, and read on its own a 70 says
-    AGL has a bug - so the command says, once, that here it does not.
+    Neither of theirs, since either would name one refusal and hide the other, and not 70, which
+    says AGL broke where a command that goes on past each refusal has ended the way it is allowed
+    to. 8 is the code for exactly this, so the reasons are the last lines written and no line
+    explains the number.
     """
     home = _home(tmp_path)
 
@@ -401,8 +462,31 @@ def test_refusals_that_disagree_exit_seventy_with_a_line_saying_what_that_means(
         fetcher=_serving(hollow=("hollow",)),
     )
 
-    assert status == 70
-    assert "read it as 'these disagreed'" in capsys.readouterr().err
+    written = capsys.readouterr().err.splitlines()
+    assert status == 8
+    assert written[-2] == "stray: codeload has no public repository octo/nope"
+    assert written[-1].startswith("hollow: jashioq/myrepo/workflows/hollow holds no pyproject.toml")
+
+@pytest.mark.parametrize(
+    ("refusals", "status"),
+    [
+        ((), 0),
+        ((NotFoundError("a"), NotFoundError("b")), 3),
+        ((UpstreamUnavailable("a"), UpstreamUnexpected("b")), 6),
+        ((NotFoundError("a"), InputError("b")), 8),
+        ((NotFoundError("a"), InputError("b"), NotFoundError("c")), 8),
+    ],
+)
+def test_refusals_exit_nought_when_there_are_none_their_shared_code_or_else_eight(
+    refusals: tuple[AglError, ...], status: int
+) -> None:
+    """The rule on its own, no command around it: the answer is the refusals' and nothing else's.
+
+    Handed once as a tuple and once as the one-pass iterator `execute` hands it, so a rule that read
+    its argument twice would answer for nothing the second time.
+    """
+    assert _refusal_status(refusals) == status
+    assert _refusal_status(iter(refusals)) == status
 
 # --- the sync that follows ----------------------------------------------------------------------
 

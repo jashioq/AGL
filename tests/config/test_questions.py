@@ -16,6 +16,17 @@ nothing, and asking about its dependencies would be noise.
 **The operator here is a script.** `Confirm` is the whole of what `answered` knows about how a
 question is put and read. The reader `agl` runs with is `cli/main.py`'s, and
 `tests/cli/test_confirm.py` holds what it does with an answer that is not one and a closed stdin.
+
+**`agl remove` asks one question of its own**, through the same `Confirm`: the entry that would go,
+as it is spelled on disk, and every name it declares - since a directory's own name need not be any
+of them, the question is where the operator sees what else goes with it. A link says it is one, and
+that only the link goes.
+
+**`agl update` asks two of its own, through the same queue.** `answered` is handed which questions
+a download raises, `needed` where nothing is handed, so the stop-at-the-first-no loop is one loop.
+An update never asks the collision - what it replaces is the same workflow - and asks instead
+whether to discard a copy that changed since it was placed, naming both commits, and then about the
+dependencies it declares that the copy does not, each as a literal.
 """
 
 from pathlib import Path
@@ -27,16 +38,22 @@ from agl.config.questions import (
     ApprovedWorkflow,
     Collision,
     DeclinedWorkflow,
+    GainedDependencies,
+    LocalChanges,
+    Question,
+    Removal,
     ThirdPartyDependencies,
     answered,
     needed,
 )
 from agl.config.registry import GROUP
+from agl.config.removal import RemovableEntry
 from agl.ports.fetch import FetchedFile, FetchedWorkflow
 from agl.ports.get_request import RepositoryAtRef, RequestedWorkflow
 from agl.ports.home_layout import AglHome
 
 _SHA: Final = "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d"
+_NOW: Final = "f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a"
 
 # Never opened: a question names what stands there, and putting one reads nothing off disk.
 _WORKFLOWS: Final = Path("/nowhere/workspace/workflows")
@@ -157,6 +174,65 @@ def test_a_control_character_in_a_dependency_is_shown_escaped_and_never_raw() ->
     assert repr(hostile) in said
     assert repr(reordered) in said
 
+@pytest.mark.parametrize(
+    ("declared", "linked", "asked"),
+    [
+        (
+            ("label_prs", "sort-issues"),
+            False,
+            "/nowhere/workspace/workflows/triage declares 'label_prs', 'sort-issues'. Remove it?",
+        ),
+        ((), False, "/nowhere/workspace/workflows/triage declares no workflow. Remove it?"),
+        (
+            ("triage",),
+            True,
+            "/nowhere/workspace/workflows/triage is a link, and declares 'triage'. Remove the "
+            "link, leaving what it names as it is?",
+        ),
+    ],
+)
+def test_the_removal_question_names_the_entry_every_name_it_declares_and_any_link(
+    declared: tuple[str, ...], linked: bool, asked: str
+) -> None:
+    removal = Removal(RemovableEntry(_WORKFLOWS / "triage", declared, linked))
+
+    assert str(removal) == asked
+
+def test_a_control_character_in_a_declared_name_is_shown_escaped_and_never_raw() -> None:
+    """A TOML key's `\\u` escape writes any of them, and the question is printed on a terminal."""
+    hostile = "triage\x1b[2K\rlint"
+    said = str(Removal(RemovableEntry(_WORKFLOWS / "triage", (hostile,), linked=False)))
+
+    assert said.isprintable(), said
+    assert repr(hostile) in said
+
+def test_the_local_changes_question_names_the_copy_both_short_commits_and_what_is_lost() -> None:
+    """As GitHub shortens a commit on its own pages, and saying outright that the changes go."""
+    question = LocalChanges(_WORKFLOWS / "triage", _SHA, _NOW)
+
+    assert str(question) == (
+        "/nowhere/workspace/workflows/triage has changed since it was placed from 7fd1a60, and "
+        "updating it to f548e57 replaces it whole, discarding those changes. Update it?"
+    )
+
+def test_the_gained_dependencies_question_names_the_update_the_copy_and_each_as_a_literal() -> None:
+    declared = ("httpx>=0.28", "pydantic>=2,<3")
+    question = GainedDependencies(_requested("triage"), _NOW, _WORKFLOWS / "triage", declared)
+
+    assert str(question) == (
+        "jashioq/myrepo/workflows/mine/triage at f548e57 declares third-party dependencies "
+        "/nowhere/workspace/workflows/triage does not, which uv will install into the workspace: "
+        "'httpx>=0.28', 'pydantic>=2,<3'. Continue?"
+    )
+
+def test_a_control_character_in_a_gained_dependency_is_shown_escaped_and_never_raw() -> None:
+    hostile = "probe @ https://example.invalid/probe.whl\x1b[2K\rrich"
+    question = GainedDependencies(_requested("triage"), _NOW, _WORKFLOWS / "triage", (hostile,))
+    said = str(question)
+
+    assert said.isprintable(), said
+    assert repr(hostile) in said
+
 # --- what the answers do -------------------------------------------------------------------------
 
 def test_a_no_to_the_collision_skips_the_download_and_its_dependency_question() -> None:
@@ -214,3 +290,26 @@ def test_every_question_is_asked_before_the_batch_hands_back_any_answer() -> Non
     with pytest.raises(_Interrupted):
         answered(placeables, interrupted_at_the_last)
     assert asked == [str(needed(placeable)[0]) for placeable in placeables]
+
+def test_the_queue_asks_what_the_selection_it_is_handed_names_and_stops_at_the_first_no() -> None:
+    """`agl update`'s questions through the one loop, and its collision never asked.
+
+    Both downloads have something standing where they go, which is what `needed` would ask about;
+    the selection handed over asks the first nothing of the kind, and its dependency question is
+    never put once its first question is answered no.
+    """
+    changed = _placeable("alpha", existing="alpha", dependencies=("rich",))
+    unchanged = _placeable("beta", existing="beta")
+    local = LocalChanges(_WORKFLOWS / "alpha", _SHA, _NOW)
+    gained = GainedDependencies(changed.workflow, _NOW, _WORKFLOWS / "alpha", ("rich",))
+
+    def update_asks(placeable: PlaceableWorkflow) -> tuple[Question, ...]:
+        return (local, gained) if placeable is changed else ()
+
+    operator = _Operator(False)
+
+    assert answered([changed, unchanged], operator, update_asks) == (
+        DeclinedWorkflow(changed, local),
+        ApprovedWorkflow(unchanged),
+    )
+    assert operator.asked == [str(local)]

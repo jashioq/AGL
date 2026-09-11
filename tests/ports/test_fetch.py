@@ -1,4 +1,4 @@
-"""What the `Fetcher` port's two answers promise about themselves, whichever fetcher built them.
+"""What the `Fetcher` port's answers promise about themselves, whichever fetcher built them.
 
 `tests/contracts/fetch.py` holds what a fetcher owes; this holds what the values it hands back
 refuse to be, because two of those refusals are what the rest of `agl get` leans on without
@@ -6,15 +6,22 @@ checking again. A file's path runs down from the workflow's own directory and no
 placing the files is a join and never a question - and a commit is a full object id, so the
 provenance written from it records a commit rather than a ref that has since moved. Both are
 `InternalError`: a value that breaks either was built by a fetcher with a bug in it, and no
-operator input can arrive that way.
+operator input can arrive that way. A resolved ref holds the second rule too, because `agl update`
+compares what it names with a recorded commit, and an abbreviation never compares equal to one.
 """
 
 from dataclasses import FrozenInstanceError
 from typing import Final
 import pytest
 from agl.ports.errors import InternalError, NotFoundError
-from agl.ports.fetch import FetchedFile, FetchedWorkflow, RefusedWorkflow
-from agl.ports.get_request import GetRequest, RequestedWorkflow
+from agl.ports.fetch import (
+    FetchedFile,
+    FetchedWorkflow,
+    RefusedWorkflow,
+    ResolvedRef,
+    UnresolvedRef,
+)
+from agl.ports.get_request import GetRequest, RepositoryAtRef, RequestedWorkflow
 
 _SHA1: Final = "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d"
 
@@ -83,3 +90,28 @@ def test_every_value_the_port_speaks_is_frozen_so_nothing_edits_one_after_it_was
 
 def test_a_fetched_file_is_not_executable_unless_it_says_it_is() -> None:
     assert FetchedFile(b"#!/bin/sh\n").executable is False
+
+@pytest.mark.parametrize("commit", [_SHA1, _SHA256])
+def test_a_ref_resolves_to_a_full_sha1_or_sha256_object_id_and_to_nothing_shorter(
+    commit: str,
+) -> None:
+    repository = RepositoryAtRef("octo", "hello", "v1")
+
+    assert ResolvedRef(repository, commit).commit == commit
+    for abbreviated in ("", "HEAD", commit[:7], commit[:-1], commit.upper()):
+        with pytest.raises(InternalError, match="not a full object id"):
+            ResolvedRef(repository, abbreviated)
+
+def test_a_ref_left_unresolved_with_a_refusal_that_says_nothing_is_refused_itself() -> None:
+    """The reason is the whole of what a person is shown for a workflow that went unchecked."""
+    with pytest.raises(InternalError, match="says nothing"):
+        UnresolvedRef(RepositoryAtRef("octo", "hello", None), NotFoundError())
+
+def test_a_resolution_is_frozen_so_no_caller_edits_the_commit_it_was_answered_with() -> None:
+    resolved = ResolvedRef(RepositoryAtRef("octo", "hello", None), _SHA1)
+    unresolved = UnresolvedRef(RepositoryAtRef("octo", "hello", None), NotFoundError("not there"))
+
+    with pytest.raises(FrozenInstanceError):
+        resolved.commit = "HEAD"  # type: ignore[misc]
+    with pytest.raises(FrozenInstanceError):
+        unresolved.refusal = NotFoundError("elsewhere")  # type: ignore[misc]

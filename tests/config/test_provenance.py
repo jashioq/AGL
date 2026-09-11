@@ -22,7 +22,6 @@ from pathlib import Path
 from typing import Final
 import pytest
 from agl.config.provenance import (
-    PROVENANCE_FILE,
     Provenance,
     fetched_hash,
     parsed_provenance,
@@ -31,7 +30,8 @@ from agl.config.provenance import (
 )
 from agl.ports.errors import InputError
 from agl.ports.fetch import FetchedFile
-from agl.ports.get_request import RepositoryAtRef, RequestedWorkflow
+from agl.ports.get_request import GetRequest, RequestedWorkflow
+from agl.ports.home_layout import PROVENANCE_FILE
 
 _SHA: Final = "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d"
 
@@ -40,9 +40,10 @@ _HASH: Final = "a" * 64
 _WRITTEN: Final = ("owner", "repo", "path", "ref", "commit", "content_hash")
 
 def _workflow(ref: str | None = "v1.2.0") -> RequestedWorkflow:
-    repository = RepositoryAtRef("JasHioq", "my.repo", ref)
-    directory = "workflows/mine/triage"
-    return RequestedWorkflow(repository, directory, f"{repository}/{directory}")
+    """Parsed, so that its `spec` is the one `parsed_provenance` rebuilds: the argument alone."""
+    at = "" if ref is None else f"@{ref}"
+    (workflow,) = GetRequest.parsed([f"JasHioq/my.repo/workflows/mine/triage{at}"]).workflows
+    return workflow
 
 def _document(**changed: object) -> bytes:
     """A provenance file as AGL writes one, with the fields named here written over."""
@@ -57,7 +58,7 @@ def _refusal(content: bytes) -> str:
 
 # --- the round trip -------------------------------------------------------------------------------
 
-@pytest.mark.parametrize("ref", ["v1.2.0", _SHA, None])
+@pytest.mark.parametrize("ref", ["v1.2.0", "release/1.0", "v1.0.0+build.5", _SHA, None])
 def test_a_provenance_rendered_and_read_back_is_the_provenance_it_was(ref: str | None) -> None:
     provenance = Provenance(_workflow(ref), _SHA, _HASH)
 
@@ -120,7 +121,9 @@ def test_a_file_with_a_key_missing_or_one_added_is_refused_whole(kept: tuple[str
         {"repo": ".."},
         {"ref": ""},
         {"ref": 3},
+        {"ref": "release//1.0"},
         {"path": "../escaped/triage"},
+        {"path": "tools@v2/triage"},
         {"path": "workflows/not-a-name"},
         {"path": 3},
         {"commit": "7fd1a60"},

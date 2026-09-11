@@ -5,13 +5,15 @@ from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Final
 from agl.config import distribution, registry, sources, toml_file, workflow_files, workspace_path
+from agl.config.comparison import Updated, compared, replacements
 from agl.config.inspection import PlaceableWorkflow, inspected
-from agl.config.placement import Got, placed
-from agl.config.questions import Confirm, answered
+from agl.config.placement import Got, Removed, placed, removed
+from agl.config.questions import Confirm, Questions, Removal, answered, needed
+from agl.config.removal import removable
 from agl.config.schema import Settings
 from agl.ports.errors import ConflictError, InputError, InternalError, NotFoundError, UpstreamError
 from agl.ports.fetch import Fetcher
-from agl.ports.get_request import GetRequest
+from agl.ports.get_request import Fetch, GetRequest
 from agl.ports.home_layout import AglHome, RunScope, workspace_dir
 from agl.ports.ids import Namespace, ProjectName, RunLabel, WorkflowName
 from agl.ports.run import RunSpec, checked_text
@@ -35,8 +37,10 @@ __all__ = [
     "init",
     "list_workflows",
     "new_workflow",
+    "remove",
     "resume",
     "run",
+    "update",
     "workflow_help",
 ]
 
@@ -240,9 +244,6 @@ async def new_workflow(syncer: Syncer, home: AglHome, name: WorkflowName) -> Pat
     await _sync_workspace(syncer, home)
     return written
 
-# Three phases, and nothing reaches the workspace before the last of them: every download is fetched
-# and inspected, then every question is asked, and only then is anything placed - so no question is
-# ever put about a workspace this command has already changed. `tests/test_get.py` holds the order.
 # What became of each workflow is reported before the sync, because a sync that raises would
 # otherwise take the only account of what was placed out with it.
 async def get(
@@ -253,14 +254,38 @@ async def get(
     confirm: Confirm,
     report: Callable[[Got], None],
 ) -> Got:
-    fetched = [answer for fetch in request.fetches for answer in await fetcher.fetch(fetch)]
-    inspections = inspected(fetched, home)
-    answers = answered([one for one in inspections if isinstance(one, PlaceableWorkflow)], confirm)
-    got = placed(home, fetched, inspections, answers)
+    got = await _placed_after_asking(fetcher, home, request.fetches, confirm, needed)
     report(got)
     if got.placed:
         await _sync_workspace(syncer, home)
     return got
+
+# No sync, and so no uv and no network: discovery walks workflows/, where the entry is gone at once,
+# and the next sync - `run` and `resume` start with one - drops the member from uv.lock and
+# uninstalls what only it needed (uv 0.11, measured).
+def remove(home: AglHome, name: str, confirm: Confirm) -> Removed | None:
+    entry = removable(home, name)
+    if not confirm(str(Removal(entry))):
+        return None
+    return removed(home, entry.path)
+
+# `get`'s phases over whatever moved, and reported before the sync for `get`'s reason.
+async def update(
+    fetcher: Fetcher,
+    syncer: Syncer,
+    home: AglHome,
+    name: str | None,
+    confirm: Confirm,
+    report: Callable[[Updated], None],
+) -> Updated:
+    comparison = await compared(fetcher, home, name)
+    replacing = replacements(home, comparison.moved)
+    got = await _placed_after_asking(fetcher, home, replacing.fetches, confirm, replacing.questions)
+    updated = Updated(comparison, replacing, got)
+    report(updated)
+    if got.placed:
+        await _sync_workspace(syncer, home)
+    return updated
 
 def list_workflows(
     *, home: AglHome | None = None, points: Iterable[EntryPoint] | None = None
@@ -295,6 +320,22 @@ async def _walk(
     finally:
         leases.release_all()
     return Replayed(steps=fingerprints.replays)
+
+# Three phases, and nothing reaches the workspace before the last of them: every download is fetched
+# and inspected, then every question is asked, and only then is anything placed - so no question is
+# ever put about a workspace the command has already changed. `tests/test_get.py` holds the order,
+# and `tests/test_update.py` holds it again from `update`'s side.
+async def _placed_after_asking(
+    fetcher: Fetcher,
+    home: AglHome,
+    fetches: Sequence[Fetch],
+    confirm: Confirm,
+    questions: Questions,
+) -> Got:
+    fetched = [answer for fetch in fetches for answer in await fetcher.fetch(fetch)]
+    inspections = inspected(fetched, home)
+    placeables = [one for one in inspections if isinstance(one, PlaceableWorkflow)]
+    return placed(home, fetched, inspections, answered(placeables, confirm, questions))
 
 # A caller that handed no syncer installs nothing, the way one that handed its own points walks no
 # workspace: `agl.testing`'s harness is both at once and `cli/main.py` is neither. Making the

@@ -15,9 +15,10 @@ the real invocation, `ask`, because the alternative is a suite that blocks on a 
 
 **Nothing patches `builtins.input`.** That is what `Invocation.ask` exists for, and a suite reaching
 past every seam a module has in order to answer one question is exactly what a seam with a signature
-prevents (`api.py` argues the pattern; `cli/main.py` holds the real default). The two tests below
-that close stdin are not an exception to that: they replace `sys.stdin`, let the real default stand,
-and a closed stdin is the thing they report on rather than a way past a seam.
+prevents (`api.py` argues the pattern; `cli/main.py` holds the real default). The tests below that
+close stdin, or another standard stream, are not an exception to that: they replace the stream, let
+the real default stand, and a closed stream is the thing they report on rather than a way past a
+seam.
 
 **A real `git init` here, and marker directories in the library suite.** `toml_file.git_root` asks
 git nothing, so a `.git` directory is the whole of what it can see and the library tests use one.
@@ -268,6 +269,46 @@ def test_the_default_ask_turns_a_closed_stdin_into_a_refusal_that_keeps_the_eof(
 
     assert "build command:" in str(raised.value)
     assert isinstance(raised.value.__cause__, EOFError)
+
+@pytest.mark.parametrize("stream", ["stdin", "stdout", "stderr"])
+def test_the_default_ask_refuses_a_stream_closed_outright_as_it_refuses_the_end_of_stdin(
+    monkeypatch: pytest.MonkeyPatch, stream: str
+) -> None:
+    """`<&-`, `>&-`, `2>&-`: `input` raises `RuntimeError` for each, and it is chained the same way.
+
+    An answer is waiting on stdin every time, so what is refused is the stream and never an empty
+    line - `api.init`'s own refusal of one would otherwise pass for this.
+    """
+    monkeypatch.setattr(sys, "stdin", io.StringIO(f"{BUILD}\n"))
+    monkeypatch.setattr(sys, stream, None)
+
+    with pytest.raises(InputError) as raised:
+        main._asked("build command: ")
+
+    assert "build command:" in str(raised.value)
+    assert isinstance(raised.value.__cause__, RuntimeError)
+
+def test_init_with_its_stdin_closed_outright_exits_two_and_prints_no_traceback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`agl init <&-`: the refusal end of file gets, where it would otherwise be a bug report."""
+    home = _home(tmp_path, monkeypatch)
+    repo = _repository(tmp_path)
+    monkeypatch.setattr(sys, "stdin", None)
+    resolved = main._compose()
+
+    code = main.main(
+        ("init",),
+        compose=lambda: main.Invocation(
+            registered=resolved.registered, settings=resolved.settings, cwd=repo
+        ),
+    )
+
+    assert code == 2
+    captured = capsys.readouterr().err
+    assert "stdin" in captured
+    assert "Traceback" not in captured
+    assert not home.exists(), "a refused init wrote something anyway"
 
 # --- what the command is, read off the module ----------------------------------------------------
 

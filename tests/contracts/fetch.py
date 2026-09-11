@@ -22,13 +22,14 @@ passes, and the drift surfaces here rather than in whichever `agl get` test beli
 ## Written against the port, so **this suite must not assume a far side**
 
 Nothing here names a host, a service, a protocol, an archive format or a status code. The port says
-a fetcher downloads one repository at one ref and takes directories out of it, and says nothing
-about how - so an implementation reading a local mirror, a cache, or a service nobody has built yet
-owes exactly what is asserted below. **What the repository holds is data this suite owns**: `TREE`
-and `COMMIT` are the repository at its ref, and each implementation arranges to serve them however
-its far side is arranged - the fake is scripted with them, and the real adapter's test module
-builds the archive its far side would send. No test here writes a file, lists a directory or takes
-a `Path`.
+a fetcher downloads one repository at one ref and takes directories out of it, and answers which
+commit a ref names now, and says nothing about how either is done - so an implementation reading a
+local mirror, a cache, or a service nobody has built yet owes exactly what is asserted below. **What
+the repository holds is data this suite owns**: `TREE` and `COMMIT` are the repository at its ref,
+and each implementation arranges to serve them however its far side is arranged - the fake is
+scripted with them, and the real adapter's test module builds the archive its far side would send
+and scripts the commit its far side names. No test here writes a file, lists a directory or takes a
+`Path`.
 
 ## What this suite does NOT prove
 
@@ -51,6 +52,9 @@ a `Path`.
 4. **Anything about two fetches at once.** Nothing here starts two, and the port promises nothing
    about what happens if somebody does.
 
+5. **That a resolve downloads nothing.** The port says so, and the answer is identical either way;
+   the real adapter's own tests count what each of its two far sides was handed.
+
 ## Where the port is silent, and what this suite assumed
 
 **That a fetcher answers more than once.** An operator whose first `agl get` named a repository
@@ -68,7 +72,15 @@ from types import MappingProxyType
 from typing import Final
 import pytest
 from agl.ports.errors import NotFoundError
-from agl.ports.fetch import FetchAnswer, FetchedFile, FetchedWorkflow, Fetcher, RefusedWorkflow
+from agl.ports.fetch import (
+    FetchAnswer,
+    FetchedFile,
+    FetchedWorkflow,
+    Fetcher,
+    RefusedWorkflow,
+    ResolvedRef,
+    UnresolvedRef,
+)
 from agl.ports.get_request import Fetch, GetRequest, RepositoryAtRef
 
 # The commit `served` is at. Not a real one anywhere, which is what makes it this suite's own: an
@@ -106,7 +118,9 @@ def held_below(directory: str) -> dict[str, FetchedFile]:
 
 def fetch_of(repository: RepositoryAtRef, *specs: str) -> Fetch:
     """The one fetch that arguments naming directories of `repository` add up to."""
-    (fetch,) = GetRequest.parsed([f"{repository}/{spec}" for spec in specs]).fetches
+    at = "" if repository.ref is None else f"@{repository.ref}"
+    named = f"{repository.owner}/{repository.repo}"
+    (fetch,) = GetRequest.parsed([f"{named}/{spec}{at}" for spec in specs]).fetches
     return fetch
 
 def fetched(answer: FetchAnswer) -> FetchedWorkflow:
@@ -124,7 +138,7 @@ def refused(answer: FetchAnswer) -> RefusedWorkflow:
     return answer
 
 class FetchContract:
-    """The suite. One method, two kinds of answer, and the order and the commit they come in.
+    """The suite. Two methods, two kinds of answer each, and the order and the commit they come in.
 
     `pytestmark` is on the class for `SyncContract`'s reason: `asyncio_mode = "strict"` makes the
     marker the difference between a test that runs and one pytest quietly skips.
@@ -146,7 +160,10 @@ class FetchContract:
 
     @pytest.fixture
     def served(self) -> RepositoryAtRef:
-        """A repository at a ref the fetcher serves, holding exactly `TREE` at `COMMIT`."""
+        """A repository at a ref the fetcher serves, holding exactly `TREE` at `COMMIT`.
+
+        Resolved as well as downloaded: its ref names `COMMIT` when either question is asked.
+        """
         raise NotImplementedError(
             "the Fetcher contract suite has no repository to fetch: subclass FetchContract and "
             "override the `served` fixture with one the Fetcher under test serves, holding TREE at "
@@ -287,3 +304,49 @@ class FetchContract:
             FetchedWorkflow,
             RefusedWorkflow,
         ]
+
+    async def test_the_ref_a_served_repository_is_asked_at_resolves_to_the_commit_it_serves(
+        self, fetcher: Fetcher, served: RepositoryAtRef
+    ) -> None:
+        """The commit a download would carry, answered without the download, and for that ref.
+
+        Compared whole, the repository included, because the caller files the answer under the
+        question it asked - and an implementation answering for some other spelling or ref would
+        have a workflow compared against another ref's commit.
+        """
+        assert await fetcher.resolve(served) == ResolvedRef(served, COMMIT)
+
+    async def test_a_repository_that_is_not_there_resolves_to_a_refusal_naming_it(
+        self, fetcher: Fetcher, missing: RepositoryAtRef
+    ) -> None:
+        """`NotFoundError`, answered and not raised, naming the owner and the repository asked of.
+
+        The caller goes on to the next repository, so a refusal raised here would take every
+        other workflow's answer out with it.
+        """
+        answer = await fetcher.resolve(missing)
+
+        assert isinstance(answer, UnresolvedRef), f"resolved where it should be refused: {answer!r}"
+        assert answer.repository == missing
+        assert isinstance(answer.refusal, NotFoundError), f"refused with {answer.refusal!r}"
+        assert f"{missing.owner}/{missing.repo}" in str(answer.refusal)
+
+    async def test_a_refused_resolve_does_not_poison_the_next_one_or_a_download(
+        self, fetcher: Fetcher, served: RepositoryAtRef, missing: RepositoryAtRef
+    ) -> None:
+        """A refusal, then the repository that is there, asked both ways, then the refusal again.
+
+        The same order as the download's own version of this test, for the same reason: what
+        bites is an answer kept from one question and handed to the next.
+        """
+        first = await fetcher.resolve(missing)
+        second = await fetcher.resolve(served)
+        (fetched_after,) = await fetcher.fetch(fetch_of(served, "workflows/mine/review"))
+        third = await fetcher.resolve(missing)
+
+        assert [type(first), type(second), type(third)] == [
+            UnresolvedRef,
+            ResolvedRef,
+            UnresolvedRef,
+        ]
+        assert fetched(fetched_after).commit == COMMIT

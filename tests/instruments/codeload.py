@@ -9,8 +9,10 @@ What it imitates is what was observed of the real service in September 2026, and
 
   * `GET /{owner}/{repo}/tar.gz/{ref}` answers `200` with `application/x-gzip`, a gzip-compressed
     pax archive whose global header carries the commit as `comment`, and whose entries all sit
-    under one top-level directory named `<repo>-<ref as requested>`. `archive` and `tree` build
-    exactly that shape.
+    under one top-level directory named `<repo>-<ref as requested>` - each `/`, `@` or `+` in the
+    ref written as `-`, so `releases/v1` is under `checkout-releases-v1`, and a leading
+    `refs/heads/` left off. `archive` and `tree` build exactly that shape, under whatever top
+    directory they are handed.
   * Anything it does not have - a repository, a ref, a private repository - is one identical `404`
     with the body `404: Not Found`, which is what an unscripted path gets here.
   * It sends no rate-limit headers. A test that wants one scripts it.

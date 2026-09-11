@@ -1171,16 +1171,18 @@ def test_every_operation_the_module_declares_is_built() -> None:
     suite of its own - `tests/test_resume.py` and `tests/test_clear.py` - and `init` was the one
     left.
 
-    `workflow_help` is on `__all__` beside the seven verbs `agl` dispatches and is not one of them:
+    `workflow_help` is on `__all__` beside the nine verbs `agl` dispatches and is not one of them:
     it is the operation behind `agl workflows <name>`, which extends that grammar, and
     `cli/commands/workflows.py` is where the deviation is argued. `new_workflow` is a verb and is
     spelled unlike the command it serves, `agl new`, because `new` is an adjective and every other
     name here is what the operation does. `Ask`, `Cleared`, `Listing` and `Replayed` are the four
     entries that are not operations at all - the callable `init` asks its one question through, and
     the three values `clear`, `list_workflows` and the two walking verbs answer with - and they are
-    here because a caller annotating any of them has to be able to name it. `get` is the verb whose
-    two are defined elsewhere: it answers with `config/placement.py`'s `Got` and asks through
-    `config/questions.py`'s `Confirm`, so a caller names each from there and neither is listed here.
+    here because a caller annotating any of them has to be able to name it. `get`, `remove` and
+    `update` are the verbs whose values are defined elsewhere: they answer with
+    `config/placement.py`'s `Got` and `Removed` and `config/comparison.py`'s `Updated`, and all
+    three ask through `config/questions.py`'s `Confirm`, so a caller names each from there and
+    none of the four is listed here.
 
     `Replayed` is one value answering for two verbs, which is what keeps the report `run` and
     `resume` share count-based rather than command-based: both walk a ledger through `_walk`, so
@@ -1188,11 +1190,11 @@ def test_every_operation_the_module_declares_is_built() -> None:
 
     `sync_workspace` was on this list and is not an operation any more. It was public because
     `agl sync` was a command and this was the operation behind it; the command is gone, a sync
-    being something `new_workflow`, `get`, `run` and `resume` each do rather than something anybody
-    asks for, and an operation nothing outside `api.py` calls is not a surface. It is
-    `_sync_workspace` now, one definition with four callers, which is what keeps the ordering of an
-    install and the file written after it out of the four verbs that share it - and out of the CLI,
-    where the command that used to hold it would otherwise have left it.
+    being something `new_workflow`, `get`, `update`, `run` and `resume` each do rather than
+    something anybody asks for, and an operation nothing outside `api.py` calls is not a surface.
+    It is `_sync_workspace` now, one definition with five callers, which is what keeps the ordering
+    of an install and the file written after it out of the five verbs that share it - and out of
+    the CLI, where the command that used to hold it would otherwise have left it.
     """
     assert set(api.__all__) == {
         "Ask",
@@ -1204,8 +1206,10 @@ def test_every_operation_the_module_declares_is_built() -> None:
         "init",
         "list_workflows",
         "new_workflow",
+        "remove",
         "resume",
         "run",
+        "update",
         "workflow_help",
     }
     assert not [name for name in api.__all__ if "unbuilt" in name.lower()]

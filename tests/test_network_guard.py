@@ -96,6 +96,14 @@ async def test_the_real_fetcher_at_its_default_address_is_stopped_rather_than_an
     with pytest.raises(OffTheMachine, match="codeload.github.com"):
         await GitHubFetcher().fetch(fetch)
 
+@pytest.mark.asyncio
+async def test_the_real_fetcher_resolving_a_ref_at_its_default_address_is_stopped_too() -> None:
+    """The second far side, api.github.com, stopped the same way and for the same reason."""
+    (fetch,) = GetRequest.parsed(["octocat/Hello-World/wf"]).fetches
+
+    with pytest.raises(OffTheMachine, match="api.github.com"):
+        await GitHubFetcher().resolve(fetch.repository)
+
 def test_this_machine_is_reachable_by_address_by_name_and_over_ipv6() -> None:
     """Every instrument here is a listener on 127.0.0.1, and a guard refusing one breaks them."""
     with socket.create_server(("127.0.0.1", 0)) as listener:

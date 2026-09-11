@@ -37,6 +37,7 @@ from agl.ports.errors import (
     AglError,
     ConflictError,
     DeniedError,
+    DisagreeingRefusals,
     InputError,
     InternalError,
     NotFoundError,
@@ -59,6 +60,7 @@ _PUBLISHED: Final[tuple[tuple[type[AglError], int], ...]] = (
     (UpstreamUnavailable, 6),
     (UpstreamUnexpected, 6),
     (Stop, 7),
+    (DisagreeingRefusals, 8),
     (InternalError, 70),
 )
 

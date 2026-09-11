@@ -684,7 +684,8 @@ def test_a_base_that_advanced_behind_the_journals_back_does_not_invalidate_earli
 
     The second half is the expensive one and is asserted separately: because every step hits, no
     step restores, and the advanced commit is still the run branch's tip afterwards. A parent
-    restoring past its landed children is one of three paths in the design that destroy work.
+    restoring past its landed children is one of the paths `ARCHITECTURE.md`'s "Invariants where a
+    mistake is silent" names as destroying work.
     """
     _spawn(world, programme="core", tag="first", seed=KILLED_SEED)
     before = _snapshot(world)
@@ -707,8 +708,8 @@ def test_a_base_that_advanced_behind_the_journals_back_does_not_invalidate_earli
     assert after.entries == before.entries, "a resume that hit everything wrote something anyway"
     assert after.branches[run_branch(RunLabel(LABEL))] == advanced, (
         "the landed commit is gone: a step missed its fingerprint and restored the worktree to a "
-        "head from before the landing, which is the one path in the design that destroys "
-        "work rather than costing a re-run"
+        "head from before the landing - one of the paths ARCHITECTURE.md's \"Invariants where a "
+        "mistake is silent\" names as destroying work rather than costing a re-run"
     )
 
 def test_changing_only_the_commit_wording_replays_every_step_and_runs_no_worker(

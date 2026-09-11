@@ -139,7 +139,7 @@ from agl.config.schema import AgentSettings
 from agl.ports.agent import Provider
 from agl.ports.fetch import FetchedFile
 from agl.ports.get_request import RepositoryAtRef
-from agl.ports.home_layout import AglHome
+from agl.ports.home_layout import AglHome, workflows_dir
 from agl.ports.ids import ProjectName
 from agl.ports.tree_layout import TreesRoot, run_branch, worktree_branch
 from agl.sdk import Claude, Namespace, Role, Run, Workflow, arg, role, workflow
@@ -927,15 +927,31 @@ _EIGHT_DOWNLOAD: Final = {
     "workflows/scaffold/__init__.py": FetchedFile(b"from agl.sdk import Run, workflow\n"),
 }
 
+_EIGHT_REPOSITORY: Final = RepositoryAtRef("octo", "flows", None)
+
+# What that repository holds once `get` has run: the same workflow at a later commit, declaring a
+# dependency the copy `get` placed does not - so `update` has a download to fetch and a question.
+_EIGHT_MOVED: Final = "f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a"
+_EIGHT_UPDATE: Final = {
+    "workflows/scaffold/pyproject.toml": FetchedFile(
+        b'[project]\nname = "scaffold"\nversion = "0.2.0"\ndependencies = ["httpx"]\n\n'
+        b'[project.entry-points."agl.workflows"]\nscaffold = "scaffold:scaffold"\n'
+    ),
+    "workflows/scaffold/__init__.py": FetchedFile(b"from agl.sdk import Run, workflow\n"),
+}
+
 # One invocation per command, in an order that lets three of them address the same run: `run`
 # starts it, `resume` replays it, `clear` takes it away. `get` follows `new` and downloads a
-# workflow of the same name, so the question it puts about what stands is put and answered. The
-# names are compared against the parser's own subcommands below, so this table cannot silently
-# fall behind the grammar.
+# workflow of the same name, so the question it puts about what stands is put and answered; the
+# repository then moves on, so `update` downloads that workflow again and asks about the dependency
+# it gained, and `remove` takes it out behind a question of its own. The names are compared against
+# the parser's own subcommands below, so this table cannot silently fall behind the grammar.
 _INVOCATIONS: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
     ("init", ("init",)),
     ("new", ("new", "scaffold")),
     ("get", ("get", "octo/flows/workflows/scaffold")),
+    ("update", ("update",)),
+    ("remove", ("remove", "scaffold")),
     ("workflows", ("workflows",)),
     ("run", ("run", "probe", "-n", "auth", "-r", "add oauth")),
     ("resume", ("resume", "auth")),
@@ -1025,10 +1041,12 @@ def test_every_declared_command_runs_on_fakes_with_no_way_out(
     **Substituted through `main`'s own seam and nothing is monkeypatched to get there.** `compose=`
     is the parameter `cli/main.py` declares for exactly this, so the bundle is `container.fakes()`,
     the entry points are this module's own, `ask` is the canned answer `agl init` asks for and
-    `confirm` the yes `agl get` is asked for. `syncer` is `container.fake_syncer` - the field whose
-    real default would start a process, and the four rows that reach it are `new`, `get`, `run`
-    and `resume`, the commands a sync is folded into - and `fetcher` is a `FakeFetcher` holding the
-    one workflow the `get` row asks for, the field whose real default would open a socket.
+    `confirm` the yes `agl get`, `agl update` and `agl remove` are asked for. `syncer` is
+    `container.fake_syncer` - the field whose real default would start a process, and the five rows
+    that reach it are `new`, `get`, `update`, `run` and `resume`, the commands a sync is folded
+    into - and `fetcher` is a `FakeFetcher` holding the one workflow the `get` row asks for, served
+    again at a later commit once that row has run, so the `update` row finds its ref moved; it is
+    the field whose real default would open a socket.
     Nothing here reaches into a module's internals; the only patching in this test is the poison,
     which is the assertion rather than the arrangement.
 
@@ -1047,12 +1065,15 @@ def test_every_declared_command_runs_on_fakes_with_no_way_out(
     )
 
     fetcher = container.fake_fetcher()
-    fetcher.serves(RepositoryAtRef("octo", "flows", None), _EIGHT_DOWNLOAD)
+    fetcher.serves(_EIGHT_REPOSITORY, _EIGHT_DOWNLOAD)
 
     def answer(question: str) -> str:
         return "pytest -q"
 
+    asked: list[str] = []
+
     def approve(question: str) -> bool:
+        asked.append(question)
         return True
 
     def compose() -> main.Invocation:
@@ -1082,7 +1103,11 @@ def test_every_declared_command_runs_on_fakes_with_no_way_out(
     with pytest.raises(_WentOutside):
         socket.create_connection(("127.0.0.1", 1))
 
-    statuses = {name: main.main(argv, compose=compose) for name, argv in _INVOCATIONS}
+    statuses: dict[str, int] = {}
+    for name, argv in _INVOCATIONS:
+        statuses[name] = main.main(argv, compose=compose)
+        if name == "get":
+            fetcher.serves(_EIGHT_REPOSITORY, _EIGHT_UPDATE, commit=_EIGHT_MOVED)
 
     assert statuses == dict.fromkeys(driven, 0), (
         f"the commands answered {statuses}. Target #8 is that every one of them runs end-to-end on "
@@ -1090,6 +1115,13 @@ def test_every_declared_command_runs_on_fakes_with_no_way_out(
         f"poisoned `subprocess` and a poisoned `socket`, so it finished without leaving the "
         f"process."
     )
+    # `update` went the whole way - a download and a question - rather than finding nothing moved.
+    assert [fetch.repository for fetch in fetcher.fetched] == [_EIGHT_REPOSITORY] * 2
+    assert [one for one in asked if "declares third-party dependencies" in one] == [
+        f"octo/flows/workflows/scaffold at {_EIGHT_MOVED[:7]} declares third-party dependencies "
+        f"{workflows_dir(AglHome(home)) / 'scaffold'} does not, which uv will install into the "
+        f"workspace: 'httpx'. Continue?"
+    ]
 
 # ================================================================================================
 # Target 9 - three runs, one repo, concurrently

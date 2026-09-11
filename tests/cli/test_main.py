@@ -565,6 +565,25 @@ def test_chunks_that_fail_differently_exit_seventy_naming_every_one_of_them(
     assert "do not resolve to one exit status" in captured.err
     assert captured.out == ""
 
+def test_a_resumed_run_whose_chunks_fail_differently_exits_seventy_as_the_run_did(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`resume` reaches the same arm as `run`, so disagreeing chunks cost 70 through either door.
+
+    The group rule is `main`'s rather than a command's. A command that goes on past each refusal
+    answers its own disagreement with 8, through `cli/commands/__init__.py`'s `_refusal_status`,
+    and that is a second rule beside this one rather than a change to it.
+    """
+    harness = _fakes(tmp_path)
+    started = _main(harness, "run", "disagreeing", "-n", "auth")
+    capsys.readouterr()
+
+    resumed = _main(harness, "resume", "auth")
+
+    assert resumed == started
+    assert started == 70
+    assert "do not resolve to one exit status" in capsys.readouterr().err
+
 def test_a_deliberate_stop_in_a_chunk_reads_exactly_like_one_raised_on_its_own(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

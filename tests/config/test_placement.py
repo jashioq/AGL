@@ -20,7 +20,8 @@ behind, which neither reader sees.
 **An override moves what stands there aside rather than removing it.** A rename moves a symbolic
 link or a file as itself and never walks into what it names, so the operator's own directory at the
 far end of a link is never touched, and the staging directory's removal disposes of whatever was
-moved into it. If the rename that places the download then fails, what stood there is put back.
+moved into it. If the rename that places the download then fails, or a Ctrl-C lands before it has
+finished, what stood there is put back; once the download is in place, it stays.
 
 **The provenance hash is the invariant an edit breaks**: a workflow measured off disk the moment it
 is placed is the one its provenance file records. `tests/config/test_inspection.py` holds that for
@@ -28,20 +29,29 @@ a hand-rolled placement; this holds it for the real one.
 """
 
 import os
+import shutil
 import stat
 from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 from typing import Final
 import pytest
 from agl.config.inspection import PlaceableWorkflow, inspected
-from agl.config.placement import Got, placed
-from agl.config.provenance import PROVENANCE_FILE, placed_hash, read_provenance
+from agl.config.placement import Got, Removed, placed, removed
+from agl.config.provenance import placed_hash, read_provenance
 from agl.config.questions import ApprovedWorkflow, answered
 from agl.config.registry import GROUP, discovered, names
 from agl.ports.errors import ConflictError, InputError, NotFoundError
 from agl.ports.fetch import FetchAnswer, FetchedFile, FetchedWorkflow, RefusedWorkflow
 from agl.ports.get_request import RepositoryAtRef, RequestedWorkflow
-from agl.ports.home_layout import AglHome, workflow_dir, workflows_dir, workspace_pyproject
+from agl.ports.home_layout import (
+    PROVENANCE_FILE,
+    STAGED_REMOVED,
+    STAGING_PREFIX,
+    AglHome,
+    workflow_dir,
+    workflows_dir,
+    workspace_pyproject,
+)
 from agl.ports.ids import WorkflowName
 
 _SHA: Final = "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d"
@@ -236,6 +246,7 @@ def test_while_a_download_is_staged_nothing_the_registry_or_uv_reads_can_see_it(
     ((arrived, declared),) = seen
     assert len(arrived) == 1
     assert arrived[0].name.startswith(".")
+    assert arrived[0].name.startswith(STAGING_PREFIX)
     assert not (arrived[0] / "pyproject.toml").exists()
     assert declared == ("release",)
 
@@ -390,6 +401,128 @@ def test_a_rename_into_place_that_fails_puts_what_stood_there_back(
     assert _tree(standing) == before
     assert sorted(entry.name for entry in workflows_dir(home).iterdir()) == ["triage"]
 
+# --- a Ctrl-C between an override's two renames -------------------------------------------------
+#
+# An override is two renames - what stands, aside into the staging directory, then the download into
+# its place - and the staging directory is removed on the way out however the way out is taken. So
+# anything that leaves between the two would take what was moved aside with it, and CPython raises a
+# Ctrl-C between two bytecodes, as readily just after a rename returns as just before one starts.
+# The tests below raise one at each of those points: what stands is always the old entry or the new.
+
+def test_a_ctrl_c_at_the_rename_into_place_puts_what_stood_there_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Raised as the download's own rename is called: the old directory back, whole.
+
+    Only the first rename onto that path raises, as it would have to: the second is the old entry
+    coming back.
+    """
+    home = _home(tmp_path)
+    standing = _standing(home, "triage")
+    before = _tree(standing)
+    renamed = os.rename
+    interrupted: list[Path] = []
+
+    def interrupting_the_first(
+        source: str | os.PathLike[str], target: str | os.PathLike[str]
+    ) -> None:
+        if Path(target) == standing and not interrupted:
+            interrupted.append(Path(source))
+            raise KeyboardInterrupt
+        renamed(source, target)
+
+    monkeypatch.setattr(os, "rename", interrupting_the_first)
+    with pytest.raises(KeyboardInterrupt):
+        _placing(home, _download("triage"))
+
+    assert _tree(standing) == before
+    assert sorted(entry.name for entry in workflows_dir(home).iterdir()) == ["triage"]
+
+def test_a_ctrl_c_at_the_rename_into_place_puts_back_a_link_that_names_nothing_at_all(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """What stood there is a link to nowhere, and it is still what stood there: back it comes."""
+    home = _home(tmp_path)
+    workflows_dir(home).mkdir(parents=True)
+    link = workflows_dir(home) / "triage"
+    link.symlink_to(tmp_path / "gone")
+    renamed = os.rename
+    interrupted: list[Path] = []
+
+    def interrupting_the_first(
+        source: str | os.PathLike[str], target: str | os.PathLike[str]
+    ) -> None:
+        if Path(target) == link and not interrupted:
+            interrupted.append(Path(source))
+            raise KeyboardInterrupt
+        renamed(source, target)
+
+    monkeypatch.setattr(os, "rename", interrupting_the_first)
+    with pytest.raises(KeyboardInterrupt):
+        _placing(home, _download("triage"))
+
+    assert os.readlink(link) == str(tmp_path / "gone")
+    assert [entry.name for entry in workflows_dir(home).iterdir()] == ["triage"]
+
+def test_a_ctrl_c_as_what_stood_there_lands_aside_puts_it_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Raised as the rename that moved it aside returns, before anything else has run."""
+    home = _home(tmp_path)
+    standing = _standing(home, "triage")
+    before = _tree(standing)
+    renamed = os.rename
+
+    def interrupting_once_it_moved(
+        source: str | os.PathLike[str], target: str | os.PathLike[str]
+    ) -> None:
+        renamed(source, target)
+        if Path(source) == standing:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(os, "rename", interrupting_once_it_moved)
+    with pytest.raises(KeyboardInterrupt):
+        _placing(home, _download("triage"))
+
+    assert _tree(standing) == before
+    assert sorted(entry.name for entry in workflows_dir(home).iterdir()) == ["triage"]
+
+def test_a_ctrl_c_as_the_download_lands_leaves_the_download_standing_and_still_propagates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Raised as the rename into place returns: that replacement is done, and the Ctrl-C is kept.
+
+    Putting the old entry back now would mean renaming it onto the download, which fails - and a
+    failure there would stand in for the Ctrl-C and report a workflow placed as one never written.
+    """
+    home = _home(tmp_path)
+    standing = _standing(home, "triage")
+    download = _download("triage")
+    (placeable,) = inspected([download], home)
+    assert isinstance(placeable, PlaceableWorkflow)
+    renamed = os.rename
+
+    def interrupting_once_it_landed(
+        source: str | os.PathLike[str], target: str | os.PathLike[str]
+    ) -> None:
+        renamed(source, target)
+        if Path(target) == standing:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(os, "rename", interrupting_once_it_landed)
+    with pytest.raises(KeyboardInterrupt):
+        placed(home, [download], [placeable], [ApprovedWorkflow(placeable)])
+
+    assert _tree(standing) == {name: file.content for name, file in placeable.files.items()}
+    assert sorted(entry.name for entry in workflows_dir(home).iterdir()) == ["triage"]
+
+def test_a_placed_workflow_names_the_commit_its_files_were_taken_from(tmp_path: Path) -> None:
+    home = _home(tmp_path)
+
+    (one,) = _placing(home, _download("triage")).placed
+
+    assert one.commit == _SHA
+
 def test_something_made_there_while_the_questions_were_asked_is_never_placed_over(
     tmp_path: Path,
 ) -> None:
@@ -442,3 +575,139 @@ def test_every_workflow_is_filed_under_the_one_phase_that_settled_it(tmp_path: P
     assert [one.workflow for one in got.unplaceable] == [unplaceable.workflow]
     assert got.unwritten == ()
     assert [one.workflow for one in got.refused] == [unfetched.workflow, unplaceable.workflow]
+
+# --- what a removal takes -----------------------------------------------------------------------
+#
+# `agl remove` takes an entry out through the same staging directory a placement uses: renamed into
+# it whole, a level down and under a name of its own, and only then deleted. uv 0.11.29 refuses
+# every sync of the workspace over a non-dot directory holding any file and no project file - which
+# is what a delete made in place leaves if it stops part-way - and over a dangling link; it passes
+# over a dot-led directory with no project file at its root, whatever is below. Measured with `uv
+# sync --offline --no-install-workspace` over a scratch workspace, as the staging above was.
+
+def test_a_removed_directory_goes_whole_and_leaves_no_staging_directory_behind(
+    tmp_path: Path,
+) -> None:
+    home = _home(tmp_path)
+    standing = _standing(home, "triage")
+    (standing / "prompts").mkdir()
+    (standing / "prompts" / "review.md").write_bytes(b"# review\n")
+    _standing(home, "release")
+
+    assert removed(home, standing) == Removed(standing, None)
+
+    assert sorted(entry.name for entry in workflows_dir(home).iterdir()) == ["release"]
+
+def test_a_removed_link_goes_as_the_link_and_never_touches_what_it_named(
+    tmp_path: Path,
+) -> None:
+    """A delete that followed the link would take a checkout the operator keeps elsewhere."""
+    home = _home(tmp_path)
+    elsewhere = tmp_path / "elsewhere" / "triage"
+    elsewhere.mkdir(parents=True)
+    (elsewhere / "pyproject.toml").write_bytes(_pyproject("triage"))
+    (elsewhere / "notes.md").write_bytes(b"# kept elsewhere\n")
+    before = _tree(elsewhere)
+    workflows_dir(home).mkdir(parents=True)
+    link = workflow_dir(home, _TRIAGE)
+    link.symlink_to(elsewhere, target_is_directory=True)
+
+    assert removed(home, link) == Removed(link, None)
+
+    assert list(workflows_dir(home).iterdir()) == []
+    assert _tree(elsewhere) == before
+
+@pytest.mark.parametrize("kind", ["file", "dangling link"])
+def test_a_plain_file_or_a_dangling_link_is_removed_like_any_other_entry(
+    tmp_path: Path, kind: str
+) -> None:
+    home = _home(tmp_path)
+    workflows_dir(home).mkdir(parents=True)
+    entry = workflows_dir(home) / "stray"
+    if kind == "file":
+        entry.write_bytes(b"not a workflow\n")
+    else:
+        entry.symlink_to(tmp_path / "gone")
+
+    assert removed(home, entry) == Removed(entry, None)
+
+    assert list(workflows_dir(home).iterdir()) == []
+
+@pytest.mark.parametrize("name", ["triage", "pyproject.toml"])
+def test_between_the_rename_and_the_delete_nothing_the_registry_or_uv_reads_can_see_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    """`workflows/` looked at the instant after the rename that takes the entry out of it.
+
+    Whatever came is led by a dot and holds no `pyproject.toml` at its own root - so neither an
+    entry named `pyproject.toml`, a stray file in the one place a project file would be read, nor
+    anything else can land where uv would take the staging directory as a member. The registry is
+    asked as well rather than trusted, and at that instant declares only what is staying.
+    """
+    home = _home(tmp_path)
+    _standing(home, "release")
+    entry = workflows_dir(home) / name
+    if name == "triage":
+        _standing(home, name)
+    else:
+        entry.write_bytes(_pyproject("stray"))
+    seen: list[tuple[list[Path], tuple[str, ...]]] = []
+    renamed = os.rename
+
+    def looking_after(source: str | os.PathLike[str], target: str | os.PathLike[str]) -> None:
+        renamed(source, target)
+        if Path(source) == entry:
+            arrived = [one for one in workflows_dir(home).iterdir() if one.name != "release"]
+            seen.append((arrived, names(discovered(home).points)))
+
+    monkeypatch.setattr(os, "rename", looking_after)
+    removed(home, entry)
+
+    ((arrived, declared),) = seen
+    assert len(arrived) == 1
+    assert arrived[0].name.startswith(".")
+    assert not (arrived[0] / "pyproject.toml").exists(follow_symlinks=False)
+    assert declared == ("release",)
+
+def test_a_delete_that_stops_part_way_leaves_only_what_no_reader_of_workflows_sees(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The rename took it out of the workspace; what the delete could not take is handed back.
+
+    `shutil.rmtree` doing nothing stands in for a delete refused everywhere - a root-owned tree, an
+    immutable file - and `tempfile` ignores what it cannot delete, so this is the one account of it.
+    """
+    home = _home(tmp_path)
+    standing = _standing(home, "triage")
+    _standing(home, "release")
+    monkeypatch.setattr(shutil, "rmtree", lambda path, *args, **kwargs: None)
+
+    left = removed(home, standing).leftover
+
+    assert left is not None
+    assert left.parent == workflows_dir(home)
+    assert left.name.startswith(".")
+    assert [one.name for one in left.iterdir()] == [STAGED_REMOVED]
+    assert not (left / "pyproject.toml").exists()
+    assert not standing.exists()
+    assert names(discovered(home).points) == ("release",)
+
+def test_a_rename_that_fails_refuses_the_removal_and_leaves_the_entry_as_it_was(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = _home(tmp_path)
+    standing = _standing(home, "triage")
+    before = _tree(standing)
+
+    def refusing(source: str | os.PathLike[str], target: str | os.PathLike[str]) -> None:
+        raise OSError("the volume went read-only")
+
+    monkeypatch.setattr(os, "rename", refusing)
+
+    with pytest.raises(InputError) as refused:
+        removed(home, standing)
+
+    assert str(standing) in str(refused.value)
+    assert "the volume went read-only" in str(refused.value)
+    assert _tree(standing) == before
+    assert sorted(entry.name for entry in workflows_dir(home).iterdir()) == ["triage"]

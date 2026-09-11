@@ -15,6 +15,12 @@ saying so, so nothing written after it runs on from the prompt. Nothing remember
 read again after a Ctrl-D, so each question meets its own end of file - and under `< /dev/null`
 every question does, which is the whole of "no terminal means no", with no `isatty` and no flag.
 
+**So is a standard stream closed outright.** Under `<&-`, `>&-` or `2>&-` the stream is `None` in
+`sys` rather than at its end, and `input` raises `RuntimeError` naming it instead of `EOFError` -
+measured on CPython 3.14 - which untranslated would reach `main`'s last clause as a traceback and
+exit 70, from `agl get` and `agl remove` alike. It declines too, with a note of its own, since the
+note for end of file would be wrong about which stream went.
+
 **Nothing patches `builtins.input`**, for `tests/cli/test_init_command.py`'s reason: stdin is what
 is replaced, and it is the situation reported on rather than a way past a seam. A stdin that fails
 rather than ending is not taken as an answer either. pytest's own captured stdin raises `OSError`,
@@ -40,6 +46,8 @@ _QUESTION: Final = "Override it?"
 _PROMPT: Final = "Override it? [y/n] "
 
 _CLOSED: Final = "n - stdin was closed, and that is taken as no\n"
+
+_LOST: Final = "n - a standard stream is closed, so nothing can be read, and that is taken as no\n"
 
 _SHA: Final = "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d"
 
@@ -128,6 +136,28 @@ def test_a_stdin_that_fails_rather_than_ends_is_an_error_and_never_a_no(
 
     with pytest.raises(OSError, match="captured"):
         main._confirmed(_QUESTION)
+
+@pytest.mark.parametrize("stream", ["stdin", "stdout", "stderr"])
+def test_a_standard_stream_closed_outright_declines_the_question_and_lets_nothing_escape(
+    monkeypatch: pytest.MonkeyPatch, stream: str
+) -> None:
+    """A `y` is waiting on stdin each time, and a closed stream keeps even that from being read."""
+    _typed(monkeypatch, "y\n")
+    monkeypatch.setattr(sys, stream, None)
+
+    assert main._confirmed(_QUESTION) is False
+
+def test_stdin_closed_outright_says_so_on_stderr_and_writes_nothing_to_stdout(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`<&-`, the one of the three a detached process meets: the question, then why it is a no."""
+    monkeypatch.setattr(sys, "stdin", None)
+
+    assert main._confirmed(_QUESTION) is False
+
+    captured = capsys.readouterr()
+    assert captured.err == _PROMPT + _LOST
+    assert captured.out == ""
 
 # --- a batch of them -----------------------------------------------------------------------------
 

@@ -8,7 +8,7 @@ from agl.ports.ids import WorkflowName
 
 __all__ = ["Fetch", "GetRequest", "RepositoryAtRef", "RequestedWorkflow"]
 
-_SHAPE: Final = "owner/repo[@ref]/path/to/workflow[,sibling...]"
+_SHAPE: Final = "owner/repo/path/to/workflow[,sibling...][@ref]"
 
 _SEPARATOR: Final = "/"
 _REF_MARK: Final = "@"
@@ -18,6 +18,14 @@ _SIBLING_MARK: Final = ","
 # owner's - so no name it hands out is refused here, and nothing that would move a download address,
 # a `?`, a `#`, a `%`, a space or a slash, is let into one.
 _ADDRESS_CHARACTERS: Final = frozenset(string.ascii_letters + string.digits + "._-")
+
+# A ref may hold `/` too, git's own separator, and `+`, semver's mark for build metadata: codeload
+# answers either raw just as it answers `%2F` and `%2B` - observed. What else git allows stays out:
+# `#` ends an address and `%` is decoded out of one, both fetching another ref without a word; `@`
+# and `,` are the argument's own; urllib cannot send what is not ASCII; the rest was never observed.
+_REF_CHARACTERS: Final = _ADDRESS_CHARACTERS | frozenset("/+")
+
+_LOCK_SUFFIX: Final = ".lock"
 
 _TRAVERSAL: Final = frozenset({".", ".."})
 
@@ -39,14 +47,18 @@ class RepositoryAtRef:
     """As written after the `@`, or None for whichever branch is the default when it is fetched."""
 
     def __post_init__(self) -> None:
-        named = [("owner", self.owner), ("repository", self.repo)]
+        checked = [
+            ("owner", self.owner, _unaddressable(self.owner)),
+            ("repository", self.repo, _unaddressable(self.repo)),
+        ]
         if self.ref is not None:
-            named.append(("ref", self.ref))
-        for noun, value in named:
-            reason = _unaddressable(value)
+            checked.append(("ref", self.ref, _unfetchable(self.ref)))
+        for noun, value, reason in checked:
             if reason is not None:
                 raise InputError(f"{noun} {value!r} cannot be used: {reason}")
 
+    # How a workflow's `uses:` writes an action at a repository's root, `actions/checkout@v4`: the
+    # name of one download, and the front of no argument, whose ref is written after the path.
     def __str__(self) -> str:
         spelled = f"{self.owner}{_SEPARATOR}{self.repo}"
         return spelled if self.ref is None else f"{spelled}{_REF_MARK}{self.ref}"
@@ -82,7 +94,9 @@ class RequestedWorkflow:
         object.__setattr__(self, "name", name)
 
     def __str__(self) -> str:
-        return f"{self.repository}{_SEPARATOR}{self.directory}"
+        repository = self.repository
+        spelled = _SEPARATOR.join((repository.owner, repository.repo, self.directory))
+        return spelled if repository.ref is None else f"{spelled}{_REF_MARK}{repository.ref}"
 
 @dataclass(frozen=True, slots=True)
 class Fetch:
@@ -130,7 +144,7 @@ class GetRequest:
     def parsed(cls, specs: Sequence[str]) -> GetRequest:
         """Every workflow the arguments of one command ask for, read in the order they were written.
 
-        :param specs: one `owner/repo[@ref]/path/to/workflow[,sibling...]` per argument
+        :param specs: one `owner/repo/path/to/workflow[,sibling...][@ref]` per argument
         :return: the whole request, or none of it: one bad argument refuses every other one too
         :raises InputError: naming the argument, what was expected of it and what is wrong with it
         :raises InternalError: handed one `str`, which would read as one argument per character
@@ -158,12 +172,11 @@ def _requested(spec: str) -> tuple[RequestedWorkflow, ...]:
     problem = _malformed(spec)
     if problem is not None:
         raise InputError(f"{spec!r} {problem} - expected {_SHAPE}")
-    owner, named, *path = spec.split(_SEPARATOR)
-    # GitHub allows no `@` in an owner's or a repository's name, so the first one starts the ref. A
-    # git ref may hold `/` itself - `release/1.2` - but here the next `/` ends it, so a ref of that
-    # shape cannot be written in this grammar at all.
-    repo, marked, ref = named.partition(_REF_MARK)
-    *parents, siblings = path
+    # GitHub allows no `@` in an owner's or a repository's name, and no directory or ref here holds
+    # one, so the one `_malformed` lets through is where the ref starts - and the ref runs to the
+    # end, `/` and all, the way a workflow's `uses:` writes `release/1.2`.
+    named, marked, ref = spec.partition(_REF_MARK)
+    owner, repo, *parents, siblings = named.split(_SEPARATOR)
     try:
         repository = RepositoryAtRef(owner, repo, ref if marked else None)
         return tuple(
@@ -176,24 +189,36 @@ def _requested(spec: str) -> tuple[RequestedWorkflow, ...]:
 def _malformed(spec: str) -> str | None:
     if not spec:
         return "is empty"
-    if spec.startswith(_SEPARATOR):
+    named, marked, ref = spec.partition(_REF_MARK)
+    if _REF_MARK in ref:
+        return "holds a second '@', where the first is where its ref starts and a ref holds none"
+    if marked and not ref:
+        return "has an '@' with no ref after it, where no '@' at all asks for the default branch"
+    if not named:
+        return "starts with '@', where the repository's owner belongs"
+    if named.startswith(_SEPARATOR):
         return "starts with '/', where the repository's owner belongs"
-    if spec.endswith(_SEPARATOR):
-        return "ends with '/', where the name of the workflow's own directory belongs"
-    segments = spec.split(_SEPARATOR)
+    if named.endswith(_SEPARATOR):
+        where = "has '/' right before its '@'" if marked else "ends with '/'"
+        return f"{where}, where the name of the workflow's own directory belongs"
+    segments = named.split(_SEPARATOR)
     if "" in segments:
         return "holds '//', with nothing between the two"
     _, *after_owner = segments
+    path = after_owner[1:]
+    if marked and not path:
+        return (
+            "has its '@' before any path to a workflow, and a ref is written last, after the "
+            "workflow's own directory"
+        )
     if not after_owner:
         return "names an owner and no repository"
-    named, *path = after_owner
     if not path:
         return "names a repository and no directory inside it"
-    _, marked, ref = named.partition(_REF_MARK)
-    if marked and not ref:
-        return "has an '@' with no ref after it, where no '@' at all asks for the default branch"
     if "" in path[-1].split(_SIBLING_MARK):
         return f"has an empty entry in its comma list {path[-1]!r}, and each entry names a sibling"
+    if _SIBLING_MARK in ref:
+        return "has ',' after its '@', where the siblings that share a ref are listed before it"
     return None
 
 def _unaddressable(value: str) -> str | None:
@@ -206,6 +231,38 @@ def _unaddressable(value: str) -> str | None:
             return (
                 f"it contains {character!r} at position {index}, and it may hold only letters "
                 f"A-Z a-z, digits, and '.', '_' or '-'"
+            )
+    return None
+
+# git's rules for the shape of a ref, those the alphabet leaves standing: no repository can hold a
+# ref that breaks one, and together they keep `..`, `//` and a segment led by `.`, any of which a
+# server may resolve into another path, out of the address. `tests/ports/test_get_request.py` holds
+# them to `git check-ref-format`.
+def _unfetchable(ref: str) -> str | None:
+    if not ref:
+        return "it is empty"
+    for index, character in enumerate(ref):
+        if character not in _REF_CHARACTERS:
+            return (
+                f"it contains {character!r} at position {index}, and it may hold only letters "
+                f"A-Z a-z, digits, and '.', '_', '-', '+' or '/'"
+            )
+    if ".." in ref:
+        return "it contains '..', which git ref names may not"
+    if ref.endswith("."):
+        return "it ends with '.', which git ref names may not"
+    for component in ref.split(_SEPARATOR):
+        if not component:
+            return (
+                "it has an empty component, which a '/' at either end or two in a row would "
+                "write, and which git ref names may not"
+            )
+        if component.startswith("."):
+            return f"its component {component!r} starts with '.', which git ref components may not"
+        if component.endswith(_LOCK_SUFFIX):
+            return (
+                f"its component {component!r} ends with {_LOCK_SUFFIX!r}, which git reserves for "
+                f"its own lock files"
             )
     return None
 
@@ -222,6 +279,11 @@ def _unwalkable(segment: str) -> str | None:
             return (
                 f"its segment {segment!r} contains {character!r} at position {index}, which is a "
                 f"separator on Windows, and this path is separated by '/' alone"
+            )
+        if character == _REF_MARK:
+            return (
+                f"its segment {segment!r} contains {character!r} at position {index}, which is "
+                f"where an argument's ref starts, so no directory holding one can be asked for"
             )
         if unicodedata.category(character).startswith(_INVISIBLE_CATEGORY):
             return (

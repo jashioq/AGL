@@ -16,16 +16,20 @@ because two names differing only in case are one directory on a case-insensitive
 answers with a `SyncOutcome`, because a resolution that cannot be satisfied is the tool's verdict
 about the operator's workflows and not a state of the world AGL is entitled to interpret. `Fetcher`
 answers rather than raises as well, for a reason of its own: one command is several downloads and
-one download several workflows, so a failure — a repository, a ref or one directory in it not
-there, or a far side that did not answer — refuses the workflows it touched and no others. Each of
-those is answered with a `RefusedWorkflow` carrying the `AglError` the adapter chose, and `api.get`
-carries it past with no `except`. `home_layout.py` sits here too and composes every path under
+one download several workflows, and the one question `agl update` asks of a ref answers for every
+workflow placed from that repository at that ref, so a failure — a repository, a ref or one
+directory in it not there, or a far side that did not answer — refuses the workflows it touched and
+no others. Each of those is answered with a `RefusedWorkflow`, or out of `resolve` an
+`UnresolvedRef`, carrying the `AglError` the adapter chose, and `api.get` and `api.update` carry
+them past with no `except`. `home_layout.py` sits here too and composes every path under
 `AGL_HOME` — the workspace, its `workflows/`, one workflow's own directory, the venv's
-site-packages and the single file AGL writes inside that venv — so no layer above it spells a
-directory name, bar the one `config/placement.py` stages a download in, inside `workflows/` for
-the length of one placement; `config/provenance.py` names the one file `agl get` writes into each
-workflow it places. It imports nothing but stdlib and its own ring: everything imports `ports`, so
-what `ports` drags in reaches every layer at once.
+site-packages and the single file AGL writes inside that venv — and spells the names `config/`
+uses as names rather than as paths: the provenance file `agl get` and `agl update` write into each
+workflow they place, and the prefix of the dot-led directory in `workflows/` that a placement or a
+removal is staged in, with the three names used inside it. So no layer above it spells a directory
+name of AGL's own under `AGL_HOME`; the `__pycache__` that `config/workflow_files.py` passes over is
+CPython's. It imports nothing but stdlib and its own ring: everything imports `ports`, so what
+`ports` drags in reaches every layer at once.
 
 **`adapters/`** — The implementations. Anything that imports a vendor SDK, opens a socket or
 shells out lives here and only here. What holds of every one of them is the grading: each class
@@ -60,13 +64,21 @@ repository, and neither resolves a project, so there is no repository of the ope
 trees root for one to sit in. `toml_file.py` renders `agl new`'s scaffold from string constants
 rather than from a template file: a real entry-point table checked in here is what
 `tests/test_measurable_targets.py`'s declaration scan exists to fire on. `agl get`'s phases are
-modules here. `inspection.py` checks every download before anything is asked, reading its project
-file through `toml_file.parsed_document` and `registry.declarations` — the walk's own reading, so a
-download is refused in the words `agl workflows` would print about the same file on disk — and
-holding it through `workspace_member.py` to what uv syncs as a member of the workspace it would
-join. `questions.py` asks, and `placement.py` writes what was approved, `provenance.py`'s file
-among it, moving whatever an override replaces aside as itself — a link as the link, never what it
-names — and back again if the placing fails.
+modules here, and `agl update` and `agl remove` are made of the same modules and one more each.
+`inspection.py` checks every download before anything is asked, reading its project file through
+`toml_file.parsed_document` and `registry.declarations` — the walk's own reading, so a download is
+refused in the words `agl workflows` would print about the same file on disk — and holding it
+through `workspace_member.py` to what uv syncs as a member of the workspace it would join.
+`questions.py` asks, and `placement.py` writes what was approved, `provenance.py`'s file among it,
+moving whatever an override replaces aside as itself — a link as the link, never what it names —
+and back again if the placing does not finish, and moves an entry `agl remove` takes out of
+`workflows/` by that same one rename before it deletes any of it. `comparison.py` is `agl update`'s
+own: it reads the provenance file of each workflow `agl get` placed, asks the `Fetcher` which
+commit its ref names now, and measures each copy that moved against the hash it recorded — which
+decides whether replacing that copy is asked about first — and it builds the downloads and the
+questions `get`'s phases then run with. `removal.py` is `agl remove`'s: it finds the one
+entry a name reaches, never a dot-led one, and refuses an entry another member depends on, all
+before the question is put.
 
 One module in that layer needs more than a clause. **`workspace_path.py` is the only module in
 `src/` that writes to `sys.path`**, and `extend` appends two entries rather than one, in this order
@@ -85,12 +97,13 @@ that `agl new`'s own scaffold puts on its first line. **Nothing in AGL reads it 
 other module in `src/` opens the file — delete it and every run behaves identically.
 
 **`cli/`** — argv in, exit code out. `main.py` dispatches to one module per subcommand (run,
-resume, clear, init, new, get, workflows) and is the one place `Path.cwd()` is read. Composition
-is per-command, and every door out of the process sits behind a field on `Invocation`: the
-container behind a thunk, so `init`, `new`, `get` and `workflows` never build one, the `Syncer`
-behind a second, so `clear`, `init` and `workflows` start no installer, and the `Fetcher` behind a
-third, which `get` alone calls. The four that install are `run`, `resume`, `new` and `get`, and no
-grammar of AGL's asks an operator to start one. `points`, `ask` and `confirm` are the other three,
+resume, clear, init, new, get, update, remove, workflows) and is the one place `Path.cwd()` is
+read. Composition is per-command, and every door out of the process sits behind a field on
+`Invocation`: the container behind a thunk, so `init`, `new`, `get`, `update`, `remove` and
+`workflows` never build one, the `Syncer` behind a second, so `clear`, `init`, `remove` and
+`workflows` start no installer, and the `Fetcher` behind a third, which `get` and `update` alone
+call. The five that install are `run`, `resume`, `new`, `get` and `update`, and no grammar of
+AGL's asks an operator to start one. `points`, `ask` and `confirm` are the other three,
 and those six fields are the whole of what a test replaces to drive a command on fakes — `compose=`
 is the parameter declared for exactly that, which is what `tests/test_measurable_targets.py` runs
 every declared command through without patching a module's internals. **Commands stay dumb.**
@@ -100,6 +113,8 @@ decides anything is one call away. So `clear` names one `api` function rather th
 and a `shutil.rmtree` past the `Store` port, `init` one rather than build-tool detection and TOML
 rendering, `new` one rather than a directory tree, two rendered documents and an argv for an
 installer, `get` one rather than a download, an inspection, a round of questions and a placement,
+`update` one rather than a question about every ref and then all of `get`'s, `remove` one rather
+than a lookup, a question and a rename,
 and `workflows` two only because the listing and the help are two operations — one of them imports
 a package and the other must never. **Which stream a line goes to
 is part of that turning**: what a machine consumes goes to stdout, and a note about it goes to
@@ -113,7 +128,10 @@ wrote is on stdout, and the line telling an operator to open the *workspace* rat
 workflow directory is a level below the venv — is a note, and goes to stderr beside it. `get`
 splits the same way: a `placed` line on stdout names a workflow the workspace now holds, and
 everything else it writes — every question, a declined or refused line, each refusal's reason — is
-a note, on stderr, so what a script reads off stdout is what the command got. **One line
+a note, on stderr, so what a script reads off stdout is what the command got. `update` splits as
+`get` does, an `updated` line standing where `get` has a `placed` one and `already up to date`
+among the notes, and so does `remove`: `removed <name>` on stdout names the entry that went, and
+its question, and a note naming what a delete that stopped part-way left, go to stderr. **One line
 in AGL is written where it is decided rather than handed back to be turned into output, and it is
 the one place `api.py` writes to a stream at all**:
 `_unchanged`, which says a sync was refused, that this workspace already had an environment, and
@@ -124,28 +142,35 @@ about the environment that run is about to import from would reach the terminal 
 import it was about. Every other answer in `api.py` is a value —
 `tests/test_api.py::test_a_refused_install_over_an_environment_that_already_stood_warns_and_runs_anyway`
 pins the stream and the case, and a sync that succeeded is asserted silent on both streams — and
-`get`'s is handed over twice, to the `report` callback its command passes and then as its return,
-the callback coming before the sync: a sync that raises, uv missing or refusing with no environment
-to fall back on, leaves nothing returned to print, and what became of each workflow is what that
-operator most needs to read.
-`tests/test_get.py::test_a_sync_that_raises_has_already_reported_what_was_placed` is that case.
+`get`'s and `update`'s are each handed over twice, to the `report` callback the command passes and
+then as the return, the callback coming before the sync: a sync that raises, uv missing or refusing
+with no environment to fall back on, leaves nothing returned to print, and what became of each
+workflow is what that operator most needs to read.
+`tests/test_get.py::test_a_sync_that_raises_has_already_reported_what_was_placed` is that case, and
+`tests/cli/test_update_command.py::test_an_installer_that_could_not_be_started_exits_six_after_the_summary_went_out`
+is it for `update`.
 Each suite under `tests/cli/` scans its own command's source for the `api.` names it reaches, so a
 use case moving back into the CLI fails a test instead of passing review.
 
 **`api.py`** — AGL's operations, callable without a terminal: `run`, `resume`, `clear`, `init`,
-`new_workflow`, `get`, `list_workflows`, `workflow_help`. Installing what a workspace declares is
-not one of them. It is `_sync_workspace`, private, with four callers — `run`, `resume`,
-`new_workflow` and `get` — because a sync is something those four *do* rather than something
-anybody asks for, and an operation nothing outside this module calls is not a surface. A `Syncer`
-therefore reaches `run` and `resume` keyword-only beside their `Services`, `None` skipping the
-install the way `points` skips the workspace walk; `new_workflow` and `get` take one required and
-no `Services` at all, addressing the operator's workspace rather than a project, so there is
-nothing to resolve and no bundle to build around one — `get` taking its `Fetcher` the same way, and
-syncing only where it placed something. `get` is three phases in an order that is the design: every
-download fetched and inspected, then every question asked, through the `confirm` it is handed the
-way `init` is handed `ask`, and only then anything placed — so no question is put about a
-workspace the command has already changed, and a Ctrl-C among the questions leaves the workspace
-as it found it. `tests/test_get.py` asserts that order from inside it.
+`new_workflow`, `get`, `update`, `remove`, `list_workflows`, `workflow_help`. Installing what a
+workspace declares is not one of them. It is `_sync_workspace`, private, with five callers — `run`,
+`resume`, `new_workflow`, `get` and `update` — because a sync is something those five *do* rather
+than something anybody asks for, and an operation nothing outside this module calls is not a
+surface. A `Syncer` therefore reaches `run` and `resume` keyword-only beside their `Services`,
+`None` skipping the install the way `points` skips the workspace walk; `new_workflow`, `get` and
+`update` take one required and no `Services` at all, addressing the operator's workspace rather
+than a project, so there is nothing to resolve and no bundle to build around one — `get` and
+`update` taking their `Fetcher` the same way, and syncing only where they placed something.
+`remove` addresses the workspace too and takes no `Syncer` at all: discovery finds the entry gone
+at once, and the next sync drops what only it needed. `get` is three phases in an order that is the
+design: every download fetched and inspected, then every question asked, through the `confirm` it
+is handed the way `init` is handed `ask`, and only then anything placed — so no question is put
+about a workspace the command has already changed, and a Ctrl-C among the questions leaves the
+workspace as it found it. `update` is the same three phases, `_placed_after_asking` being the one
+copy of them both commands run, over what its comparison found moved and with its own questions in
+place of `get`'s, and `remove` puts its one question before it takes anything. `tests/test_get.py`
+asserts that order from inside it, and `tests/test_update.py` from `update`'s side.
 
 **`testing.py`** — The workflow author's harness: `harness(tmp_path, agent=…)` builds an all-fakes
 bundle, `run(...)` and `resume(...)` drive `api` over it, `recorded` is every journal entry,
@@ -164,7 +189,8 @@ find one, and there is still no central table to edit. An install does reach tha
 workflows *declare*, and only that: `--no-install-workspace` is what keeps the workflows themselves
 out of it, so no workflow ever has a dist-info anywhere and `import <name>` can resolve only from
 the source the operator is editing. **Nobody types that install.** `agl new` ends with one,
-`agl get` ends with one wherever it placed anything, and `agl run` and `agl resume` each begin with
+`agl get` and `agl update` each end with one wherever they placed anything, and `agl run` and
+`agl resume` each begin with
 one, above the discovery that puts the venv on `sys.path` and well above the import of the
 workflow's own module — an install below that import would never run on the machine that needed
 it, the import having failed first, so the next run would fail identically and nothing would
@@ -173,8 +199,9 @@ first, which is why `config/registry.py`'s refusal for a module the workflow imp
 installed names what installs and what does not rather than a command to type: an install that was
 refused, one that was never asked for and a package no file declares are three states that reach
 that line as one. The workspace's own `pyproject.toml` is written by `toml_file.make_workspace`,
-create-only, and the only commands that call it are the two that put a workflow into `workflows/`:
-`agl new`, and `agl get` once it has something to place. So a `workflows/` assembled by hand beside
+create-only, and the only commands that call it are the ones that put a workflow into `workflows/`:
+`agl new`, and `agl get` and `agl update` once either has something to place. So a `workflows/`
+assembled by hand beside
 no workspace file is refused by the installer `agl run` and `agl resume` begin with —
 `adapters/uv/syncer.py` says why, uv resolving a project by walking *up* — rather than made on the
 way past. The name `agl run` takes is the key on the left of a declaration rather than the
@@ -250,8 +277,8 @@ deliberate: the two SDKs are unconditional base dependencies, present in every i
 contract is the only thing keeping each one to its own adapter package; the Codex CLI is a binary
 installed separately and resolved at preflight, so it has no import statement for a contract to
 hold. The GitHub adapter is neither shape and needs neither guard: `adapters/github/fetcher.py`
-reaches codeload.github.com through the standard library's `urllib`, so it adds nothing to
-`[project] dependencies` and has no import for a contract to name.
+reaches codeload.github.com and api.github.com through the standard library's `urllib`, so it adds
+nothing to `[project] dependencies` and has no import for a contract to name.
 
 A third entry in `[project] dependencies` is neither a vendor SDK nor a binary. `packaging` is what
 `config/distribution.py` compares a workflow's declared bound on AGL with, PEP 440 being a grammar
@@ -632,9 +659,12 @@ between stopping the run and warning past it, and it is a fact about the workspa
 verdict about it — so `api._sync_workspace` stats it for itself through
 `config/workspace_path.py`'s `venv_exists`, before the installer is spawned, and `SyncOutcome`
 goes on answering for what uv said and nothing else. `config/placement.py` is the other, and says
-so with `ignore_cleanup_errors=True`: a staging directory it fails to remove changes nothing a
-caller is told, and holds no project file at its own root, so neither reader of `workflows/` sees
-it — "Invariants where a mistake is silent" has why that root stays empty.
+so with `ignore_cleanup_errors=True`: what goes wrong removing a staging directory is neither
+raised nor reported, and the directory holds no project file at its own root, so neither reader of
+`workflows/` sees it — "Invariants where a mistake is silent" has why that root stays empty. After
+a placement, such a leftover changes nothing a caller is told. After a removal it holds what is
+left of the workflow the command reports gone, so the directory, though not the error, comes back
+as `Removed.leftover`, and `agl remove` names it on stderr.
 
 **`ports/errors.py` holds the one exception-to-exit-code table and `cli/exit_codes.py` consumes it
 without adding a number of its own.** An exception that is not an `AglError` arriving at the top of
@@ -684,10 +714,30 @@ loop and one that merely exited 130 does not — so a handler answering 130 here
 `mypy --strict` is the enforcement, since `except BaseException as error: return exit_status(error)`
 will not type-check, and `tests/cli/test_exit_codes.py` pins both the annotation and the group rule.
 
+**A command that goes on past each refusal is not a run that failed several ways, so it does not
+borrow the group's 70.** `agl get` and `agl update` each refuse one workflow and carry on with the
+next, so refusals with different codes are an ending both are built to reach, and a 70 there would
+send an operator to
+report a bug about a command that did what it could. Refusals that agree exit with the code they
+share — compared on the resolved code, exactly as leaves are — and refusals that disagree exit 8,
+`DisagreeingRefusals`' row, which means that and nothing else. The rule is `_refusal_status`, in
+`cli/commands/__init__.py` rather than `cli/exit_codes.py` because its first answer — nothing
+refused, 0 — is a command's to return and no row of the table's, and the group rule above stays
+`exit_status`'s, for the groups a workflow's own `TaskGroup` hands `run` and `resume`. Nor is it a
+precedence: no refusal's code is preferred to another's, which is the guess the paragraph above
+refuses to make, and the disagreement gets a number of its own rather than one of theirs. So the
+hierarchy holds one class that exists for its row alone and that nothing raises — the table is
+keyed on a class and is the one place a published number is written, and `exit_code_for` reads it
+there. `tests/cli/test_get_command.py` holds the rule on its own and through `agl get`,
+`tests/cli/test_update_command.py` through `agl update` with refusals from every phase of it, and
+`tests/cli/test_main.py` holds a resumed run's disagreeing chunks at 70 beside a started one's.
+
 ## Invariants where a mistake is silent
 
 No gate catches these and no exception announces them. Everything else in AGL fails by raising or
-by costing a re-run. **Three of them destroy work.**
+by costing a re-run. **Five of them destroy work** — the ones on a step with no `commit=`, on
+handing a landing back to the parent's chain, on a red build gate, on what an override replaces or
+a removal takes, and on a placed workflow's hash.
 
 **A step with no `commit=` wipes its worktree.** `Journal._ending` in `sdk/_engine/journal.py`
 ends every step by committing everything or calling `Workspace.restore(last_good)` — `git reset
@@ -882,50 +932,88 @@ out of no directory, so its map is empty at both ends and the comparison passes;
 own refusal is what still stands behind it there.
 
 **A placed workflow's hash leaves out its provenance file and its bytecode, and the scheme under it
-never moves.** `agl get` writes `.agl-provenance.json` into each workflow it places — the
-repository, path and ref it was asked for, the commit it got and a `content_hash` — and always its
-own, one arriving in a download being dropped
+never moves.** `agl get` and `agl update` write `.agl-provenance.json` into each workflow they
+place — the repository, path and ref it was asked for, the commit it got and a `content_hash` — and
+always their own, one arriving in a download being dropped
 (`tests/config/test_inspection.py::test_a_provenance_file_arriving_in_a_download_is_replaced_by_agls_own`).
 Unedited means `config/provenance.py`'s `placed_hash` of the directory equals the hash that file
-records. The file is left out because it holds the hash: a hash counting it would have to contain
-itself, and no directory would ever measure to what its file records. `__pycache__` is left out at
-any depth, as the resume's digests leave it out, and that is sound only because a download's own
-is never placed — a repository can ship bytecode CPython runs without checking it against the
-source beside it, which would be code no hash here measured. The scheme is
+records, and that comparison, in `config/comparison.py`, is the whole of what decides whether
+`agl update` asks before it discards a copy's changes. So an edit the hash cannot see — a file's
+mode, anything under `__pycache__`, the provenance file itself — is replaced without that question,
+and a mistake that leaves anything else out replaces the operator's edit to it with nothing said
+and nothing keeping it. The file is left out because it holds the hash: a hash counting it would
+have to contain itself, and no directory would ever measure to what its file records. `__pycache__`
+is left out at any depth, as the resume's digests leave it out, and that is sound only because a
+download's own is never placed — a repository can ship bytecode CPython runs without checking it
+against the source beside it, which would be code no hash here measured. The scheme is
 `config/workflow_files.py`'s: the per-file digests `api.run` stamps into `run.json`, run together
 by `content_hash`. A provenance file keeps its answer across upgrades of AGL, so a byte moved in
-either leaves every workflow already placed measuring as edited. None of it can announce itself.
-Nothing in `src/` calls `read_provenance` or `placed_hash`, so a wrong hash is written by a command
-that succeeds, and the bytes it measured are kept nowhere else, so no later reading can correct it.
+either leaves every workflow already placed measuring as edited, and `agl update` asks of each one
+whose ref moves whether to discard changes nobody made. None of it can announce itself: a wrong
+hash is written by a command that succeeds, and the bytes it measured are kept nowhere else, so no
+later reading can correct it.
 `tests/config/test_inspection.py::test_a_placed_workflow_measured_back_off_disk_is_the_one_its_provenance_records`
 holds the first exclusion, and
 `tests/config/test_placement.py::test_a_workflow_measured_off_disk_as_placed_is_the_one_its_provenance_records`
 holds it through the real placement;
 `tests/config/test_inspection.py::test_bytecode_arriving_in_a_download_is_never_placed_at_any_depth`
-holds what the second rests on; and
+holds what the second rests on;
 `tests/config/test_workflow_files.py::test_the_content_hash_of_one_known_tree_is_the_answer_it_has_always_been`
-holds the scheme, its answer written out because a derived one would move with it.
+holds the scheme, its answer written out because a derived one would move with it; and
+`tests/test_update.py::test_a_changed_copy_asked_about_and_declined_keeps_every_byte_it_held` and
+`::test_a_mode_changed_or_bytecode_written_in_a_copy_is_replaced_without_a_question` hold the
+question on either side of what the hash sees.
 
-**Nothing is ever written at the root of the directory a download is staged in.**
-`config/placement.py` writes each approved download into a dot-led directory inside `workflows/`,
-because `os.rename` raises `EXDEV` between two filesystems, and renames it into place in one step.
+**No `pyproject.toml` ever stands directly inside a staging directory.** `config/placement.py`
+stages each approved download, and each entry `agl remove` takes out, in a dot-led directory inside
+`workflows/`, because `os.rename` raises `EXDEV` between two filesystems: a download is written
+there and renamed into place in one step, and an entry is renamed in whole and only then deleted.
 The leading dot hides it from neither of the two that read that directory: uv 0.11, taking
 `workflows/*` as the workspace's members, takes a dot-led directory as one wherever a
 `pyproject.toml` stands directly inside it — measured, and written down in
 `tests/config/test_placement.py` — and `config/registry.py` reads every entry's project file,
-dot-led or not. So the download goes a level down, and a staging directory that outlives its
-placement — a crash, or a removal that failed — is one neither of them reads. Write the download at
-that root instead and every placement still succeeds: the difference shows only in such a leftover,
-as a declaration read out of a directory nobody made and a member uv syncs for it.
+dot-led or not. So nothing goes in under a name of its own: the download is written into
+`placing`, and what an override replaces is renamed to `replaced` and what a removal takes to
+`removed`, the names `ports/home_layout.py` spells for them. A staging directory that outlives its
+placement or removal — a crash, or a delete that stopped part-way — is then one neither reader
+sees. Write at its root instead and every placement and removal still succeeds: the difference
+shows only in such a leftover, as a declaration read out of a directory nobody made and a member uv
+syncs for it.
 `tests/config/test_placement.py::test_while_a_download_is_staged_nothing_the_registry_or_uv_reads_can_see_it`
-looks at `workflows/` at the instant before the rename that places the download.
+looks at `workflows/` at the instant before the rename that places a download, and
+`::test_between_the_rename_and_the_delete_nothing_the_registry_or_uv_reads_can_see_it` at the
+instant after the one that takes an entry out.
+
+**What an override replaces, or a removal takes, leaves `workflows/` by one rename, as itself, and
+an override puts it back if its placing does not finish.** `config/placement.py`'s `_swap` renames
+what stands where a download goes — for `agl update`, always the operator's own copy — to
+`replaced` in the staging directory, a link as the link and never what it names, before it renames
+the download into place, and a removal takes an entry out by the same one rename before anything
+is deleted. Whatever is raised from the first of `_swap`'s renames until the second has finished —
+an `OSError`, a Ctrl-C, anything — the handler reads off disk which of them happened and, unless
+the download has landed, renames back what it moved aside before the exception goes on, so what
+stands is always the old entry or the new one. Delete in place, follow a link or drop the rename
+back, and nothing raises: the command reports what it always does, and the operator's workflow, or
+the directory a link named, is gone. Three cases are beyond it: a rename back that itself fails,
+after which the staging directory's removal takes what it was putting back unless that fails too;
+another Ctrl-C inside the handler before its rename back; and an end no Python code runs through —
+SIGKILL, a SIGTERM or SIGHUP that AGL installs no handler for, power loss — which leaves the old
+entry under `replaced` in a staging directory nothing names or sweeps.
+`tests/config/test_placement.py::test_a_rename_into_place_that_fails_puts_what_stood_there_back`,
+`::test_a_ctrl_c_at_the_rename_into_place_puts_what_stood_there_back` and
+`::test_a_ctrl_c_as_the_download_lands_leaves_the_download_standing_and_still_propagates` hold the
+rename back and where it stops;
+`::test_an_override_of_a_link_replaces_the_link_and_never_touches_what_it_named` and
+`::test_a_removed_link_goes_as_the_link_and_never_touches_what_it_named` hold the link.
 
 **What `agl get` asks about a download's dependencies is everything that download asks uv to
-install.** The question names `[project] dependencies` and nothing else, and uv reads more of a
-workspace member than that list while it syncs: every extra and every dependency group resolved,
-a git URL in either cloned, the `dev` group installed, a `[tool.uv]` table repointing a dependency
-to another source or installing a list of its own, and a member whose version or dependencies are
-dynamic, or one of whose requirements it cannot read, built by a backend it installs and runs.
+install, and what `agl update` asks is all of it bar what the copy it replaces already declares the
+same way.** The question names `[project] dependencies` and nothing else, and uv reads
+more of a workspace member than that list while it syncs: every extra and every dependency group
+resolved, a git URL in either cloned, the `dev` group installed, a `[tool.uv]` table repointing a
+dependency to another source or installing a list of its own, and a member whose version or
+dependencies are dynamic, or one of whose requirements it cannot read, built by a backend it
+installs and runs.
 `config/workspace_member.py` refuses a download carrying any of them before anything is asked, and
 says which of them uv 0.11 was seen to do. Relax one refusal and nothing raises anywhere: the
 operator approves one list and uv installs another.
@@ -1063,10 +1151,11 @@ The reasoning is the point — without it these get re-proposed.
   answer a question it cannot answer honestly: a captive portal answers every request, so what such
   a probe measures is not reachability, and the thing that has to be true is that the *agent
   backend* will answer — which is what `check_ready` already asks. The `Fetcher` behind `agl get`
-  has that shape and is not such a probe: it asks the one far side its command needs, at the moment
-  it needs it, and says what that far side answered — a download that could not be made is refused
-  naming the host and the reason the connection gave, and an answer that is not an archive, which
-  is what a captive portal sends, is refused as exactly that. A probe would also have to sit behind
+  and `agl update` has that shape and is not such a probe: it asks the far side its command needs,
+  at the moment it needs it, and says what that far side answered — a download that could not be
+  made, or a ref that could not be asked about, is refused naming the host and the reason the
+  connection gave, and an answer that is not the archive or the sha that was asked for, which is
+  what a captive portal sends, is refused as exactly that. A probe would also have to sit behind
   a field on `Invocation`, as that fetcher does, or break
   `tests/test_measurable_targets.py::test_every_declared_command_runs_on_fakes_with_no_way_out`,
   which poisons `getaddrinfo` and `gethostbyname` by name and then requires every declared command
@@ -1079,10 +1168,11 @@ The reasoning is the point — without it these get re-proposed.
   what it can fail at is its install. Where the install is what meets the missing network the
   operator still reads the right thing: with no prior environment the command stops on uv's own
   words, and with one, the stderr warning "The layers" describes comes first and preflight refuses
-  after it. `agl get` has no preflight either and is no third gap: its download is the first thing
-  it does, so a machine that cannot reach the far side is refused before anything is asked or
-  placed. What AGL does not claim anywhere is that the internet is down. What it says is that the
-  agent backend did not answer, or that a download could not be made from the host it names.
+  after it. `agl get` and `agl update` have no preflight either and are no third gap: each sends its
+  first request before it asks anything, so a machine that cannot reach the far side is refused
+  before anything is asked or placed. What AGL does not claim anywhere is that the internet is down.
+  What it says is that the agent backend did not answer, or that a download could not be made, or a
+  ref asked about, at the host it names.
 - **No CLI positionals.** `agl run <workflow>` already occupies that slot, so `arg()` refuses a
   flagless field where it is written rather than at the parse that would have gone wrong.
 - **`@workflow` takes nothing at all and is written bare.** `params=`, `name=` and `roles=` each

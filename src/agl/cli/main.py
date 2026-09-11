@@ -13,8 +13,10 @@ from agl.cli.commands import clear as clear_command
 from agl.cli.commands import get as get_command
 from agl.cli.commands import init as init_command
 from agl.cli.commands import new as new_command
+from agl.cli.commands import remove as remove_command
 from agl.cli.commands import resume as resume_command
 from agl.cli.commands import run as run_command
+from agl.cli.commands import update as update_command
 from agl.cli.commands import workflows as workflows_command
 from agl.cli.exit_codes import exit_code_for, exit_status, leaves
 from agl.config import container, distribution, sources
@@ -57,16 +59,20 @@ _CHOICES: Final = "[y/n]"
 
 _CLOSED: Final = "n - stdin was closed, and that is taken as no"
 
+_LOST: Final = "n - a standard stream is closed, so nothing can be read, and that is taken as no"
+
 def _asked(prompt: str) -> str:
     try:
         return input(prompt)
     # `input` raises `EOFError` on a closed stdin - a Ctrl-D at the prompt, or a command run as
-    # `agl init < /dev/null`.
-    except EOFError as closed:
+    # `agl init < /dev/null` - and `RuntimeError` where a standard stream is closed outright, as
+    # `<&-`, `>&-` and `2>&-` each leave one.
+    except (EOFError, RuntimeError) as closed:
         raise InputError(
-            f"stdin was closed before this question could be answered - a Ctrl-D, or a command run "
-            f"with nothing on its input. Nothing has been written, so run it again somewhere the "
-            f"question can be answered: {prompt.strip()}"
+            f"stdin was closed before this question could be answered, or another standard stream "
+            f"was - a Ctrl-D, a command run with nothing on its input, or one run with a stream "
+            f"closed outright. Nothing has been written, so run it again somewhere the question "
+            f"can be answered: {prompt.strip()}"
         ) from closed
 
 def _confirmed(question: str) -> bool:
@@ -80,6 +86,11 @@ def _confirmed(question: str) -> bool:
         # remembered: a terminal is read again after a Ctrl-D, so each question meets its own.
         except EOFError:
             print(_CLOSED, file=sys.stderr)
+            return False
+        # Raised instead where a standard stream is closed outright - `<&-`, `>&-`, `2>&-` - so
+        # nothing can be read at all, and the answer that destroys nothing is the one given.
+        except RuntimeError:
+            print(_LOST, file=sys.stderr)
             return False
         if answer in _YES:
             return True
@@ -106,8 +117,9 @@ class Invocation:
     # `config/container.py` says why beside `real_syncer`.
     syncer: Callable[[], Syncer] = container.real_syncer
 
-    # A thunk for the same reason, and `get` is the one command that calls it. Its default reaches
-    # codeload.github.com, which `tests/conftest.py` refuses from any test that leaves it standing.
+    # A thunk for the same reason, and `get` and `update` are the commands that call it. Its default
+    # reaches codeload.github.com and api.github.com, which `tests/conftest.py` refuses from any
+    # test that leaves it standing.
     fetcher: Callable[[], Fetcher] = container.real_fetcher
 
 type Compose = Callable[[], Invocation]
@@ -153,6 +165,8 @@ def parser() -> RefusingParser:
     init_command.declare(declared)
     new_command.declare(declared)
     get_command.declare(declared)
+    update_command.declare(declared)
+    remove_command.declare(declared)
     workflows_command.declare(declared)
     return root
 
@@ -205,6 +219,18 @@ def _dispatch(invocation: Invocation, parsed: argparse.Namespace, tail: Sequence
             syncer=invocation.syncer(),
             confirm=invocation.confirm,
         )
+    if command == update_command.NAME:
+        _no_tail(command, tail)
+        return update_command.execute(
+            invocation.settings.home,
+            parsed,
+            fetcher=invocation.fetcher(),
+            syncer=invocation.syncer(),
+            confirm=invocation.confirm,
+        )
+    if command == remove_command.NAME:
+        _no_tail(command, tail)
+        return remove_command.execute(invocation.settings.home, parsed, confirm=invocation.confirm)
     if command == workflows_command.NAME:
         _no_tail(command, tail)
         return workflows_command.execute(

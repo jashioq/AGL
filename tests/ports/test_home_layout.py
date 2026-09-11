@@ -18,6 +18,11 @@ from agl.adapters.git import _trees
 from agl.ports import home_layout
 from agl.ports.errors import InputError, InternalError
 from agl.ports.home_layout import (
+    PROVENANCE_FILE,
+    STAGED_PLACING,
+    STAGED_REMOVED,
+    STAGED_REPLACED,
+    STAGING_PREFIX,
     AglHome,
     RunScope,
     project_config,
@@ -79,6 +84,25 @@ def test_every_named_path_under_agl_home_is_spelled_out_in_full() -> None:
     assert workspace_editor_pth(_HOME, "python3.14") == Path(
         "/agl-home/workspace/.venv/lib/python3.14/site-packages/agl.pth"
     )
+
+def test_the_provenance_file_keeps_the_name_every_placed_workflow_was_written_with() -> None:
+    """A name and not a path, since `config/` keys a download's files by it, and never respelled.
+
+    Every workflow `agl get` or `agl update` has placed holds a file by this name, and a directory
+    holding none is one `agl update` takes for written by hand. An AGL reading any other name would
+    find every one of them hand-written, and `agl update` with no name would pass over them all and
+    say only that everything is already up to date.
+    """
+    assert PROVENANCE_FILE == ".agl-provenance.json"
+
+def test_a_staging_directory_and_every_name_inside_it_are_spelled_out_in_full() -> None:
+    """Names rather than paths, since `tempfile` finishes a staging directory's own.
+
+    One a crash leaves in `workflows/` can hold the only copy of the workflow an override was
+    replacing, under `replaced`, so these are names an operator may have to read and act on.
+    """
+    assert STAGING_PREFIX == ".agl-staging-"
+    assert (STAGED_PLACING, STAGED_REPLACED, STAGED_REMOVED) == ("placing", "replaced", "removed")
 
 def test_the_two_paths_under_home_that_no_project_name_composes() -> None:
     """The operator's own settings file at the top, and the directory the projects sit in.

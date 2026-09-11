@@ -4,9 +4,18 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Final
 from agl.ports.errors import AglError, InternalError
-from agl.ports.get_request import Fetch, RequestedWorkflow
+from agl.ports.get_request import Fetch, RepositoryAtRef, RequestedWorkflow
 
-__all__ = ["FetchAnswer", "FetchedFile", "FetchedWorkflow", "Fetcher", "RefusedWorkflow"]
+__all__ = [
+    "FetchAnswer",
+    "FetchedFile",
+    "FetchedWorkflow",
+    "Fetcher",
+    "RefusedWorkflow",
+    "Resolution",
+    "ResolvedRef",
+    "UnresolvedRef",
+]
 
 _SEPARATOR: Final = "/"
 
@@ -37,7 +46,7 @@ class FetchedWorkflow:
     """Keyed by `/`-separated path below the workflow's own directory, whose name no key holds."""
 
     def __post_init__(self) -> None:
-        if len(self.commit) not in _SHA_LENGTHS or not _SHA_CHARACTERS.issuperset(self.commit):
+        if not _a_full_object_id(self.commit):
             raise InternalError(
                 f"{self.workflow} was answered with commit {self.commit!r}, which is not a full "
                 f"object id: expected 40 characters of lowercase hexadecimal (sha1) or 64 "
@@ -72,8 +81,43 @@ class RefusedWorkflow:
 
 type FetchAnswer = FetchedWorkflow | RefusedWorkflow
 
+@dataclass(frozen=True, slots=True)
+class ResolvedRef:
+    """One repository's ref as it stands: the commit it names at the moment it was asked."""
+
+    repository: RepositoryAtRef
+
+    commit: str
+    """A full object id - a download of `repository` a moment later may already be past it."""
+
+    def __post_init__(self) -> None:
+        if not _a_full_object_id(self.commit):
+            raise InternalError(
+                f"{self.repository} was resolved to {self.commit!r}, which is not a full object "
+                f"id: expected 40 characters of lowercase hexadecimal (sha1) or 64 (sha256), "
+                f"because that is what a placed workflow's recorded commit is compared with"
+            )
+
+@dataclass(frozen=True, slots=True)
+class UnresolvedRef:
+    """A ref that could not be resolved, and the error saying why - answered, never raised."""
+
+    repository: RepositoryAtRef
+
+    refusal: AglError
+    """Never raised: `NotFoundError` where the repository or the ref is not there to be asked of."""
+
+    def __post_init__(self) -> None:
+        if not str(self.refusal):
+            raise InternalError(
+                f"{self.repository} went unresolved with a {type(self.refusal).__name__} that "
+                f"says nothing, and the reason is the whole of what a person is shown for it"
+            )
+
+type Resolution = ResolvedRef | UnresolvedRef
+
 class Fetcher(ABC):
-    """Every download behind one port: a repository at a ref, and each workflow taken from it."""
+    """Every download behind one port, and every question of which commit a ref names now."""
 
     @abstractmethod
     async def fetch(self, fetch: Fetch) -> tuple[FetchAnswer, ...]:
@@ -83,3 +127,15 @@ class Fetcher(ABC):
         :return: one answer per workflow in `fetch`, in order - a failure answered, never raised
         """
         ...
+
+    @abstractmethod
+    async def resolve(self, repository: RepositoryAtRef) -> Resolution:
+        """Ask which commit one repository's ref names now, downloading nothing to learn it.
+
+        :param repository: its ref asked exactly as written, and `None` as the default branch
+        :return: the commit, or why none could be told - a failure answered, never raised
+        """
+        ...
+
+def _a_full_object_id(commit: str) -> bool:
+    return len(commit) in _SHA_LENGTHS and _SHA_CHARACTERS.issuperset(commit)

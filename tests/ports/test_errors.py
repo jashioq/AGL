@@ -14,6 +14,7 @@ from agl.ports.errors import (
     AglError,
     ConflictError,
     DeniedError,
+    DisagreeingRefusals,
     InputError,
     InternalError,
     NotFoundError,
@@ -80,6 +81,7 @@ def test_the_published_exit_codes_are_the_ones_scripts_branch_on() -> None:
     assert exit_code_for(UpstreamUnavailable) == 6
     assert exit_code_for(UpstreamUnexpected) == 6
     assert exit_code_for(Stop) == 7
+    assert exit_code_for(DisagreeingRefusals) == 8
     assert exit_code_for(InternalError) == 70
 
 def test_no_two_table_entries_share_an_exit_code() -> None:

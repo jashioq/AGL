@@ -6,15 +6,23 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Final
 from agl.config import registry, workspace_member
-from agl.config.provenance import PROVENANCE_FILE, Provenance, fetched_hash, rendered
+from agl.config.provenance import Provenance, fetched_hash, rendered
 from agl.config.toml_file import parsed_document, read_document
 from agl.config.workflow_files import in_bytecode_cache
 from agl.ports.errors import ConflictError, InputError
 from agl.ports.fetch import FetchAnswer, FetchedFile, FetchedWorkflow, RefusedWorkflow
 from agl.ports.get_request import RequestedWorkflow
-from agl.ports.home_layout import AglHome, workflow_dir, workflows_dir
+from agl.ports.home_layout import PROVENANCE_FILE, AglHome, workflow_dir, workflows_dir
 
-__all__ = ["Inspection", "PlaceableWorkflow", "inspected"]
+__all__ = [
+    "Inspection",
+    "Member",
+    "PlaceableWorkflow",
+    "StandingEntry",
+    "folded",
+    "inspected",
+    "listed",
+]
 
 _PYPROJECT_FILE: Final = "pyproject.toml"
 _PACKAGE_MODULE: Final = "__init__.py"
@@ -43,27 +51,33 @@ class PlaceableWorkflow:
 type Inspection = PlaceableWorkflow | RefusedWorkflow
 
 @dataclass(frozen=True, slots=True)
-class _Member:
+class Member:
     """One member of the workspace as the others meet it: its declarations and names under uv."""
 
     where: str
     """How a refusal names it: the directory it stands in, or the argument that asked for it."""
 
     declared: frozenset[str]
+    """Every name `agl run` takes that it declares."""
 
     distribution: str | None
+    """Its `[project] name` as uv compares members' names, `None` where uv reads none."""
 
     required: frozenset[str]
+    """Every distribution its `[project] dependencies` names, spelled as uv compares names."""
+
+    dependencies: tuple[str, ...]
+    """Its `[project] dependencies` themselves, as written and in order."""
 
 @dataclass(frozen=True, slots=True)
-class _Entry:
+class StandingEntry:
     """One name the workflows directory holds, folded, and the member standing there, if any."""
 
     path: Path
 
     folded: str
 
-    member: _Member | None
+    member: Member | None
 
 @dataclass(frozen=True, slots=True)
 class _Candidate:
@@ -77,11 +91,11 @@ class _Candidate:
 
     dependencies: tuple[str, ...]
 
-    member: _Member
+    member: Member
 
 def inspected(answers: Sequence[FetchAnswer], home: AglHome) -> tuple[Inspection, ...]:
     """One inspection per answer, in the answers' own order: placeable as it stands, or refused."""
-    entries = _listed(home)
+    entries = listed(home)
     checked = [
         _checked(answer) if isinstance(answer, FetchedWorkflow) else answer for answer in answers
     ]
@@ -103,8 +117,9 @@ def _checked(fetched: FetchedWorkflow) -> _Candidate | RefusedWorkflow:
 def _candidate(fetched: FetchedWorkflow) -> _Candidate:
     workflow = fetched.workflow
     # Refused in the words discovery uses about a file, and nothing of this one is on disk yet, so
-    # they name where it was downloaded from.
-    where = Path(str(workflow))
+    # they name where it was downloaded from - by repository and directory, since the argument's
+    # `@ref` is written last and would stand between the directory and its files.
+    where = Path(workflow.repository.owner, workflow.repository.repo, workflow.directory)
     path = where / _PYPROJECT_FILE
     held = fetched.files.get(_PYPROJECT_FILE)
     if held is None:
@@ -120,14 +135,15 @@ def _candidate(fetched: FetchedWorkflow) -> _Candidate:
     for point in found.points:
         _check_own(path, workflow, point)
     workspace_member.check_member(path, document)
-    member = _Member(
+    dependencies = workspace_member.dependencies(document)
+    member = Member(
         f"{str(workflow)!r}, which this same command asks for",
         frozenset(point.name for point in found.points),
         workspace_member.distribution_name(document),
         workspace_member.dependency_names(document),
+        dependencies,
     )
     files = {name: file for name, file in fetched.files.items() if _placed(name)}
-    dependencies = workspace_member.dependencies(document)
     return _Candidate(workflow, fetched.commit, files, dependencies, member)
 
 # Neither is ever placed. Bytecode is written again from the source beside it at the first import,
@@ -153,7 +169,7 @@ def _check_own(path: Path, workflow: RequestedWorkflow, point: EntryPoint) -> No
 # either may be the one left standing. What stands where this one goes is the one exception.
 def _settled(
     candidate: _Candidate,
-    entries: Sequence[_Entry],
+    entries: Sequence[StandingEntry],
     candidates: Sequence[_Candidate],
     home: AglHome,
 ) -> Inspection:
@@ -181,7 +197,7 @@ def _settled(
         None if existing is None else existing.path,
     )
 
-def _clash(workflow: RequestedWorkflow, mine: _Member, theirs: _Member) -> str | None:
+def _clash(workflow: RequestedWorkflow, mine: Member, theirs: Member) -> str | None:
     shared = sorted(mine.declared & theirs.declared)
     if shared:
         return _declared_twice(workflow, shared, theirs)
@@ -193,7 +209,8 @@ def _clash(workflow: RequestedWorkflow, mine: _Member, theirs: _Member) -> str |
         return _required_by(workflow, mine.distribution, theirs)
     return None
 
-def _listed(home: AglHome) -> tuple[_Entry, ...]:
+def listed(home: AglHome) -> tuple[StandingEntry, ...]:
+    """Every entry of workflows/ in name order, and none where there is no workflows/ yet."""
     directory = workflows_dir(home)
     try:
         entries = sorted(directory.iterdir())
@@ -201,11 +218,11 @@ def _listed(home: AglHome) -> tuple[_Entry, ...]:
         return ()
     except OSError as error:
         raise InputError(_unlistable(directory, error)) from error
-    return tuple(_Entry(entry, _folded(entry.name), _member_at(entry)) for entry in entries)
+    return tuple(StandingEntry(entry, folded(entry.name), _member_at(entry)) for entry in entries)
 
 # A project file that will not parse declares nothing to discovery and names nothing uv could read,
 # so it holds no name a download could collide with - the sync is refused over it already.
-def _member_at(directory: Path) -> _Member | None:
+def _member_at(directory: Path) -> Member | None:
     if not directory.is_dir():
         return None
     try:
@@ -214,16 +231,17 @@ def _member_at(directory: Path) -> _Member | None:
         return None
     if document is None:
         return None
-    return _Member(
+    return Member(
         str(directory),
         frozenset(point.name for point in registry.declarations(directory, document).points),
         workspace_member.distribution_name(document),
         workspace_member.dependency_names(document),
+        workspace_member.dependencies(document),
     )
 
 # `WorkflowName.collision_key`'s fold, asked of a directory's own name - which need not be a
 # workflow's, since the operator names a directory they make by hand whatever they like.
-def _folded(name: str) -> str:
+def folded(name: str) -> str:
     return unicodedata.normalize("NFC", name.casefold())
 
 def _unprojected(workflow: RequestedWorkflow) -> str:
@@ -257,7 +275,9 @@ def _foreign(path: Path, workflow: RequestedWorkflow, point: EntryPoint, module:
         f"one its provenance file's hash measures"
     )
 
-def _ambiguous(workflow: RequestedWorkflow, destination: Path, standing: Sequence[_Entry]) -> str:
+def _ambiguous(
+    workflow: RequestedWorkflow, destination: Path, standing: Sequence[StandingEntry]
+) -> str:
     return (
         f"{workflow} would be placed at {destination}, where {len(standing)} entries stand whose "
         f"names differ only in case: {', '.join(str(entry.path) for entry in standing)}. A "
@@ -265,21 +285,21 @@ def _ambiguous(workflow: RequestedWorkflow, destination: Path, standing: Sequenc
         f"download replaces"
     )
 
-def _declared_twice(workflow: RequestedWorkflow, shared: Sequence[str], other: _Member) -> str:
+def _declared_twice(workflow: RequestedWorkflow, shared: Sequence[str], other: Member) -> str:
     return (
         f"{workflow} declares {', '.join(repr(name) for name in shared)}, and so does "
         f"{other.where}. Two declarations of one name are refused by `agl workflows` and `agl run` "
         f"alike - AGL will not choose between them - so this one is not placed beside the other"
     )
 
-def _named_twice(workflow: RequestedWorkflow, distribution: str, other: _Member) -> str:
+def _named_twice(workflow: RequestedWorkflow, distribution: str, other: Member) -> str:
     return (
         f"{workflow} is named {distribution!r} in [project] name, as uv compares names, and so is "
         f"{other.where}. uv takes every directory under workflows/ as a member of one workspace, "
         f"and it will not sync a workspace holding two members of one name at all"
     )
 
-def _requires_member(workflow: RequestedWorkflow, distribution: str, other: _Member) -> str:
+def _requires_member(workflow: RequestedWorkflow, distribution: str, other: Member) -> str:
     return (
         f"{workflow} depends on {distribution!r}, which is the [project] name of {other.where}. uv "
         f"reads a dependency on a workspace member's name as a dependency on that member, and "
@@ -287,7 +307,7 @@ def _requires_member(workflow: RequestedWorkflow, distribution: str, other: _Mem
         f"may carry"
     )
 
-def _required_by(workflow: RequestedWorkflow, distribution: str, other: _Member) -> str:
+def _required_by(workflow: RequestedWorkflow, distribution: str, other: Member) -> str:
     return (
         f"{workflow} is named {distribution!r} in [project] name, and {other.where} depends on a "
         f"distribution of that name. uv reads a dependency on a workspace member's name as a "
@@ -297,7 +317,7 @@ def _required_by(workflow: RequestedWorkflow, distribution: str, other: _Member)
 
 def _unlistable(directory: Path, error: OSError) -> str:
     return (
-        f"{directory} cannot be listed: {error}. That is where a downloaded workflow is placed, "
-        f"and what already stands there is what a download is checked against - so nothing can "
-        f"be placed until it can be read"
+        f"{directory} cannot be listed: {error}. That is where every workflow in the workspace "
+        f"stands, and what stands there is what a download is checked against and what a removal "
+        f"looks for - so nothing can be placed or removed until it can be read"
     )

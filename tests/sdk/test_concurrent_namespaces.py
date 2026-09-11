@@ -591,10 +591,10 @@ async def test_a_head_advanced_behind_the_frameworks_back_does_not_move_the_chai
     step having run and so with nothing journalled. An obligation is attached to that which nothing
     here can discharge - "`IntegrationOutcome.head` carries the value; the engine must write it into
     the parent's chain" - because `integrate()` is not a step, and a parent whose chain still points
-    before its landed children would `restore()` past all of them on its next fingerprint miss,
-    which is "one of the three paths in the design that destroy work rather than costing a re-run".
-    The commit made below with `_git` is that state, arranged by hand where there is no
-    `integrate()` to make it for real.
+    before its landed children would `restore()` past all of them on its next fingerprint miss -
+    one of the paths `ARCHITECTURE.md`'s "Invariants where a mistake is silent" names as destroying
+    work rather than costing a re-run. The commit made below with `_git` is that state, arranged by
+    hand where there is no `integrate()` to make it for real.
 
     **The child is the second half and the sharper one.** A run's own step replaying is a claim
     about `Journal._last_good`; a child cut on the *second* walk landing at the same base is a claim
@@ -639,6 +639,6 @@ async def test_a_head_advanced_behind_the_frameworks_back_does_not_move_the_chai
     )
     assert _git(checkout, "rev-parse", "HEAD").strip() == advanced, (
         "the landed commit is gone: a step missed its fingerprint and restored the checkout to a "
-        "head from before the landing, which is the one path in the design that destroys "
-        "work rather than costing a re-run"
+        "head from before the landing - one of the paths ARCHITECTURE.md's \"Invariants where a "
+        "mistake is silent\" names as destroying work rather than costing a re-run"
     )

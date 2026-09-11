@@ -5,6 +5,11 @@ from agl.ports.errors import InputError, InternalError
 from agl.ports.ids import Namespace, ProjectName, RunLabel, StepName, WorkflowName
 
 __all__ = [
+    "PROVENANCE_FILE",
+    "STAGED_PLACING",
+    "STAGED_REMOVED",
+    "STAGED_REPLACED",
+    "STAGING_PREFIX",
     "AglHome",
     "RunScope",
     "project_config",
@@ -47,6 +52,20 @@ _SITE_PACKAGES: Final = "site-packages"
 # for, and it is a name nothing else in that directory takes: `uv sync` leaves `_virtualenv.pth`
 # beside it, and the distribution AGL publishes is `agents-gl` rather than `agl`.
 _EDITOR_PTH: Final = "agl.pth"
+
+# Public, and a name rather than a path, because `config/` keys maps of files by it. JSON, which no
+# import resolves and no reader of a pyproject.toml opens, and led by a dot. Every workflow already
+# placed holds one by this name, and `agl update` takes a directory holding none for one written by
+# hand - `tests/ports/test_home_layout.py` holds the spelling.
+PROVENANCE_FILE: Final = ".agl-provenance.json"
+# Public, as names rather than paths, because `tempfile` finishes the directory's own. It stands in
+# workflows/ for the length of one placement or removal, led by a dot so no import resolves it, and
+# nothing but these three is put in it, so no pyproject.toml stands at its root, where uv 0.11 and
+# the registry each look for a member's - `tests/config/test_placement.py` holds both.
+STAGING_PREFIX: Final = ".agl-staging-"
+STAGED_PLACING: Final = "placing"
+STAGED_REPLACED: Final = "replaced"
+STAGED_REMOVED: Final = "removed"
 
 _MAX_SEGMENT_BYTES: Final = 255
 
