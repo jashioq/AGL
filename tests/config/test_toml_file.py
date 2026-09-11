@@ -33,6 +33,7 @@ from agl.config.toml_file import (
     git_root,
     make_workflow,
     make_workspace,
+    parsed_document,
     read_document,
     read_project,
     read_settings,
@@ -1204,3 +1205,30 @@ def test_the_run_directory_of_a_project_is_not_mistaken_for_a_project_file(tmp_p
     _register(home, "myapp", root)
     (project_config(home, ProjectName("myapp")).parent / "myapp" / "runs").mkdir(parents=True)
     assert resolve_project(home, root).repo == root
+
+# --- a document that was never on disk ------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "content", [b"[project\n", b"\xff\xfe[project]\n", b'[project]\nname = "triage"\n']
+)
+def test_bytes_that_never_touched_disk_read_exactly_as_the_file_holding_them_would(
+    tmp_path: Path, content: bytes
+) -> None:
+    """`agl get` reads a project file out of a download, and answers what the walk answers on disk.
+
+    Refused in the same words or parsed to the same document - both halves, so a reader of bytes
+    that went its own way on either would fail here rather than in the message an operator reads.
+    """
+    path = tmp_path / "pyproject.toml"
+    path.write_bytes(content)
+
+    try:
+        from_disk: object = read_document(path)
+    except InputError as refused:
+        from_disk = str(refused)
+    try:
+        from_memory: object = parsed_document(path, content)
+    except InputError as refused:
+        from_memory = str(refused)
+
+    assert from_memory == from_disk

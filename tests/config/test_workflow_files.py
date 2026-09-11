@@ -31,7 +31,7 @@ from typing import Final
 import pytest
 from agl import api
 from agl.config import container, registry
-from agl.config.workflow_files import digests
+from agl.config.workflow_files import content_hash, digested, digests
 from agl.ports.agent import AgentTask
 from agl.ports.errors import InputError
 from agl.ports.home_layout import AglHome, workflows_dir
@@ -279,3 +279,51 @@ async def test_running_a_workflow_twice_changes_no_digest_because_bytecode_is_le
     )
     assert tuple(before) == _WRITTEN
     assert before == once == twice
+
+# --- the same answer for files that are not on disk yet, and one hash for all of them ------------
+
+def test_files_digested_in_memory_answer_what_the_directory_holding_them_answers(
+    tmp_path: Path,
+) -> None:
+    """The walk's twin for a download, compared with the walk over those very files written out.
+
+    Nested paths, a name outside ASCII, bytecode at two depths and a file that is merely called
+    `__pycache__` - the walk passes over a directory of that name and not a file, and the twin has
+    to draw the line in the same place. Order is compared as well as content, both being sorted.
+    """
+    files = {
+        "__init__.py": b"from agl.sdk import Run, workflow\n",
+        "prompts/caf\u00e9.md": b"# review\n",
+        "__pycache__/__init__.cpython-314.pyc": b"compiled",
+        "flows/__pycache__/review.cpython-314.pyc": b"compiled too",
+        "flows/review.py": b"REVIEW = 1\n",
+        "notes/__pycache__": b"a file, whatever its name says",
+        "empty.md": b"",
+    }
+    for name, content in files.items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_bytes(content)
+
+    assert list(digested(files).items()) == list(digests(tmp_path).items())
+    assert "notes/__pycache__" in digested(files)
+
+def test_the_content_hash_is_one_answer_whatever_order_its_map_was_built_in() -> None:
+    measured = digested({"b.py": b"b\n", "a.py": b"a\n", "c/d.md": b"d\n"})
+
+    assert content_hash(dict(reversed(list(measured.items())))) == content_hash(measured)
+
+def test_the_content_hash_of_one_known_tree_is_the_answer_it_has_always_been() -> None:
+    """The scheme held still, because a provenance file keeps its answer across upgrades of AGL.
+
+    A byte moved in how one file is digested or in how the digests are run together gives every
+    workflow `agl get` has placed a hash other than the one its provenance file recorded, and every
+    one of them would read as edited. So the answer is written out rather than derived here.
+    """
+    files = {
+        "__init__.py": b"from agl.sdk import Run, workflow\n",
+        "prompts/review.md": b"# review\n",
+    }
+
+    assert content_hash(digested(files)) == (
+        "7dcb92bcb8cc0d7f7e9c63ae13180a486a80062e7c0b0b8e4b9baf722cd12c7c"
+    )

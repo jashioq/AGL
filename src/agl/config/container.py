@@ -16,6 +16,8 @@ from agl.adapters.git.fake import (
 from agl.adapters.git.history import GitHistory
 from agl.adapters.git.integrator import GitIntegrator
 from agl.adapters.git.workspace import GitWorkspaceProvider
+from agl.adapters.github.fake import FakeFetcher
+from agl.adapters.github.fetcher import GitHubFetcher
 from agl.adapters.openai import fake as openai_fake
 from agl.adapters.openai.runner import OpenAiRunner
 from agl.adapters.rich_terminal.headless import HeadlessTerminal
@@ -29,6 +31,7 @@ from agl.adapters.uv.syncer import UvSyncer
 from agl.config.schema import AgentSettings, Project, Settings
 from agl.ports.agent import AgentOutcome, AgentRunner, Provider, ToolResult
 from agl.ports.errors import UpstreamUnavailable
+from agl.ports.fetch import Fetcher
 from agl.ports.run import JsonValue
 from agl.ports.store import Store
 from agl.ports.sync import Syncer
@@ -44,9 +47,11 @@ __all__ = [
     "ScriptedTerminal",
     "Services",
     "answering",
+    "fake_fetcher",
     "fake_syncer",
     "fakes",
     "real",
+    "real_fetcher",
     "real_syncer",
 ]
 
@@ -134,13 +139,20 @@ def answering(responses: Sequence[Press | int] = ()) -> ScriptedTerminal:
     return ScriptedTerminal(responses)
 
 # Outside both bundles, and beside `answering` for the same reason: a sync addresses the operator's
-# workspace rather than a run, so there is no project, no repository and no trees root in scope -
-# exactly as there is none for `agl new` or `agl workflows`.
+# workspace and a fetch a public repository, rather than a run, so there is no project, no
+# repository of the operator's and no trees root in scope - exactly as there is none for `agl new`
+# or `agl workflows`.
 def real_syncer() -> Syncer:
     return UvSyncer()
 
 def fake_syncer() -> FakeSyncer:
     return FakeSyncer()
+
+def real_fetcher() -> Fetcher:
+    return GitHubFetcher()
+
+def fake_fetcher() -> FakeFetcher:
+    return FakeFetcher()
 
 def _claude_script(agent: Agent | None) -> claude_fake.Script | None:
     if agent is None:

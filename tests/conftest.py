@@ -54,12 +54,22 @@ above rather than by association with it. `sys.path` is process-global,
 `agl/config/registry.py`'s `discovered` is what calls that - so any test walking a workspace under
 `tmp_path` leaves that directory on the path of every test collected after it.
 `_sys_path_as_each_test_found_it` takes it back off, and its own docstring is where that is argued.
+
+**The third guard is the network itself**, and it is here because the first one cannot reach it.
+The environment variables above redirect a vendor CLI, which is a child process reading its own
+configuration; `agl get` is AGL making an HTTP request in this interpreter, with nothing between a
+test that builds the real fetcher and codeload.github.com. `_nothing_leaves_this_machine` refuses
+every name lookup and every connection that would leave the machine, for the whole session, and
+`tests/instruments/offline.py` says what that covers and what it cannot. `scripts/check`'s
+paid-endpoint gate proves a freshly written test file inherits it, the same way it proves the
+redirect is inherited.
 """
 
 import sys
 from collections.abc import Iterator
 import pytest
 from instruments.loopback import DUMMY_KEY, REPLY, Loopback
+from instruments.offline import refuse_everything_off_this_machine
 
 @pytest.fixture(scope="session", autouse=True)
 def loopback(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Loopback]:
@@ -100,6 +110,21 @@ def loopback(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Loopback]:
         environment.setenv("CODEX_HOME", str(tmp_path_factory.mktemp("codex-home-no-credential")))
         environment.setenv("AGL_HOME", str(tmp_path_factory.mktemp("agl-home-not-the-operators")))
         yield endpoint
+
+@pytest.fixture(scope="session", autouse=True)
+def _nothing_leaves_this_machine() -> Iterator[None]:
+    """Every test in this repository, unable to resolve or reach any host but this one.
+
+    Session-scoped and autouse for `loopback`'s reason: the test that needs it is the one written
+    next, by somebody who built the real fetcher with its default address and did not think about
+    where that points. A test that closes the doors harder for itself -
+    `tests/test_measurable_targets.py::_poison` replaces the same functions with ones that refuse
+    loopback too - does so through its own function-scoped `monkeypatch`, which puts this refusal
+    back rather than the originals when it undoes itself.
+    """
+    with pytest.MonkeyPatch.context() as doors:
+        refuse_everything_off_this_machine(doors)
+        yield
 
 @pytest.fixture(autouse=True)
 def _one_test_at_a_time(loopback: Loopback) -> Iterator[None]:

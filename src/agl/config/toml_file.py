@@ -28,6 +28,7 @@ __all__ = [
     "git_root",
     "make_workflow",
     "make_workspace",
+    "parsed_document",
     "read_document",
     "read_project",
     "read_settings",
@@ -286,16 +287,23 @@ def resolve_project(home: AglHome, start: Path) -> FileProject:
 def read_document(path: Path) -> Mapping[str, object] | None:
     """The TOML at `path`, `None` where there is no file, `InputError` for every other failure."""
     try:
-        with path.open("rb") as handle:
-            document: dict[str, object] = tomllib.load(handle)
+        content = path.read_bytes()
     except FileNotFoundError:
         return None
+    except OSError as error:
+        raise InputError(f"{path} cannot be read: {error}") from error
+    return parsed_document(path, content)
+
+def parsed_document(path: Path, content: bytes) -> Mapping[str, object]:
+    """`content` as TOML, refused in the words `read_document` would use for a file at `path`."""
+    try:
+        document: dict[str, object] = tomllib.loads(content.decode("utf-8"))
     except tomllib.TOMLDecodeError as error:
         raise InputError(
             f"{path} is not valid TOML: {error}. AGL will not guess at what a half-parsed file "
             f"meant to say"
         ) from error
-    except (OSError, UnicodeDecodeError) as error:
+    except UnicodeDecodeError as error:
         raise InputError(f"{path} cannot be read: {error}") from error
     return document
 

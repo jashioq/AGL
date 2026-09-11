@@ -4,13 +4,15 @@ from pathlib import Path
 from typing import Final
 from agl.ports.errors import InputError
 
-__all__ = ["digests"]
+__all__ = ["content_hash", "digested", "digests", "in_bytecode_cache"]
 
 # Importing a workflow makes CPython write its bytecode into this directory, beside the source it
 # compiled and so inside the very directory the import was resolved from. Digest what is in there
 # and a run changes the answer it was itself measured by: a map taken before a workflow's first
 # import never matches the one taken after it, and nothing is ever resumable.
 _BYTECODE: Final = "__pycache__"
+
+_SEPARATOR: Final = "/"
 
 # A name `iterdir` hands back carries lone surrogates wherever the filesystem held bytes that are
 # not valid UTF-8, and `surrogatepass` is the one handler that encodes those back to the bytes they
@@ -27,20 +29,40 @@ _SURROGATES: Final = "surrogatepass"
 def digests(directory: Path) -> Mapping[str, str]:
     """Every file in a workflow's directory, keyed by POSIX path relative to it and digested."""
     found = dict(_walked(directory, ()))
-    return {name: _digest(name, found[name]) for name in sorted(found)}
+    return {name: _digest(name, _content(found[name])) for name in sorted(found)}
+
+def digested(files: Mapping[str, bytes]) -> Mapping[str, str]:
+    """What `digests` answers for a directory holding exactly `files`, with nothing read."""
+    return {
+        name: _digest(name, files[name]) for name in sorted(files) if not in_bytecode_cache(name)
+    }
+
+def in_bytecode_cache(path: str) -> bool:
+    """Whether a relative POSIX path lies inside a directory `digests` never walks into."""
+    *directories, _ = path.split(_SEPARATOR)
+    return _BYTECODE in directories
+
+# A provenance file keeps this across upgrades of AGL, so it is a scheme every later AGL has to
+# reproduce byte for byte - one that moved would read every workflow `agl get` placed as edited.
+# `tests/config/test_workflow_files.py` holds it to one known answer.
+def content_hash(measured: Mapping[str, str]) -> str:
+    """One digest standing for a whole map of per-file digests, whatever order it was built in."""
+    combined = hashlib.sha256()
+    for name in sorted(measured):
+        combined.update(measured[name].encode(_ENCODING))
+    return combined.hexdigest()
 
 def _walked(directory: Path, prefix: tuple[str, ...]) -> Iterator[tuple[str, Path]]:
     for entry in _listed(directory):
         if entry.is_file():
-            yield "/".join((*prefix, entry.name)), entry
+            yield _SEPARATOR.join((*prefix, entry.name)), entry
         # A directory reached through a symlink is not descended into: a link naming an ancestor of
         # itself is a walk with no end, and a filesystem is free to hold one.
         elif entry.is_dir() and not entry.is_symlink() and entry.name != _BYTECODE:
             yield from _walked(entry, (*prefix, entry.name))
 
-def _digest(name: str, path: Path) -> str:
+def _digest(name: str, content: bytes) -> str:
     spelled = name.encode(_ENCODING, _SURROGATES)
-    content = _content(path)
     digest = hashlib.sha256()
     digest.update(f"file {len(spelled)} {len(content)}\n".encode())
     digest.update(spelled)

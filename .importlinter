@@ -74,6 +74,7 @@ source_modules =
     agl.ports.run
     agl.ports.home_layout
     agl.ports.tree_layout
+    agl.ports.get_request
 forbidden_modules =
     agl.ports.agent
     agl.ports.workspace
@@ -84,6 +85,7 @@ forbidden_modules =
     agl.ports.sync
     agl.ports.terminal
     agl.ports.clock
+    agl.ports.fetch
 
 
 # 3. Vendor containment: each vendor SDK is visible to exactly one adapter package, so
@@ -154,6 +156,7 @@ modules =
     agl.adapters.rich_terminal
     agl.adapters.system_clock
     agl.adapters.uv
+    agl.adapters.github
 
 
 # 5. The composition root: config/container.py is the only module that says `new`.

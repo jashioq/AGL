@@ -15,6 +15,7 @@ __all__ = [
     "Discovery",
     "check_satisfied",
     "check_unbroken",
+    "declarations",
     "discovered",
     "load",
     "names",
@@ -224,6 +225,14 @@ def _declared(directory: Path) -> Discovery:
     # a scratch copy, a notes directory or a `.venv` is stray rather than a workflow that broke.
     if document is None:
         return Discovery((), ())
+    return declarations(directory, document)
+
+# The walk's own reading of a project file, and `config/inspection.py` asks it of one still in
+# memory too, naming where that file was downloaded from: nothing here opens `directory`, which is
+# only what the refusals name and what the declarations are filed under.
+def declarations(directory: Path, document: Mapping[str, object]) -> Discovery:
+    """What one directory's parsed project file declares, and what of it this AGL will not run."""
+    path = directory / _PYPROJECT_FILE
     project = _nested(document, _PROJECT)
     table = _nested(_nested(project, _ENTRY_POINTS), GROUP)
     if not table:

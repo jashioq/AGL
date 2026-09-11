@@ -76,10 +76,12 @@ from agl.config.registry import (
     Discovery,
     check_satisfied,
     check_unbroken,
+    declarations,
     discovered,
     load,
     names,
 )
+from agl.config.toml_file import read_document
 from agl.ports.errors import ConflictError, InputError, NotFoundError
 from agl.ports.home_layout import AglHome, workflows_dir
 
@@ -661,3 +663,30 @@ def test_the_workflows_own_missing_module_is_refused_about_the_declaration_and_n
     said = str(refused.value)
     assert "loading it failed" in said
     assert "not installed" not in said
+
+# --- one directory's reading, handed a document somebody else parsed ----------------------------
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        _declaring(_pointing_here("triage")),
+        '[project]\nname = "triage"\nversion = "0.1.0"\n',
+        _declaring("triage = 3"),
+        _needing(f">={_BEYOND_REACH}", f"triage = {_UNIMPORTABLE!r}"),
+    ],
+)
+def test_a_document_parsed_elsewhere_reads_exactly_as_the_walk_reads_it_off_disk(
+    tmp_path: Path, document: str
+) -> None:
+    """`agl get` hands over a project file still in memory, and it is read as the walk reads it.
+
+    The same four shapes the walk meets - declaring, declaring nothing, declaring a non-string and
+    declaring past this AGL - and the whole `Discovery` compared, so a second reading drifting on
+    any field of it fails here rather than as a download refused in other words than a listing.
+    """
+    home = _home(tmp_path)
+    directory = _directory(home, "triage", document)
+    parsed = read_document(directory / "pyproject.toml")
+    assert parsed is not None
+
+    assert declarations(directory, parsed) == discovered(home)

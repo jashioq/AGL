@@ -10,6 +10,7 @@ from typing import Final
 from agl.api import Ask
 from agl.cli import commands
 from agl.cli.commands import clear as clear_command
+from agl.cli.commands import get as get_command
 from agl.cli.commands import init as init_command
 from agl.cli.commands import new as new_command
 from agl.cli.commands import resume as resume_command
@@ -17,8 +18,10 @@ from agl.cli.commands import run as run_command
 from agl.cli.commands import workflows as workflows_command
 from agl.cli.exit_codes import exit_code_for, exit_status, leaves
 from agl.config import container, distribution, sources
+from agl.config.questions import Confirm
 from agl.config.schema import Settings
 from agl.ports.errors import AglError, InputError, InternalError, Stop
+from agl.ports.fetch import Fetcher
 from agl.ports.ids import ProjectName
 from agl.ports.sync import Syncer
 from agl.sdk._engine.services import Services
@@ -46,6 +49,14 @@ _OUR_BUG: Final = (
     "above it could report the failure in words. Please report it with the lines above"
 )
 
+_YES: Final = frozenset({"y", "Y"})
+
+_NO: Final = frozenset({"n", "N"})
+
+_CHOICES: Final = "[y/n]"
+
+_CLOSED: Final = "n - stdin was closed, and that is taken as no"
+
 def _asked(prompt: str) -> str:
     try:
         return input(prompt)
@@ -57,6 +68,23 @@ def _asked(prompt: str) -> str:
             f"with nothing on its input. Nothing has been written, so run it again somewhere the "
             f"question can be answered: {prompt.strip()}"
         ) from closed
+
+def _confirmed(question: str) -> bool:
+    while True:
+        print(f"{question} {_CHOICES} ", end="", file=sys.stderr, flush=True)
+        try:
+            # Handed no prompt: `input` writes one to stdout wherever stdin or stdout is not a
+            # terminal, and stdout carries what a machine reads - so the question is on stderr.
+            answer = input()
+        # Raised at end of file - `< /dev/null`, a script's input run dry, a Ctrl-D - and not
+        # remembered: a terminal is read again after a Ctrl-D, so each question meets its own.
+        except EOFError:
+            print(_CLOSED, file=sys.stderr)
+            return False
+        if answer in _YES:
+            return True
+        if answer in _NO:
+            return False
 
 @dataclass(frozen=True, slots=True)
 class Invocation:
@@ -70,11 +98,17 @@ class Invocation:
 
     ask: Ask = _asked
 
+    confirm: Confirm = _confirmed
+
     # A thunk and not a built `Syncer`, for the reason `registered` is one: every invocation
-    # carries this field and three commands in the grammar call it, so `clear`, `init` and
+    # carries this field and only the commands that install call it, so `clear`, `init` and
     # `workflows` construct nothing. It is not on `Services` and takes no project -
     # `config/container.py` says why beside `real_syncer`.
     syncer: Callable[[], Syncer] = container.real_syncer
+
+    # A thunk for the same reason, and `get` is the one command that calls it. Its default reaches
+    # codeload.github.com, which `tests/conftest.py` refuses from any test that leaves it standing.
+    fetcher: Callable[[], Fetcher] = container.real_fetcher
 
 type Compose = Callable[[], Invocation]
 
@@ -118,6 +152,7 @@ def parser() -> RefusingParser:
     clear_command.declare(declared)
     init_command.declare(declared)
     new_command.declare(declared)
+    get_command.declare(declared)
     workflows_command.declare(declared)
     return root
 
@@ -161,6 +196,15 @@ def _dispatch(invocation: Invocation, parsed: argparse.Namespace, tail: Sequence
     if command == new_command.NAME:
         _no_tail(command, tail)
         return new_command.execute(invocation.settings.home, parsed, syncer=invocation.syncer())
+    if command == get_command.NAME:
+        _no_tail(command, tail)
+        return get_command.execute(
+            invocation.settings.home,
+            parsed,
+            fetcher=invocation.fetcher(),
+            syncer=invocation.syncer(),
+            confirm=invocation.confirm,
+        )
     if command == workflows_command.NAME:
         _no_tail(command, tail)
         return workflows_command.execute(

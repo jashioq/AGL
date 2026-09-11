@@ -60,6 +60,7 @@ from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Final, cast
 import pytest
+from agl.adapters.github.fake import FakeFetcher
 from agl.adapters.uv.fake import FakeSyncer
 from agl.cli import main
 from agl.config import container, distribution, registry, sources
@@ -69,6 +70,7 @@ from agl.ports.errors import (
     UpstreamUnavailable,
     UpstreamUnexpected,
 )
+from agl.ports.fetch import Fetcher
 from agl.ports.home_layout import RunScope
 from agl.ports.ids import ProjectName, RunLabel
 from agl.ports.sync import Syncer
@@ -1015,6 +1017,24 @@ def test_the_real_syncer_is_the_default_behind_the_seam_every_suite_here_substit
 
     assert isinstance(invocation.syncer(), Syncer)
     assert not isinstance(invocation.syncer(), FakeSyncer)
+
+def test_the_real_fetcher_is_the_default_behind_the_seam_every_suite_here_substitutes(
+    tmp_path: Path,
+) -> None:
+    """The syncer's pin again, for the field `agl get` downloads through.
+
+    Every invocation under `tests/cli/` that reaches a fetcher hands one in, so without this the
+    suites would pass against an `Invocation` whose default was a fake - and `agl get` typed at a
+    terminal would download nothing and report every workflow it was asked for as not there.
+    Constructing a `GitHubFetcher` opens no connection, which is what makes the default safe to
+    build here under `tests/conftest.py`'s refusal of every host but this one.
+    """
+    invocation = main.Invocation(
+        registered=lambda: (PROJECT, _fakes(tmp_path).services), settings=SETTINGS, cwd=ELSEWHERE
+    )
+
+    assert isinstance(invocation.fetcher(), Fetcher)
+    assert not isinstance(invocation.fetcher(), FakeFetcher)
 
 def test_argv_defaults_to_the_command_line_without_this_module_saying_so(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch

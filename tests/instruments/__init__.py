@@ -23,4 +23,8 @@ a vendor's endpoint is an instrument that could be pointed at one by accident, a
 of the package is that the guarantee is structural rather than a promise in a docstring. And **it
 redacts credentials before recording anything**: an instrument's job is to be handed whatever a
 vendor process sends, which on a developer machine includes live tokens.
+
+One module here is not a stand-in, and it is the first rule made mechanical: `offline` is the
+refusal `tests/conftest.py` puts over every name lookup and connection that would leave the
+machine. It lives here rather than in the conftest so that a test can name what it raises.
 """

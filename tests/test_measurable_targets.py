@@ -137,6 +137,8 @@ from agl.cli import main
 from agl.config import container, registry, sources
 from agl.config.schema import AgentSettings
 from agl.ports.agent import Provider
+from agl.ports.fetch import FetchedFile
+from agl.ports.get_request import RepositoryAtRef
 from agl.ports.home_layout import AglHome
 from agl.ports.ids import ProjectName
 from agl.ports.tree_layout import TreesRoot, run_branch, worktree_branch
@@ -915,12 +917,25 @@ async def probe(run: Run[_EightParams]) -> None:
 
 _EIGHT_POINT: Final = EntryPoint(name="probe", value=f"{__name__}:probe", group=registry.GROUP)
 
+# What the `get` row downloads: a workflow named as the one the `new` row scaffolds, held in bytes
+# here because a real project file anywhere in this repository is what `_declarations` hunts for.
+_EIGHT_DOWNLOAD: Final = {
+    "workflows/scaffold/pyproject.toml": FetchedFile(
+        b'[project]\nname = "scaffold"\nversion = "0.1.0"\n\n'
+        b'[project.entry-points."agl.workflows"]\nscaffold = "scaffold:scaffold"\n'
+    ),
+    "workflows/scaffold/__init__.py": FetchedFile(b"from agl.sdk import Run, workflow\n"),
+}
+
 # One invocation per command, in an order that lets three of them address the same run: `run`
-# starts it, `resume` replays it, `clear` takes it away. The names are compared against the parser's
-# own subcommands below, so this table cannot silently fall behind the grammar.
+# starts it, `resume` replays it, `clear` takes it away. `get` follows `new` and downloads a
+# workflow of the same name, so the question it puts about what stands is put and answered. The
+# names are compared against the parser's own subcommands below, so this table cannot silently
+# fall behind the grammar.
 _INVOCATIONS: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
     ("init", ("init",)),
     ("new", ("new", "scaffold")),
+    ("get", ("get", "octo/flows/workflows/scaffold")),
     ("workflows", ("workflows",)),
     ("run", ("run", "probe", "-n", "auth", "-r", "add oauth")),
     ("resume", ("resume", "auth")),
@@ -1009,10 +1024,11 @@ def test_every_declared_command_runs_on_fakes_with_no_way_out(
 
     **Substituted through `main`'s own seam and nothing is monkeypatched to get there.** `compose=`
     is the parameter `cli/main.py` declares for exactly this, so the bundle is `container.fakes()`,
-    the entry points are this module's own, `ask` is the canned answer `agl init` asks for, and
-    `syncer` is `container.fake_syncer` - the one field on the `Invocation` whose real default
-    would start a process, and the three rows that reach it are `new`, `run` and `resume`, which
-    are the commands a sync is folded into.
+    the entry points are this module's own, `ask` is the canned answer `agl init` asks for and
+    `confirm` the yes `agl get` is asked for. `syncer` is `container.fake_syncer` - the field whose
+    real default would start a process, and the four rows that reach it are `new`, `get`, `run`
+    and `resume`, the commands a sync is folded into - and `fetcher` is a `FakeFetcher` holding the
+    one workflow the `get` row asks for, the field whose real default would open a socket.
     Nothing here reaches into a module's internals; the only patching in this test is the poison,
     which is the assertion rather than the arrangement.
 
@@ -1030,8 +1046,14 @@ def test_every_declared_command_runs_on_fakes_with_no_way_out(
         TreesRoot(tmp_path / "trees"), files={"src/a.py": b"pass\n"}, agent=_eight_agent
     )
 
+    fetcher = container.fake_fetcher()
+    fetcher.serves(RepositoryAtRef("octo", "flows", None), _EIGHT_DOWNLOAD)
+
     def answer(question: str) -> str:
         return "pytest -q"
+
+    def approve(question: str) -> bool:
+        return True
 
     def compose() -> main.Invocation:
         return main.Invocation(
@@ -1040,7 +1062,9 @@ def test_every_declared_command_runs_on_fakes_with_no_way_out(
             cwd=repo,
             points=(_EIGHT_POINT,),
             ask=answer,
+            confirm=approve,
             syncer=container.fake_syncer,
+            fetcher=lambda: fetcher,
         )
 
     driven = {name for name, _ in _INVOCATIONS}

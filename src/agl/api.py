@@ -5,8 +5,13 @@ from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Final
 from agl.config import distribution, registry, sources, toml_file, workflow_files, workspace_path
+from agl.config.inspection import PlaceableWorkflow, inspected
+from agl.config.placement import Got, placed
+from agl.config.questions import Confirm, answered
 from agl.config.schema import Settings
 from agl.ports.errors import ConflictError, InputError, InternalError, NotFoundError, UpstreamError
+from agl.ports.fetch import Fetcher
+from agl.ports.get_request import GetRequest
 from agl.ports.home_layout import AglHome, RunScope, workspace_dir
 from agl.ports.ids import Namespace, ProjectName, RunLabel, WorkflowName
 from agl.ports.run import RunSpec, checked_text
@@ -26,6 +31,7 @@ __all__ = [
     "Listing",
     "Replayed",
     "clear",
+    "get",
     "init",
     "list_workflows",
     "new_workflow",
@@ -234,6 +240,28 @@ async def new_workflow(syncer: Syncer, home: AglHome, name: WorkflowName) -> Pat
     await _sync_workspace(syncer, home)
     return written
 
+# Three phases, and nothing reaches the workspace before the last of them: every download is fetched
+# and inspected, then every question is asked, and only then is anything placed - so no question is
+# ever put about a workspace this command has already changed. `tests/test_get.py` holds the order.
+# What became of each workflow is reported before the sync, because a sync that raises would
+# otherwise take the only account of what was placed out with it.
+async def get(
+    fetcher: Fetcher,
+    syncer: Syncer,
+    home: AglHome,
+    request: GetRequest,
+    confirm: Confirm,
+    report: Callable[[Got], None],
+) -> Got:
+    fetched = [answer for fetch in request.fetches for answer in await fetcher.fetch(fetch)]
+    inspections = inspected(fetched, home)
+    answers = answered([one for one in inspections if isinstance(one, PlaceableWorkflow)], confirm)
+    got = placed(home, fetched, inspections, answers)
+    report(got)
+    if got.placed:
+        await _sync_workspace(syncer, home)
+    return got
+
 def list_workflows(
     *, home: AglHome | None = None, points: Iterable[EntryPoint] | None = None
 ) -> Listing:
@@ -270,8 +298,8 @@ async def _walk(
 
 # A caller that handed no syncer installs nothing, the way one that handed its own points walks no
 # workspace: `agl.testing`'s harness is both at once and `cli/main.py` is neither. Making the
-# workspace is the scaffold's job and not this one's - `run` and `resume` read a workflow out of
-# one that is already there.
+# workspace is the job of whatever writes a workflow into it and not this one's - `run` and
+# `resume` read a workflow out of one that is already there.
 #
 # An installer that could not be *started* raises out of `sync` rather than answering, which is
 # `ports/sync.py`'s own clause, and it is deliberately not caught: nothing was tried, and a machine

@@ -466,12 +466,26 @@ fi
 # a new one because it fails in the identical shape - a module added today, protected by default
 # or not - and it is absent from GUARDED_VARS above for the reason given there.
 #
+# **The probe's second test is the network itself**, and it rides here for the same reason the
+# fourth assertion does: it fails in the identical shape. `agl get` made AGL an HTTP client in its
+# own interpreter, and no environment variable stands between a test that builds the real fetcher
+# and codeload.github.com - so tests/conftest.py refuses every name lookup and every connection
+# that would leave the machine, and the probe asks for both off this machine and requires the
+# refusal. It tells that refusal apart from an ordinary failure by kind: the guard raises a
+# BaseException that is not an Exception, where a lookup that failed or a connection that timed
+# out raises an Exception - so a machine that happens to be offline cannot pass for a guarded one.
+# It tries `.invalid`, which RFC 6761 reserves never to resolve, and 192.0.2.1, RFC 5737's
+# documentation network, which is routed nowhere on the internet: with the guard missing, the most
+# it does is ask a resolver about a name that cannot exist and send one packet to an address nobody
+# holds. What the refusal cannot reach is a child process, which resolves and connects with its own
+# libc; tests/instruments/offline.py says what else it cannot.
+#
 # (Named, not numbered: gates get inserted, and the numbers move. tests/conftest.py and
 # tests/adapters/test_claude_code_runner.py refer to this one as the paid-endpoint gate.)
 # ---------------------------------------------------------------------------------------------
 
 gate_header 8 "no test module can reach a paid endpoint" \
-    "ast scan of tests/ for writes to the guarded variables, then $VENV_BIN/pytest on a probe module written into tests/ with the real endpoints and the operator AGL home poisoned"
+    "ast scan of tests/ for writes to the guarded variables, then $VENV_BIN/pytest on a probe module written into tests/ with the real endpoints and the operator AGL home poisoned, which also reaches for a host off this machine"
 
 guard_writes="$(
     AGL_GUARDED_VARS="$GUARDED_VARS" AGL_GUARD_OWNER="$GUARD_OWNER" "$VENV_BIN/python" - <<'PY'
@@ -561,11 +575,13 @@ asking. Nothing here imports the guard, names its fixture, or opts into anything
 passes, `tests/conftest.py` reached a module it has never heard of. `scripts/check` runs it with
 the real endpoints and a stand-in for the operator's own AGL home poisoned into the environment,
 which is what makes passing mean the guard *overrode* them rather than that this machine happened
-to be clean.
+to be clean. The second test is the same claim about the network: a lookup and a connection off
+this machine, each refused by the guard rather than failing on its own.
 """
 
 import ipaddress
 import os
+import socket
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -602,6 +618,36 @@ def test_a_module_written_today_inherits_the_paid_endpoint_guard() -> None:
         f"settings and the project registry of whoever is running the suite - and unset it is "
         f"worse, because config/sources.py falls back to $HOME/.agl rather than failing"
     )
+
+
+def _resolved_off_this_machine() -> object:
+    return socket.getaddrinfo("agl-probe.invalid", 443)
+
+
+def _connected_off_this_machine() -> object:
+    return socket.create_connection(("192.0.2.1", 9), timeout=2)
+
+
+def test_a_module_written_today_inherits_the_refusal_of_every_host_but_this_one() -> None:
+    for door in (_resolved_off_this_machine, _connected_off_this_machine):
+        try:
+            door()
+        except Exception as failed:
+            raise AssertionError(
+                f"{door.__name__} failed with {failed!r} in a module that asked for nothing - an "
+                f"ordinary failure, where the repo-wide guard raises something no `except "
+                f"Exception` catches. Nothing refused it: a newly added test file building the "
+                f"real fetcher reaches codeload.github.com, and on a machine that is online it "
+                f"gets there"
+            ) from failed
+        except BaseException as refused:
+            if isinstance(refused, (KeyboardInterrupt, SystemExit)):
+                raise
+            continue
+        raise AssertionError(
+            f"{door.__name__} went through in a module that asked for nothing, so no test in "
+            f"this repository is kept off the network"
+        )
 PY
 
 printf '\nProbe: %s, run with the endpoints and the operator AGL home poisoned.\n\n' "$PROBE"
@@ -623,8 +669,8 @@ else
     if [ "$probe_status" -ne 0 ]; then
         printf '\nThe probe module was written into tests/ moments ago and asked for nothing. It\n'
         printf 'inherits whatever %s gives every test - and on this run that was not\n' "$GUARD_OWNER"
-        printf 'enough to keep a paid endpoint out of reach. Every test file in the repository is\n'
-        printf 'in the same position, including the ones that spawn a CLI.\n'
+        printf 'enough to keep a paid endpoint, or the network, out of reach. Every test file in\n'
+        printf 'the repository is in the same position, including the ones that spawn a CLI.\n'
     fi
     record "paid-endpoint guard" FAIL ""
 fi
