@@ -376,17 +376,24 @@ async def test_the_terminal_is_entered_once_around_a_resumed_workflow(tmp_path: 
 class _Refusing(WorkspaceProvider):
     """A provider that provisions nothing, so that `api.run` fails on its last line before the
     workflow. `tests/test_api.py` carries the same stub for the same one failure `container.fakes()`
-    cannot arrange; the two teardown verbs exist only because the port has four members, and `hold`
-    is granted because `api.run` takes the run's claim before the line under test."""
+    cannot arrange; the two teardown verbs are tripwires because a run reaches them only by
+    finishing or stopping, and this one does neither, and `hold` is granted because `api.run` takes
+    the run's claim before the line under test."""
 
     async def open(self, label: RunLabel, namespace: Namespace | None, base: str) -> Workspace:
         raise ConflictError("this provider refused to provision anything, deliberately")
 
+    async def residue(self, label: RunLabel) -> tuple[Namespace, ...]:
+        raise AssertionError("a run whose provisioning failed asks nothing about what it left")
+
+    async def check_removable(self, label: RunLabel, namespace: Namespace | None) -> None:
+        raise AssertionError("a run whose provisioning failed asks nothing about taking one back")
+
     async def remove(self, label: RunLabel, namespace: Namespace | None) -> None:
-        raise AssertionError("nothing in `api.run` takes a workspace back")
+        raise AssertionError("a run whose provisioning failed takes no workspace back")
 
     async def discard(self, label: RunLabel, namespace: Namespace | None) -> None:
-        raise AssertionError("nothing in `api.run` deletes a line of work")
+        raise AssertionError("a run whose provisioning failed deletes no line of work")
 
     def hold(self, label: RunLabel) -> AbstractAsyncContextManager[None]:
         return _granted()

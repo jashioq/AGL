@@ -598,7 +598,7 @@ async def test_a_resume_does_not_rewrite_run_json(tmp_path: Path) -> None:
     assert handed[0].base == pinned, "the resumed run started from somewhere other than the pin"
 
 class _Watching(WorkspaceProvider):
-    """The bundle's own provider with a note taken of every `open`.
+    """The bundle's own provider with a note taken of every `open` and every `remove`.
 
     Substituted with `dataclasses.replace`, which is what `tests/test_api.py` does for its refusing
     provider: the port-typed field is the seam, and `container.fakes()` has no `workspaces=`
@@ -609,12 +609,20 @@ class _Watching(WorkspaceProvider):
     def __init__(self, provider: WorkspaceProvider) -> None:
         self._provider = provider
         self.opened: list[tuple[RunLabel, Namespace | None, str]] = []
+        self.taken_back: list[tuple[RunLabel, Namespace | None]] = []
 
     async def open(self, label: RunLabel, namespace: Namespace | None, base: str) -> Workspace:
         self.opened.append((label, namespace, base))
         return await self._provider.open(label, namespace, base)
 
+    async def residue(self, label: RunLabel) -> tuple[Namespace, ...]:
+        return await self._provider.residue(label)
+
+    async def check_removable(self, label: RunLabel, namespace: Namespace | None) -> None:
+        await self._provider.check_removable(label, namespace)
+
     async def remove(self, label: RunLabel, namespace: Namespace | None) -> None:
+        self.taken_back.append((label, namespace))
         await self._provider.remove(label, namespace)
 
     async def discard(self, label: RunLabel, namespace: Namespace | None) -> None:
@@ -639,6 +647,10 @@ async def test_a_resume_reopens_base_from_the_pin_even_when_the_workflow_takes_n
     invocations, and `open` accepts a ref expression as happily as a commit id - so handing it
     `base_ref` would work every day except the one somebody pushes on, and then the checkout would
     start at a commit the record never pinned.
+
+    The last pair is the other end of the same lifetime: a resume that finishes hands the checkout
+    back exactly as a first run does, so the directory is gone and `agl/auth` - still at the pin,
+    a run that took no step having moved nothing - is a name `git checkout` will take.
     """
     dispatched: list[str] = []
     harness = _fakes(tmp_path, dispatched)
@@ -654,6 +666,7 @@ async def test_a_resume_reopens_base_from_the_pin_even_when_the_workflow_takes_n
     )
     harness.repository.move("main", landed)
     watching.opened.clear()
+    watching.taken_back.clear()
 
     await api.resume(services, PROJECT, LABEL, points=POINTS)
 
@@ -661,7 +674,8 @@ async def test_a_resume_reopens_base_from_the_pin_even_when_the_workflow_takes_n
         "a resumed run either provisioned nothing or provisioned it from something other than the "
         "commit its record pins"
     )
-    assert base_worktree(TreesRoot(tmp_path / "trees"), LABEL).is_dir()
+    assert watching.taken_back == [(LABEL, None)]
+    assert not base_worktree(TreesRoot(tmp_path / "trees"), LABEL).exists()
     assert harness.repository.tip(run_branch(LABEL)) == pinned
 
 # --- the refusals ---------------------------------------------------------------------------------
@@ -1124,9 +1138,9 @@ class _NotTaken(WorkspaceProvider):
     one deliberately two lines under preflight, and does it over a checkout that is usually already
     there, idempotently, by `ports/workspace.py`'s "an existing workspace is returned exactly as it
     stands". `_Untouched.remove` and `.discard` name `api.run` outright. Sharing one class means
-    either templating every message on which operation is under test - four hand-written sentences
-    turned into four that say less - or loosening them until they fit both, which is weakening the
-    file that already leans on them. The duplication being bought here is eight lines with no
+    either templating every message on which operation is under test - five hand-written sentences
+    turned into five that say less - or loosening them until they fit both, which is weakening the
+    file that already leans on them. The duplication being bought here is a dozen lines with no
     behaviour in them, and it is cheaper than either.
 
     `AssertionError` and never an `AglError`, which is what makes this legible from a `raises`: a
@@ -1145,6 +1159,12 @@ class _NotTaken(WorkspaceProvider):
             "preflight refused this resume and `_base` was opened anyway, so `agl/<label>` "
             "was cut - or reopened - for a run nobody is walking"
         )
+
+    async def residue(self, label: RunLabel) -> tuple[Namespace, ...]:
+        raise AssertionError("nothing in `api.resume` asks what a run left standing - `clear` does")
+
+    async def check_removable(self, label: RunLabel, namespace: Namespace | None) -> None:
+        raise AssertionError("nothing in `api.resume` asks whether a place will go - `clear` does")
 
     async def remove(self, label: RunLabel, namespace: Namespace | None) -> None:
         raise AssertionError("nothing in `api.resume` takes a workspace back - that is `clear`")

@@ -10,6 +10,10 @@ class Worktrees[R]:
     def __init__(self) -> None:
         self._taken: dict[str, _Taken[R]] = {}
 
+    @property
+    def namespaces(self) -> tuple[Namespace, ...]:
+        return tuple(taken.namespace for taken in self._taken.values())
+
     def open(
         self, namespace: str, *, scope: RunScope, base: str, build: Callable[[RunScope, str], R]
     ) -> R:

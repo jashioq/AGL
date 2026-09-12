@@ -3,14 +3,15 @@ import fcntl
 import os
 import shutil
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
-from agl.ports.errors import AglError, ConflictError, DeniedError, UpstreamUnavailable
+from agl.ports.errors import AglError, ConflictError, DeniedError, InputError, UpstreamUnavailable
 from agl.ports.ids import Namespace, RunLabel
 from agl.ports.tree_layout import (
+    BASE_DIRNAME,
     TreesRoot,
     base_worktree,
     run_branch,
@@ -18,7 +19,7 @@ from agl.ports.tree_layout import (
     worktree_dir,
 )
 
-__all__ = ["delete", "make", "registry_lock", "run_lock", "tidy"]
+__all__ = ["delete", "make", "namespaces_in", "registry_lock", "run_lock", "tidy"]
 
 # Never unlinked. A lock file deleted on release is one a second process can still hold by inode
 # while a third creates a new file at the same path and takes that - two holders of one mutex.
@@ -75,6 +76,22 @@ def tidy(directory: Path) -> None:
         directory.rmdir()
     except OSError:
         return
+
+# Both places a namespace of a run can be read back off spell it as text - the tail of a branch
+# under `worktree_branch_prefix`, and the last segment of a checkout's own path - and `ids.py` is
+# the only thing entitled to say whether such text is a name. `_base` is the run's own place and is
+# never one; anything `Namespace` refuses was not written by AGL, and a teardown that guessed at it
+# would be composing a path out of characters this layout refuses to compose one out of.
+def namespaces_in(names: Iterable[str]) -> tuple[Namespace, ...]:
+    found: dict[str, Namespace] = {}
+    for name in names:
+        if name == BASE_DIRNAME or name in found:
+            continue
+        try:
+            found[name] = Namespace(name)
+        except InputError:
+            continue
+    return tuple(found[name] for name in sorted(found))
 
 @dataclass(frozen=True, slots=True)
 class _Place:

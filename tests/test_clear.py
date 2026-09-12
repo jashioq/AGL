@@ -62,6 +62,14 @@ So the last test below puts `GitWorkspaceProvider` and `GitHistory` under `api.c
 itself, exactly as `tests/test_api.py` does for the two claims about a real ref, and it asserts the
 same clear succeeding once the lock is off, so that it is a test about a lock rather than about
 `clear` refusing.
+
+**Where that refusal lands is the whole of the fourth claim.** A `branch -D` refused at the end of
+the walk is a `clear` that has already deleted every other checkout and every other branch of the
+run - and a child branch holds work that reached no other line, so the run is destroyed by the call
+that failed. `WorkspaceProvider.check_removable` is asked about every place before the first one is
+touched, and the last test asserts the full census on both sides of the refusal: everything the run
+had is still there, and then the same clear takes all of it once the lock is off. Asserting the
+`ConflictError` alone was what let the old behaviour pass.
 """
 
 import subprocess
@@ -78,7 +86,7 @@ from agl.adapters.git.history import GitHistory
 from agl.adapters.git.workspace import GitWorkspaceProvider
 from agl.config import container, registry
 from agl.ports.agent import AgentOutcome, Claude, StopReason
-from agl.ports.errors import ConflictError, NotFoundError, exit_code_for
+from agl.ports.errors import ConflictError, NotFoundError, UpstreamUnavailable, exit_code_for
 from agl.ports.home_layout import RunScope
 from agl.ports.ids import Namespace, ProjectName, RunLabel, StepName
 from agl.ports.run import JsonValue, RunSpec
@@ -143,6 +151,30 @@ async def nesting(run: Run[NoParams]) -> None:
     grandchild = child.worktree(str(GRANDCHILD))
     await grandchild.step(writing(), commit="the grandchild's work")
 
+# The one instruction the agent below refuses to come back from. A step whose worker raises writes
+# no entry (`sdk/_engine/journal.py` commits nothing and records nothing unless it returned), and
+# the checkout it was going to run in was cut before any of that - which is the whole arrangement
+# `orphaning` exists to produce.
+DIES: Final = "this dispatch never comes back"
+
+@role(model=Claude.SONNET)
+def dying() -> Role:
+    """A role whose dispatch raises, so the step it is taken with records nothing at all."""
+    return Role(name="dies", instructions=DIES)
+
+@workflow
+async def orphaning(run: Run[NoParams]) -> None:
+    """The run that leaves a namespace no ledger anywhere describes.
+
+    `sdk/_engine/steps.py`'s `_namespace` opens the child's workspace - cutting the checkout and
+    the branch `agl/_work/auth/T-01` - before `journal.step` is reached, and the dispatch inside
+    that step then raises, so no entry is written and `Store.namespaces` has nothing to answer
+    with. The run's own step is taken first and does record, so the run is one `clear` can be aimed
+    at at all: the record at depth zero is what `clear` reads before anything else.
+    """
+    await run.step(writing(), commit="the run's own work")
+    await run.worktree(str(CHILD)).step(dying(), commit="the child's work")
+
 @workflow
 async def quiet(run: Run[NoParams]) -> None:
     """Takes no step at all, so `agl/auth` never leaves the commit the run was cut from.
@@ -152,9 +184,35 @@ async def quiet(run: Run[NoParams]) -> None:
     `clear` can take.
     """
 
+# A run that finishes hands every checkout it cut back, so a `clear` after one has only branches
+# and records left to take away. The two workflows below end in a failure instead, which is the run
+# `clear`'s other half is for: the one that broke half way and whose checkouts are still on disk
+# with work in them nobody landed. One raise each, so the walk ends the way a real failure ends it.
+@workflow
+async def abandoned(run: Run[NoParams]) -> None:
+    """`nesting`'s three lines of work at three depths, and then a failure."""
+    await nesting.fn(run)
+    raise UpstreamUnavailable("this run broke after its third step and before it finished")
+
+@workflow
+async def breaking(run: Run[NoParams]) -> None:
+    """`quiet`'s nothing at all, and then a failure - the shortest run that keeps its checkout."""
+    raise UpstreamUnavailable("this run broke before it had taken a single step")
+
 # What a `clear` issued from inside a live run raised, at module level because the workflow that
 # issues it has to be: `EntryPoint.load` imports a module and reads an attribute in it.
 refused: Final[list[ConflictError]] = []
+
+roots: Final[list[TreesRoot]] = []
+"""Where the run's checkouts are, written by a test before it starts the run.
+
+Handed over rather than asked for, because there is no way to ask. Whether a refused `clear` took
+a checkout away is only answerable while the run is still live - the run gives its own checkouts
+back on the way out - and `WorkspaceProvider.open` is no help either: it would put back whatever it
+was asked about, so every answer it gave would be yes."""
+
+standing: Final[list[bool]] = []
+"""Whether the run's own checkout was still there the instant after the `clear` refused."""
 
 @workflow
 async def clearing(run: Run[NoParams]) -> None:
@@ -171,13 +229,15 @@ async def clearing(run: Run[NoParams]) -> None:
         await api.clear(run.services, PROJECT, LABEL)
     except ConflictError as conflict:
         refused.append(conflict)
+    standing.append(base_worktree(roots[-1], run.scope.label).is_dir())
 
 def _point(name: str, attribute: str) -> EntryPoint:
     """A `probe = "agl.workflows.probe:probe"` line, pointed at this module instead."""
     return EntryPoint(name=name, value=f"{__name__}:{attribute}", group=registry.GROUP)
 
-POINTS: Final = (
-    _point("nesting", "nesting"), _point("quiet", "quiet"), _point("clearing", "clearing")
+POINTS: Final = tuple(
+    _point(name, name)
+    for name in ("nesting", "quiet", "clearing", "abandoned", "breaking", "orphaning")
 )
 
 def _writing(dispatched: list[str]) -> Script:
@@ -189,6 +249,8 @@ def _writing(dispatched: list[str]) -> Script:
     """
 
     async def _script(conversation: Conversation) -> AgentOutcome:
+        if DIES in conversation.task.instructions:
+            raise UpstreamUnavailable("the agent died on this step, and nothing was recorded")
         dispatched.append(conversation.task.instructions)
         target = conversation.task.workspace / f"src/step-{len(dispatched)}.py"
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -215,6 +277,11 @@ async def _start(
 ) -> None:
     """The first invocation: `agl run <name> -n auth`, with this module's entry points."""
     await api.run(harness.services, PROJECT, name, LABEL, (), points=points)
+
+async def _broke(harness: container.FakeServices, name: str = "abandoned") -> None:
+    """The same invocation over a workflow that raises, which leaves its checkouts standing."""
+    with pytest.raises(UpstreamUnavailable):
+        await api.run(harness.services, PROJECT, name, LABEL, (), points=POINTS)
 
 async def _clear(harness: container.FakeServices) -> api.Cleared:
     """`agl clear auth`, and the listing of what it took away."""
@@ -338,9 +405,12 @@ async def test_every_namespace_at_every_depth_comes_away(tmp_path: Path) -> None
     enumeration of what a run used, and `MemoryStore.remove` at depth zero deletes the entries it
     derives that answer from - so a `clear` that removed the records first would walk an empty list,
     return cleanly, and leave both child checkouts and both child branches exactly where they are.
+
+    The run is `abandoned` rather than `nesting` because a run that finishes hands its checkouts
+    back itself, and a traversal asserted over a trees root that is already empty asserts nothing.
     """
     harness = _fakes(tmp_path)
-    await _start(harness)
+    await _broke(harness)
     trees = _trees(tmp_path)
     for namespace in (CHILD, GRANDCHILD):
         assert worktree_dir(trees, LABEL, namespace).is_dir(), "the run never cut this checkout"
@@ -366,6 +436,55 @@ async def test_every_namespace_at_every_depth_comes_away(tmp_path: Path) -> None
     )
     assert await harness.store.namespaces(SCOPE) == ()
 
+@pytest.mark.asyncio
+async def test_a_namespace_whose_first_step_died_is_taken_although_no_ledger_records_it(
+    tmp_path: Path,
+) -> None:
+    """The walk's second source, and the state it is the only thing that can see.
+
+    A checkout and its branch are cut by `sdk/_engine/steps.py`'s `_namespace` before
+    `journal.step` writes anything, so a child whose first dispatch raises leaves both and records
+    neither. `Store.namespaces` answers about directories that were written, so it walks past this
+    one - and `clear` used to walk past it too, deleting the run's own branch, removing `_base`,
+    taking the records and **exiting 0** over a branch and a checkout still standing. The next
+    `agl clear auth` then found no record and answered `NotFoundError`, so the residue was
+    unreachable through AGL entirely.
+
+    The ledger is asserted empty before the clear rather than afterwards, because that is the claim:
+    if `Store.namespaces` could see this namespace there would be nothing here for
+    `WorkspaceProvider.residue` to be about, and the test would pass against the defect.
+
+    `Cleared` names it beside everything else and in the same position, which is the whole of what
+    `clear` says about residue: it is a checkout of this run and a branch of this run, and there is
+    nothing about the ledger having missed it that an operator can act on.
+    """
+    harness = _fakes(tmp_path)
+    with pytest.raises(UpstreamUnavailable):
+        await api.run(harness.services, PROJECT, "orphaning", LABEL, (), points=POINTS)
+    trees = _trees(tmp_path)
+    branch = worktree_branch(LABEL, CHILD)
+    assert await harness.store.namespaces(SCOPE) == (), (
+        "the ledger recorded the child after all, so this run is not the state the defect needs "
+        "and the clear below would have found it through `Store.namespaces` either way"
+    )
+    assert worktree_dir(trees, LABEL, CHILD).is_dir()
+    assert harness.repository.tip(branch) is not None
+
+    cleared = await _clear(harness)
+
+    assert cleared.worktrees == (str(CHILD), BASE_DIRNAME)
+    assert cleared.branches == (branch, run_branch(LABEL))
+    assert harness.repository.tip(branch) is None, (
+        f"{branch!r} is still there after a clear that reported success. `open` attaches a later "
+        f"run under this label to a branch that exists and ignores the base it was handed, so this "
+        f"is the half that costs work rather than disk"
+    )
+    assert not worktree_dir(trees, LABEL, CHILD).exists()
+    assert not run_trees_dir(trees, LABEL).exists(), (
+        "`.trees/auth/` survived, which is what an un-taken checkout in it leaves behind: the "
+        "`rmdir` in `WorkspaceProvider.remove` refuses a directory that still holds one"
+    )
+
 class _Recording(WorkspaceProvider):
     """The bundle's own provider with every call written into a shared list.
 
@@ -383,6 +502,14 @@ class _Recording(WorkspaceProvider):
     async def open(self, label: RunLabel, namespace: Namespace | None, base: str) -> Workspace:
         self._events.append(f"open {_named(namespace)}")
         return await self._provider.open(label, namespace, base)
+
+    async def residue(self, label: RunLabel) -> tuple[Namespace, ...]:
+        self._events.append("residue")
+        return await self._provider.residue(label)
+
+    async def check_removable(self, label: RunLabel, namespace: Namespace | None) -> None:
+        self._events.append(f"check {_named(namespace)}")
+        await self._provider.check_removable(label, namespace)
 
     async def remove(self, label: RunLabel, namespace: Namespace | None) -> None:
         self._events.append(f"remove {_named(namespace)}")
@@ -459,11 +586,21 @@ def _named(namespace: Namespace | None) -> str:
 async def test_the_order_is_enumerate_then_the_checkouts_then_the_records(tmp_path: Path) -> None:
     """The whole call sequence, in one assertion, for a run with something at every depth.
 
-    Four separate claims live in this list and each one fails silently on its own:
+    Seven separate claims live in this list and each one fails silently on its own:
 
       * **The enumeration recurses.** `Store.namespaces` is asked at depth 0, then under `T-01`,
         then under `T-01/sub-b` - which is the port's "immediate children only, and the caller
         recurses through `RunScope.inside`". A flat `clear` would ask once.
+      * **The provider is asked as well, once, after the ledger and before the first check.**
+        `WorkspaceProvider.residue` is the only thing that can see a namespace whose checkout was
+        cut and whose first step never recorded an entry, and asking it after anything had been
+        removed would be asking what a half-finished teardown left rather than what the run did.
+      * **Every place is checked before any place is removed**, the run's own included, which is
+        the claim with a run's work riding on it: the refusals a `clear` meets are at the end of
+        the walk - a checkout something is holding is one whose branch `discard` will not delete -
+        so a check spent per place, directly above that place's own `remove`, would still take the
+        children away before reaching the one that refuses. Three `check` lines and then three
+        `remove` lines is the shape; interleaved is the bug, and it passes every other test here.
       * **`remove` comes before `discard`, per namespace.** `ports/workspace.py`: "an
         implementation is within its rights to refuse to delete a line of work that something still
         has open, and calling these in this order means no caller has to know whether it does".
@@ -495,6 +632,10 @@ async def test_the_order_is_enumerate_then_the_checkouts_then_the_records(tmp_pa
         "namespaces under []",
         "namespaces under ['T-01']",
         "namespaces under ['T-01', 'sub-b']",
+        "residue",
+        "check T-01",
+        "check sub-b",
+        "check _base",
         "remove T-01",
         "discard T-01",
         "remove sub-b",
@@ -570,6 +711,8 @@ async def test_a_clear_aimed_at_a_live_run_refuses_and_takes_nothing(tmp_path: P
     the same `clear`, over the same run, succeeds once the run has ended and let go.
     """
     refused.clear()
+    standing.clear()
+    roots.append(_trees(tmp_path))
     harness = _fakes(tmp_path)
 
     await _start(harness, "clearing")
@@ -587,9 +730,10 @@ async def test_a_clear_aimed_at_a_live_run_refuses_and_takes_nothing(tmp_path: P
     assert harness.repository.tip(run_branch(LABEL)) is not None, (
         "the refused `clear` deleted the live run's line of work anyway"
     )
-    assert base_worktree(_trees(tmp_path), LABEL).is_dir(), (
+    assert standing == [True], (
         "the refused `clear` took the live run's own checkout away anyway - which is exactly the "
-        "sentence that had no mechanism behind it"
+        "sentence that had no mechanism behind it. The reading is the workflow's own, taken the "
+        "instant after the refusal, because the run gives that checkout back when it ends"
     )
 
     assert (await _clear(harness)).branches == (run_branch(LABEL),)
@@ -611,6 +755,8 @@ async def test_a_clear_aimed_at_a_live_resume_refuses_too(tmp_path: Path) -> Non
     `refused` therefore carries one entry per invocation, which is what the count below reads.
     """
     refused.clear()
+    standing.clear()
+    roots.append(_trees(tmp_path))
     harness = _fakes(tmp_path)
     await _start(harness, "clearing")
     assert len(refused) == 1, "the run's own claim is what the other test is about"
@@ -625,8 +771,9 @@ async def test_a_clear_aimed_at_a_live_resume_refuses_too(tmp_path: Path) -> Non
     assert await harness.services.store.read_record(SCOPE) is not None, (
         "the refused `clear` removed the resumed run's records anyway"
     )
-    assert base_worktree(_trees(tmp_path), LABEL).is_dir(), (
-        "the refused `clear` took the resumed run's own checkout away anyway"
+    assert standing == [True, True], (
+        "the refused `clear` took the resumed run's own checkout away anyway. Two readings, one "
+        "per invocation, each taken by the workflow the instant after its own refusal"
     )
 
 # --- absence, which is the ordinary case ----------------------------------------------------------
@@ -788,7 +935,7 @@ def _over(repository: Path, tmp_path: Path) -> container.FakeServices:
     The store stays the in-memory one - nothing here is a claim about a file under `AGL_HOME`.
     """
     trees = _trees(tmp_path)
-    harness = container.fakes(trees, files={SEEDED: b"one\n"})
+    harness = container.fakes(trees, files={SEEDED: b"one\n"}, claude=_writing([]))
     return replace(
         harness,
         services=replace(
@@ -809,12 +956,45 @@ def _branch_exists(repository: Path, branch: str) -> bool:
     )
     return done.returncode == 0
 
+def _checkout(trees: TreesRoot, namespace: Namespace | None) -> Path:
+    """Where one of the run's three checkouts is, addressed the way `clear` addresses it."""
+    if namespace is None:
+        return base_worktree(trees, LABEL)
+    return worktree_dir(trees, LABEL, namespace)
+
+def _census(repository: Path, trees: TreesRoot) -> dict[str, object]:
+    """Everything the run put into the world, as one value that can be compared in one line.
+
+    A mapping rather than a row of assertions, because what the defect below produced was a
+    *partial* teardown: a `clear` that took two branches and three checkouts and then refused. Any
+    single assertion passes over that, and a pytest failure on a dict names the entries that moved.
+
+    git's own registry is in it beside the branches and the directories. That is the half `remove`
+    prunes and the half a lock makes it fail to prune, so a refusal that had already spent `remove`
+    somewhere shows up here even where the directory it took back held nothing.
+    """
+    return {
+        **{
+            f"branch {branch}": _branch_exists(repository, branch)
+            for branch in (
+                run_branch(LABEL),
+                worktree_branch(LABEL, CHILD),
+                worktree_branch(LABEL, GRANDCHILD),
+            )
+        },
+        **{
+            f"checkout {_named(namespace)}": _checkout(trees, namespace).is_dir()
+            for namespace in (None, CHILD, GRANDCHILD)
+        },
+        "trees directory": run_trees_dir(trees, LABEL).is_dir(),
+        "git's registry": _git(repository, "worktree", "list", "--porcelain"),
+    }
+
 @pytest.mark.asyncio
-async def test_a_locked_worktree_is_what_refuses_a_clear(
+async def test_a_locked_worktree_refuses_a_clear_before_it_has_taken_anything_away(
     repository: Path, tmp_path: Path
 ) -> None:
-    """The last sentence - "It refuses while a run holds a lock" - and the only mechanism in v1.1
-    that makes it true.
+    """The last sentence - "It refuses while a run holds a lock" - and *where* that refusal lands.
 
     There is no durable "this run is live" record in AGL: `ARCHITECTURE.md`'s "Deliberately not
     built" refuses stored status by name, and leases are in-process, so a second `agl` invocation
@@ -822,29 +1002,43 @@ async def test_a_locked_worktree_is_what_refuses_a_clear(
     `worktree prune` and refuses only on a deadline. What is left is git's own `worktree lock`, and
     it really does refuse: `prune` skips a locked entry even after its directory has gone, so the
     registration survives `remove`, and `git branch -D` then refuses the branch that registration
-    holds - which `GitWorkspaceProvider.discard` re-raises as `ConflictError` after asking whether
-    the branch is still there.
+    holds - which `GitWorkspaceProvider.discard` re-raises as `ConflictError`.
+
+    **Every word of that is about the end of the walk, which is what made the refusal destructive.**
+    The run's own place is removed last, so a `clear` that only found out there had already taken
+    both child checkouts and deleted both child branches - and a child branch is the only copy of
+    work that reached no other line. The ledger survived describing a three-namespace run whose
+    checkouts were gone, and the run was then stuck in both directions, a resume being refused by
+    the same missing-but-locked registration. The census on both sides of the refusal is the
+    assertion that closes it, and asserting the `ConflictError` alone is what let it through:
+    `WorkspaceProvider.check_removable` is now asked about every place before the first is touched.
 
     A fake cannot be asked any of this, which is why this one test builds a repository; the module
-    docstring argues the exception. The second half is what makes it a test about a lock: the same
-    `clear`, over the same run, succeeds once the lock is off - so a `clear` that refused for any
-    other reason would fail here rather than pass twice.
+    docstring argues the exception. The second half is what makes it a test about a lock rather than
+    about `clear` refusing: the same `clear`, over the same run, takes all of it once the lock is
+    off - so a `clear` that refused for some other reason would fail here rather than pass twice.
 
-    `quiet` is the workflow because it is the shortest run there is, and because it leaves the
-    smallest thing behind for the second half to succeed over. Nothing about what it commits is
-    load-bearing: `clear` tries to delete the name whatever is on it.
+    `abandoned` is the workflow because the claim is about the branches under the run's own, and a
+    run needs to have failed to still have its checkouts: one that finishes gives them back itself.
+    Nothing about what its three steps commit is load-bearing - `clear` deletes each name whatever
+    is on it - only that each namespace really exists and has a branch of its own to lose.
     """
     harness = _over(repository, tmp_path)
-    await api.run(harness.services, PROJECT, "quiet", LABEL, (), points=POINTS)
-    place = base_worktree(_trees(tmp_path), LABEL)
+    await _broke(harness)
+    trees = _trees(tmp_path)
+    place = base_worktree(trees, LABEL)
     _git(repository, "worktree", "lock", str(place))
+    standing = _census(repository, trees)
+    assert all(standing.values()), f"the run left nothing for this test to be about: {standing}"
 
     with pytest.raises(ConflictError) as caught:
         await _clear(harness)
 
-    assert run_branch(LABEL) in str(caught.value)
-    assert _branch_exists(repository, run_branch(LABEL)), (
-        "the refusal was raised and the branch went anyway"
+    assert str(place.resolve()) in str(caught.value)
+    assert _census(repository, trees) == standing, (
+        "the refused clear took something anyway. It refuses on the run's own checkout, which is "
+        "the last one it would have reached, so anything missing here is a child that was already "
+        "gone by then - and a child branch holds work that landed on no other line"
     )
     assert await harness.services.store.read_record(SCOPE) is not None, (
         "`store.remove` is the last line of `clear` and ran although the line above it refused"
@@ -852,9 +1046,106 @@ async def test_a_locked_worktree_is_what_refuses_a_clear(
 
     _git(repository, "worktree", "unlock", str(place))
 
-    assert (await _clear(harness)).branches == (run_branch(LABEL),)
-    assert not _branch_exists(repository, run_branch(LABEL)), (
-        "the clear that was refused only by the lock still did not delete the branch once the lock "
-        "was off, so the refusal above was about something else"
+    cleared = await _clear(harness)
+
+    assert cleared.branches == (
+        worktree_branch(LABEL, CHILD),
+        worktree_branch(LABEL, GRANDCHILD),
+        run_branch(LABEL),
+    )
+    taken = _census(repository, trees)
+    assert not any(value for key, value in taken.items() if key != "git's registry"), (
+        f"the clear that was refused only by the lock did not take the run away once the lock was "
+        f"off, so the refusal above was about something else: {taken}"
+    )
+    assert str(trees.path) not in str(taken["git's registry"]), (
+        "git still has a worktree registered under this run's trees root, so `remove` pruned "
+        "nothing even with the lock off"
     )
     assert await harness.services.store.read_record(SCOPE) is None
+
+@pytest.mark.asyncio
+async def test_git_itself_is_what_finds_the_branch_and_the_checkout_no_ledger_recorded(
+    repository: Path, tmp_path: Path
+) -> None:
+    """The same orphan against a real repository, because the answer is a real ref and a real
+    registration.
+
+    `GitWorkspaceProvider.residue` reads `for-each-ref` over `agl/_work/auth/*` and `worktree list
+    --porcelain -z`, and a `FakeRepository` can be made to agree with a wrong reading of either.
+    What is asserted here is the census: the branch, the checkout, git's own registry and the run's
+    trees directory, all gone in one call, over a run whose ledger names none of it.
+
+    `<trees>/worktrees.lock` is asserted still there in the same breath. It is the cross-process
+    registry mutex at the trees root and `adapters/git/_trees.py` says why it is never unlinked - a
+    lock file deleted on release is one a second process holds by inode while a third creates a new
+    file at the same path and takes that. A teardown that started removing what it found under the
+    trees root rather than what it was addressed by would take it, and every assertion above would
+    still pass.
+    """
+    harness = _over(repository, tmp_path)
+    with pytest.raises(UpstreamUnavailable):
+        await api.run(harness.services, PROJECT, "orphaning", LABEL, (), points=POINTS)
+    trees = _trees(tmp_path)
+    branch = worktree_branch(LABEL, CHILD)
+    assert await harness.services.store.namespaces(SCOPE) == ()
+    assert _branch_exists(repository, branch)
+    assert worktree_dir(trees, LABEL, CHILD).is_dir()
+
+    cleared = await _clear(harness)
+
+    assert branch in cleared.branches
+    assert not _branch_exists(repository, branch), (
+        f"git still holds {branch!r}, and a clear that leaves it leaves the label half taken: "
+        f"`api.run` guards `agl/auth` and has no equivalent for this family"
+    )
+    assert not worktree_dir(trees, LABEL, CHILD).exists()
+    assert str(trees.path) not in _git(repository, "worktree", "list", "--porcelain"), (
+        "a registration under this run's trees root survived, so `remove` was never spent on the "
+        "checkout the ledger did not name"
+    )
+    assert not run_trees_dir(trees, LABEL).exists()
+    assert (trees.path / "worktrees.lock").is_file(), (
+        "the per-project registry mutex went with the run. It is a file at the trees root and no "
+        "run's residue, and `adapters/git/_trees.py` argues that deleting one is two holders of "
+        "one mutex rather than a tidier directory"
+    )
+
+@pytest.mark.asyncio
+async def test_the_next_checkout_under_a_cleared_label_starts_where_it_is_asked_to(
+    repository: Path, tmp_path: Path
+) -> None:
+    """What the orphan cost: `open` attaches to a branch that exists and ignores the base it took.
+
+    The question is asked of `WorkspaceProvider.open` and not of a second `agl run`, because a run
+    launders its own answer: the first thing `journal.step` does for a step with no entry is
+    `restore(last_good)`, which is `git reset --hard` and moves the branch it is standing on - so
+    by the time a second run's child has taken one step, an adopted branch and a freshly cut one
+    are at the same commit. The window is real for as long as it is open - a child that lands
+    before it steps merges the dead run's tip into the deliverable, and a run that dies before that
+    first restore leaves the branch exactly where the dead run left it - and this is the moment the
+    difference exists to be measured at.
+
+    `main` is moved on after the orphaning run so that the base asked for is a commit the residue
+    does not carry: the head that comes back is then either the one this call named or the one the
+    dead run left, and never both.
+    """
+    harness = _over(repository, tmp_path)
+    with pytest.raises(UpstreamUnavailable):
+        await api.run(harness.services, PROJECT, "orphaning", LABEL, (), points=POINTS)
+    stale = _git(repository, "rev-parse", f"refs/heads/{worktree_branch(LABEL, CHILD)}").strip()
+    await _clear(harness)
+    (repository / "moved-on.txt").write_bytes(b"the base the next run asks for\n")
+    _git(repository, "add", "moved-on.txt")
+    _git(repository, "commit", "-q", "-m", "the world the next run is cut from")
+    asked = _git(repository, "rev-parse", "refs/heads/main").strip()
+    assert asked != stale, "the base was not moved, so both answers below are the same commit"
+
+    workspace = await harness.services.workspaces.open(LABEL, CHILD, asked)
+
+    assert await workspace.head() == asked, (
+        f"the checkout for {str(CHILD)!r} came back at {await workspace.head()!r} rather than at "
+        f"{asked!r}, which is what it was cut from. That is the orphaned branch being attached to "
+        f"instead of a new one being cut, with the base silently ignored - the run believes it "
+        f"started from where it asked and its agent is working on a dead run's tip"
+    )

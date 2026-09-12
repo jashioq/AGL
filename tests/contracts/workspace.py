@@ -21,7 +21,8 @@ the outcome.
 tests are `open` - provisioning, reopening, and the two addresses a run has. The halves it inherits
 follow seams the ports draw themselves: `_workspace_steps` is `Workspace`, "one isolated checkout,
 already provisioned: where it is, what it is called, and the three things a step does to it",
-`_workspace_teardown` is the two verbs that unmake one, which `clear` needs apart, and
+`_workspace_teardown` is the two verbs that unmake one, which `clear` needs apart, and the two
+members above them that say what there is to unmake and whether it will go, and
 `_workspace_holding` is `hold`, the claim that this process is walking this run - a member that
 makes no place and unmakes none, which is why it is neither of the other two.
 `_workspace_files` under all of them holds the names and the files every test is built from, and
@@ -90,6 +91,14 @@ made to reveal, not a test somebody forgot.
 
 8. **That `restore` is atomic, or what one racing a write does.** The port says nothing about that
    ordering and nothing here provokes it.
+
+9. **That `check_removable` ever refuses.** Gap 1's shape exactly, one member over: the state it
+   names needs something outside the provider under test holding one of that provider's checkouts,
+   and the only thing making checkouts here is that provider. What this suite asks instead is that
+   it does *not* refuse a place the provider itself made, which is what stops "raise always" from
+   passing everything else. `_workspace_teardown` argues it at the tests, and where a real refusal
+   is met is `tests/adapters/test_git_workspace.py`, which takes a `git worktree lock` on a place
+   the adapter made, and `tests/test_clear.py`, which does it under `api.clear` end to end.
 
 ## Where the port is silent, and what this suite assumed
 

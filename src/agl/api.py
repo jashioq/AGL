@@ -17,14 +17,14 @@ from agl.ports.get_request import Fetch, GetRequest, RequestedWorkflow
 from agl.ports.home_layout import AglHome, RunScope, workspace_dir
 from agl.ports.ids import Namespace, ProjectName, RunLabel, WorkflowName
 from agl.ports.run import RunSpec, checked_text
-from agl.ports.store import Store
 from agl.ports.sync import Syncer, SyncOutcome
 from agl.ports.tree_layout import BASE_DIRNAME, TreesRoot, run_branch, worktree_branch
 from agl.sdk import params
-from agl.sdk._engine import preflight
+from agl.sdk._engine import preflight, teardown
 from agl.sdk._engine.integration import Leases
 from agl.sdk._engine.journal import Fingerprints
 from agl.sdk._engine.services import Services
+from agl.sdk._engine.worktrees import Worktrees
 from agl.sdk.workflow import Run, Workflow
 
 __all__ = [
@@ -183,6 +183,14 @@ async def resume(
     async with services.workspaces.hold(label):
         return await _walk(services, wf, scope, spec, given)
 
+# `discard` is spent unconditionally here, where `sdk/_engine/teardown.py` asks `History.contains`
+# first and keeps a child branch whose work reached nothing. The two are answering different
+# questions rather than disagreeing: a release is automatic and nobody asked for it, so a branch it
+# took would be work destroyed as a side effect, while a clear is a label somebody typed. What a
+# containment gate would buy here is argued under ARCHITECTURE.md's "Deliberately not built" - a
+# kept branch is a label the `Store` reads as free and the repository does not, the warning naming
+# it arrives after the record any second `agl clear` would need is gone, and a `--force` to get past
+# it is a confirmation everybody learns to type. `Cleared` says what went, afterwards, instead.
 async def clear(services: Services, project: ProjectName, label: RunLabel) -> Cleared:
     scope = RunScope(project, label)
     if await services.store.read_record(scope) is None:
@@ -191,7 +199,15 @@ async def clear(services: Services, project: ProjectName, label: RunLabel) -> Cl
     worktrees: list[str] = []
     branches: list[str] = []
     async with services.workspaces.hold(label):
-        for namespace in await _under(services.store, scope):
+        found = await _addressed(services, scope)
+        # Every place is asked before any is taken: the refusals live at the end of this walk - a
+        # checkout something holds is one whose branch will not delete, and the run's own goes last
+        # - so a clear that found out there has already taken the children, and a child branch is
+        # the only copy of work that reached no other line. `discard` below is unconditional.
+        for namespace in (*found, None):
+            await services.workspaces.check_removable(label, namespace)
+
+        for namespace in found:
             await services.workspaces.remove(label, namespace)
             await services.workspaces.discard(label, namespace)
             worktrees.append(str(namespace))
@@ -301,27 +317,46 @@ def workflow_help(
     wf = _loaded(_discovery(home, points), name)
     return params.parser_for(wf.params, prog=f"agl run {name}").format_help()
 
+# The nesting of the three is load-bearing in both directions. `releasing` sits outside the
+# terminal, so the note it may write reaches a console `RichTerminal` has already handed back rather
+# than one still redrawing over it; and inside the `finally`, so a lease is still live when
+# `sdk/_engine/teardown.py` reads it to tell an unsettled landing from a settled one.
 async def _walk(
     services: Services, wf: Workflow[object], scope: RunScope, spec: RunSpec, given: object
 ) -> Replayed:
     await services.workspaces.open(scope.label, None, spec.base_sha)
     leases = Leases()
     fingerprints = Fingerprints()
+    worktrees: Worktrees[Run[object]] = Worktrees()
     try:
-        async with services.terminal:
-            await wf.fn(
-                Run(
-                    params=given,
-                    services=services,
-                    scope=scope,
-                    base=spec.base_sha,
-                    fingerprints=fingerprints,
-                    leases=leases,
+        async with teardown.releasing(services, scope, worktrees, leases, _warn):
+            async with services.terminal:
+                await wf.fn(
+                    Run(
+                        params=given,
+                        services=services,
+                        scope=scope,
+                        base=spec.base_sha,
+                        fingerprints=fingerprints,
+                        worktrees=worktrees,
+                        leases=leases,
+                    )
                 )
-            )
     finally:
         leases.release_all()
     return Replayed(steps=fingerprints.replays)
+
+# Two sources, because neither alone is the set a clear has to take. The ledger holds every
+# namespace that recorded a step, one whose checkout and branch have already gone included; the
+# provider holds every one it can still find, one `sdk/_engine/steps.py` cut a checkout for before
+# the first entry was written included - that one is recorded nowhere, and `WorkspaceProvider.open`
+# attaches a later run under this label to the branch it left rather than cutting a fresh one. The
+# recorded ones lead, so `Cleared` goes on naming them in the order the store answers in.
+async def _addressed(services: Services, scope: RunScope) -> tuple[Namespace, ...]:
+    recorded = await teardown.namespaces_under(services.store, scope)
+    named = {str(namespace) for namespace in recorded}
+    left = await services.workspaces.residue(scope.label)
+    return (*recorded, *(namespace for namespace in left if str(namespace) not in named))
 
 # Three phases, and nothing reaches the workspace before the last of them: every download is fetched
 # and inspected, then every question is asked, and only then is anything placed - so no question is
@@ -363,12 +398,16 @@ async def _sync_workspace(syncer: Syncer | None, home: AglHome | None) -> None:
         return
     if not stood:
         raise UpstreamError(_refused(outcome))
-    print(_unchanged(outcome), file=sys.stderr)
+    _warn(_unchanged(outcome))
 
 # Never on stdout, for `cli/commands/__init__.py`'s reason: what a machine consumes goes there and
-# this is a note to whoever is reading the terminal. It is written here rather than handed back for
-# a command to print, because what a run hands back it hands back at the end - and the end of a run
-# is hours after the point at which knowing this would have been worth anything.
+# this is a note to whoever is reading the terminal. Both callers write here rather than hand a
+# line back for a command to print, and for two different reasons - `_sync_workspace`'s is that
+# what a run hands back it hands back hours later, and `sdk/_engine/teardown.py`'s is that a run
+# ending in a `Stop` hands nothing back at all, the workflow's own exception being what leaves.
+def _warn(note: str) -> None:
+    print(note, file=sys.stderr)
+
 def _unchanged(outcome: SyncOutcome) -> str:
     return (
         f"warning: the sync was refused - uv exited {outcome.status} rather than 0 - and this "
@@ -393,13 +432,6 @@ def _refused(outcome: SyncOutcome) -> str:
         f"non-zero exit - so what uv said is printed whole below rather than "
         f"summarised:\n\n{outcome.output.rstrip()}"
     )
-
-async def _under(store: Store, scope: RunScope) -> tuple[Namespace, ...]:
-    found: list[Namespace] = []
-    for namespace in await store.namespaces(scope):
-        found.append(namespace)
-        found.extend(await _under(store, scope.inside(namespace)))
-    return tuple(found)
 
 def _loaded(found: registry.Discovery, name: str) -> Workflow[object]:
     registry.check_unbroken(found, name)

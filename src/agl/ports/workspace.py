@@ -6,7 +6,7 @@ from agl.ports.ids import Namespace, RunLabel
 __all__ = ["Workspace", "WorkspaceProvider"]
 
 class WorkspaceProvider(ABC):
-    """Every checkout behind one port: open one, take it back, discard the work, hold the run."""
+    """Every checkout behind one port: open one, find them, ask whether one goes, unmake, hold."""
 
     @abstractmethod
     async def open(self, label: RunLabel, namespace: Namespace | None, base: str) -> Workspace:
@@ -17,6 +17,25 @@ class WorkspaceProvider(ABC):
         :param base: a ref or a commit id, consulted only when provisioning and ignored on reopen
         :return: the place, an existing one exactly as the previous attempt left it
         :raises ConflictError: a line of work of this name exists and is not this workspace's
+        """
+        ...
+
+    @abstractmethod
+    async def residue(self, label: RunLabel) -> tuple[Namespace, ...]:
+        """Every child place of this run this provider can still find, recorded anywhere or not.
+
+        :param label: which run; the run's own place is never among them and needs no finding
+        :return: each namespace once and in one order, so a teardown walking this is reproducible
+        """
+        ...
+
+    @abstractmethod
+    async def check_removable(self, label: RunLabel, namespace: Namespace | None) -> None:
+        """Refuse now if `remove` and `discard` would not both finish here, before either is spent.
+
+        :param label: which run; the address the two teardown verbs take, asked ahead of them
+        :param namespace: which checkout, `None` for the run's own; a place that is not there goes
+        :raises ConflictError: something outside this provider is holding the place or its branch
         """
         ...
 

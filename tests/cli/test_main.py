@@ -74,7 +74,7 @@ from agl.ports.fetch import Fetcher
 from agl.ports.home_layout import RunScope
 from agl.ports.ids import ProjectName, RunLabel
 from agl.ports.sync import Syncer
-from agl.ports.tree_layout import TreesRoot
+from agl.ports.tree_layout import TreesRoot, run_branch
 from agl.sdk.roles import Claude, Role, role
 from agl.sdk.terminal import Screen
 from agl.sdk.tools import ToolResult, tool
@@ -474,6 +474,11 @@ def test_a_deliberate_stop_is_not_rendered_as_a_failure(
     the class, not for the clause - and changes exactly this: the stop would be printed to stderr
     with the `agl:` prefix a failure carries, and stdout would be empty. Both assertions below fail
     in that world, and neither of them mentions a number.
+
+    What is read off stderr is the absence of that prefix rather than the absence of output. A stop
+    releases its checkouts, so `sdk/_engine/teardown.py` writes there to say where the work landed,
+    and the third assertion is that half: a run an operator ended on purpose is one they are about
+    to go and look at.
     """
     harness = _fakes(tmp_path)
 
@@ -482,7 +487,11 @@ def test_a_deliberate_stop_is_not_rendered_as_a_failure(
     captured = capsys.readouterr()
     assert code == 7
     assert captured.out == "stopped: two rounds and no convergence\n"
-    assert captured.err == "", "a deliberate end was reported as a failure"
+    assert "agl: " not in captured.err, "a deliberate end was reported as a failure"
+    assert run_branch(LABEL) in captured.err, (
+        "the run gave its checkouts back and named no branch, so an operator who stopped a run is "
+        "left to work out where its work went from the label they typed"
+    )
 
 def test_the_handler_catches_stop_before_agl_error(tmp_path: Path) -> None:
     """The same criterion in the source: the clause order, read off `main`'s own text.
@@ -614,6 +623,11 @@ def test_a_deliberate_stop_in_a_chunk_reads_exactly_like_one_raised_on_its_own(
     `cli/exit_codes.py`'s to answer and the message is `main`'s, and both are asserted here against
     the identical stop raised sequentially, which is the only comparison that fails in a world
     where one of the two arms drifts.
+
+    Both arms release, so both write `sdk/_engine/teardown.py`'s line saying where the work landed
+    and stderr is equal rather than empty - which is the comparison this test was making anyway.
+    The prefix is asserted absent beside it, because two arms that both rendered a deliberate end
+    as a failure would be equal too.
     """
     together = _main(_fakes(tmp_path / "together"), "run", "halting_together", "-n", "auth")
     concurrent = capsys.readouterr()
@@ -623,7 +637,8 @@ def test_a_deliberate_stop_in_a_chunk_reads_exactly_like_one_raised_on_its_own(
     assert together == alone
     assert alone == 7
     assert concurrent.out == sequential.out == f"stopped: {NO_CONVERGENCE}\n"
-    assert concurrent.err == sequential.err == ""
+    assert concurrent.err == sequential.err
+    assert "agl: " not in concurrent.err
 
 def test_a_chunk_that_stopped_beside_a_chunk_that_broke_exits_eight_naming_both(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]

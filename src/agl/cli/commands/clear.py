@@ -27,9 +27,12 @@ def declare(commands: _Commands) -> RefusingParser:
         description=(
             "Take a run away, whole: its checkouts, its branches - the run's own included, "
             "whether or not its work is in the base ref yet - and its records. Nothing is "
-            "asked first and no flag changes it. Committed work is reachable afterwards only "
-            "through `git reflog`; what a checkout was holding uncommitted is not reachable "
-            "at all. What went is listed on stdout."
+            "asked first and no flag changes it. Deleting a branch deletes that branch's "
+            "reflog, and each checkout's own goes with the checkout, so no `git reflog` entry "
+            "of AGL's is left to go back to. What each deleted branch was at is what "
+            "`git fsck --unreachable` still names, until those objects are pruned - so note "
+            "the sha of anything you may want before you run this. Whatever a checkout was "
+            "holding uncommitted goes with the directory. What went is listed on stdout."
         ),
         allow_abbrev=False,
     )

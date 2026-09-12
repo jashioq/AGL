@@ -6,7 +6,7 @@ the port's docstring and before this adapter existed, which is the inversion `te
 rests on - so nothing below re-asserts any of it.
 
 What is below is what that suite deliberately cannot see, because it is written against the port
-and a port has no filesystem in it. Four things:
+and a port has no filesystem in it. Five things:
 
   * **The temp file is in the destination's own directory.** `os.replace` is atomic within one
     filesystem and raises `EXDEV` across two - and, worse, on configurations that paper over that,
@@ -19,6 +19,10 @@ and a port has no filesystem in it. Four things:
     an `OSError`, and every branch of that mapping is a branch no port-level test can provoke.
   * **The tree is what it says it is** - readable JSON, nothing created by a read, and a
     `worktrees/` container that ignores what AGL did not put there.
+  * **A removal takes the empty directories over the run with it and nothing else.** `remove`
+    answers with nothing either way, so the port cannot tell a store that left two empty
+    containers per cleared run from one that did not - nor one that took the project's settings
+    file, which is a sibling of the directory that goes, standing beside it and not in it.
 
 Named `test_filesystem_store.py` and not `test_store.py`: `tests/` carries no `__init__.py` - see
 `tests/conftest.py` for why it must not - so pytest's module names are the bare filenames and two
@@ -35,7 +39,16 @@ from typing import Final, cast
 import pytest
 from agl.adapters.filesystem.store import FilesystemStore
 from agl.ports.errors import DeniedError, InternalError, UpstreamUnavailable, UpstreamUnexpected
-from agl.ports.home_layout import AglHome, RunScope, run_record, scope_dir, step_entry
+from agl.ports.home_layout import (
+    AglHome,
+    RunScope,
+    project_config,
+    project_dir,
+    projects_dir,
+    run_record,
+    scope_dir,
+    step_entry,
+)
 from agl.ports.ids import Namespace, ProjectName, RunLabel, StepName
 from agl.ports.run import JsonValue
 from agl.ports.store import Store
@@ -332,3 +345,61 @@ async def test_an_entry_on_disk_is_indented_utf8_json_a_person_can_read(
     assert json.loads(text) == DOCUMENT
     assert "\n  " in text, "the entry is one minified line"
     assert "café 日本語" in text, "the entry's unicode was escaped"
+
+# --- What a removal leaves in the home, which the port cannot see either -----------------------
+
+async def test_a_removed_run_takes_the_empty_directories_over_it_and_not_the_settings_file(
+    store: Store, home: AglHome
+) -> None:
+    """`remove` used to be one `rmtree` of `runs/<label>` and stop, so a home that had held one run
+    kept `projects/<project>/runs/` and `projects/<project>/` as empty directories for ever.
+
+    `projects/<project>.toml` is the assertion that matters here. It is the project registration
+    and a *sibling file* of the directory that goes - `home_layout.project_config` puts it beside
+    `project_dir` rather than in it - so a tidy written as "take the project's directory away"
+    rather than as "rmdir what is empty" would unregister the project as a side effect of clearing
+    a run, and `agl run` would then answer that this repository is not one AGL knows.
+
+    `projects/` itself stays, because that file is in it.
+    """
+    registration = project_config(home, RUN.project)
+    registration.parent.mkdir(parents=True, exist_ok=True)
+    registration.write_text("[project]\n", encoding="utf-8")
+    await store.write_entry(RUN.inside(CHILD), STEP, DIGEST, DOCUMENT)
+
+    await store.remove(RUN)
+
+    assert not project_dir(home, RUN.project).exists(), (
+        "the project's run directory is still there with nothing in it. Nothing reads an empty one "
+        "and `write_record` makes the whole chain again, so what it costs is an operator finding "
+        "directories under `~/.agl` for runs they cleared months ago"
+    )
+    assert registration.read_text(encoding="utf-8") == "[project]\n", (
+        "the project's settings file went with the run's records. It is the registration this "
+        "project was `agl init`ed with, and no part of any run"
+    )
+    assert projects_dir(home).is_dir()
+
+async def test_a_run_removed_beside_another_leaves_the_containers_that_still_hold_one(
+    store: Store, home: AglHome
+) -> None:
+    """The bound on the tidy above: `rmdir` and never `rmtree`, so anything holding something stops
+    it where it stands and no directory is read before it is taken.
+
+    A second run under the same project, and a second project under the same home, are the two
+    levels the walk climbs through - and both have to survive one of their neighbours being
+    cleared, which is what an operator with a machine full of runs meets every time.
+    """
+    sibling = RunScope(RUN.project, RunLabel("other"))
+    elsewhere = RunScope(ProjectName("second"), RunLabel("auth"))
+    for scope in (RUN, sibling, elsewhere):
+        await store.write_entry(scope, STEP, DIGEST, DOCUMENT)
+
+    await store.remove(RUN)
+
+    assert await store.read_entry(sibling, STEP, DIGEST) == DOCUMENT, (
+        "the run beside the cleared one went with it, so the walk up took a directory it had not "
+        "asked whether anything was in"
+    )
+    assert await store.read_entry(elsewhere, STEP, DIGEST) == DOCUMENT
+    assert not scope_dir(home, RUN).exists(), "the run this was aimed at is still there"

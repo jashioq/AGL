@@ -2,12 +2,19 @@
 
 `tests/test_clear.py` drives `api.clear` from the library side, where the traversal, the order and
 the unconditional deletion are asserted. This module drives the real entry point for what argv
-means, and there are four claims to make about it:
+means, and these are the claims it makes about it:
 
 **It holds a label and nothing else.** The line for this verb, read off the parser object rather
 than off a sentence - which is `params.parser_for`'s own argument for being public and
 `cli/commands/run.py`'s for returning its subparser. There is no flag to declare: `clear` takes the
 whole run away and has nothing left to be asked twice about.
+
+**What `--help` says about recovery is what git can do.** `clear`'s `description=` is the only place
+an operator is told how to get work back, so a wrong sentence there costs work rather than costing a
+read - and the branch reflog an earlier wording sent them to goes with the branch.
+`test_the_clear_description_names_the_recovery_git_actually_offers_after_a_clear` holds what was
+measured and asserts the route that survived it, so a rewrite back to the reflog story goes red
+rather than through review.
 
 **What `api.clear` answers with reaches stdout.** The command's whole job past the call is to turn a
 `Cleared` into lines, so the pin is the lines: the branch this run left is named on stdout, in the
@@ -160,6 +167,39 @@ def test_the_clear_parser_holds_one_positional_and_no_flags_at_all() -> None:
 
     assert options == {"-h", "--help"}
     assert positionals == ["label"]
+
+def test_the_clear_description_names_the_recovery_git_actually_offers_after_a_clear() -> None:
+    """What `agl clear --help` says about getting work back, held to what git does.
+
+    This is the only place an operator is told how to recover from a clear, so a wrong sentence here
+    costs them the work rather than costing them a read. The sentence that stood here offered
+    `git reflog`, and git has none to offer: deleting a branch deletes that branch's reflog, and a
+    checkout's own goes with `.git/worktrees/<name>` when the registration is pruned. Measured on
+    git 2.50.1, over a repository torn down the way `api.clear` tears one down - a run branch, a
+    child branch and both their checkouts - `git reflog --all` named none of it afterwards and
+    `git log -g agl/auth` answered `fatal: ambiguous argument`.
+
+    What git does still offer is the objects. `git fsck --unreachable` named the commit each deleted
+    branch was at, and both were still readable by sha. A plain `git gc` left them standing, the
+    default prune window not being immediate, and `git gc --prune=now` took them, after which the
+    sha answered `fatal: bad object`. So it is a salvage route with an end to it, and the half that
+    does not expire is a sha noted before the verb - which is why the description names both.
+
+    The assertion is the route rather than the prose: a description rewritten back to the reflog
+    story has nothing to put in `git fsck --unreachable`'s place, and that is the failure worth
+    catching. How much of the run is gone is asserted by `tests/test_clear.py`, not here.
+    """
+    description = _clear_parser().description
+
+    assert description is not None, "the one destructive verb declares no description at all"
+    assert "`git fsck --unreachable`" in description, (
+        "the one command that still finds a cleared run's commits is not named, so an operator who "
+        "did not note a sha beforehand is told nothing they can act on"
+    )
+    assert "sha" in description, (
+        "nothing here tells an operator to note a sha before the verb, which is the only half of "
+        "the recovery that does not expire"
+    )
 
 def test_abbreviation_is_off_on_the_clear_subparser(tmp_path: Path) -> None:
     """A subparser does not inherit `allow_abbrev` - `add_parser` builds a fresh `ArgumentParser`

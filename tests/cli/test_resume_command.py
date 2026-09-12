@@ -353,6 +353,10 @@ def test_a_resume_that_replayed_two_steps_says_so_on_stderr_and_names_the_clear(
     **`agl clear auth` is quoted in the form that command actually takes**, a required positional,
     because it is the answer to the question the count raises: the ledger is why this cost nothing,
     and taking it away is how the operator gets the work done again.
+
+    It is the last line rather than the whole stream: a resume that finished released its checkouts
+    on the way out, so `sdk/_engine/teardown.py`'s line is already on stderr by the time `api`
+    hands the count back for the command to print.
     """
     halt.clear()
     harness = _fakes(tmp_path)
@@ -362,7 +366,9 @@ def test_a_resume_that_replayed_two_steps_says_so_on_stderr_and_names_the_clear(
     assert _main(harness, "resume", "auth") == 0
 
     captured = capsys.readouterr()
-    assert captured.err == "replayed 2 steps from cache - `agl clear auth` removes it.\n"
+    assert captured.err.splitlines()[-1] == (
+        "replayed 2 steps from cache - `agl clear auth` removes it."
+    )
     assert captured.out == "resume 'auth' finished\n"
 
 def test_a_resume_that_replayed_one_step_counts_it_in_the_singular(
@@ -384,7 +390,9 @@ def test_a_resume_that_replayed_one_step_counts_it_in_the_singular(
 
     assert _main(harness, "resume", "auth") == 0
 
-    assert capsys.readouterr().err == "replayed 1 step from cache - `agl clear auth` removes it.\n"
+    assert capsys.readouterr().err.splitlines()[-1] == (
+        "replayed 1 step from cache - `agl clear auth` removes it."
+    )
 
 def test_a_run_says_nothing_because_a_label_with_a_ledger_is_refused_not_replayed(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -396,6 +404,9 @@ def test_a_run_says_nothing_because_a_label_with_a_ledger_is_refused_not_replaye
     beside it is a `ConflictError` pointing at `agl resume` or `agl clear`, and a label without one
     has no entry any digest could hit. So a run walks a ledger it wrote itself and replays none of
     it, and the line does not appear - which is what makes its appearance mean something.
+
+    Its absence is read as the word rather than as an empty stream, because a run that finished
+    gave its checkouts back and `sdk/_engine/teardown.py` says so on stderr whatever the count was.
     """
     halt.clear()
     harness = _fakes(tmp_path)
@@ -403,7 +414,7 @@ def test_a_run_says_nothing_because_a_label_with_a_ledger_is_refused_not_replaye
     assert _main(harness, "run", "stepping", "-n", "auth", "-r", "x") == 0
 
     first = capsys.readouterr()
-    assert first.err == ""
+    assert "replayed" not in first.err
     assert first.out == "run 'auth' finished\n"
 
     assert _main(harness, "resume", "auth") == 0

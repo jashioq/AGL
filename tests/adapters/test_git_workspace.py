@@ -23,6 +23,9 @@ repository can close:
   * **The worktree edge cases underneath the port's clauses** - a registration left standing by a
     crash, a place another line of work already holds - which are refusals git states and which
     the port describes only in its own vocabulary.
+  * **That `check_removable` ever refuses.** Gap 9 in the suite, and gap 1's shape: the state needs
+    something outside the provider holding one of that provider's own checkouts, and the only thing
+    making checkouts there is the provider. A `git worktree lock` from out here is that something.
 
 Named `test_git_workspace.py`, for the module it covers: `tests/` carries no `__init__.py` - see
 `tests/conftest.py` for why it must not - so pytest's module names are the bare filenames and two
@@ -376,6 +379,84 @@ async def test_open_refuses_a_place_or_a_name_another_line_of_work_already_holds
 
     with pytest.raises(ConflictError):
         await provider.open(LABEL, CHILD, base)
+
+# --- The two refusals `check_removable` exists for, which only real git can produce --------------
+
+async def test_check_removable_refuses_a_locked_checkout_before_a_clear_has_taken_anything(
+    provider: WorkspaceProvider, repository: Path, base: str
+) -> None:
+    """A `remove` that only looks as though it worked, caught before either teardown verb is spent.
+
+    `shutil.rmtree` does not consult git's lock, so the directory goes; `git worktree prune`
+    declines a locked registration even once its directory has gone, measured against git 2.50; and
+    `git branch --delete` is then refused on the name that registration still holds. So `remove`
+    answers as though it worked and `discard` is what fails - at the end of a walk that has already
+    taken the run's other checkouts and deleted the branches under them, which is what `api.clear`
+    asks this ahead of all of them to avoid.
+
+    The lock reason carries a newline and a decoy `branch refs/heads/...` line in it, because git
+    passes a reason through verbatim in the `-z` listing this reads and the NUL is the only thing
+    separating it from the next attribute. A parser splitting that listing on newlines reads the
+    decoy as a registration.
+
+    The second half is what makes it a test about the lock rather than about the method refusing:
+    with the lock off, the same question over the same checkout is answered by returning.
+    """
+    workspace = await provider.open(LABEL, CHILD, base)
+    reason = "on a network share\nbranch refs/heads/decoy\nsince Tuesday"
+    _git(repository, "worktree", "lock", "--reason", reason, str(workspace.path))
+
+    with pytest.raises(ConflictError) as refused:
+        await provider.check_removable(LABEL, CHILD)
+
+    assert str(workspace.path.resolve()) in str(refused.value), (
+        "the refusal does not say which checkout is locked, and `git worktree unlock` is the only "
+        "way past it - which nobody can type without being told where"
+    )
+
+    _git(repository, "worktree", "unlock", str(workspace.path))
+
+    await provider.check_removable(LABEL, CHILD)
+
+async def test_check_removable_refuses_a_run_branch_that_is_checked_out_outside_the_run(
+    provider: WorkspaceProvider, repository: Path, trees: TreesRoot, base: str
+) -> None:
+    """The other registration that refuses a `discard`, and the one a clear never even touches.
+
+    `remove` takes back the checkout at the run's own path and prunes; a checkout of the same
+    branch anywhere else is not at that path, so nothing a clear does reaches it and
+    `git branch --delete` is refused for as long as it stands. It is a state an operator reaches by
+    hand rather than an exotic one: a run gives its checkout back and keeps the branch, so putting
+    a worktree of one's own on that branch is the obvious way to go and look at what the run did.
+    """
+    await provider.open(LABEL, CHILD, base)
+    await provider.remove(LABEL, CHILD)
+    elsewhere = trees.path / "elsewhere"
+    _git(repository, "worktree", "add", "-q", str(elsewhere), worktree_branch(LABEL, CHILD))
+
+    with pytest.raises(ConflictError) as refused:
+        await provider.check_removable(LABEL, CHILD)
+
+    assert str(elsewhere.resolve()) in str(refused.value)
+    assert worktree_branch(LABEL, CHILD) in str(refused.value)
+
+async def test_a_lock_on_one_run_says_nothing_about_whether_another_run_can_be_cleared(
+    provider: WorkspaceProvider, repository: Path, base: str
+) -> None:
+    """One listing covers the whole repository, so what the answer keys on has to be the branch.
+
+    A run's places carry two kinds of name and no others, and the question is only ever about the
+    one place it was asked about. A check that refused on any locked worktree in the listing would
+    make a single forgotten lock, on a run nobody is clearing, enough to stop every `agl clear` in
+    the repository - and it would pass the two tests above, both of which lock the place they ask
+    about.
+    """
+    held = await provider.open(OTHER, CHILD, base)
+    await provider.open(LABEL, CHILD, base)
+    _git(repository, "worktree", "lock", str(held.path))
+
+    await provider.check_removable(LABEL, CHILD)
+    await provider.check_removable(LABEL, None)
 
 # --- What a restore takes away, and the one thing it deliberately leaves ------------------------
 

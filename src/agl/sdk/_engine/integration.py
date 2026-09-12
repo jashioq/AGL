@@ -17,6 +17,13 @@ class Leases:
         self._locks: dict[RunScope, asyncio.Lock] = {}
         self._live: dict[RunScope, Lease] = {}
 
+    # A lease is held from `integrate()` until something settles the landing, and `_settle` is the
+    # only thing that lets one go during a walk - so one still live is a landing left unsettled,
+    # which `sdk/_engine/teardown.py` reads to decide whether a checkout may be taken back.
+    @property
+    def unsettled(self) -> bool:
+        return bool(self._live)
+
     async def claim(self, target: RunScope, journal: Journal) -> Lease:
         lock = self._locks.get(target)
         if lock is None:

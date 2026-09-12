@@ -206,7 +206,7 @@ OVERLOAD_DECORATOR: Final = "overload"
 # was pointed at. Measured today: 233 modules under `src/` and `tests/`, and 89 public callables on
 # the documented surface. Both numbers are floors and not measurements.
 FILES_TODAY: Final = 150
-PUBLIC_CALLABLES_TODAY: Final = 60
+PUBLIC_CALLABLES_TODAY: Final = 63
 
 # A field line: a colon, a word, optional arguments, a closing colon, then the description. Anchored
 # at the start of the line, so a colon inside a description is part of the description.

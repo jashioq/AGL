@@ -289,6 +289,15 @@ One entry, holding `0`, is what makes "the slot was written while a question was
 than a hope: a question is displayed for as long as one is queued, so a write made with nothing
 answered is a write made behind a screen the board was not on."""
 
+contents: Final[list[Mapping[str, bytes | None]]] = []
+"""What the run's own checkout held, read by the workflow at its last line.
+
+Read there for the reason the module docstring gives about a frame: a run that finishes gives its
+checkouts back, so a test reading `.trees/auth/_base/` afterwards would be reading a directory that
+is not there any more. Reading the *branch* instead is not the same assertion - a reopen writes the
+tip's tree, so an `abort` that moved the head and left the working tree as the attempt wrote it
+would read as correct. This is the working tree, at the last moment there is one."""
+
 # --- the views a workflow shows ------------------------------------------------------------------
 
 # Built out of `agl.sdk.terminal`, which is the front door for exactly this: a workflow
@@ -532,6 +541,7 @@ async def deciding(run: Run[NoParams]) -> None:
             await outcome.retry()
         else:
             await outcome.abort()
+    contents.append(await _held(run))
 
 @workflow
 async def contested(run: Run[NoParams]) -> None:
@@ -594,7 +604,19 @@ async def contested(run: Run[NoParams]) -> None:
     lines[LANDING_CHILD] = AFTER_ROW
     under.append(len(answered))
     await questions
+    contents.append(await _held(run))
     await scene.finish.wait()
+
+# The second line either workflow carries for this file's sake, and the same reason as the first:
+# what it reads is gone by the time a test could look. `WorkspaceProvider.open` is idempotent, so
+# asking for the run's own place again hands back the one the walk is already using and cuts
+# nothing - which is what `_head` below does for the same reason one port over.
+async def _held(run: Run[NoParams]) -> Mapping[str, bytes | None]:
+    place = await run.services.workspaces.open(run.scope.label, None, run.base)
+    return {name: _body(place.path / name) for name in (CONTESTED, CHILD_ONLY, AFTERWARDS)}
+
+def _body(path: Path) -> bytes | None:
+    return path.read_bytes() if path.is_file() else None
 
 def _point(name: str) -> EntryPoint:
     """The `probe = "agl.workflows.probe:probe"` entry point, pointed at this module."""
@@ -652,7 +674,7 @@ def _nothing_carried_over() -> None:
     workflow that ran when nobody expected it to shows up as a list that is too long rather than as
     one somebody cleared on the way out.
     """
-    for record in (asked, answered, decided, boards, under, _STAGED):
+    for record in (asked, answered, decided, boards, under, contents, _STAGED):
         record.clear()
 
 def _staged() -> _Scene:
@@ -764,11 +786,11 @@ async def test_a_person_who_resolves_the_collision_and_retries_lands_the_work(
         f"the head this integration reports, {outcome.head!r}, does not contain the child's own "
         f"line of work - and the child is what was being integrated"
     )
-    assert (_target_dir(tmp_path) / CONTESTED).read_bytes() == RESOLVED, (
+    assert contents[0][CONTESTED] == RESOLVED, (
         "what the person put in the target's checkout is not what the target holds. `retry` "
         "concludes what they staged, and this port has no other opinion about their work"
     )
-    assert (_target_dir(tmp_path) / CHILD_ONLY).read_bytes() == CHILD_WORK, (
+    assert contents[0][CHILD_ONLY] == CHILD_WORK, (
         "the part of the child's work nobody disagreed with is not in the target's checkout, so "
         "what landed was the resolution alone"
     )
@@ -828,12 +850,12 @@ async def test_a_person_who_gives_up_at_the_conflict_screen_puts_the_target_back
         "abort has to end it"
     )
     assert outcome.head is None, "the two-case outcome, and this is the case with no head in it"
-    assert (_target_dir(tmp_path) / CONTESTED).read_bytes() == PARENT_BODY, (
+    assert contents[0][CONTESTED] == PARENT_BODY, (
         "the file the two lines of work collided over does not hold what the target held before "
         "the landing, so the abort put the head back and left the working tree as the attempt "
         "wrote it"
     )
-    assert not (_target_dir(tmp_path) / CHILD_ONLY).exists(), (
+    assert contents[0][CHILD_ONLY] is None, (
         "the child's uncontested file is still in the target's checkout after the abort. `land` "
         "wrote the whole combination into that tree before it found the collision, so an abort "
         "that only moved the branch leaves the next step reading half of somebody's landing"
@@ -975,7 +997,7 @@ async def test_a_conflict_preempts_two_agent_questions_and_the_parents_step_goes
         scene.finish.set()
         await running
 
-    assert (_target_dir(tmp_path) / AFTERWARDS).read_bytes() == AFTER_WORK, (
+    assert contents[0][AFTERWARDS] == AFTER_WORK, (
         "the parent's own step left nothing in its checkout, so what went on after the conflict "
         "was decided was not the step this test was watching for"
     )

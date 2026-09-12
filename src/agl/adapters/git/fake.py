@@ -6,13 +6,13 @@ from agl.adapters.git._conflicts import already_holding, collided, unresolved
 from agl.adapters.git._merging import combined, contested
 from agl.adapters.git._patches import differences, patch
 from agl.adapters.git._snapshots import FakeRepository, Hold, Tree
-from agl.adapters.git._trees import _Place, _place, delete, make, tidy
+from agl.adapters.git._trees import _Place, _place, delete, make, namespaces_in, tidy
 from agl.adapters.git._working import apply, restore, snapshot
 from agl.ports.errors import ConflictError, InternalError, NotFoundError, UpstreamUnexpected
 from agl.ports.history import FileChange, History
 from agl.ports.ids import Namespace, RunLabel
 from agl.ports.integration import IntegrationOutcome, Integrator
-from agl.ports.tree_layout import TreesRoot, run_trees_dir
+from agl.ports.tree_layout import TreesRoot, run_trees_dir, worktree_branch_prefix
 from agl.ports.workspace import Workspace, WorkspaceProvider
 
 __all__ = ["FakeHistory", "FakeIntegrator", "FakeRepository", "FakeWorkspaceProvider"]
@@ -56,6 +56,22 @@ class FakeWorkspaceProvider(WorkspaceProvider):
         self._repository.attach(place.path, place.branch, cut_from)
         restore(place.path, self._repository.tree_of(cut_from))
         return _FakeWorkspace(place, self._repository)
+
+    # The two sources `GitWorkspaceProvider` reads, in the two forms this repository keeps them in:
+    # the names it holds, and the places it has attached to one. Neither is a ledger, which is the
+    # whole point - a namespace whose first step died recorded nothing anywhere else.
+    async def residue(self, label: RunLabel) -> tuple[Namespace, ...]:
+        prefix = worktree_branch_prefix(label)
+        found = [branch[len(prefix) :] for branch in self._repository.branches_under(prefix)]
+        directory = run_trees_dir(self._trees, label)
+        found.extend(path.name for path in self._repository.checkouts_under(directory))
+        return namespaces_in(found)
+
+    async def check_removable(self, label: RunLabel, namespace: Namespace | None) -> None:
+        # Nothing here can hold a place against its own provider: a `FakeRepository` has no worktree
+        # registry, so it has no lock and no registration for a second checkout of one branch to sit
+        # in. `tests/contracts/_workspace_teardown.py` states that as the gap it cannot close.
+        return
 
     async def remove(self, label: RunLabel, namespace: Namespace | None) -> None:
         place = _place(self._trees, label, namespace)

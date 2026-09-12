@@ -20,7 +20,14 @@ from agl.ports.errors import (
     UpstreamUnavailable,
     UpstreamUnexpected,
 )
-from agl.ports.home_layout import AglHome, RunScope, run_record, scope_dir, step_entry
+from agl.ports.home_layout import (
+    AglHome,
+    RunScope,
+    projects_dir,
+    run_record,
+    scope_dir,
+    step_entry,
+)
 from agl.ports.ids import Namespace, StepName
 from agl.ports.run import JsonValue
 from agl.ports.store import Store
@@ -78,12 +85,28 @@ class FilesystemStore(Store):
         try:
             shutil.rmtree(scope_dir(self._home, scope))
         except (FileNotFoundError, NotADirectoryError):
-            return
+            pass
         except OSError as error:
             raise _translated(error, f"the removal of {_scope_address(scope)}") from error
+        _tidy(scope_dir(self._home, scope.run).parent, projects_dir(self._home))
 
 def _worktrees_container(home: AglHome, scope: RunScope) -> Path:
     return scope_dir(home, scope.inside(_PROBE)).parent
+
+# `rmdir` and never `rmtree`: it refuses a directory holding anything, so a `runs/` still holding
+# another run and a `projects/<project>/` still holding one of its own stop the walk without either
+# being read first. `projects/` is where it stops on an emptied home, because `project_config` puts
+# `<project>.toml` beside the directory this takes away rather than inside it. It starts above the
+# run and never at the scope removed, so a removal below one leaves the worktree directories over it
+# standing - `tests/adapters/test_store_parity.py` holds that divergence and why it is the safe way
+# round.
+def _tidy(directory: Path, stop: Path) -> None:
+    while stop in directory.parents:
+        try:
+            directory.rmdir()
+        except OSError:
+            return
+        directory = directory.parent
 
 def _write_atomically(destination: Path, payload: bytes, address: str) -> None:
     try:

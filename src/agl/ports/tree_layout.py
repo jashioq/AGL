@@ -11,6 +11,7 @@ __all__ = [
     "run_branch",
     "run_trees_dir",
     "worktree_branch",
+    "worktree_branch_prefix",
     "worktree_dir",
 ]
 
@@ -66,10 +67,10 @@ def worktree_dir(trees: TreesRoot, label: RunLabel, namespace: Namespace) -> Pat
     return run_trees_dir(trees, label) / str(namespace)
 
 def run_branch(label: RunLabel) -> str:
-    """The branch the run's own checkout is on - the deliverable, and what a user pushes.
+    """The branch a run commits its own work to - the deliverable, and it outlives every checkout.
 
     :param label: which run; no root, because a branch is not a path
-    :return: `agl/<label>`
+    :return: `agl/<label>`, which a finished run leaves standing when it gives its checkout back
     """
     return f"{_BRANCH_PREFIX}{_BRANCH_SEPARATOR}{label}"
 
@@ -80,8 +81,16 @@ def worktree_branch(label: RunLabel, namespace: Namespace) -> str:
     :param namespace: which child; one namespace per run, since depth does not appear here
     :return: `agl/_work/<label>/<namespace>` - the infix is what lets git hold both refs at once
     """
-    parts = (_BRANCH_PREFIX, _WORK_INFIX, str(label), str(namespace))
-    return _BRANCH_SEPARATOR.join(parts)
+    return f"{worktree_branch_prefix(label)}{namespace}"
+
+def worktree_branch_prefix(label: RunLabel) -> str:
+    """What every child branch of one run begins with, and the whole of what its name adds to.
+
+    :param label: which run; no root, because a branch is not a path
+    :return: `agl/_work/<label>/` - one namespace, with no separator in it, completes a branch
+    """
+    parts = (_BRANCH_PREFIX, _WORK_INFIX, str(label))
+    return _BRANCH_SEPARATOR.join(parts) + _BRANCH_SEPARATOR
 
 def _root(trees: TreesRoot) -> Path:
     if not isinstance(trees, TreesRoot):

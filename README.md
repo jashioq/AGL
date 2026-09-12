@@ -36,6 +36,34 @@ inside your own file. It is a floor and not a pin, so any later AGL satisfies it
 `[tool.agl]` and deliberately not `[project] dependencies`: uv walks past a `[tool]` table it does
 not own, so nothing ever goes off to an index looking for that version.
 
+## Where a run's work goes
+
+Everything a run commits is on a branch of its own, `agl/<label>`, where `<label>` is the name you
+gave `agl run -n <label>`. Nothing lands on the branch you had checked out, and nothing is ever
+pushed anywhere. A run that finishes says on stderr which branch that is, so `git checkout
+agl/<label>` in that repository is the work.
+
+The agents never work in your checkout. AGL cuts git worktrees of its own — one for the run and one
+for each isolated piece of work inside it — under `.agl-trees/` beside the repository by default,
+which `agl init` writes into the project's settings. **A run that finishes gives those worktrees
+back. A run that failed, or that you interrupted, keeps every one of them**: that is the run you are
+about to resume or go and look at, and a half-written file, a build's leavings and anything an agent
+left mid-edit are in the worktree and on no branch. A run that ends holding a merge nobody settled
+keeps them too and says so on stderr, a half-resolved conflict living in that worktree and nowhere
+else; so does anything AGL was refused, which it names.
+
+Giving a worktree back costs nothing, because what a run's record depends on is the branch and not
+the directory: `agl resume <label>` cuts the worktree again from the branch it was on, replays the
+steps already recorded and runs the rest. A released run therefore resumes exactly as a kept one
+does. A release never takes `agl/<label>` itself or the run's record — the branch is the
+deliverable — and it keeps any branch inside the run whose work never reached `agl/<label>`, naming
+it on stderr so you can read that branch before you decide what to do with it.
+
+`agl clear <label>` is what takes a run away: every worktree, every branch including `agl/<label>`,
+and the record. Deleting a branch deletes that branch's reflog, so `git reflog` is not a way back
+afterwards — `git fsck --unreachable` still names the commit each branch was at until those objects
+are pruned, and noting a sha before you clear is the reliable half.
+
 ## Getting workflows from GitHub
 
 `agl get` downloads workflows from public GitHub repositories into your workspace, where

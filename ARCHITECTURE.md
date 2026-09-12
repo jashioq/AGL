@@ -49,7 +49,7 @@ opens no socket.
 authoring surface with `__all__` typed out rather than computed; `_engine/` is the private
 machinery behind `Run` and five of `Run`'s public fields have types defined there. That underscore
 names the **workflow author's** surface and nothing narrower — `api`, `config` and `sdk`'s own
-modules import those eight modules freely, so there is no import for a contract to forbid and this
+modules import those nine modules freely, so there is no import for a contract to forbid and this
 sentence is the whole of the rule, unlike the same underscore under `adapters/`, which means
 private to that package and is enforced by `tests/test_naming_convention.py`. Something belongs
 here when two workflows would otherwise write it themselves.
@@ -132,17 +132,26 @@ everything else it writes — every question, a declined or refused line, each r
 a note, on stderr, so what a script reads off stdout is what the command got. `update` splits as
 `get` does, an `updated` line standing where `get` has a `placed` one and `already up to date`
 among the notes, and so does `remove`: `removed <name>` on stdout names the entry that went, and
-its question, and a note naming what a delete that stopped part-way left, go to stderr. **One line
-in AGL is written where it is decided rather than handed back to be turned into output, and it is
-the one place `api.py` writes to a stream at all**:
+its question, and a note naming what a delete that stopped part-way left, go to stderr. **Three
+lines in AGL are written where they are decided rather than handed back to be turned into output,
+and `api.py`'s `_warn` is the one place that module writes to a stream at all**:
 `_unchanged`, which says a sync was refused, that this workspace already had an environment, and
-that the run is carrying on against it. The rule about streams holds over that line unchanged — it
-is a note about a run and not a name a machine reads, so it goes to stderr. What it does not obey
-is the turning, and deliberately: what `run` hands back it hands back after the walk, so a warning
-about the environment that run is about to import from would reach the terminal hours after the
-import it was about. Every other answer in `api.py` is a value —
+that the run is carrying on against it; whatever `sdk/_engine/teardown.py` could not release at
+the end of a run; and, out of that same module, the branch a run that finished left its work on —
+`_warn` being what it is handed as `report` for both of its own. The rule about streams holds
+over all three unchanged — each is a note about a run and not a name a machine reads, and
+`agl/<label>` in particular is `run_branch` of the label the operator typed, so a script that
+started the run knew it before the run did and nothing here is a name one learns. What none of the
+three obeys is the turning, and for two different reasons. What `run` hands back it
+hands back after the walk, so a warning about the environment that run is about to import from
+would reach the terminal hours after the import it was about; and a run that ends on a `Stop` hands
+nothing back at all, the workflow's own exception being what leaves `api.run`, so a return value is
+a channel the teardown's notes structurally cannot use — which is what settles it for the branch
+as well, an operator who ended a run on purpose being exactly the one about to go and look at what
+it did. Every other answer in `api.py` is a value —
 `tests/test_api.py::test_a_refused_install_over_an_environment_that_already_stood_warns_and_runs_anyway`
-pins the stream and the case, and a sync that succeeded is asserted silent on both streams — and
+pins the stream and the case, and a sync that succeeded is asserted to add nothing to either
+stream — and
 `get`'s and `update`'s are each handed over twice, to the `report` callback the command passes and
 then as the return, the callback coming before the sync: a sync that raises, uv missing or refusing
 with no environment to fall back on, leaves nothing returned to print, and what became of each
@@ -175,6 +184,107 @@ that copy to. A copy that no longer measures it by then is refused rather than a
 since that question would be put about a workspace the command has already changed. `remove` puts
 its one question before it takes anything. `tests/test_get.py` asserts that order from inside it,
 and `tests/test_update.py` from `update`'s side.
+
+**A run that finished gives its checkouts back, and one that did not keeps every one of them.**
+`_walk` wraps the workflow in `sdk/_engine/teardown.py`'s `releasing`, which releases on a return
+and on a `Stop` — a group of nothing but `Stop`s included, that being the same exit code — and on
+nothing else: a run that failed or was cancelled is exactly the one somebody resumes or goes to
+look at, and what is worth looking at is in the working tree and on no branch. Releasing is
+`WorkspaceProvider.remove` over every namespace and then over the run's own `_base`, plus `discard`
+of each child branch whose work reached `agl/<label>`. `agl/<label>` itself is kept, and so is the
+ledger: the branch is the deliverable, and `GitWorkspaceProvider.open` rebuilds a released checkout
+by attaching to it, so a resume costs nothing — `tests/test_release.py` walks that round trip.
+What makes the round trip cost nothing is the shape of an entry. `Entry` in
+`sdk/_engine/journal.py` carries four fields — a fingerprint, a value, a head and a moment — and its
+only pointer out into the world is `head`, a bare sha; nothing on the ledger names a path, so no
+entry goes stale when a directory does. `open` rebuilds by pruning the registry and then
+`git worktree add --end-of-options <path> <branch>`, ignoring the base it was handed, so what comes
+back is the branch as the run left it. **The ledger depends on the branch and never on the
+checkout**, and that is the whole of why releasing is something AGL may do unasked.
+**The question asked about a child branch is not `git branch -d`'s**, which measures a branch
+against the repository's own HEAD — whichever branch the operator has checked out — and so refuses
+every child of a perfect run. It is `History.contains(child, agl/<label>)`, and a child that
+answers no keeps its name and is named on stderr. **A run that ends holding an unsettled landing
+keeps everything too**, a live `Lease` at the end of the walk being what says so: a conflicted merge
+lives in the target's own checkout and nowhere else, and `remove` is a `shutil.rmtree` that would
+carry it off without git's refusal to help. That reading is only available in the right order:
+`releasing` sits inside the `try` whose `finally` calls `Leases.release_all`, so the sweep that ends
+a walk runs *after* the teardown has asked, and a sweep hoisted above it would leave `unsettled`
+answering false every time —
+`tests/test_release.py::test_a_run_ending_with_a_landing_nobody_settled_keeps_every_checkout_it_cut`
+is what goes red for that. `Leases` and `Lease` are in-process `asyncio` primitives and have
+nothing to do with worktrees or with the run lock, which is `_trees.run_lock`'s `flock` and is
+argued under "Invariants where a mistake is silent". Nothing here fails a run: what will not go is a
+note on stderr, because the work is committed and reachable either way.
+
+**Having given the checkout back, the run says which branch its work is on**, and that line's
+presence is the whole of the report. `agl/<label>` is only takeable once the run's own checkout has
+gone — git answers `fatal: 'agl/<label>' is already used by worktree at …` while a worktree
+holds it — so the base's own `remove` decides, and no child's: `worktree_branch` spells a child's
+name with an infix, so no child checkout can hold it. The two endings that keep everything,
+an unsettled landing and a base that would not go, therefore get the warning naming what still
+stands and no invitation to check anything out, and `tests/test_release.py` asserts the absence in
+both. The line is the release's rather than `cli/`'s because a run that stopped needs it too and
+hands nothing back to be turned into output; `run 'auth' finished` on stdout is untouched beside
+it, being the shape `agl run`, `agl resume` and `agl clear` share.
+
+**`clear` asks every place whether it will go before it takes any of them.** It walks the run's
+namespaces — the ledger's, and every one `WorkspaceProvider.residue` can still find, which is the
+only way a namespace whose first step died and recorded nothing is addressed at all — and then its
+own `_base`, spending `remove` and `discard` on each — so every refusal it
+can meet is at the end of the walk, and one arriving there arrives after the child branches have
+been deleted, which are the only copy of work that reached no other line. git supplies exactly such
+a refusal: `git worktree prune` declines a locked registration even once its directory has gone, so
+`remove` half-succeeds and `git branch --delete` is then refused on the name that registration
+still holds. `WorkspaceProvider.check_removable` is the answer and one of the port's four teardown
+members — `api.clear` spends it on every address before the first `remove`, and
+`GitWorkspaceProvider`
+reads `git worktree list --porcelain -z` for it, refusing where a registration holding one of the
+run's branches is locked or sits outside the run's own trees directory. **What it does not cover is
+everything that is not that registry**: a `shutil.rmtree` the filesystem refuses part-way, and
+anything locked between the check and the removal. Both still tear down as far as they get, so this
+narrows the window rather than closing it, and
+`tests/test_clear.py::test_a_locked_worktree_refuses_a_clear_before_it_has_taken_anything_away`
+pins the census on both sides of the refusal.
+
+**Two readings answer "what is under this label", and neither alone is the set.** The ledger's is
+`namespaces_under` in `sdk/_engine/teardown.py`, which recurses through `Store.namespaces` and holds
+every namespace that recorded a step — one whose checkout and branch went long ago included. The
+provider's is `WorkspaceProvider.residue`, which `GitWorkspaceProvider` answers by unioning
+`git for-each-ref` over `refs/heads/agl/_work/<label>/*` — whose `*` stops at a `/`, so it reads one
+segment below the prefix and never two — with the `git worktree list --porcelain -z` registry
+narrowed to registrations sitting directly under the run's own trees directory. That second reading
+is the only way a namespace whose first step died is addressed at all: `sdk/_engine/steps.py` cuts
+the checkout before the first entry is written, so one that opened and recorded nothing is in git
+and in no ledger. `_trees.namespaces_in` turns either reading's text back into names and is the one
+thing entitled to — `_base` is dropped, the run's own place being no namespace; a name twice read is
+kept once; and a name `ids.py` refuses is dropped rather than guessed at. `api._addressed` then puts
+the recorded ones first, in the order the store answered in, and appends only those the provider
+found and the ledger did not — so `Cleared` lists what went in the order it went, and two clears of
+one shape list it alike.
+
+**What neither reading finds is worth naming, because each is silent.** A run with no ledger record
+at all never reaches `residue`: `api.clear` reads the record first, and a missing one is a
+`NotFoundError`, exit 3 — so a label whose branches stand and whose record somebody took by hand is
+refused rather than swept. A directory under the run's trees whose name `ids.py` will not admit is
+passed over, a teardown that guessed at it being one composing a path out of characters the layout
+refuses to compose one out of. And a child whose ref and whose registration are both already gone is
+invisible to both: no branch is left to delete, and a directory still standing at that address stays
+— `remove` ends in `_trees.tidy`, which is an `rmdir` of the run's trees directory, and `rmdir`
+declines one with anything in it, so a label whose residue nothing names keeps a path under the
+trees root. What `clear`
+takes past the checkouts is the record's own container: `Store.remove` deletes the run's directory
+and then rmdirs upwards through `runs/` and `projects/<project>/`, stopping at `projects/`, because
+`home_layout.project_config` puts `<project>.toml` beside that directory rather than inside it — so
+a project whose last run is cleared keeps its settings and loses its emptied tree, which
+`tests/adapters/test_filesystem_store.py::test_a_removed_run_takes_the_empty_directories_over_it_and_not_the_settings_file`
+holds. `<trees>/worktrees.lock` is the one thing under the trees root no teardown unlinks, and
+`adapters/git/_trees.py` argues why beside the name.
+
+**`clear` deletes every child branch without asking, where a release asks `History.contains`
+first**, and the two are answering different questions rather than disagreeing: a release is
+automatic and nobody asked for it, so a branch it took would be work destroyed as a side effect,
+while a clear is a label somebody typed. "Deliberately not built" argues the rest below.
 
 **`testing.py`** — The workflow author's harness: `harness(tmp_path, agent=…)` builds an all-fakes
 bundle, `run(...)` and `resume(...)` drive `api` over it, `recorded` is every journal entry,
@@ -1365,14 +1475,24 @@ The reasoning is the point — without it these get re-proposed.
   reaches no store. One class buries that in `handler is None`.
 - **No safe mode on `agl clear`.** It takes the whole run — every checkout, every branch, the run's
   own included, and the records — whether the work is uncommitted, committed and unlanded, or
-  already in the base ref, and no flag changes that. The obvious alternative is a `git branch -d`
+  already in the base ref, and no flag changes that. The one thing it refuses over is whether it
+  can finish: `check_removable` above stops a clear that would have to leave a checkout standing,
+  and it stops it before the first removal rather than granting anything a reprieve. The obvious
+  alternative is a `git branch -d`
   gate on the run's own branch, keeping it when `History.contains` says the base ref does not hold
   it yet, with a `-f` to override. What that buys is a label that reads as free to the `Store` and
   is taken in the repository; a warning an operator cannot act on, because the same call removed the
   record any second `agl clear` would need; and a `--force` everybody learns to type by reflex,
   which is a confirmation nobody reads. The honest ordering is the other way round — `git log
   agl/<label>` before the verb, and a listing of the branches and the checkouts after it, so what
-  went is on the terminal rather than in a manual. `api.clear` therefore answers with a `Cleared`
+  went is on the terminal rather than in a manual. **Before is the half that is load-bearing**, and
+  measurably so: deleting a branch deletes that branch's reflog, and a checkout's own reflog goes
+  with `.git/worktrees/<name>` when the registration is pruned, so a cleared run leaves no reflog
+  entry of AGL's behind at all (git 2.50, measured). What is left is unreachable objects —
+  `git fsck --unreachable` still names the commit each deleted branch was at, until something prunes
+  them — which is a salvage route and not a record. That is why `cli/commands/clear.py`'s
+  `description=` tells an operator to note a sha first rather than pointing at the reflog.
+  `api.clear` therefore answers with a `Cleared`
   rather than printing anything, which is what every operation there does with its result: the one
   line `api.py` writes to a stream is the refused-sync warning "The layers" argues, and that is a
   note in the middle of a run rather than the answer a command is waiting for.

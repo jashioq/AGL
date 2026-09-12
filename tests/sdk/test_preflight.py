@@ -398,11 +398,17 @@ class _Untouched(WorkspaceProvider):
     async def open(self, label: RunLabel, namespace: Namespace | None, base: str) -> Workspace:
         raise AssertionError("preflight refused this run and a workspace was provisioned anyway")
 
+    async def residue(self, label: RunLabel) -> tuple[Namespace, ...]:
+        raise AssertionError("a run preflight refused asks nothing about what a run left standing")
+
+    async def check_removable(self, label: RunLabel, namespace: Namespace | None) -> None:
+        raise AssertionError("a run preflight refused asks nothing about taking a workspace back")
+
     async def remove(self, label: RunLabel, namespace: Namespace | None) -> None:
-        raise AssertionError("nothing in `api.run` takes a workspace back")
+        raise AssertionError("a run preflight refused takes no workspace back")
 
     async def discard(self, label: RunLabel, namespace: Namespace | None) -> None:
-        raise AssertionError("nothing in `api.run` deletes a line of work")
+        raise AssertionError("a run preflight refused deletes no line of work")
 
     def hold(self, label: RunLabel) -> AbstractAsyncContextManager[None]:
         raise AssertionError(

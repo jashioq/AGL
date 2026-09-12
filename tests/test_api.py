@@ -117,6 +117,19 @@ def looking() -> Role:
 # have to be: `EntryPoint.load` imports a module and reads an attribute in it, and sees no local.
 handed: Final[list[Run[ProbeParams]]] = []
 raised: Final[list[Stop]] = []
+peered: Final[list[_Peered]] = []
+
+@dataclass(frozen=True, slots=True)
+class _Peered:
+    """What the run's own checkout was, read from inside the walk: where, whether, and at what."""
+
+    place: Path
+
+    there: bool
+
+    head: str
+
+    landed: bool
 
 @workflow
 async def probe(run: Run[ProbeParams]) -> None:
@@ -129,6 +142,26 @@ async def halting(run: Run[NoParams]) -> None:
     stop = ReviewNotConverging("two rounds and no convergence")
     raised.append(stop)
     raise stop
+
+# A checkout is readable from inside the walk and nowhere else: a run that finishes gives its
+# checkouts back, so a test looking at the trees root afterwards finds nothing there. A *step* is
+# no good for reading one either - `Journal.step` resets the tree to the chain's head before the
+# agent is dispatched, which is exactly the difference the pin test below is looking for.
+@workflow
+async def peering(run: Run[NoParams]) -> None:
+    """Reads the checkout `api.run` provisioned, through the port, and takes no step.
+
+    `WorkspaceProvider.open` is idempotent by contract, so asking for the run's own place again
+    hands back the one the walk already cut and provisions nothing."""
+    place = await run.services.workspaces.open(run.scope.label, None, run.base)
+    peered.append(
+        _Peered(
+            place=place.path,
+            there=place.path.is_dir(),
+            head=await place.head(),
+            landed=(place.path / LANDED).exists(),
+        )
+    )
 
 @workflow
 async def stepping(run: Run[NoParams]) -> None:
@@ -150,6 +183,7 @@ POINTS: Final = (_point("probe", "probe"), _point("halting", "halting"))
 # whole listing, so a third workflow added to that tuple would be one test editing an unrelated
 # assertion about something else entirely; the two tests that need it pass both.
 STEPPING: Final = (_point("stepping", "stepping"),)
+PEERING: Final = (_point("peering", "peering"),)
 
 def _fakes(tmp_path: Path) -> container.FakeServices:
     """Target #8's deployment: one repository seeded with a file, one store, one frozen clock."""
@@ -234,35 +268,47 @@ async def test_from_names_the_base_ref_and_the_default_is_the_repositorys(tmp_pa
     assert record["base_sha"] == await harness.services.history.resolve("main")
 
 @pytest.mark.asyncio
-async def test_a_workflow_that_takes_no_step_still_leaves_base_provisioned(tmp_path: Path) -> None:
-    """Provisioning, and the whole of what it is observable as. `probe` takes no steps at all, so
-    the lazy open in `sdk/_engine/steps.py` is never reached - which makes this precisely the run
-    for which "`agl/<label>` is a real ref from run start, so progress is inspectable live" used to
-    be false. This file once asserted the opposite in as many words, that a completed run left
-    nothing but `run.json`; what changed is not how strong the claim is but which of the two callers
-    of `WorkspaceProvider.open` gets there first.
+async def test_a_workflow_that_takes_no_step_is_still_cut_a_base_and_still_hands_it_back(
+    tmp_path: Path,
+) -> None:
+    """Provisioning and release, over the run that reaches neither by taking a step. `peering`
+    takes no steps at all, so the lazy open in `sdk/_engine/steps.py` is never reached - which makes
+    this precisely the run for which "`agl/<label>` is a real ref from run start, so progress is
+    inspectable live" used to be false.
 
-    Both halves, because a provisioning that made the directory and no line of work - or the line of
-    work and no directory - is one that neither `git log agl/auth` nor a person going to look at
-    what the agents did could use. The branch is asserted to be *at the pin*, not merely to exist:
-    a `_base` cut from somewhere else is a run whose first step chains its fingerprint off one
-    commit and whose checkout starts at another."""
+    Three halves rather than two. A provisioning that made the directory and no line of work - or
+    the line of work and no directory - is one that neither `git log agl/auth` nor a person going to
+    look at what the agents did could use, so both are read from inside the walk. The branch is
+    asserted to be *at the pin*, not merely to exist: a `_base` cut from somewhere else is a run
+    whose first step chains its fingerprint off one commit and whose checkout starts at another.
+
+    And the third is what a finished run owes: the directory is gone afterwards, and the branch is
+    not. A run that ends is a run whose deliverable somebody is about to check out, and a checkout
+    still registered on `agl/auth` is one `git checkout agl/auth` refuses."""
     harness = _fakes(tmp_path)
 
-    await _run(harness)
+    await _run(harness, name="peering", argv=(), points=(*POINTS, *PEERING))
 
-    assert base_worktree(TreesRoot(tmp_path / "trees"), LABEL).is_dir()
+    place = base_worktree(TreesRoot(tmp_path / "trees"), LABEL)
+    assert peered[-1].place == place and peered[-1].there, (
+        f"the run's own checkout was at {peered[-1].place} and there={peered[-1].there} while the "
+        f"workflow ran, and the layout puts it at {place}"
+    )
     assert harness.repository.tip(run_branch(LABEL)) == (await _record(harness))["base_sha"]
+    assert not place.exists(), (
+        "the run finished and its own checkout is still standing, so `agl/auth` is still held by a "
+        "worktree and the deliverable cannot be checked out where it is wanted"
+    )
 
 class _Refusing(WorkspaceProvider):
     """A provider that provisions nothing, which is the one failure `container.fakes()` cannot
     arrange.
 
-    A stub rather than a broken bundle: what the test below needs is `open` raising, and the two
-    teardown verbs exist only because the port has four members - reaching either of them would
-    mean `run` had started taking workspaces back, which it does not. `ConflictError` is `open`'s
-    own refusal class (`ports/workspace.py`), so nothing about the shape of the failure is invented
-    for the occasion.
+    A stub rather than a broken bundle: what the test below needs is `open` raising. A run that
+    finishes or stops does take its checkouts back, and this one does neither - `open` raises
+    before the workflow is ever reached - so the two teardown verbs are asserted unreachable here
+    rather than merely unimplemented. `ConflictError` is `open`'s own refusal class
+    (`ports/workspace.py`), so nothing about the shape of the failure is invented for the occasion.
 
     `hold` is the fourth and is granted rather than refused, because `api.run` takes the run's claim
     before it writes anything and this test is about the line after that. A stub that refused it
@@ -272,11 +318,17 @@ class _Refusing(WorkspaceProvider):
     async def open(self, label: RunLabel, namespace: Namespace | None, base: str) -> Workspace:
         raise ConflictError("this provider refused to provision anything, deliberately")
 
+    async def residue(self, label: RunLabel) -> tuple[Namespace, ...]:
+        raise AssertionError("a run whose provisioning failed asks nothing about what it left")
+
+    async def check_removable(self, label: RunLabel, namespace: Namespace | None) -> None:
+        raise AssertionError("a run whose provisioning failed asks nothing about taking one back")
+
     async def remove(self, label: RunLabel, namespace: Namespace | None) -> None:
-        raise AssertionError("nothing in `api.run` takes a workspace back")
+        raise AssertionError("a run whose provisioning failed takes no workspace back")
 
     async def discard(self, label: RunLabel, namespace: Namespace | None) -> None:
-        raise AssertionError("nothing in `api.run` deletes a line of work")
+        raise AssertionError("a run whose provisioning failed deletes no line of work")
 
     def hold(self, label: RunLabel) -> AbstractAsyncContextManager[None]:
         return _granted()
@@ -524,16 +576,35 @@ def _worktrees(repository: Path) -> tuple[Path, ...]:
         Path(line[len(at) :]).resolve() for line in listing.splitlines() if line.startswith(at)
     )
 
-def _looking(seen: list[Path]) -> Script:
-    """An agent that writes nothing, reports nothing, and records where it was pointed.
+@dataclass(frozen=True, slots=True)
+class _Stepped:
+    """What git said while a step was running: where it ran, every registration, and the branch."""
+
+    place: Path
+
+    worktrees: tuple[Path, ...]
+
+    branch: str
+
+def _looking(seen: list[_Stepped], repository: Path) -> Script:
+    """An agent that writes nothing, reports nothing, and asks git what it can see from where it is.
 
     `AgentTask.workspace` is the only place the checkout a step actually ran in is observable from
     above the engine, which makes it the honest way to ask whether the second `open` handed back
-    the place the first one provisioned.
+    the place the first one provisioned. The registry is read here rather than after the run for the
+    reason `peering` gives: a run that finishes takes its checkouts back, so a count taken
+    afterwards is a count of what survived the release rather than of what the run cut.
     """
 
     async def _script(conversation: Conversation) -> AgentOutcome:
-        seen.append(conversation.task.workspace)
+        place = conversation.task.workspace
+        seen.append(
+            _Stepped(
+                place=place,
+                worktrees=_worktrees(repository),
+                branch=_git(place, "rev-parse", "--abbrev-ref", "HEAD").strip(),
+            )
+        )
         return AgentOutcome(stop_reason=StopReason.COMPLETED, text="")
 
     return _script
@@ -548,11 +619,15 @@ async def test_the_checkout_is_cut_from_the_pin_and_not_from_the_ref(
     This is what "pass `spec.base_sha`, never `base_ref`" costs to get wrong: `open` accepts a ref
     expression too, so handing it the string would work every day except the one where somebody
     pushes while a run is starting - and then the checkout begins at a commit the `Journal` never
-    hashed, and every first fingerprint in the run is taken over a head the worktree is not at."""
+    hashed, and every first fingerprint in the run is taken over a head the worktree is not at.
+
+    The checkout is read by `peering` from inside the walk, and it has to be: a run that finishes
+    hands its checkouts back, and a step would have reset the tree to the pin before anybody
+    looked - which is the very difference being measured."""
     pinned = _git(repository, "rev-parse", "--verify", "main").strip()
     harness = _over(repository, tmp_path, moving=True)
 
-    await _run(harness, base_ref="main")
+    await _run(harness, name="peering", argv=(), points=(*POINTS, *PEERING), base_ref="main")
 
     assert _git(repository, "rev-parse", "--verify", "main").strip() != pinned, (
         "the arrangement never moved the ref, so this test distinguishes nothing"
@@ -561,9 +636,9 @@ async def test_the_checkout_is_cut_from_the_pin_and_not_from_the_ref(
     assert _git(repository, "rev-parse", "--verify", f"refs/heads/{run_branch(LABEL)}").strip() == (
         pinned
     )
-    place = base_worktree(TreesRoot(tmp_path / "trees"), LABEL)
-    assert _git(place, "rev-parse", "HEAD").strip() == pinned
-    assert not (place / LANDED).exists(), "the checkout carries a commit made after the pin"
+    assert peered[-1].place == base_worktree(TreesRoot(tmp_path / "trees"), LABEL)
+    assert peered[-1].head == pinned
+    assert not peered[-1].landed, "the checkout carries a commit made after the pin"
 
 @pytest.mark.asyncio
 async def test_a_step_reopens_that_checkout_rather_than_cutting_a_second(
@@ -577,16 +652,26 @@ async def test_a_step_reopens_that_checkout_rather_than_cutting_a_second(
     is the whole of the risk. The worktree count is the assertion with teeth: a second `add` at
     this path is not merely waste, it is the refusal `open` makes instead of provisioning over a
     place something already holds, so an engine that had stopped reopening would not quietly cut a
-    second checkout - it would fail the run."""
-    seen: list[Path] = []
-    harness = _over(repository, tmp_path, claude=_looking(seen))
+    second checkout - it would fail the run.
+
+    All three readings are taken while the step is running, because the run gives its checkout back
+    when it finishes and a registry read afterwards would count what survived that rather than what
+    the run cut. The last assertion is that release, from git's own side."""
+    seen: list[_Stepped] = []
+    harness = _over(repository, tmp_path, claude=_looking(seen, repository))
 
     await _run(harness, name="stepping", argv=(), points=(*POINTS, *STEPPING))
 
     place = base_worktree(TreesRoot(tmp_path / "trees"), LABEL)
-    assert seen == [place], "the step ran somewhere other than the place `api.run` provisioned"
-    assert _worktrees(repository) == (repository.resolve(), place.resolve())
-    assert _git(place, "rev-parse", "--abbrev-ref", "HEAD").strip() == run_branch(LABEL)
+    assert [one.place for one in seen] == [place], (
+        "the step ran somewhere other than the place `api.run` provisioned"
+    )
+    assert seen[0].worktrees == (repository.resolve(), place.resolve())
+    assert seen[0].branch == run_branch(LABEL)
+    assert _worktrees(repository) == (repository.resolve(),), (
+        "the run finished and git still has its checkout registered, so `agl/auth` is still held "
+        "and `git checkout agl/auth` refuses"
+    )
 
 # --- `--from` reaches git before the record that checks it ----------------------------------------
 
@@ -1072,7 +1157,7 @@ async def test_an_installer_that_could_not_be_started_stops_the_run_rather_than_
     assert await harness.services.store.read_record(SCOPE) is None
 
 @pytest.mark.asyncio
-async def test_an_install_that_finished_says_nothing_at_all_on_either_stream(
+async def test_an_install_that_finished_adds_no_line_of_its_own_to_either_stream(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Silence on success is the whole of "a user never thinks about syncing".
@@ -1081,6 +1166,10 @@ async def test_an_install_that_finished_says_nothing_at_all_on_either_stream(
     would be noise on the ordinary path and would train an operator to skip the one place a real
     line appears. There is no skip condition either - the install is asked for every time and says
     nothing every time it worked.
+
+    The one line stderr does carry is the release's, which every run that finished writes and
+    `tests/test_release.py` holds to its wording. Counted rather than matched, because that wording
+    is the other test's to hold and a count is the whole of what this one claims.
     """
     home = _home(tmp_path)
     _directory(home, "triage", _declaring("triage", "stepping"))
@@ -1090,7 +1179,8 @@ async def test_an_install_that_finished_says_nothing_at_all_on_either_stream(
 
     printed = capsys.readouterr()
     assert printed.out == ""
-    assert printed.err == ""
+    said = printed.err.splitlines()
+    assert len(said) == 1 and run_branch(LABEL) in said[0], said
 
 # Two more names spent once each, for `_NEEDS_INSTALLING`'s reason: the workflow that imports what
 # it never declared, and the package no install anywhere in this suite provides.

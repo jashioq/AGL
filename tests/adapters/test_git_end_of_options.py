@@ -82,12 +82,12 @@ FENCE: Final = "--end-of-options"
 BINDING: Final = frozenset({"-b", "--message"})
 
 # How many call sites carried a value from outside when this was written: one in `integrator.py`,
-# four in `workspace.py` and six in `history.py`. It is a measurement and it moves: `History` grew
+# five in `workspace.py` and six in `history.py`. It is a measurement and it moves: `History` grew
 # `exists` and then `message`, and each brought a fenced site with it, so the number below is raised
 # rather than left as a floor that has stopped meaning anything. The floor is the hermeticity test's
 # `sessions >= 2` - every assertion below passes silently over an argv that has nothing to fence, so
 # a version of this file that found none of them would be green and checking nothing.
-FENCED_TODAY: Final = 11
+FENCED_TODAY: Final = 12
 
 type _Scopes = tuple[Mapping[str, list[ast.expr]], ...]
 

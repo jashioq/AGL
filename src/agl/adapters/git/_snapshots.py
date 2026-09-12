@@ -100,6 +100,9 @@ class FakeRepository:
     def drop(self, branch: str) -> None:
         self._branches.pop(branch, None)
 
+    def branches_under(self, prefix: str) -> tuple[str, ...]:
+        return tuple(sorted(branch for branch in self._branches if branch.startswith(prefix)))
+
 
     def checked_out_at(self, path: Path) -> str | None:
         return self._checkouts.get(path.resolve())
@@ -123,6 +126,12 @@ class FakeRepository:
     def prune(self) -> None:
         for path in [path for path in self._checkouts if not path.is_dir()]:
             self.detach(path)
+
+    # Unpruned, because `git worktree list` reports a registration whose directory has gone as
+    # prunable rather than omitting it, and a teardown asking what a run left wants both.
+    def checkouts_under(self, directory: Path) -> tuple[Path, ...]:
+        at = directory.resolve()
+        return tuple(sorted(path for path in self._checkouts if path.parent == at))
 
 
     def held(self, path: Path) -> Hold | None:
