@@ -29,23 +29,23 @@ about a directory. And `_workspace_files` reads and writes through `Workspace.pa
 port **exposes** a `Path` on purpose and says why - "a workspace genuinely is a directory: an agent
 is pointed at one and a verifier's working directory is one" - so a suite that would not touch one
 could not make a workspace dirty, and everything `Workspace`, `History` and `Integrator` promise is
-about a workspace somebody dirtied. And `verifier` names a `Path` it never touches, because `verify`
-**accepts** a working directory - the one member across these five ports that does - so a suite with
-no directory to hand over could not call it at all.
+about a workspace somebody dirtied. And `verifier` and `sync` each name a `Path` they never touch,
+because `Verifier.verify` and `Syncer.sync` each **accept** a directory, so a suite with no
+directory to hand over could not call either at all.
 
 None of the four licenses a fifth. The first is data, the second is one function, the third is taken
 only where a port hands a `Path` over itself - what a *provider* must never accept is a location,
 and nothing here computes one - and the fourth passes on a directory the implementation's own
-fixture chose, reading, writing, listing and creating nothing under it. Past that line all five
-suites are the same - no subprocess, no tool named, no program's output parsed, and no test that
-knows what the thing underneath is.
+fixture chose, reading, writing, listing and creating nothing under it. Past that line every suite
+here is the same - no subprocess, no tool named, no program's output parsed, and no test that knows
+what the thing underneath is.
 
 There is one exception of a different kind, and it is `terminal.py`'s. Every other suite drives its
 port with the port's own methods; that one cannot, because `Terminal` has no member that answers a
 screen - answering is what a person does - and an interactive `show` does not come back until
 somebody has. So `TerminalContract` asks for a second fixture, `TerminalDriver`, which is the only
-knob across these five suites that is not the thing under test: two members, one reporting what is
-displayed and one responding to it.
+knob in this package that reaches the thing under test other than through its port: two members,
+one reporting what is displayed and one responding to it.
 
 It is argued where it is taken, in `_terminal_driver`, with its cost stated out loud - a driver is
 written by the party it exists to catch - and with a limit that keeps it from becoming a habit. The

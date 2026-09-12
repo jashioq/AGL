@@ -75,13 +75,13 @@ along shortly. Relative imports are resolved rather than skipped, on
 `test_ports_stdlib_only.py`'s reasoning: there are none under `src/` today, and a scan that ignored
 every dotted import because of that would be a hole shaped exactly like the one it exists to close.
 
-**Why this is a test and not a seventh `.importlinter` contract.** import-linter could express it -
+**Why this is a test and not another `.importlinter` contract.** import-linter could express it -
 `protected` is the contract type - and the cost is not in writing it. `CLAUDE.md`, and
 `tests/test_contract_listings.py` and `tests/test_contract_firing.py` in their docstrings and in
-their data, all argue about *the six*. A seventh means editing every one of those to say seven, and
-`CLAUDE.md`'s own instruction to refer to gates by name and never by number is the warning that a
-count is the thing that goes stale. The strength is identical either way. So it lands here, next to
-the five other rules about what the source says.
+their data, all argue about the contracts there are, one by one. Another means editing every one of
+those, and `CLAUDE.md`'s own instruction to refer to gates by name and never by number is the
+warning that a count is the thing that goes stale. The strength is identical either way. So it
+lands here, next to the five other rules about what the source says.
 
 **The other half of N3 is not here and cannot be.** `sdk/_engine/`'s eight modules are imported
 freely by `api`, by `config` and by `sdk`'s own modules: the underscore there names the *workflow

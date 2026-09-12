@@ -23,8 +23,10 @@ holds; everything else is a note, and goes to stderr with the questions.
 **The exit status.** A decline is the operator's answer, so a command whose every moved workflow
 was updated or declined exits 0 - under `< /dev/null` too. Refusals resolve by
 `cli/commands/__init__.py`'s `_refusal_status`, whichever phase made them: the code they share, or
-8 where they differ. A name `agl get` never placed, or nothing holds, exits 3 before any question
-is asked. A sync that raises after the placing exits 6 through `main`, the summary gone out first.
+8 where they differ. A copy changed after it was measured is refused as it is about to be replaced,
+`(not written)` and 4. A name `agl get` never placed, or nothing holds, exits 3 before any question
+is asked. A sync that fails after the placing is one more reason, written once below the summary,
+and its 6 joins the refusals as it does under `agl get`: 6 alone, 8 beside a 3.
 
 **Every door out is substituted through `main.Invocation`**: the fetcher, the syncer and, where a
 test answers for the operator, `confirm`. Where it does not, `sys.stdin` is replaced and the real
@@ -33,11 +35,14 @@ here raises if anything so much as builds one.
 """
 
 import ast
+import contextlib
 import dataclasses
 import inspect
 import io
 import os
 import sys
+import sysconfig
+from collections.abc import Callable
 from pathlib import Path
 from typing import Final
 import pytest
@@ -52,7 +57,13 @@ from agl.config.questions import Confirm
 from agl.ports.errors import NotFoundError, UpstreamUnavailable
 from agl.ports.fetch import FetchedFile, Fetcher
 from agl.ports.get_request import RepositoryAtRef, RequestedWorkflow
-from agl.ports.home_layout import PROVENANCE_FILE, AglHome, workflows_dir
+from agl.ports.home_layout import (
+    PROVENANCE_FILE,
+    AglHome,
+    workflows_dir,
+    workspace_dir,
+    workspace_site_packages,
+)
 from agl.ports.ids import ProjectName
 from agl.ports.sync import Syncer, SyncOutcome
 from agl.sdk._engine.services import Services
@@ -77,6 +88,24 @@ _CURRENT: Final = "already up to date\n"
 
 _MODULE: Final = b"from agl.sdk import Run, workflow\n"
 _MODULE_NOW: Final = b"from agl.sdk import Run, workflow\n\n# as upstream has it now\n"
+
+_UV_SAID: Final = "error: no solution found for moved\n"
+
+_UV_MISSING: Final = "uv is not installed, or 'uv' is not on PATH"
+
+# How each installer failure below reads on stderr: the first two in the line `main` prints for any
+# refusal, the third as the warning `api._unchanged` writes.
+_SAID_MISSING: Final = f"agl: {_UV_MISSING}"
+_SAID_REFUSED: Final = "agl: the sync was refused: uv exited 2 rather than 0"
+_WARNED: Final = "warning: the sync was refused - uv exited 2 rather than 0"
+
+# The reasons `_gone`, `_hollow` and `_unanswered` refuse with: 3, 2 and 6.
+_GONE: Final = "gone: the fake fetcher serves no repository octo/nope"
+_HOLLOW: Final = "hollow: octo/flows/workflows/hollow holds no pyproject.toml"
+_UNANSWERED: Final = "check: api.github.com did not answer for jashioq/checks"
+
+# The `lib/` subdirectory this interpreter installs into, which is the one a sync addresses.
+SEGMENT: Final = Path(sysconfig.get_path("purelib")).parent.name
 
 class _NoSync(Syncer):
     """A syncer that fails the test if anything is installed, for runs that placed nothing."""
@@ -190,6 +219,53 @@ def _main(
         return invocation if confirm is None else dataclasses.replace(invocation, confirm=confirm)
 
     return main.main(argv, compose=compose)
+
+def _written(
+    home: AglHome,
+    *argv: str,
+    fetcher: Fetcher,
+    syncer: Syncer,
+    confirm: Confirm = _asking_nothing,
+) -> tuple[int, str]:
+    """The exit status, and both streams as one, in the order the command wrote to them.
+
+    `capsys` keeps stdout and stderr apart, and what a caller of this asserts is which came first.
+    """
+    both = io.StringIO()
+    with contextlib.redirect_stdout(both), contextlib.redirect_stderr(both):
+        status = _main(home, *argv, fetcher=fetcher, syncer=syncer, confirm=confirm)
+    return status, both.getvalue()
+
+def _uv_missing(home: AglHome) -> Syncer:
+    """The first rule: an installer that could not be started, raising what `UvSyncer` raises."""
+    return _Raising(UpstreamUnavailable(_UV_MISSING))
+
+def _uv_refusing(home: AglHome) -> Syncer:
+    """uv exiting 2 on `home`'s workspace: the second rule, or the third where a venv stands."""
+    installer = FakeSyncer()
+    installer.answers(workspace_dir(home), synced=False, status=2, output=_UV_SAID)
+    return installer
+
+def _moved(home: AglHome) -> FakeFetcher:
+    """`moved`, placed from `octo/tools@v2` and moved on since: updated, and synced for."""
+    _placed(home, "moved", _TOOLS)
+    return _serving(FakeFetcher(), _TOOLS, "moved")
+
+def _gone(home: AglHome, fetcher: FakeFetcher) -> None:
+    """A workflow placed from a repository the fetcher does not have: refused unchecked, 3."""
+    _placed(home, "gone", _NOWHERE)
+
+def _hollow(home: AglHome, fetcher: FakeFetcher) -> None:
+    """A workflow whose ref moved to a download holding no project file: refused unplaceable, 2."""
+    _placed(home, "hollow", _FLOWS)
+    _serving(fetcher, _FLOWS, hollow=("hollow",))
+
+def _unanswered(home: AglHome, fetcher: FakeFetcher) -> None:
+    """A workflow placed from a repository that did not answer: refused unchecked, 6."""
+    _placed(home, "check", _CHECKS)
+    fetcher.refuses(
+        _CHECKS, UpstreamUnavailable("api.github.com did not answer for jashioq/checks")
+    )
 
 def _words(stream: str) -> list[list[str]]:
     """Each line split on whitespace, which is how a script reads a column."""
@@ -502,6 +578,61 @@ def test_refusals_made_in_every_phase_exit_eight_through_main_each_reason_said_o
         "hollow",
     ]
 
+def test_a_copy_edited_while_its_question_is_up_is_not_written_and_exits_four(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The yes covered the edit the copy held when it was measured, and not one saved after it.
+
+    The workflow beside it is updated and named on stdout, and the refusal is filed where `agl get`
+    files one made as it writes: `(not written)`, its reason once on stderr, the copy as left.
+    """
+    home = _home(tmp_path)
+    triage = _placed(home, "triage", _FLOWS)
+    _changed(triage)
+    _placed(home, "lint", _FLOWS)
+    kept: dict[str, bytes] = {}
+
+    def editing_again(question: str) -> bool:
+        with (triage / "__init__.py").open("ab") as module:
+            module.write(b"# saved while the question was up\n")
+        kept.update({path.name: path.read_bytes() for path in triage.iterdir()})
+        return True
+
+    fetcher = _serving(FakeFetcher(), _FLOWS, "triage", "lint")
+    status = _main(home, "update", fetcher=fetcher, confirm=editing_again)
+
+    captured = capsys.readouterr()
+    written = captured.err.splitlines()
+    assert status == 4
+    assert captured.out == "updated   lint    octo/flows/workflows/lint  0b496e9 -> f548e57\n"
+    assert written[0] == "refused   triage  octo/flows/workflows/triage  (not written)"
+    assert written[1].startswith(f"triage: {triage} changed after `agl update` measured it")
+    assert len(written) == 2
+    assert {path.name: path.read_bytes() for path in triage.iterdir()} == kept
+
+def test_a_copy_edited_meanwhile_beside_a_refusal_with_another_code_exits_eight(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A repository that is not there refuses with 3, and the copy edited meanwhile with 4."""
+    home = _home(tmp_path)
+    triage = _placed(home, "triage", _FLOWS)
+    _changed(triage)
+    _placed(home, "gone", _NOWHERE)
+
+    def editing_again(question: str) -> bool:
+        _changed(triage)
+        return True
+
+    fetcher = _serving(FakeFetcher(), _FLOWS, "triage")
+    status = _main(home, "update", fetcher=fetcher, confirm=editing_again)
+
+    written = capsys.readouterr().err.splitlines()
+    assert status == 8
+    assert [line.split()[:2] for line in written[:2]] == [
+        ["refused", "gone"],
+        ["refused", "triage"],
+    ]
+
 # --- names, and the dispatch --------------------------------------------------------------------
 
 def test_a_named_workflow_agl_get_never_placed_exits_three_before_anything_is_asked(
@@ -545,7 +676,11 @@ def test_an_argument_too_many_on_an_update_line_is_refused_by_the_dispatch(
 def test_an_installer_that_could_not_be_started_exits_six_after_the_summary_went_out(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """uv missing: exit 6 through `main`, and the workflow it updated is on stdout regardless."""
+    """uv missing and nothing refused: exit 6, the updated line on stdout, one line on stderr.
+
+    Both streams are asserted whole, for `agl get`'s reason: with no refusal to join, the sync's 6
+    is the whole answer, printed in the line `main` prints for any refusal that reaches it.
+    """
     home = _home(tmp_path)
     _placed(home, "triage", _FLOWS)
 
@@ -553,13 +688,202 @@ def test_an_installer_that_could_not_be_started_exits_six_after_the_summary_went
         home,
         "update",
         fetcher=_serving(FakeFetcher(), _FLOWS, "triage"),
-        syncer=_Raising(UpstreamUnavailable("uv is not installed, or 'uv' is not on PATH")),
+        syncer=_uv_missing(home),
     )
 
     captured = capsys.readouterr()
+    assert (status, captured.out, captured.err) == (
+        6,
+        "updated   triage  octo/flows/workflows/triage  0b496e9 -> f548e57\n",
+        f"{_SAID_MISSING}\n",
+    )
+
+def test_a_refused_sync_with_no_environment_behind_it_exits_six_after_the_summary(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The second rule: uv exiting non-zero with no venv yet has nothing to fall back on, so 6."""
+    home = _home(tmp_path)
+    fetcher = _moved(home)
+
+    status = _main(home, "update", fetcher=fetcher, syncer=_uv_refusing(home))
+
+    captured = capsys.readouterr()
     assert status == 6
-    assert _words(captured.out)[0][:2] == ["updated", "triage"]
-    assert "uv is not installed" in captured.err
+    assert _words(captured.out)[0][:2] == ["updated", "moved"]
+    assert captured.err.startswith(_SAID_REFUSED)
+    assert captured.err.count(_UV_SAID.strip()) == 1
+
+def test_a_refused_sync_over_an_environment_that_stood_warns_and_exits_zero(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The third rule: a venv stood before the sync, so uv's words go to stderr and that is all."""
+    home = _home(tmp_path)
+    fetcher = _moved(home)
+    workspace_site_packages(home, SEGMENT).mkdir(parents=True)
+
+    status = _main(home, "update", fetcher=fetcher, syncer=_uv_refusing(home))
+
+    captured = capsys.readouterr()
+    assert status == 0
+    assert _words(captured.out)[0][:2] == ["updated", "moved"]
+    assert captured.err.startswith(_WARNED)
+    assert captured.err.count(_UV_SAID.strip()) == 1
+
+@pytest.mark.parametrize(
+    ("refusing", "installer", "said", "status", "reasons"),
+    [
+        pytest.param((_gone,), _uv_missing, _SAID_MISSING, 8, (_GONE,), id="a 3 and uv missing"),
+        pytest.param(
+            (_gone, _hollow),
+            _uv_missing,
+            _SAID_MISSING,
+            8,
+            (_GONE, _HOLLOW),
+            id="a 3, a 2 and uv missing",
+        ),
+        pytest.param(
+            (_gone,),
+            _uv_refusing,
+            _SAID_REFUSED,
+            8,
+            (_GONE,),
+            id="a 3 and uv refusing with no venv",
+        ),
+        pytest.param(
+            (_unanswered,),
+            _uv_missing,
+            _SAID_MISSING,
+            6,
+            (_UNANSWERED,),
+            id="a 6 and uv missing",
+        ),
+    ],
+)
+def test_a_sync_failing_after_refusals_is_said_once_below_them_and_joins_their_status(
+    tmp_path: Path,
+    refusing: tuple[Callable[[AglHome, FakeFetcher], None], ...],
+    installer: Callable[[AglHome], Syncer],
+    said: str,
+    status: int,
+    reasons: tuple[str, ...],
+) -> None:
+    """`moved` is updated, the sync fails, and its 6 joins the refusals by `_refusal_status`.
+
+    `agl get`'s case from `update`'s side, the refusals made in the comparison and the inspection:
+    a 3 beside the sync exits 8, a 6 agrees with it, every reason is written once, and the sync's
+    is written last, both streams counted.
+    """
+    home = _home(tmp_path)
+    fetcher = _moved(home)
+    for refused in refusing:
+        refused(home, fetcher)
+
+    exited, written = _written(home, "update", fetcher=fetcher, syncer=installer(home))
+
+    assert exited == status
+    assert written.count(said) == 1
+    for reason in reasons:
+        assert written.count(reason) == 1
+        assert written.index(reason) < written.index(said)
+    assert written.index("updated   moved") < written.index(said)
+
+def test_a_copy_edited_meanwhile_and_a_sync_that_failed_after_it_exit_eight_together(
+    tmp_path: Path,
+) -> None:
+    """The refusal made as a copy comes to be written (4) meets a sync that could not start (6).
+
+    `lint` is updated, so the sync runs; `triage` was edited while its question was up, so it is
+    refused `(not written)`. Its reason and the sync's are each written once, the sync's last.
+    """
+    home = _home(tmp_path)
+    triage = _placed(home, "triage", _FLOWS)
+    _changed(triage)
+    _placed(home, "lint", _FLOWS)
+
+    def editing_again(question: str) -> bool:
+        _changed(triage)
+        return True
+
+    status, written = _written(
+        home,
+        "update",
+        fetcher=_serving(FakeFetcher(), _FLOWS, "triage", "lint"),
+        syncer=_uv_missing(home),
+        confirm=editing_again,
+    )
+
+    edited = f"triage: {triage} changed after `agl update` measured it"
+    assert status == 8
+    assert written.count(edited) == 1
+    assert written.count(_SAID_MISSING) == 1
+    assert written.index(edited) < written.index(_SAID_MISSING)
+
+def test_a_refusal_keeps_its_own_code_when_the_sync_after_it_only_warns(tmp_path: Path) -> None:
+    """The third rule beside a refusal: the warning is written once, below it, and 3 stands."""
+    home = _home(tmp_path)
+    fetcher = _moved(home)
+    _gone(home, fetcher)
+    workspace_site_packages(home, SEGMENT).mkdir(parents=True)
+
+    status, written = _written(home, "update", fetcher=fetcher, syncer=_uv_refusing(home))
+
+    assert status == 3
+    assert written.count(_WARNED) == 1
+    assert written.count(_GONE) == 1
+    assert written.index(_GONE) < written.index(_WARNED)
+    assert "agl: " not in written
+
+def test_refusals_with_nothing_placed_start_no_sync_and_exit_by_their_own_rule(
+    tmp_path: Path,
+) -> None:
+    """A 3 and a 2 and nothing updated: 8, and `_NoSync`, which fails the test if asked, is not."""
+    home = _home(tmp_path)
+    fetcher = FakeFetcher()
+    _gone(home, fetcher)
+    _hollow(home, fetcher)
+
+    assert _main(home, "update", fetcher=fetcher, syncer=_NoSync()) == 8
+
+def test_a_sync_raising_something_unnamed_reaches_main_as_itself_with_its_traceback(
+    tmp_path: Path,
+) -> None:
+    """No `AglError`, so nothing joins it: 70, with the traceback and the frame that raised it.
+
+    For `agl get`'s reason, the traceback is what this asserts: a fold would answer 70 as well.
+    """
+    home = _home(tmp_path)
+    fetcher = _moved(home)
+    _gone(home, fetcher)
+
+    status, written = _written(
+        home, "update", fetcher=fetcher, syncer=_Raising(RuntimeError("the installer broke"))
+    )
+
+    assert status == 70
+    assert "Traceback (most recent call last)" in written
+    assert "RuntimeError: the installer broke" in written
+    assert "`_Raising.sync`" in written
+    assert written.count(_GONE) == 1
+
+def test_a_refusal_raised_before_the_summary_leaves_the_command_as_itself_with_nothing_printed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A name `agl get` never placed is refused before anything is compared, let alone summarised.
+
+    Through `main` it exits 3, and a command that folded it alone would exit 3 in the same words,
+    so this calls the command itself: the refusal leaves as it was raised, and nothing is printed.
+    """
+    home = _home(tmp_path)
+    hand_written = _workflow(home, "hand_written")
+    parsed = _update_parser().parse_args(["hand_written"])
+
+    with pytest.raises(NotFoundError) as refused:
+        update_command.execute(
+            home, parsed, fetcher=FakeFetcher(), syncer=_uv_missing(home), confirm=_asking_nothing
+        )
+
+    assert str(refused.value).startswith(f"{hand_written} holds no {PROVENANCE_FILE}")
+    assert capsys.readouterr() == ("", "")
 
 # --- the real fetcher, off this machine's network -----------------------------------------------
 

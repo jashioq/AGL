@@ -18,6 +18,12 @@ operator's workspace and the exclusion is measured against the thing it exists f
 beside it, and it is not a substitute: a directory somebody made proves the name is filtered, not
 that the filter sits where the bytecode actually lands.
 
+**A `.DS_Store` is left out too, by that name and at any depth**, because Finder leaves one in a
+folder it opens and a directory only looked at is not a workflow that changed. It is a name and not
+a rule: every other dot-led name keeps its key, `.gitignore`, `.env` and `.git` among them, since a
+rule would stop seeing the operator's own edits to those - and a `.git` holds the operator's
+history, which replacing a placed copy deletes.
+
 **Nothing here reaches the network or the operator's own home.** Every `AglHome` is built from
 `tmp_path` rather than resolved, so no environment variable is read; the run goes over
 `container.fakes()`, which has no credential to spend and starts no process; and the agent handed to
@@ -280,6 +286,34 @@ async def test_running_a_workflow_twice_changes_no_digest_because_bytecode_is_le
     assert tuple(before) == _WRITTEN
     assert before == once == twice
 
+# --- a file Finder leaves, and no other dot-led name ----------------------------------------------
+
+def test_a_ds_store_finder_leaves_at_any_depth_reaches_neither_a_key_nor_a_digest(
+    tmp_path: Path,
+) -> None:
+    """At the top and a level down, as Finder leaves one in each folder it opens."""
+    directory = _workflow(_home(tmp_path), "triage")
+    before = digests(directory)
+
+    (directory / ".DS_Store").write_bytes(b"\x00\x00\x00\x01Bud1")
+    (directory / "prompts" / ".DS_Store").write_bytes(b"\x00\x00\x00\x01Bud1")
+
+    assert digests(directory) == before
+
+def test_every_dot_led_name_but_finders_keeps_its_key_and_its_digest(tmp_path: Path) -> None:
+    """The names passed over are a set and not a rule, so these are counted like the module is.
+
+    A `.gitignore` and a `.env` are a workflow's own, a level down as much as at the top, and a
+    `.git` holds the history an operator versioning the directory would lose with it.
+    """
+    directory = _workflow(_home(tmp_path), "triage")
+    (directory / ".git").mkdir()
+    (directory / ".git" / "HEAD").write_bytes(b"ref: refs/heads/main\n")
+    (directory / ".gitignore").write_bytes(b"*.log\n")
+    (directory / "prompts" / ".env").write_bytes(b"TOKEN=mine\n")
+
+    assert set(digests(directory)) == {*_WRITTEN, ".git/HEAD", ".gitignore", "prompts/.env"}
+
 # --- the same answer for files that are not on disk yet, and one hash for all of them ------------
 
 def test_files_digested_in_memory_answer_what_the_directory_holding_them_answers(
@@ -289,7 +323,9 @@ def test_files_digested_in_memory_answer_what_the_directory_holding_them_answers
 
     Nested paths, a name outside ASCII, bytecode at two depths and a file that is merely called
     `__pycache__` - the walk passes over a directory of that name and not a file, and the twin has
-    to draw the line in the same place. Order is compared as well as content, both being sorted.
+    to draw the line in the same place. Finder's `.DS_Store` is the other way about, a file passed
+    over at two depths and a directory of that name walked. Order is compared as well as content,
+    both being sorted.
     """
     files = {
         "__init__.py": b"from agl.sdk import Run, workflow\n",
@@ -298,6 +334,9 @@ def test_files_digested_in_memory_answer_what_the_directory_holding_them_answers
         "flows/__pycache__/review.cpython-314.pyc": b"compiled too",
         "flows/review.py": b"REVIEW = 1\n",
         "notes/__pycache__": b"a file, whatever its name says",
+        ".DS_Store": b"\x00\x00\x00\x01Bud1",
+        "flows/.DS_Store": b"\x00\x00\x00\x01Bud1",
+        "shots/.DS_Store/kept.md": b"a directory, whatever its name says",
         "empty.md": b"",
     }
     for name, content in files.items():
@@ -306,6 +345,7 @@ def test_files_digested_in_memory_answer_what_the_directory_holding_them_answers
 
     assert list(digested(files).items()) == list(digests(tmp_path).items())
     assert "notes/__pycache__" in digested(files)
+    assert "shots/.DS_Store/kept.md" in digested(files)
 
 def test_the_content_hash_is_one_answer_whatever_order_its_map_was_built_in() -> None:
     measured = digested({"b.py": b"b\n", "a.py": b"a\n", "c/d.md": b"d\n"})

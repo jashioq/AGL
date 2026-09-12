@@ -13,7 +13,7 @@ from agl.config.removal import removable
 from agl.config.schema import Settings
 from agl.ports.errors import ConflictError, InputError, InternalError, NotFoundError, UpstreamError
 from agl.ports.fetch import Fetcher
-from agl.ports.get_request import Fetch, GetRequest
+from agl.ports.get_request import Fetch, GetRequest, RequestedWorkflow
 from agl.ports.home_layout import AglHome, RunScope, workspace_dir
 from agl.ports.ids import Namespace, ProjectName, RunLabel, WorkflowName
 from agl.ports.run import RunSpec, checked_text
@@ -168,7 +168,7 @@ async def resume(
         raise ConflictError(
             f"run {str(label)!r} was started by {spec.workflow!r}, and that workflow's own "
             f"directory is not what it was then: {_moved(spec.workflow_digests, measured)}. A run "
-            f"digests every file of the directory its workflow is written in, and AGL refuses a "
+            f"digests every file there but bytecode and any `.DS_Store`, and AGL refuses a "
             f"resume that disagrees rather than migrating one: every step already on this run's "
             f"ledger was produced by those files as they stood. So this run finishes against them "
             f"and no others - put the directory back to what it was when the run started, out of "
@@ -254,7 +254,7 @@ async def get(
     confirm: Confirm,
     report: Callable[[Got], None],
 ) -> Got:
-    got = await _placed_after_asking(fetcher, home, request.fetches, confirm, needed)
+    got = await _placed_after_asking(fetcher, home, request.fetches, confirm, needed, measured={})
     report(got)
     if got.placed:
         await _sync_workspace(syncer, home)
@@ -280,7 +280,9 @@ async def update(
 ) -> Updated:
     comparison = await compared(fetcher, home, name)
     replacing = replacements(home, comparison.moved)
-    got = await _placed_after_asking(fetcher, home, replacing.fetches, confirm, replacing.questions)
+    got = await _placed_after_asking(
+        fetcher, home, replacing.fetches, confirm, replacing.questions, replacing.measured
+    )
     updated = Updated(comparison, replacing, got)
     report(updated)
     if got.placed:
@@ -323,19 +325,21 @@ async def _walk(
 
 # Three phases, and nothing reaches the workspace before the last of them: every download is fetched
 # and inspected, then every question is asked, and only then is anything placed - so no question is
-# ever put about a workspace the command has already changed. `tests/test_get.py` holds the order,
-# and `tests/test_update.py` holds it again from `update`'s side.
+# ever put about a workspace the command has already changed, and a copy `update` measured that has
+# moved by the time it would be replaced is refused there rather than asked about again.
+# `tests/test_get.py` holds the order, and `tests/test_update.py` holds it from `update`'s side.
 async def _placed_after_asking(
     fetcher: Fetcher,
     home: AglHome,
     fetches: Sequence[Fetch],
     confirm: Confirm,
     questions: Questions,
+    measured: Mapping[RequestedWorkflow, str],
 ) -> Got:
     fetched = [answer for fetch in fetches for answer in await fetcher.fetch(fetch)]
     inspections = inspected(fetched, home)
     placeables = [one for one in inspections if isinstance(one, PlaceableWorkflow)]
-    return placed(home, fetched, inspections, answered(placeables, confirm, questions))
+    return placed(home, fetched, inspections, answered(placeables, confirm, questions), measured)
 
 # A caller that handed no syncer installs nothing, the way one that handed its own points walks no
 # workspace: `agl.testing`'s harness is both at once and `cli/main.py` is neither. Making the

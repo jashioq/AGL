@@ -221,6 +221,35 @@ async def test_a_declined_workflow_is_skipped_and_every_other_one_is_placed_rega
     assert sorted(str(one.workflow.name) for one in got.placed) == ["lint", "release"]
     assert _snapshot(standing) == kept
 
+@pytest.mark.asyncio
+async def test_an_override_edited_while_its_collision_question_is_up_is_placed_all_the_same(
+    tmp_path: Path,
+) -> None:
+    """`agl get` measures nothing it overrides: its question says only that something is there.
+
+    So what stands there when the yes comes back is what the yes approved, edited or not, and the
+    download replaces it - where `agl update`, whose question is about changes, refuses the copy.
+    """
+    home = _home(tmp_path)
+    standing = _standing(home, "triage")
+
+    def editing(question: str) -> bool:
+        (standing / "__init__.py").write_bytes(b"# edited while the question was up\n")
+        return True
+
+    got = await api.get(
+        _serving("triage"),
+        _Recording([]),
+        home,
+        _request("jashioq/myrepo/workflows/triage"),
+        editing,
+        lambda got: None,
+    )
+
+    assert [one.directory for one in got.placed] == [standing]
+    assert got.unwritten == ()
+    assert (standing / "__init__.py").read_bytes() == _MODULE
+
 # --- the report and the sync --------------------------------------------------------------------
 
 @pytest.mark.asyncio

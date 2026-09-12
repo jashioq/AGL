@@ -1,6 +1,6 @@
 import argparse
-import asyncio
 import sys
+from functools import partial
 from typing import Final
 from agl import api
 from agl.cli.commands import (
@@ -8,13 +8,14 @@ from agl.cli.commands import (
     _UPDATED,
     _declined,
     _print_summary,
-    _refusal_status,
     _refused,
     _Row,
     _said,
+    _status_after_summary,
 )
 from agl.config.comparison import Updated
 from agl.config.questions import Confirm, abbreviated
+from agl.ports.errors import AglError
 from agl.ports.fetch import Fetcher
 from agl.ports.home_layout import AglHome
 from agl.ports.sync import Syncer
@@ -49,10 +50,13 @@ def declare(commands: _Commands) -> RefusingParser:
             "asked before anything is replaced - whether to discard a copy that changed since it "
             "was placed, and whether to install third-party packages the new version declares and "
             "the copy does not - and one stdin cannot answer, at its end or closed, is answered "
-            "no. A copy that is a link, or stands under another name than it was placed as, is "
-            "left as it is, and a workflow written by hand or by `agl new` records no repository "
-            "and is passed over. With nothing moved it says `already up to date` and nothing else; "
-            "what is replaced is then installed, the way `agl get` installs what it places."
+            "no. Each copy is measured again just before it is replaced, and one that changed "
+            "after it was first measured - while the questions were on screen, say - is refused "
+            "and left as it stands. A copy that is a link, or stands under another name than it "
+            "was placed as, is left as it is, and a workflow written by hand or by `agl new` "
+            "records no repository and is passed over. With nothing moved it says `already up to "
+            "date` and nothing else; what is replaced is then installed, the way `agl get` "
+            "installs what it places."
         ),
         allow_abbrev=False,
     )
@@ -76,9 +80,13 @@ def execute(
     confirm: Confirm,
 ) -> int:
     named = None if getattr(parsed, _WORKFLOW) is None else _said(parsed, _WORKFLOW, command=NAME)
-    updated = asyncio.run(api.update(fetcher, syncer, home, named, confirm, _summarise))
-    # A decline is the operator's answer, so only a refusal moves the status.
-    return _refusal_status(updated.refusals)
+    return _status_after_summary(
+        partial(api.update, fetcher, syncer, home, named, confirm), _summarise, _refusals
+    )
+
+# A decline is the operator's answer, so only a refusal moves the status.
+def _refusals(updated: Updated) -> tuple[AglError, ...]:
+    return updated.refusals
 
 # Handed to `api.update` for `get`'s reason: a sync that raises leaves nothing returned to print.
 def _summarise(updated: Updated) -> None:

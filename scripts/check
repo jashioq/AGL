@@ -391,7 +391,7 @@ fi
 #
 # The one hole in contract 5. import-linter skips any (source, forbidden) pair where one module
 # is a descendant of the other, and agl.adapters is a descendant of agl - so an adapter imported
-# in src/agl/__init__.py leaves all six contracts kept. Nothing in .importlinter can express it.
+# in src/agl/__init__.py leaves every contract kept. Nothing in .importlinter can express it.
 # Hence the blunt rule: that file holds no import statements at all. It is meant to stay empty; a
 # later stage that genuinely needs a re-export there comes here and changes this. Deleting it is a
 # different proposal and a refused one - tests/test_tree.py's docstring carries the measurement.
@@ -439,11 +439,13 @@ fi
 # restatement of it, and it does not care where the fixture lives or what it is called. It runs
 # with the environment poisoned: ANTHROPIC_BASE_URL set to the real vendor endpoint,
 # ANTHROPIC_API_KEY emptied (which is what makes the CLI reach for the operator's own OAuth bearer
-# token), and CODEX_HOME pointed at a scratch directory holding a stand-in auth.json. The poison is
-# what makes the probe non-vacuous: the machine this was written on already had
-# ANTHROPIC_BASE_URL=https://api.anthropic.com in the ambient shell, so "the variable looked fine"
-# would have been luck. Passing means the guard *overrode* a live endpoint. Nothing here starts a
-# CLI or opens a socket to anything: the probe reads three environment variables and one file path.
+# token), CODEX_HOME pointed at a scratch directory holding a stand-in auth.json, and AGL_HOME at
+# one holding a stand-in config.toml. The poison is what makes the probe non-vacuous: the machine
+# this was written on already had ANTHROPIC_BASE_URL=https://api.anthropic.com in the ambient
+# shell, so "the variable looked fine" would have been luck. Passing means the guard *overrode* a
+# live endpoint. Nothing here starts a CLI: the first test reads four environment variables and two
+# file paths, and the second is refused its lookup and its connection before a resolver is asked or
+# a socket is made.
 #
 # Half two - a test module quietly re-pointing a guarded variable. An AST scan of every .py under
 # tests/ except the one file allowed to write them. It flags setenv/delenv/putenv/unsetenv naming a

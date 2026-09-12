@@ -1,7 +1,7 @@
 """Structural test: three contracts in `.importlinter` are lists somebody typed, and this is what
 notices when a list and the thing it is meant to police stop agreeing.
 
-Two of the five contracts are fail-closed and need nothing from this file. Contract 5's source is
+Two of the contracts are fail-closed and need nothing from this file. Contract 5's source is
 `agl.*`, which re-expands as packages are added, so a module introduced at a later stage is covered
 the moment it exists and its author need do nothing to be policed. **Contract 1 was a
 hand-maintained guard here and is now the second of those**: `containers = agl` plus
@@ -153,7 +153,7 @@ ADAPTERS_DIR: Final = PACKAGE_DIR / "adapters"
 # The pairing is asserted below, so a renumbering fails here rather than silently pointing a
 # comparison at the wrong contract.
 # Contract 1 is absent because this file no longer reads it; `tests/test_contract_firing.py` pins
-# all five numbers to their types, that being the file that builds a contract object per number.
+# every number to its type, that being the file that builds a contract object per number.
 PURE_TYPES_SECTION: Final = "importlinter:contract:2"
 VENDOR_SECTION: Final = "importlinter:contract:3"
 ADAPTERS_SECTION: Final = "importlinter:contract:4"
@@ -204,13 +204,12 @@ VENDOR_IMPORT_NAMES: Final[Mapping[str, str]] = {}
 # `packaging` is a grammar and not a backend. Nothing behind it can be reached, spoken to or paid
 # for - there is no endpoint, no credential and no process - so "installing one vendor drags in the
 # other's SDK", which is the whole of what contract 3 exists to prevent, has nothing to be about
-# here. It is imported by `config/distribution.py` alone, to compare a workflow's declared bound on
-# AGL against the AGL that is running, and PEP 440 is what makes that a parse rather than a string
-# comparison. Contract 3 could name it and would then forbid the one import that has to exist.
+# here. `config/` reads versions and requirements with it, PEP 440 being what makes comparing two
+# versions a parse rather than a string comparison. Contract 3 could name it and would then forbid
+# imports that have to exist.
 NOT_A_VENDOR: Final[Mapping[str, str]] = {
-    "packaging": "PEP 440 and PEP 508 parsing, used by config/distribution.py to compare a "
-    "workflow's declared bound on AGL against the running version; no endpoint behind it, so "
-    "there is no vendor to contain",
+    "packaging": "PEP 440 and PEP 508 parsing, which config/ reads versions and requirements "
+    "with; no endpoint behind it, so there is no vendor to contain",
 }
 
 # Where a requirement string stops being a distribution name: a version, a marker, an extras list.

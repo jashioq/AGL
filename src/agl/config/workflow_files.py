@@ -12,6 +12,12 @@ __all__ = ["content_hash", "digested", "digests", "in_bytecode_cache"]
 # import never matches the one taken after it, and nothing is ever resumable.
 _BYTECODE: Final = "__pycache__"
 
+# Finder leaves a `.DS_Store` in a folder it opens, so a directory only looked at would measure as
+# changed. Names, not a rule: "anything dot-led" would stop seeing an edit to a workflow's own
+# `.gitignore` or `.env` and replace it unasked, where a name missing here costs only a false alarm.
+# Not `.git`, which replacing a copy deletes with it - `tests/test_update.py` pins that it is asked.
+_WRITTEN_BY_FINDER: Final = frozenset({".DS_Store"})
+
 _SEPARATOR: Final = "/"
 
 # A name `iterdir` hands back carries lone surrogates wherever the filesystem held bytes that are
@@ -27,14 +33,16 @@ _SURROGATES: Final = "surrogatepass"
 # alone is enough to refuse a resume that would otherwise have replayed. That is intended rather
 # than an oversight: what no digest can do is tell which line of a file a reader calls load-bearing.
 def digests(directory: Path) -> Mapping[str, str]:
-    """Every file in a workflow's directory, keyed by POSIX path relative to it and digested."""
+    """Every file in a workflow's directory but bytecode and Finder's, by relative POSIX path."""
     found = dict(_walked(directory, ()))
     return {name: _digest(name, _content(found[name])) for name in sorted(found)}
 
 def digested(files: Mapping[str, bytes]) -> Mapping[str, str]:
     """What `digests` answers for a directory holding exactly `files`, with nothing read."""
     return {
-        name: _digest(name, files[name]) for name in sorted(files) if not in_bytecode_cache(name)
+        name: _digest(name, files[name])
+        for name in sorted(files)
+        if not in_bytecode_cache(name) and name.rpartition(_SEPARATOR)[2] not in _WRITTEN_BY_FINDER
     }
 
 def in_bytecode_cache(path: str) -> bool:
@@ -55,7 +63,8 @@ def content_hash(measured: Mapping[str, str]) -> str:
 def _walked(directory: Path, prefix: tuple[str, ...]) -> Iterator[tuple[str, Path]]:
     for entry in _listed(directory):
         if entry.is_file():
-            yield _SEPARATOR.join((*prefix, entry.name)), entry
+            if entry.name not in _WRITTEN_BY_FINDER:
+                yield _SEPARATOR.join((*prefix, entry.name)), entry
         # A directory reached through a symlink is not descended into: a link naming an ancestor of
         # itself is a walk with no end, and a filesystem is free to hold one.
         elif entry.is_dir() and not entry.is_symlink() and entry.name != _BYTECODE:
@@ -74,7 +83,7 @@ def _listed(directory: Path) -> list[Path]:
         return list(directory.iterdir())
     except OSError as error:
         raise InputError(
-            f"{directory} cannot be listed: {error}. AGL digests every file a workflow's own "
+            f"{directory} cannot be listed: {error}. AGL digests the files a workflow's own "
             f"directory holds, so that a resume can say whether the workflow it is about to "
             f"replay is still the one that recorded the run - and a directory it cannot read is a "
             f"question it cannot answer either way"
@@ -86,6 +95,6 @@ def _content(path: Path) -> bytes:
     except OSError as error:
         raise InputError(
             f"{path} cannot be read: {error}. It is one of the files in a workflow's own "
-            f"directory, every one of which is digested - passing over the one that will not open "
-            f"would answer with a digest saying the workflow is unchanged"
+            f"directory that are digested - passing over the one that will not open would "
+            f"answer with a digest saying the workflow is unchanged"
         ) from error

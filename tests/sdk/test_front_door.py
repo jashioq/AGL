@@ -94,8 +94,9 @@ _NOT_ON_THE_ERROR_FACADE: Final[Mapping[str, str]] = {
     "with, and `cli/exit_codes.py` re-exports that table and holds none of its own",
     "exit_code_for": "the CLI's, for the same reason, and the only supported way to read that "
     "table",
-    "DisagreeingRefusals": "the CLI's as well: the code a command exits with where the refusals it "
-    "went on past disagree, read out of that table and never raised, so no run holds one to catch",
+    "DisagreeingRefusals": "the CLI's as well: the code a run's concurrent failures, or the "
+    "refusals a command went on past, exit with where their codes disagree - read out of that "
+    "table and never raised, so no run holds one to catch",
     "Stop": "already on the door through `sdk/workflow.py`, beside the `Run` it is raised out of "
     "- the surface is `Run`'s six members, plus `Stop` - one name does not get two import paths "
     "into one door",

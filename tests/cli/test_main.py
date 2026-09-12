@@ -108,6 +108,11 @@ UNPARSEABLE: Final = "the agent finished with no reporting-tool payload"
 TAKEN: Final = "another run holds the integration lease on agl/auth"
 UNTRANSLATED: Final = "a chunk's adapter forgot to translate this"
 
+# What `_severally` says of chunks that disagree, one phrase per status it can end on: every chunk
+# named and none of them the answer, or a 70 among them that the disagreement does not set aside.
+ALL_NAMED: Final = "AGL has a name for every one of them"
+ONE_UNNAMED: Final = "which no disagreement sets aside"
+
 # What the three author-code boundaries below raise. Each is a sentence a workflow author's own bug
 # would have left behind, because what those tests read is which of the three the message named.
 IN_A_REPORTER: Final = "the dashboard this role reports into has gone away"
@@ -199,6 +204,13 @@ async def chunked_bug(run: Run[NoParams]) -> None:
     async with asyncio.TaskGroup() as chunks:
         chunks.create_task(_chunk(ValueError(UNTRANSLATED)))
 
+@workflow
+async def failing_and_untranslated(run: Run[NoParams]) -> None:
+    """One chunk that could not reach its backend and one nobody translated - 6 and 70."""
+    async with asyncio.TaskGroup() as chunks:
+        chunks.create_task(_chunk(UpstreamUnavailable(UNREACHABLE)))
+        chunks.create_task(_chunk(ValueError(UNTRANSLATED)))
+
 def _watching(line: str) -> None:
     """A role's `on_activity`, which is the workflow author's own function and can have a bug."""
     raise RuntimeError(IN_A_REPORTER)
@@ -273,6 +285,7 @@ POINTS: Final = (
     _point("halting_together", "halting_together"),
     _point("halting_and_failing", "halting_and_failing"),
     _point("chunked_bug", "chunked_bug"),
+    _point("failing_and_untranslated", "failing_and_untranslated"),
     _point("in_a_reporter", "in_a_reporter"),
     _point("in_a_tool", "in_a_tool"),
     _point("in_a_view", "in_a_view"),
@@ -535,21 +548,21 @@ def test_chunks_that_fail_the_same_way_exit_that_way_whatever_their_classes(
     `UpstreamUnavailable` and `UpstreamUnexpected` are two classes and one published answer:
     `ports/errors.py` leaves both out of the table so that both inherit `UpstreamError`'s 6, "so a
     caller that does not care which it was catches this and a script still sees one code". A run
-    that hit one of each therefore failed one way twice, and 70 would be this handler inventing a
+    that hit one of each therefore failed one way twice, and 8 would be this handler inventing a
     distinction the hierarchy exists to remove.
     """
     assert _main(_fakes(tmp_path), "run", "agreeing", "-n", "auth") == 6
 
-def test_chunks_that_fail_differently_exit_seventy_naming_every_one_of_them(
+def test_chunks_that_fail_differently_exit_eight_naming_every_one_of_them(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """"For leaves that disagree, 70, naming all of them" - the naming being the half asserted here.
+    """"For leaves that disagree, 8, naming all of them" - the naming being the half asserted here.
 
     The number is argued: a run that failed several different ways is genuinely not attributable to
-    one code, and `InternalError` is the honest answer rather than a guess. What that argument
-    costs the operator is a 70 whose usual meaning is "file a bug" for a run in which nothing was
-    AGL's fault, so the naming is not decoration - it is the only thing that tells them which
-    failures produced the number and that neither of them was ours.
+    one code, and any one of theirs would be a guess that hid the rest. What 8 tells the operator is
+    that no one of them is the answer, so the naming is not decoration - it is the only thing that
+    tells them which failures produced the number, and it is written without a traceback because
+    AGL had a name for each.
 
     Each leaf is asserted beside the status it resolves to on its own, because that is what makes
     the sentence actionable: 6 says retry the backend and 4 says the label or the lease is taken,
@@ -557,22 +570,25 @@ def test_chunks_that_fail_differently_exit_seventy_naming_every_one_of_them(
     """
     harness = _fakes(tmp_path)
 
-    assert _main(harness, "run", "disagreeing", "-n", "auth") == 70
+    assert _main(harness, "run", "disagreeing", "-n", "auth") == 8
 
     captured = capsys.readouterr()
     assert f"6  UpstreamUnavailable: {UNREACHABLE}" in captured.err
     assert f"4  ConflictError: {TAKEN}" in captured.err
     assert "do not resolve to one exit status" in captured.err
+    assert ALL_NAMED in captured.err
+    assert ONE_UNNAMED not in captured.err
+    assert "Traceback" not in captured.err
     assert captured.out == ""
 
-def test_a_resumed_run_whose_chunks_fail_differently_exits_seventy_as_the_run_did(
+def test_a_resumed_run_whose_chunks_fail_differently_exits_eight_as_the_run_did(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """`resume` reaches the same arm as `run`, so disagreeing chunks cost 70 through either door.
+    """`resume` reaches the same arm as `run`, so disagreeing chunks cost 8 through either door.
 
-    The group rule is `main`'s rather than a command's. A command that goes on past each refusal
-    answers its own disagreement with 8, through `cli/commands/__init__.py`'s `_refusal_status`,
-    and that is a second rule beside this one rather than a change to it.
+    The group rule is `main`'s rather than a command's, and it is the rule `agl get` and
+    `agl update` answer their refusals by too: `cli/exit_codes.py`'s `joint_status`, which
+    `tests/cli/test_exit_codes.py` holds both of its callers to.
     """
     harness = _fakes(tmp_path)
     started = _main(harness, "run", "disagreeing", "-n", "auth")
@@ -580,9 +596,12 @@ def test_a_resumed_run_whose_chunks_fail_differently_exits_seventy_as_the_run_di
 
     resumed = _main(harness, "resume", "auth")
 
+    err = capsys.readouterr().err
     assert resumed == started
-    assert started == 70
-    assert "do not resolve to one exit status" in capsys.readouterr().err
+    assert started == 8
+    assert f"6  UpstreamUnavailable: {UNREACHABLE}" in err
+    assert f"4  ConflictError: {TAKEN}" in err
+    assert ALL_NAMED in err
 
 def test_a_deliberate_stop_in_a_chunk_reads_exactly_like_one_raised_on_its_own(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -606,10 +625,10 @@ def test_a_deliberate_stop_in_a_chunk_reads_exactly_like_one_raised_on_its_own(
     assert concurrent.out == sequential.out == f"stopped: {NO_CONVERGENCE}\n"
     assert concurrent.err == sequential.err == ""
 
-def test_a_chunk_that_stopped_beside_a_chunk_that_broke_is_named_with_both(
+def test_a_chunk_that_stopped_beside_a_chunk_that_broke_exits_eight_naming_both(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """"All of them" includes the deliberate end, because it is half of why the run exits 70.
+    """"All of them" includes the deliberate end, because it is half of why the run exits 8.
 
     A run in which one chunk finished the work it had and another could not reach its backend is
     exactly the run that cannot be attributed to one code: 7 says "needs you" and 6 says "broken",
@@ -619,12 +638,13 @@ def test_a_chunk_that_stopped_beside_a_chunk_that_broke_is_named_with_both(
     """
     harness = _fakes(tmp_path)
 
-    assert _main(harness, "run", "halting_and_failing", "-n", "auth") == 70
+    assert _main(harness, "run", "halting_and_failing", "-n", "auth") == 8
 
     captured = capsys.readouterr()
     assert captured.out == f"stopped: {NO_CONVERGENCE}\n"
     assert f"7  ReviewNotConverging: {NO_CONVERGENCE}" in captured.err
     assert f"6  UpstreamUnavailable: {UNREACHABLE}" in captured.err
+    assert ALL_NAMED in captured.err
     assert "Traceback" not in captured.err, "a translated refusal was rendered as a bug"
 
 def test_an_untranslated_exception_in_a_chunk_keeps_the_traceback_it_would_have_kept(
@@ -656,6 +676,32 @@ def test_an_untranslated_exception_in_a_chunk_keeps_the_traceback_it_would_have_
         "a chunk of this module raised and the group was reported as AGL's, which is the whole of "
         "what a leaf-by-leaf attribution exists to stop"
     )
+    assert captured.out == ""
+
+def test_a_chunk_nobody_translated_beside_a_named_failure_keeps_the_run_at_seventy(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A failure nobody named does not hide behind a disagreement with one somebody did.
+
+    8 would tell the operator that AGL had a name for every failure in the run, and one of these is
+    a traceback. So the run exits 70, as that chunk would have on its own; the traceback and the
+    line naming its frame are printed for it and for no other; and the sentence under them says why
+    the number is 70 rather than calling the pair a disagreement, which would send the operator to
+    read two reasons where one of them is a bug with no reason written.
+    """
+    harness = _fakes(tmp_path)
+
+    assert _main(harness, "run", "failing_and_untranslated", "-n", "auth") == 70
+
+    captured = capsys.readouterr()
+    under = _under_the_traceback(captured.err)
+    assert "Traceback" in captured.err
+    assert "_chunk" in under, _misattributed("_chunk", captured.err)
+    assert f"6  UpstreamUnavailable: {UNREACHABLE}" in captured.err
+    assert captured.err.count(UNREACHABLE) == 1, "the named failure was printed as a bug as well"
+    assert f"70  ValueError: {UNTRANSLATED}" in captured.err
+    assert ONE_UNNAMED in captured.err
+    assert ALL_NAMED not in captured.err
     assert captured.out == ""
 
 # --- refusals a user can provoke, and the one that is ours ---------------------------------------

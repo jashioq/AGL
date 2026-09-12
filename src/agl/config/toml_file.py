@@ -53,9 +53,9 @@ _PROJECT_KEYS: Final = (_NAME, _REPO, _TREES_ROOT, _BUILD, _BUILD_TIMEOUT)
 
 _HOME_KEYS: Final = frozenset({"home", "agl_home", "AGL_HOME"})
 
-# uv reads a member as a glob against the directory holding this file, so `*` there would take in
-# the `.venv` a sync builds beside `workflows/` - the one `home_layout.workspace_site_packages`
-# composes - and the workspace would hold its own environment as a member of itself. It is the
+# Measured against uv 0.11.29: a member is a glob against the directory holding this file. With `*`
+# there uv refuses the sync over `workflows/` itself, a directory holding files and no project file,
+# and passes over the `.venv` beside it, which is dot-led and holds none at its root. It is the
 # whole of the document, and the `[project]` table it leaves out is what makes the file a virtual
 # uv workspace root rather than a package of its own - and what keeps it from ever reading as the
 # workflow declaration `config/registry.py` looks for.

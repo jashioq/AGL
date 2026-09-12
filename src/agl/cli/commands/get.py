@@ -1,11 +1,18 @@
 import argparse
-import asyncio
+from functools import partial
 from typing import Final
 from agl import api
-from agl.cli.commands import _PLACED, _declined, _print_summary, _refusal_status, _refused, _Row
+from agl.cli.commands import (
+    _PLACED,
+    _declined,
+    _print_summary,
+    _refused,
+    _Row,
+    _status_after_summary,
+)
 from agl.config.placement import Got
 from agl.config.questions import Confirm
-from agl.ports.errors import InternalError
+from agl.ports.errors import AglError, InternalError
 from agl.ports.fetch import Fetcher
 from agl.ports.get_request import GetRequest
 from agl.ports.home_layout import AglHome
@@ -57,9 +64,13 @@ def execute(
     confirm: Confirm,
 ) -> int:
     request = GetRequest.parsed(_specs(parsed))
-    got = asyncio.run(api.get(fetcher, syncer, home, request, confirm, _summarise))
-    # A decline is the operator's answer, so only a refusal moves the status.
-    return _refusal_status(one.refusal for one in got.refused)
+    return _status_after_summary(
+        partial(api.get, fetcher, syncer, home, request, confirm), _summarise, _refusals
+    )
+
+# A decline is the operator's answer, so only a refusal moves the status.
+def _refusals(got: Got) -> tuple[AglError, ...]:
+    return tuple(one.refusal for one in got.refused)
 
 # Handed to `api.get` rather than printed after it returns, because a sync that raises leaves
 # nothing returned to print.

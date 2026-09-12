@@ -16,12 +16,18 @@ the operator asked for the update and those two are the things they could not ha
 cannot be measured: each is refused before anything is downloaded, and every other workflow is
 updated regardless.
 
+**A copy is measured again as it is replaced**, once its download is written and before anything
+of it moves, and one that no longer measures what it measured before anything was downloaded or
+asked is refused and left exactly as it stands - edited while a download was fetched or while a
+question was on screen, its own or another's, and whether or not it had changed before. Every other
+workflow is updated regardless, and a `.DS_Store` Finder writes meanwhile is no change at all.
+
 Everything runs on fakes: `FakeFetcher` for the questions about refs and for the downloads, and a
 syncer written here that answers yes and keeps what it was handed.
 """
 
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from pathlib import Path
 from typing import Final
@@ -32,8 +38,8 @@ from agl.config.comparison import Updated
 from agl.config.provenance import Provenance, fetched_hash, placed_hash, read_provenance, rendered
 from agl.config.registry import GROUP
 from agl.ports.errors import ConflictError, InputError, NotFoundError
-from agl.ports.fetch import FetchedFile, Resolution, ResolvedRef
-from agl.ports.get_request import RepositoryAtRef, RequestedWorkflow
+from agl.ports.fetch import FetchAnswer, FetchedFile, Resolution, ResolvedRef
+from agl.ports.get_request import Fetch, RepositoryAtRef, RequestedWorkflow
 from agl.ports.home_layout import PROVENANCE_FILE, AglHome, workflows_dir, workspace_dir
 from agl.ports.sync import Syncer, SyncOutcome
 
@@ -63,6 +69,19 @@ class _Recording(Syncer):
         self.reported.append(len(self._reports))
         return SyncOutcome(synced=True, status=0, output="")
 
+class _Meanwhile(FakeFetcher):
+    """A fetcher running what the operator did meanwhile, once, as the first download is fetched."""
+
+    def __init__(self, meanwhile: Callable[[], None]) -> None:
+        super().__init__()
+        self._meanwhile: Callable[[], None] | None = meanwhile
+
+    async def fetch(self, fetch: Fetch) -> tuple[FetchAnswer, ...]:
+        if self._meanwhile is not None:
+            meanwhile, self._meanwhile = self._meanwhile, None
+            meanwhile()
+        return await super().fetch(fetch)
+
 class _MovedAgain(FakeFetcher):
     """A fetcher whose refs move once more between the check and the download, as busy ones do.
 
@@ -91,15 +110,20 @@ def _placed(
     *,
     dependencies: str = "",
     entry_name: str | None = None,
+    extra: Mapping[str, bytes] | None = None,
 ) -> Path:
     """A workflow as `agl get` leaves one: its files, and the provenance it wrote last.
 
-    `entry_name` stands it under another name than the one it was placed as, as a rename would.
+    `entry_name` stands it under another name than the one it was placed as, as a rename would, and
+    `extra` is more files it was placed with, by path relative to it.
     """
     entry = workflows_dir(home) / (entry_name or name)
     entry.mkdir(parents=True)
     (entry / "pyproject.toml").write_bytes(_pyproject(name, dependencies))
     (entry / "__init__.py").write_bytes(_MODULE)
+    for path, content in (extra or {}).items():
+        (entry / path).parent.mkdir(parents=True, exist_ok=True)
+        (entry / path).write_bytes(content)
     unspelled = RequestedWorkflow(repository, f"workflows/{name}", "")
     workflow = replace(unspelled, spec=str(unspelled))
     (entry / PROVENANCE_FILE).write_bytes(
@@ -563,20 +587,80 @@ async def test_a_name_updates_that_one_workflow_and_leaves_every_other_moved_one
 # share - so what that scheme counts is what this question can see. Both halves are written down
 # here as they stand rather than left to be discovered.
 
+_FINDER: Final = b"\x00\x00\x00\x01Bud1"
+
+# What versioning a copy leaves in it, as either of the two shapes git gives a `.git`: the
+# repository itself, holding a branch the working tree does not show, and a worktree's gitlink.
+_REPOSITORY: Final = {
+    ".git/HEAD": b"ref: refs/heads/main\n",
+    ".git/refs/heads/mine": b"7af3f30e3f6b0e9a6d0c6f1e4f2b9d8c7a6b5e4d\n",
+}
+_GITLINK: Final = {".git": b"gitdir: /elsewhere/.git/worktrees/triage\n"}
+
 @pytest.mark.asyncio
-async def test_a_file_finder_leaves_in_a_copy_reads_as_a_change_and_is_asked_about(
+async def test_the_file_finder_leaves_in_any_folder_of_a_copy_is_replaced_unasked(
     tmp_path: Path,
 ) -> None:
-    """`.DS_Store` is a file like any other to the hash, so a folder opened in Finder is asked."""
+    """Planted at the top and a level down once the copy is placed, and no question is put at all.
+
+    Finder leaves a `.DS_Store` in a folder it opens, so a copy the operator only looked at would
+    otherwise be asked about as though it held changes of theirs - the question guarding the one
+    loss in this command, asked when there is nothing to lose. `_never` fails on any question.
+    """
     home = _home(tmp_path)
-    entry = _placed(home, "triage")
-    (entry / ".DS_Store").write_bytes(b"\x00\x00\x00\x01Bud1")
+    entry = _placed(home, "triage", extra={"prompts/review.md": b"# review\n"})
+    (entry / ".DS_Store").write_bytes(_FINDER)
+    (entry / "prompts" / ".DS_Store").write_bytes(_FINDER)
+
+    updated = await _update(home, _serving(FakeFetcher(), _FLOWS, "triage"), _never)
+
+    assert [one.directory for one in updated.got.placed] == [entry]
+
+@pytest.mark.parametrize("written", [".gitignore", "prompts/.env"])
+@pytest.mark.asyncio
+async def test_a_changed_dot_led_file_that_finder_did_not_write_is_still_asked_about(
+    tmp_path: Path, written: str
+) -> None:
+    """A `.gitignore` it was placed with and edited, and a `.env` added a level down.
+
+    Both are the operator's as much as the module beside them, so what the hash passes over is
+    Finder's file by name and not every dot-led one: a rule would replace these unasked.
+    """
+    home = _home(tmp_path)
+    entry = _placed(
+        home, "triage", extra={".gitignore": b"*.log\n", "prompts/review.md": b"# review\n"}
+    )
+    (entry / written).write_bytes(b"# the operator's own\n")
     operator = _Operator(False)
 
     await _update(home, _serving(FakeFetcher(), _FLOWS, "triage"), operator)
 
     (asked,) = operator.asked
     assert asked.startswith(f"{entry} has changed since it was placed")
+
+@pytest.mark.parametrize("made", [_REPOSITORY, _GITLINK], ids=["repository", "gitlink"])
+@pytest.mark.asyncio
+async def test_a_copy_whose_only_change_is_a_git_directory_or_file_is_asked_about(
+    tmp_path: Path, made: Mapping[str, bytes]
+) -> None:
+    """Every file it was placed with stands as placed, so the `.git` is all the hash sees move.
+
+    Versioning a copy keeps the operator's history in it, or a gitlink to where it is kept, and a
+    yes replaces the copy whole and deletes that with it - a branch nobody pushed included. So a
+    `.git` is counted like any file the operator made, and a no keeps it where it was.
+    """
+    home = _home(tmp_path)
+    entry = _placed(home, "triage")
+    for path, content in made.items():
+        (entry / path).parent.mkdir(parents=True, exist_ok=True)
+        (entry / path).write_bytes(content)
+    operator = _Operator(False)
+
+    await _update(home, _serving(FakeFetcher(), _FLOWS, "triage"), operator)
+
+    (asked,) = operator.asked
+    assert asked.startswith(f"{entry} has changed since it was placed")
+    assert all((entry / path).read_bytes() == content for path, content in made.items())
 
 @pytest.mark.asyncio
 async def test_a_mode_changed_or_bytecode_written_in_a_copy_is_replaced_without_a_question(
@@ -593,3 +677,205 @@ async def test_a_mode_changed_or_bytecode_written_in_a_copy_is_replaced_without_
 
     assert len(updated.got.placed) == 1
     assert not (entry / "__pycache__").exists()
+
+# --- a copy changed while the update runs -------------------------------------------------------
+#
+# Each copy is measured before anything is downloaded or asked, and the questions rest on that
+# measure - so an edit saved after it, while the downloads are fetched or a question is on screen,
+# is one nobody was asked about. Four moments, each with a workflow beside it that nothing touches
+# and that is updated regardless; the copy's bytes are read back as the edit left them.
+
+def _unwritten(updated: Updated) -> list[tuple[str, type[Exception]]]:
+    """Each workflow refused as it was about to be written, and the class of its refusal."""
+    return [(str(one.workflow.name), type(one.refusal)) for one in updated.got.unwritten]
+
+def _placed_names(updated: Updated) -> list[str]:
+    return sorted(str(one.workflow.name) for one in updated.got.placed)
+
+@pytest.mark.asyncio
+async def test_an_edit_saved_while_its_own_dependency_question_is_up_is_refused_and_kept(
+    tmp_path: Path,
+) -> None:
+    """Unchanged when measured, so the one question put about it is its new dependency's."""
+    home = _home(tmp_path)
+    lint = _placed(home, "lint")
+    _placed(home, "release")
+    kept: dict[str, bytes | None] = {}
+
+    def editing_lint(question: str) -> bool:
+        _changed(lint)
+        kept.update(_snapshot(lint))
+        return True
+
+    fetcher = _serving(
+        FakeFetcher(), _FLOWS, "lint", "release", depending={"lint": 'dependencies = ["httpx"]'}
+    )
+    updated = await _update(home, fetcher, editing_lint)
+
+    assert _unwritten(updated) == [("lint", ConflictError)]
+    assert _snapshot(lint) == kept
+    assert _placed_names(updated) == ["release"]
+
+@pytest.mark.asyncio
+async def test_an_edit_to_a_copy_asked_nothing_saved_during_another_ones_question_is_refused(
+    tmp_path: Path,
+) -> None:
+    """`release` raises no question at all, and is edited while `lint`'s is on screen."""
+    home = _home(tmp_path)
+    _placed(home, "lint")
+    release = _placed(home, "release")
+    kept: dict[str, bytes | None] = {}
+
+    def editing_release(question: str) -> bool:
+        _changed(release)
+        kept.update(_snapshot(release))
+        return True
+
+    fetcher = _serving(
+        FakeFetcher(), _FLOWS, "lint", "release", depending={"lint": 'dependencies = ["httpx"]'}
+    )
+    updated = await _update(home, fetcher, editing_release)
+
+    assert _unwritten(updated) == [("release", ConflictError)]
+    assert _snapshot(release) == kept
+    assert _placed_names(updated) == ["lint"]
+
+@pytest.mark.asyncio
+async def test_an_edit_saved_while_the_downloads_are_fetched_is_refused_with_nothing_asked(
+    tmp_path: Path,
+) -> None:
+    """No question is put in this run at all, so nothing but the measuring could have seen it."""
+    home = _home(tmp_path)
+    tool = _placed(home, "tool")
+    _placed(home, "triage")
+    kept: dict[str, bytes | None] = {}
+
+    def editing_tool() -> None:
+        _changed(tool)
+        kept.update(_snapshot(tool))
+
+    fetcher = _serving(_Meanwhile(editing_tool), _FLOWS, "tool", "triage")
+    updated = await _update(home, fetcher, _never)
+
+    assert _unwritten(updated) == [("tool", ConflictError)]
+    assert _snapshot(tool) == kept
+    assert _placed_names(updated) == ["triage"]
+
+@pytest.mark.asyncio
+async def test_a_second_edit_saved_while_its_local_changes_question_is_up_is_refused(
+    tmp_path: Path,
+) -> None:
+    """Changed when measured and asked about, so the yes covers the first edit, not the second."""
+    home = _home(tmp_path)
+    triage = _placed(home, "triage")
+    _changed(triage)
+    _placed(home, "release")
+    kept: dict[str, bytes | None] = {}
+
+    def editing_again(question: str) -> bool:
+        with (triage / "__init__.py").open("ab") as module:
+            module.write(b"# and a second edit, saved while the question was up\n")
+        kept.update(_snapshot(triage))
+        return True
+
+    updated = await _update(
+        home, _serving(FakeFetcher(), _FLOWS, "triage", "release"), editing_again
+    )
+
+    assert _unwritten(updated) == [("triage", ConflictError)]
+    assert _snapshot(triage) == kept
+    assert _placed_names(updated) == ["release"]
+    assert sorted(path.name for path in workflows_dir(home).iterdir()) == ["release", "triage"]
+
+@pytest.mark.asyncio
+async def test_a_copy_put_back_as_placed_while_its_question_is_up_is_refused_too(
+    tmp_path: Path,
+) -> None:
+    """A decision rather than an accident: what is compared is what the copy measured when asked.
+
+    Put back as it was placed, the copy holds nothing a replacement would lose, and it is refused
+    anyway - the yes was about the copy holding changes, and this is not that copy. The next update
+    finds it unchanged and replaces it without a question.
+    """
+    home = _home(tmp_path)
+    triage = _placed(home, "triage")
+    placed_module = (triage / "__init__.py").read_bytes()
+    _changed(triage)
+
+    def reverting(question: str) -> bool:
+        (triage / "__init__.py").write_bytes(placed_module)
+        return True
+
+    fetcher = _serving(FakeFetcher(), _FLOWS, "triage")
+    updated = await _update(home, fetcher, reverting)
+
+    assert _unwritten(updated) == [("triage", ConflictError)]
+    again = await _update(home, _serving(FakeFetcher(), _FLOWS, "triage"), _never)
+    assert _placed_names(again) == ["triage"]
+
+@pytest.mark.asyncio
+async def test_a_ds_store_finder_writes_while_the_questions_are_up_refuses_nothing(
+    tmp_path: Path,
+) -> None:
+    """Opening a copy in Finder to decide about it writes one, and the hash never counts one."""
+    home = _home(tmp_path)
+    lint = _placed(home, "lint", extra={"prompts/review.md": b"# review\n"})
+    release = _placed(home, "release")
+
+    def looking_in_finder(question: str) -> bool:
+        for folder in (lint, lint / "prompts", release):
+            (folder / ".DS_Store").write_bytes(_FINDER)
+        return True
+
+    fetcher = _serving(
+        FakeFetcher(), _FLOWS, "lint", "release", depending={"lint": 'dependencies = ["httpx"]'}
+    )
+    updated = await _update(home, fetcher, looking_in_finder)
+
+    assert updated.got.unwritten == ()
+    assert _placed_names(updated) == ["lint", "release"]
+
+@pytest.mark.asyncio
+async def test_a_copy_only_opened_and_read_while_the_questions_are_up_is_still_replaced(
+    tmp_path: Path,
+) -> None:
+    """Every file read and its times moved, as an editor opening it does: content is what counts."""
+    home = _home(tmp_path)
+    triage = _placed(home, "triage")
+    _changed(triage)
+
+    def reading(question: str) -> bool:
+        for path in triage.rglob("*"):
+            if path.is_file():
+                path.read_bytes()
+                os.utime(path, (1_000_000_000, 1_000_000_000))
+        return True
+
+    updated = await _update(home, _serving(FakeFetcher(), _FLOWS, "triage"), reading)
+
+    assert updated.got.unwritten == ()
+    assert (triage / "__init__.py").read_bytes() == _MODULE_NOW
+
+@pytest.mark.asyncio
+async def test_a_copy_renamed_during_the_questions_is_refused_and_nothing_takes_its_place(
+    tmp_path: Path,
+) -> None:
+    """Kept under a name of the operator's own: gone from where it was measured, and left there.
+
+    Inspection passed over the copy as the one a download replaces, so a download placed now would
+    stand beside the renamed copy declaring every name it declares, with nothing having checked.
+    """
+    home = _home(tmp_path)
+    triage = _placed(home, "triage")
+    _changed(triage)
+    mine = workflows_dir(home) / "triage_mine"
+
+    def renaming(question: str) -> bool:
+        triage.rename(mine)
+        return True
+
+    updated = await _update(home, _serving(FakeFetcher(), _FLOWS, "triage"), renaming)
+
+    assert _unwritten(updated) == [("triage", ConflictError)]
+    assert f"{triage} is gone" in str(updated.got.unwritten[0].refusal)
+    assert sorted(path.name for path in workflows_dir(home).iterdir()) == ["triage_mine"]

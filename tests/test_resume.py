@@ -901,6 +901,28 @@ async def test_a_directory_rewritten_wholesale_names_five_files_and_counts_the_r
     assert "step05.py" not in message, "the sixth file of fifteen was named, so nothing is bounded"
 
 @pytest.mark.asyncio
+async def test_a_run_recorded_clean_resumes_after_finder_leaves_a_ds_store_in_it(
+    tmp_path: Path,
+) -> None:
+    """Finder leaves a `.DS_Store` in a folder it opens, at the top and a level down alike.
+
+    Opening the workflow's directory to look at it is no edit to what the ledger was written by, so
+    the resume goes on to the workflow rather than refusing the run over a file nobody wrote.
+    """
+    dispatched: list[str] = []
+    harness = _fakes(tmp_path, dispatched)
+    home = _home(tmp_path)
+    directory = _directory(home)
+    _clear()
+    await api.run(harness.services, PROJECT, "triage", LABEL, (), home=home)
+
+    (directory / ".DS_Store").write_bytes(b"\x00\x00\x00\x01Bud1")
+    (directory / "prompts" / ".DS_Store").write_bytes(b"\x00\x00\x00\x01Bud1")
+    await api.resume(harness.services, PROJECT, LABEL, home=home)
+
+    assert len(handed) == 2, "the resume never reached the workflow the run was recorded by"
+
+@pytest.mark.asyncio
 @pytest.mark.usefixtures("_forgotten_afterwards")
 async def test_a_resume_of_an_untouched_directory_replays_although_the_run_imported_it_first(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

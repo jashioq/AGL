@@ -54,10 +54,10 @@ apparatus behind it, where it lives.
 
 Everything structural is **derived from the tree**, never from a list typed here. The port/suite
 parity of #7 walks `src/agl/ports/` and `tests/contracts/`; the connector mutation of #6 walks
-`src/agl/adapters/`; the command enumeration of #8 walks the parser object `agl` itself builds. A
-ninth port, a third connector or a sixth command is covered the moment it exists, and its author
-need do nothing to be measured. That is `tests/test_contract_listings.py`'s rule applied one floor
-up, and it is the difference between a measurement and a memo.
+`src/agl/adapters/`; the command enumeration of #8 walks the parser object `agl` itself builds.
+Another port, connector or command is covered the moment it exists, and its author need do nothing
+to be measured. That is `tests/test_contract_listings.py`'s rule applied one floor up, and it is
+the difference between a measurement and a memo.
 
 ## No test here spends a token, and none of them can
 
@@ -614,7 +614,8 @@ def test_vendor_containment_is_a_pair_of_instruments() -> None:
         f"no module under {directory} names the {binary!r} binary, so `scripts/check`'s gate is "
         f"searching for something that does not exist and would report zero violations against "
         f"any tree at all. A gate that cannot find its own subject is not containing it - this is "
-        f"the same non-vacuity `tests/test_contract_firing.py` takes once for all six contracts."
+        f"the same non-vacuity `tests/test_contract_firing.py` takes for every contract in "
+        f"`.importlinter`."
     )
 
     declared = tomllib.loads(PYPROJECT_FILE.read_text())["project"]["dependencies"]
@@ -736,9 +737,8 @@ def test_deleting_an_adapter_package_dangles_the_container_alone(
 #
 # Derived from the tree on both sides. The ports come from walking `src/agl/ports/` for a class with
 # `ABC` in its bases; the suites come from walking `tests/contracts/` for its public modules. A
-# ninth port added later fails this until it has a suite, and its author need do nothing to be
-# policed - which is the property, since a hand-maintained list here would agree with whoever last
-# edited it.
+# port added later fails this until it has a suite, and its author need do nothing to be policed -
+# which is the property, since a hand-maintained list here would agree with whoever last edited it.
 #
 # **The honest exception, recorded rather than skipped past.** Six of the agent suite's eight
 # clauses **skip** against the real adapters, and that is a fact about what a free instrument can

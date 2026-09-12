@@ -46,9 +46,10 @@ from agl.cli import main
 from agl.cli.commands import resume as resume_command
 from agl.config import container, registry, sources
 from agl.ports.agent import Claude, Restriction
+from agl.ports.errors import UpstreamUnavailable
 from agl.ports.home_layout import RunScope, workspace_dir
 from agl.ports.ids import ProjectName, RunLabel
-from agl.ports.sync import Syncer
+from agl.ports.sync import Syncer, SyncOutcome
 from agl.ports.tree_layout import TreesRoot
 from agl.sdk.params import RefusingParser, arg
 from agl.sdk.roles import Role, role
@@ -127,6 +128,12 @@ def _point(name: str) -> EntryPoint:
     return EntryPoint(name=name, value=f"{__name__}:{name}", group=registry.GROUP)
 
 POINTS: Final = (_point("flagged"), _point("stepping"))
+
+class _Unstartable(Syncer):
+    """An installer that could not be started, raising what `UvSyncer` raises for a missing uv."""
+
+    async def sync(self, workspace: Path) -> SyncOutcome:
+        raise UpstreamUnavailable("uv is not installed, or 'uv' is not on PATH")
 
 def _fakes(tmp_path: Path) -> container.FakeServices:
     """Target #8's deployment, seeded so `History` has a default ref and a commit to resolve."""
@@ -434,4 +441,23 @@ def test_an_install_this_command_could_not_finish_stops_the_resume_before_it_wal
     assert _main(harness, "resume", "auth", syncer=installer) == 6
 
     assert "error: no solution found" in capsys.readouterr().err
+    assert flagged_with == []
+
+def test_an_installer_that_could_not_be_started_stops_the_resume_before_it_walks(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """uv missing: exit 6, in the line `main` prints for any refusal, and no workflow re-entered.
+
+    The first of the three rules, which `tests/test_api.py` pins for `api.run` and the `new`, `get`
+    and `update` suites each pin through their command. Nothing was attempted, so there is no
+    verdict of uv's to weigh.
+    """
+    harness = _fakes(tmp_path)
+    assert _main(harness, "run", "flagged", "-n", "auth", "-r", "add oauth") == 0
+    flagged_with.clear()
+    capsys.readouterr()
+
+    assert _main(harness, "resume", "auth", syncer=_Unstartable()) == 6
+
+    assert capsys.readouterr().err == "agl: uv is not installed, or 'uv' is not on PATH\n"
     assert flagged_with == []

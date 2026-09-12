@@ -25,13 +25,20 @@ rule that a real `TaskGroup` would - the leaves are the same objects either way.
 group cannot say is that a group *reaches* the handler at all, which is a fact about `cli/main.py`
 and is asserted there, through the console entry point, on workflows that open a `TaskGroup` for
 real: `tests/cli/test_main.py`. Both halves are needed, and neither is the other's duplicate.
+
+**A run and a command answer by that one rule, and one test holds them to it.** `joint_status` is
+the rule over a set of codes: `exit_status` hands it a group's leaves, and `_refusal_status` in
+`cli/commands/__init__.py` the refusals `agl get` and `agl update` went on past. `_OUTCOMES` hands
+both the same outcomes, a 70 among some, so a second rule written into either caller fails there.
 """
 
 import ast
 import inspect
 from typing import Final, get_type_hints
+import pytest
 from agl.cli import exit_codes
-from agl.cli.exit_codes import EXIT_CODES, exit_code_for, exit_status, leaves
+from agl.cli.commands import _refusal_status
+from agl.cli.exit_codes import EXIT_CODES, exit_code_for, exit_status, joint_status, leaves
 from agl.ports import errors
 from agl.ports.errors import (
     AglError,
@@ -62,6 +69,23 @@ _PUBLISHED: Final[tuple[tuple[type[AglError], int], ...]] = (
     (Stop, 7),
     (DisagreeingRefusals, 8),
     (InternalError, 70),
+)
+
+# Outcomes that arrive together, and the one status each set comes to whether a run's concurrent
+# children raised them or a command went on past them. Written out for `_PUBLISHED`'s reason.
+_OUTCOMES: Final[tuple[tuple[tuple[AglError, ...], int], ...]] = (
+    ((NotFoundError("a"),), 3),
+    ((NotFoundError("a"), NotFoundError("b")), 3),
+    ((UpstreamUnavailable("a"), UpstreamUnexpected("b")), 6),
+    ((NotFoundError("a"), InputError("b")), 8),
+    ((NotFoundError("a"), InputError("b"), NotFoundError("c")), 8),
+    ((Stop("a"), UpstreamError("b")), 8),
+    ((DisagreeingRefusals("a"), NotFoundError("b")), 8),
+    ((InternalError("a"),), 70),
+    ((InternalError("a"), NotFoundError("b")), 70),
+    ((InternalError("a"), NotFoundError("b"), InputError("c")), 70),
+    ((Stop("a"), InternalError("b")), 70),
+    ((DisagreeingRefusals("a"), InternalError("b")), 70),
 )
 
 class ReviewNotConverging(Stop):
@@ -168,25 +192,62 @@ def test_leaves_agree_when_their_codes_agree_and_not_when_their_classes_do() -> 
     `UpstreamUnavailable` and `UpstreamUnexpected` appear in no table - both inherit
     `UpstreamError`'s 6, deliberately, "so a caller that does not care which it was catches this
     and a script still sees one code". Two classes and one answer is therefore agreement, and a
-    rule comparing classes would answer 70 for a run that failed one way twice.
+    rule comparing classes would answer 8 for a run that failed one way twice.
     """
     unreachable = UpstreamUnavailable("its CLI is not on PATH")
     unparseable = UpstreamUnexpected("it finished with no reporting-tool payload")
 
     assert exit_status(ExceptionGroup("two chunks", [unreachable, unparseable])) == 6
 
-def test_leaves_that_disagree_are_seventy_because_no_one_of_them_is_the_answer() -> None:
-    """"For leaves that disagree, 70" - and 70 here is a decision, not a fallback.
+def test_leaves_that_disagree_are_eight_because_no_one_of_them_is_the_answer() -> None:
+    """"For leaves that disagree, 8" - a code of their own, and neither leaf's.
 
-    A run that failed several different ways is genuinely not attributable to one code, and
-    `InternalError` is the honest answer rather than a guess. The pair below is the smallest
-    version of that: both are refusals a user can act on, they say to do different things, and any
-    rule picking one of them would publish a number that named one failure and hid the other.
+    A run that failed several different ways is genuinely not attributable to one code. The pair
+    below is the smallest version of that: both are refusals a user can act on, they say to do
+    different things, and any rule picking one of them would publish a number that named one
+    failure and hid the other. 70 would hide both, sending an operator to report a bug in AGL about
+    a run in which AGL had a name for everything that happened.
     """
     group = ExceptionGroup("two chunks", [UpstreamError("no answer"), ConflictError("taken")])
 
-    assert exit_status(group) == 70
-    assert exit_status(group) == exit_code_for(InternalError)
+    assert exit_status(group) == 8
+    assert exit_status(group) == exit_code_for(DisagreeingRefusals)
+
+def test_a_deliberate_stop_beside_a_failure_is_eight_like_any_other_disagreement() -> None:
+    """7 says the workflow ended on purpose and 6 that something broke, and no answer is both.
+
+    A `Stop` is named as surely as a failure is, so it is compared like any other leaf rather than
+    excused for being deliberate - a workflow's own subclass of it included, which reaches 7 up
+    the class tree before it is compared at all.
+    """
+    stopped = Stop("nothing left to pick up")
+    broke = UpstreamError("no answer")
+
+    assert exit_status(ExceptionGroup("two chunks", [stopped, broke])) == 8
+    assert exit_status(ExceptionGroup("two", [ReviewNotConverging("x"), ConflictError("y")])) == 8
+
+def test_a_leaf_that_resolves_to_seventy_keeps_the_whole_group_at_seventy() -> None:
+    """70 is not one answer among the others: it says AGL had no name for what was raised.
+
+    So a group holding one is 70 whatever sits beside it - an untranslated exception, an
+    `InternalError` or a branch nobody mapped, beside a failure, a deliberate end or several of
+    them. 8 in its place would tell a script that every failure in the run had a name, and the one
+    that had none is the one a report is for.
+    """
+
+    class _UnmappedBranch(AglError):
+        """A branch of the hierarchy nobody remembered to map."""
+
+    beside: tuple[list[Exception], ...] = (
+        [OSError("not ours"), UpstreamError("no answer")],
+        [InternalError("an invariant"), ConflictError("taken")],
+        [_UnmappedBranch("no code"), InputError("unusable")],
+        [Stop("done"), OSError("not ours")],
+        [InternalError("an invariant"), UpstreamError("no answer"), ConflictError("taken")],
+    )
+
+    for mixed in beside:
+        assert exit_status(ExceptionGroup("chunks", mixed)) == 70, mixed
 
 def test_a_deliberate_stop_inside_a_group_is_still_seven() -> None:
     """The group rule's other half, and the half a `Stop` subclass reaches too.
@@ -213,12 +274,27 @@ def test_a_leaf_resolves_the_same_however_deeply_its_group_is_nested() -> None:
 
     assert exit_status(deep) == exit_status(shallow) == exit_status(leaf)
 
+def test_a_disagreement_and_a_seventy_count_from_whatever_depth_the_leaf_sits_at() -> None:
+    """The rule reads leaves, so both of its decisions are made about leaves and not about children.
+
+    A rule reading `group.exceptions` once would resolve the inner group itself - no `AglError` - to
+    70, and then hold at 70 a run in which every failure was named. The second assertion is the
+    other direction: the leaf nobody translated is one group down, and it still decides the run.
+    """
+    upstream = UpstreamError("no answer")
+    taken = ConflictError("taken")
+    untranslated = OSError("not ours")
+
+    assert exit_status(ExceptionGroup("outer", [ExceptionGroup("inner", [upstream]), taken])) == 8
+    assert exit_status(ExceptionGroup("outer", [ExceptionGroup("in", [untranslated]), taken])) == 70
+
 def test_a_leaf_nobody_translated_takes_part_in_agreement_like_any_other() -> None:
     """The module's one decision, reaching inside a group: an untranslated exception is our bug.
 
-    So it resolves to 70 as a leaf exactly as it does on its own, and it agrees with an
-    `InternalError` beside it rather than being excused from the comparison - which is what keeps a
-    group from ever answering with a code no leaf of it actually had.
+    So it resolves to 70 as a leaf exactly as it does on its own, and it is compared like any other
+    leaf rather than excused from the comparison: it agrees with an `InternalError` beside it, and
+    beside a named failure its 70 holds the group, as any leaf's 70 would - which is what keeps a
+    failure nobody named from hiding behind a disagreement with one somebody did.
     """
     ours = ExceptionGroup("two chunks", [InternalError("an invariant"), OSError("not ours")])
 
@@ -268,3 +344,21 @@ def test_a_keyboard_interrupt_is_not_this_modules_to_answer_for() -> None:
     assert get_type_hints(exit_status)["error"] is Exception
     assert not isinstance(KeyboardInterrupt(), Exception)
     assert not isinstance(SystemExit(), Exception)
+
+# --- one rule, for a run and for a command -------------------------------------------------------
+
+@pytest.mark.parametrize(("outcomes", "status"), _OUTCOMES)
+def test_a_run_and_a_command_come_to_one_status_over_the_same_outcomes(
+    outcomes: tuple[AglError, ...], status: int
+) -> None:
+    """The same outcomes cost the same whether a run's children raised them or a command refused.
+
+    `agl get` and `agl update` go on past each refusal, so refusals whose codes differ are an ending
+    both are built to reach, as chunks failing different named ways are for a run. So both answer by
+    `joint_status`, and a rule of its own written into `_refusal_status` fails here rather than in
+    any `agl get` test - no refusal site builds a 70 today, so only the rows holding one tell a
+    precedence kept by one caller from the same rule dropped by the other.
+    """
+    assert exit_status(ExceptionGroup("chunks", outcomes)) == status
+    assert _refusal_status(outcomes) == status
+    assert joint_status({exit_code_for(one) for one in outcomes}) == status

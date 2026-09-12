@@ -26,9 +26,10 @@ stands, and the provenance says what each was placed as.
 
 **What an update may replace is decided next, before anything is downloaded.** `replacements`
 refuses a moved copy standing under another name than it was placed as, one that is a link and one
-that cannot be measured - each as a value, never raised - and measures the rest: whether anything
-in it changed since it was placed, and the dependencies it declares on disk, as written. Its
-downloads are one per repository at a recorded ref, and its questions are `agl update`'s own.
+that cannot be measured - each as a value, never raised - and measures the rest: the hash it stands
+at, which says whether anything in it changed since it was placed and which placement holds it to as
+it replaces it, and the dependencies it declares on disk, as written. Its downloads are one per
+repository at a recorded ref, and its questions are `agl update`'s own.
 """
 
 import os
@@ -521,14 +522,16 @@ async def test_a_moved_copy_standing_as_it_was_placed_is_replaceable_and_measure
 
     replacing = replacements(home, await _moved(home))
 
+    measured = placed_hash(entry)
     assert replacing == Replacements(
-        (ReplaceableWorkflow(entry, _recorded(entry), False, ("httpx>=0.27", "rich")),), ()
+        (ReplaceableWorkflow(entry, _recorded(entry), measured, ("httpx>=0.27", "rich")),), ()
     )
+    assert not replacing.replaceable[0].changed
 
 async def test_a_moved_copy_with_anything_in_it_changed_since_it_was_placed_measures_changed(
     tmp_path: Path,
 ) -> None:
-    """A file added is a change as much as a line edited: the hash is over every file there."""
+    """A file added is a change as much as a line edited: the hash is over names and bytes alike."""
     home = _home(tmp_path)
     edited = _placed(home, "edited")
     (edited / "__init__.py").write_bytes(b"# the operator's own\n")
@@ -541,6 +544,41 @@ async def test_a_moved_copy_with_anything_in_it_changed_since_it_was_placed_meas
         ("added", True),
         ("edited", True),
     ]
+
+async def test_a_changed_copy_keeps_the_hash_it_measured_and_not_merely_that_it_changed(
+    tmp_path: Path,
+) -> None:
+    """The hash of the copy as the operator left it, which is what the question put about it covers.
+
+    Placement measures the copy again against this as it replaces it, so an edit saved while that
+    question was on screen is one the answer never covered - which a bare "changed" cannot tell.
+    """
+    home = _home(tmp_path)
+    entry = _placed(home, "triage")
+    (entry / "__init__.py").write_bytes(b"# the operator's own\n")
+    edited = placed_hash(entry)
+
+    (one,) = replacements(home, await _moved(home)).replaceable
+
+    assert one.measured == edited
+    assert one.measured != one.provenance.content_hash
+    assert one.changed
+
+async def test_what_each_copy_measured_is_handed_on_under_the_workflow_downloaded_for_it(
+    tmp_path: Path,
+) -> None:
+    """One entry per replaceable copy, changed or not, under the workflow its download asks for."""
+    home = _home(tmp_path)
+    triage = _placed(home, "triage")
+    lint = _placed(home, "lint", _RELEASED)
+    (lint / "notes.md").write_bytes(b"# notes\n")
+
+    replacing = replacements(home, await _moved(home))
+
+    assert replacing.measured == {
+        _recorded(lint).workflow: placed_hash(lint),
+        _recorded(triage).workflow: placed_hash(triage),
+    }
 
 async def test_a_moved_copy_under_another_name_than_it_was_placed_as_is_a_conflict(
     tmp_path: Path,
@@ -629,7 +667,8 @@ def _replaceable(
     unspelled = RequestedWorkflow(repository, f"workflows/{name}", "")
     workflow = replace(unspelled, spec=str(unspelled))
     provenance = Provenance(workflow, _PLACED_FROM, "0" * 64)
-    return ReplaceableWorkflow(Path("/nowhere") / name, provenance, changed, declared)
+    measured = ("1" if changed else "0") * 64
+    return ReplaceableWorkflow(Path("/nowhere") / name, provenance, measured, declared)
 
 async def test_the_downloads_are_one_per_repository_at_a_recorded_ref_each_workflow_asked_once(
     tmp_path: Path,

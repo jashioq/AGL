@@ -429,6 +429,30 @@ def test_bytecode_written_after_placement_leaves_the_measured_hash_where_it_was(
 
     assert placed_hash(directory) == before
 
+def test_a_downloaded_ds_store_is_placed_and_left_out_of_the_recorded_hash(
+    tmp_path: Path,
+) -> None:
+    """Committed upstream at the top and a level down, and placed as it came, unlike bytecode.
+
+    Nothing runs a `.DS_Store`, so placing one puts no code past what the hash measures. It is left
+    out of that hash as a download is measured in memory - the answer the same download without it
+    records - and as the placed copy is measured back off disk, which is that answer again.
+    """
+    kept = {"flows/review.py": FetchedFile(b"REVIEW = 1\n")}
+    finder = FetchedFile(b"\x00\x00\x00\x01Bud1")
+    arrived = {**kept, ".DS_Store": finder, "flows/.DS_Store": finder}
+
+    placeable = _placeable(_one(_download("triage", extra=arrived), _home(tmp_path)))
+    directory = _placed(placeable, tmp_path / "placed")
+
+    without = _placeable(_one(_download("triage", extra=kept), _home(tmp_path)))
+    unshipped = parsed_provenance(Path(PROVENANCE_FILE), without.files[PROVENANCE_FILE].content)
+    recorded = read_provenance(directory)
+    assert recorded is not None
+    assert {".DS_Store", "flows/.DS_Store"} <= set(placeable.files)
+    assert recorded.content_hash == unshipped.content_hash
+    assert placed_hash(directory) == recorded.content_hash
+
 def test_an_edit_to_a_placed_file_moves_the_measured_hash(tmp_path: Path) -> None:
     directory = _placed(_placeable(_one(_download("triage"), _home(tmp_path))), tmp_path / "placed")
     before = placed_hash(directory)

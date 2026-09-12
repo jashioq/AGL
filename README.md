@@ -96,10 +96,11 @@ reason following. Only the `placed` lines go to stdout, so a script reading it s
 the questions and everything else go to stderr. The exit status is 0 unless a workflow was
 refused, because declining is an answer and not a failure. A refusal exits with AGL's code for
 that kind of failure — 3 where a repository, a ref or a directory is not there, 6 where the
-download itself failed — and refusals that would exit differently exit 8 together, a code
-`agl get` and `agl update` keep for exactly that. What was placed is then installed as `agl new`
-installs; the summary is printed before that install starts, so an install that is refused still
-leaves it on your terminal.
+download itself failed — and refusals that would exit differently exit 8 together, a code kept for
+exactly that. What was placed is then installed as `agl new` installs; the summary is printed
+before that install starts, so an install that is refused still leaves it on your terminal. One
+that fails — uv missing, or refused with no environment to fall back on — exits 6, or 8 beside a
+refusal that would exit differently: its code joins the refusals' rather than replacing them.
 
 Each workflow `agl get` places holds one file it did not arrive with, `.agl-provenance.json`: the
 owner, repository, path and ref it was asked for — `null` for the default branch — the full sha of
@@ -139,12 +140,13 @@ it was placed from — so one placed from a branch goes on following that branch
 what `agl update` is for. Two others are, each only where it applies:
 
 - **Your copy has changed since it was placed.** Where its files no longer measure to the hash its
-  provenance file records — an edit, a file added or deleted, even a `.DS_Store` Finder left in
-  it — replacing the copy would discard those changes for good, so `agl update` asks first:
+  provenance file records — an edit, a file added or deleted — replacing the copy would discard
+  those changes for good, so `agl update` asks first:
   `<path> has changed since it was placed from 0b496e9, and updating it to f548e57 replaces it
   whole, discarding those changes. Update it? [y/n]`. No keeps your copy exactly as it is. A
-  file's mode and anything under `__pycache__` are not measured, so a change to those alone is
-  replaced without the question.
+  file's mode, anything under `__pycache__` and the `.DS_Store` Finder leaves in a folder it opens
+  are not measured, so a change to those alone is replaced without the question. A `.git` in the
+  copy is measured like the rest of it, since replacing the copy deletes the repository too.
 - **The new version declares third-party dependencies your copy does not.** Each one the download
   writes that your copy does not write the same way is named, quoted, as `agl get` names them, and
   asked about; one your copy already writes the same way is not asked about again.
@@ -152,17 +154,23 @@ what `agl update` is for. Two others are, each only where it applies:
 Each question is answered as under `agl get`, so where no answer can be read a changed copy is
 kept. A copy standing under another name than the one it was placed as — renamed, or copied with
 its provenance file — and a copy that is a link are refused rather than replaced, and nothing is
-downloaded for them. What is replaced gets a provenance file of its own, keeping the ref and
-recording the commit it came from now, and everything replaced is installed once, after the
-summary, as `agl get` installs.
+downloaded for them. Each copy is measured once more just before it is replaced, and one that
+changed after it was first measured — an edit saved while a question was on screen, or while the
+downloads were fetched — is refused rather than replaced and left exactly as it stands, and so is
+one that is gone, or is a link or no directory at all, by then; the next `agl update` measures it
+afresh. A `.DS_Store` Finder writes while you look is not a change. What is replaced gets a
+provenance file of its own, keeping the ref and recording the commit it came from now, and
+everything replaced is installed once, after the summary, as `agl get` installs.
 
 A workflow still current gets no line. Every other gets one, as under `agl get`: `updated`,
 `declined` or `refused`, its name and where it came from, an `updated` line ending in the commit it
 was placed from and the one it is at now — `0b496e9 -> f548e57` — and a declined or refused one in
 a few words on why, each refusal's full reason following. Only the `updated` lines go to stdout.
 The exit status is `agl get`'s: 0 unless a workflow was refused, whichever phase refused it, and
-then the code those refusals share, or 8 where they disagree. A name that reaches nothing
-`agl get` placed exits 3 before anything is asked or downloaded.
+then the code those refusals share, or 8 where they disagree. A copy that changed after it was
+measured, or is gone or no longer a directory by then, refuses with 4, and its line ends
+`(not written)`. A name that reaches nothing `agl get` placed exits 3 before anything is asked or
+downloaded.
 
 ## Removing a workflow
 

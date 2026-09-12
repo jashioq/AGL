@@ -43,11 +43,12 @@ Three shapes found in this tree are **not** on the list, and each is left off fo
 A number is a citation when it points into prose and an identifier when something resolves it. Both
 exemptions are the second kind, and both were checked by breaking them rather than by reading them.
 
-**Contract numbers.** `[importlinter:contract:1]` through `[importlinter:contract:6]` are section
-ids import-linter itself consumes. `tests/test_contract_firing.py`'s `CONTRACT_TYPES` builds a
+**Contract numbers.** Every `[importlinter:contract:N]` in `.importlinter` is a section id
+import-linter itself consumes. `tests/test_contract_firing.py`'s `CONTRACT_TYPES` builds a
 contract object per number, `tests/test_contract_listings.py` names three of the sections as
 constants, and `tests/test_measurable_targets.py`'s `_contract` resolves one against the real file.
-Renumbering the sixth contract to a seventh was tried: five tests fail and name it.
+Renumbering the last of them was tried: tests in `tests/test_contract_firing.py` and in this file
+fail, and every failure names it.
 
 **Target numbers.** `tests/test_measurable_targets.py`'s `SETTLED` is a `Mapping[int, ...]` keyed by
 target number, and

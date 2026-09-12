@@ -57,11 +57,11 @@ drops "orphans". `src/agl/__init__.py` stays, so `src/agl` is that portion root 
 subpackage beneath it leaves the graph entirely. `grimp` held 106 `agl` modules then and 12 with
 the twelve deleted, of which three were `agl`'s children: `api` and `testing`, which are single
 modules, and `sdk`, which carries an `__init__.py` of its own. `lint-imports` - which reports
-`Analyzed 131 files, 652 dependencies` and five contracts kept today - then exits 1 on
+every contract kept on the tree as it stands - then exits 1 on
 `Missing layer in container 'agl': module <one of them> does not exist` and evaluates **no contract
 at all**. Which one it names varies between runs, the layers being checked in set order, so the
-message is not a fingerprint to match on - what is stable is that it stops there. Not four kept and
-one broken: a layers contract naming a module the graph does not hold
+message is not a fingerprint to match on - what is stable is that it stops there. Not one contract
+broken and the others kept: a layers contract naming a module the graph does not hold
 fails before a single import is looked at, and the rest are never reached. Every test
 `tests/test_contract_firing.py` collects fails with it, that file existing to fire each
 contract at the real graph.

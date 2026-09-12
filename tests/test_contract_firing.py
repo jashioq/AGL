@@ -1,5 +1,5 @@
 """Structural test: every contract in `.importlinter` refuses the violation it was written to
-refuse. Five contracts, and before this file nothing in this suite had watched one of them say no.
+refuse. Before this file, nothing in this suite had watched one of them say no.
 
 `tests/test_contract_listings.py` next door checks that the hand-maintained *listings* inside three
 of the contracts still agree with the tree they police. That is a weaker and different claim: a
@@ -8,7 +8,7 @@ that no longer exists, if an `ignore_imports` expression quietly swallows the wh
 if a later edit turns a `forbidden` contract into one whose `source_modules` and `forbidden_modules`
 overlap - import-linter skips overlapping pairs in silence, which is exactly how contract 2 comes to
 have no opinion about `agl.ports` itself. **A contract nobody has seen break is a contract nobody
-has seen work.** Four of the five were once found failing open by inspection; this file is what
+has seen work.** Four of them were once found failing open by inspection; this file is what
 would have found them by measurement.
 
 So each probe below fabricates the import that contract exists to catch, and asserts that *that*
@@ -26,7 +26,7 @@ same breath.
 is what makes the overlaps visible instead of incidental:
 
   * every probe here breaks exactly one contract, which is a stronger result than it looks. It
-    means each of the five is load-bearing on its own: delete it and a fabrication that is caught
+    means each of them is load-bearing on its own: delete it and a fabrication that is caught
     today is caught by nothing. A row whose `breaks` holds two numbers is not a defect - it is an
     overlap somebody had to come here and write down, which is the whole reason the field is a set
     rather than a boolean.
@@ -95,8 +95,8 @@ CONFIG_FILE: Final = REPO_ROOT / ".importlinter"
 
 # The contract *types* AGL uses, and the classes import-linter checks them with. Not a registry
 # lookup: `importlinter.api.read_configuration` is the documented way in and it stops at the parsed
-# options, so the three classes are named here instead. A seventh contract of a fourth type fails
-# below with a message saying so rather than being quietly skipped.
+# options, so the three classes are named here instead. A contract of any other type fails below
+# with a message saying so rather than being quietly skipped.
 CONTRACT_CLASSES: Final[Mapping[str, type[Contract]]] = {
     "layers": LayersContract,
     "forbidden": ForbiddenContract,
@@ -106,7 +106,7 @@ CONTRACT_CLASSES: Final[Mapping[str, type[Contract]]] = {
 # Contract numbers are stable - `.importlinter`'s header says so, and a number there is the
 # section id import-linter reads - and the type is half of what a number means: contract 4
 # becoming a `forbidden` contract would leave every probe below still running and no longer
-# probing what it says it does. This is where all five numbers are pinned,
+# probing what it says it does. This is where every number is pinned,
 # `tests/test_contract_listings.py` having handed over the four it used to pin when it stopped
 # reading contract 1.
 CONTRACT_TYPES: Final[Mapping[str, str]] = {
@@ -123,7 +123,7 @@ UNDECLARED_MEMBER: Final = "agl.probe_that_no_layer_declares"
 
 @dataclass(frozen=True)
 class Probe:
-    """One import that does not exist, and what happens to the five contracts when it does.
+    """One import that does not exist, and what happens to every contract when it does.
 
     `contract` is the number this probe is *of* - the contract whose failure is the point. `breaks`
     is every number that goes broken, which includes `contract` and is asserted as a set, so a
@@ -177,15 +177,15 @@ PROBES: Final[tuple[Probe, ...]] = (
     # "The dependency rule": "siblings and may not import each other". Contract 1 once had three
     # probes and this was not one of them: the row above was the only independence probe there was,
     # so this pair was enforced by nothing that anything checked. Respelling it `:` left
-    # `lint-imports` at five kept, zero broken, and the whole suite green - which is this file's own
-    # thesis arriving one row short.
+    # `lint-imports` reporting every contract kept, and the whole suite green - which is this file's
+    # own thesis arriving one row short.
     #
     # **The direction is forced, and a probe the other way round would pass for the wrong reason.**
     # Contract 5 forbids `agl.* -> agl.adapters` and so already catches `sdk -> adapters` on its
-    # own - measured: that fabrication breaks 1, 5 and 6, and still breaks 5 and 6 with this pair
-    # spelled `:`, so a probe of it would report a failure whether or not contract 1 had an opinion.
-    # `adapters -> sdk` is the direction nothing else covers, and it discriminates exactly: contract
-    # 1 alone on the file as it stands, and nothing at all under the `:` mutation.
+    # own - measured on import-linter 2.15, that fabrication breaks contracts 1 and 5, and 5 alone
+    # with this pair spelled `:`, so a probe of it would report a failure whether or not contract 1
+    # had an opinion. `adapters -> sdk` is the direction nothing else covers, and it discriminates
+    # exactly: contract 1 alone on the file as it stands, and nothing at all under the `:` mutation.
     Probe(
         contract="1",
         importer="agl.adapters.git.history",
@@ -390,10 +390,10 @@ def test_contract_1_breaks_on_a_top_level_member_no_layer_declares(
         f"removed, which silently disables it - an unlisted package is unpoliced by anything."
     )
 
-# --- That the five above are the five there are ---------------------------------------------------
+# --- That the contracts probed above are the contracts there are ---------------------------------
 
 def test_every_contract_in_the_file_has_a_probe(contracts: Mapping[str, Contract]) -> None:
-    """A seventh contract added without a probe is a rule nobody has watched work.
+    """A contract added without a probe is a rule nobody has watched work.
 
     This is the assertion that keeps this file from decaying the way the thing it tests decayed:
     the probes are a hand-written table, so without this they cover whatever they covered on the

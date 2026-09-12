@@ -9,6 +9,7 @@ from types import TracebackType
 from typing import Final
 from agl.api import Ask
 from agl.cli import commands
+from agl.cli.commands import _print_refusal
 from agl.cli.commands import clear as clear_command
 from agl.cli.commands import get as get_command
 from agl.cli.commands import init as init_command
@@ -133,7 +134,7 @@ def main(argv: Sequence[str] | None = None, *, compose: Compose | None = None) -
         print(f"stopped: {stop}")
         return exit_status(stop)
     except AglError as refusal:
-        print(f"{_PROGRAM}: {refusal}", file=sys.stderr)
+        _print_refusal(refusal)
         return exit_status(refusal)
     except ExceptionGroup as concurrent:
         return _concurrent(concurrent)
@@ -282,12 +283,19 @@ def _severally(group: ExceptionGroup[Exception]) -> str:
             f"- so that is what the run exits with, exactly as any one of them raised on its own "
             f"would have:\n{named}"
         )
+    if status == exit_code_for(InternalError):
+        return (
+            f"this run's concurrent children raised, and they do not resolve to one exit status - "
+            f"but at least one of them is exit {status}, which no disagreement sets aside: AGL had "
+            f"no name for what it raised, or broke an invariant of its own, so the run exits "
+            f"{status} as that one would have on its own. All of them, with the status each "
+            f"resolves to on its own:\n{named}"
+        )
     return (
         f"this run's concurrent children raised, and they do not resolve to one exit status - so "
-        f"the run exits {status}. A run that failed several different ways is not attributable to "
-        f"one code, and `InternalError`'s is the honest answer rather than a guess at which "
-        f"of them was the real one, so read this {status} as 'these disagreed' and not as its "
-        f"usual 'file a bug'. All of them, with the status each resolves to on its own:\n{named}"
+        f"the run exits {status}, which says exactly that: AGL has a name for every one of them, "
+        f"and no one of them is the answer. All of them, with the status each resolves to on its "
+        f"own:\n{named}"
     )
 
 def _attributed(error: Exception) -> str:

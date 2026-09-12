@@ -1,10 +1,11 @@
 import argparse
+import asyncio
 import sys
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Coroutine, Iterable, Sequence
 from dataclasses import dataclass
 from typing import Final
 from agl import api
-from agl.cli.exit_codes import exit_code_for
+from agl.cli.exit_codes import exit_code_for, joint_status
 from agl.config.placement import Got
 from agl.config.questions import (
     Collision,
@@ -14,7 +15,7 @@ from agl.config.questions import (
     Question,
     ThirdPartyDependencies,
 )
-from agl.ports.errors import AglError, DisagreeingRefusals, InternalError
+from agl.ports.errors import AglError, InternalError
 from agl.ports.fetch import RefusedWorkflow
 from agl.ports.ids import ProjectName, RunLabel
 from agl.sdk._engine.services import Services
@@ -22,6 +23,8 @@ from agl.sdk._engine.services import Services
 __all__ = ["Registered"]
 
 type Registered = Callable[[], tuple[ProjectName, Services]]
+
+type _Report[T] = Callable[[T], None]
 
 _NOTHING_TO_REPORT: Final = 0
 
@@ -79,15 +82,42 @@ def _print_replays(label: RunLabel, replayed: api.Replayed) -> None:
         file=sys.stderr,
     )
 
-# `exit_status` answers a disagreement with `InternalError`'s code, which says AGL broke, and a
-# command that goes on past each refusal disagrees as a matter of course. ARCHITECTURE.md's "Errors
-# at the boundary" says why the answer here is a code of its own rather than a precedence.
+# `joint_status` is the rule a run's concurrent failures are answered by too, so the two cannot
+# drift apart. The 0 is this module's: nothing refused is a command's answer, not a table row.
 def _refusal_status(refusals: Iterable[AglError]) -> int:
     codes = {exit_code_for(refusal) for refusal in refusals}
     if not codes:
         return _NOTHING_TO_REPORT
-    agreed, *disagreeing = codes
-    return exit_code_for(DisagreeingRefusals) if disagreeing else agreed
+    return joint_status(codes)
+
+# The line `cli/main.py` prints for a refusal that reaches it. It lives here because `main` imports
+# this package and not the reverse, so a command that answers a refusal itself prints the same line.
+def _print_refusal(refusal: AglError) -> None:
+    print(f"agl: {refusal}", file=sys.stderr)
+
+# `api.get` and `api.update` hand the summary to `report` before they sync, so a named failure once
+# it is out finds every refusal's reason above it, and joins them by `_refusal_status` rather than
+# standing in for them by reaching `main`. One raised before the summary is re-raised untouched, and
+# one AGL has no name for is never caught: `main` answers both, the second with its traceback.
+def _status_after_summary[T](
+    operation: Callable[[_Report[T]], Coroutine[object, object, T]],
+    summarise: _Report[T],
+    refusals: Callable[[T], Iterable[AglError]],
+) -> int:
+    summarised: list[T] = []
+
+    def report(value: T) -> None:
+        summarise(value)
+        summarised.append(value)
+
+    try:
+        value = asyncio.run(operation(report))
+    except AglError as refusal:
+        if not summarised:
+            raise
+        _print_refusal(refusal)
+        return _refusal_status([*refusals(summarised[0]), refusal])
+    return _refusal_status(refusals(value))
 
 # Handed rows grouped by what became of each workflow rather than in the order asked, so the lines
 # on stdout arrive together and ahead of every note. One failure can refuse several workflows with

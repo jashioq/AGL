@@ -76,7 +76,8 @@ and back again if the placing does not finish, and moves an entry `agl remove` t
 own: it reads the provenance file of each workflow `agl get` placed, asks the `Fetcher` which
 commit its ref names now, and measures each copy that moved against the hash it recorded — which
 decides whether replacing that copy is asked about first — and it builds the downloads and the
-questions `get`'s phases then run with. `removal.py` is `agl remove`'s: it finds the one
+questions `get`'s phases then run with, and hands `placement.py` the hash each copy measured, which
+the copy must still measure when it is replaced. `removal.py` is `agl remove`'s: it finds the one
 entry a name reaches, never a dot-led one, and refuses an entry another member depends on, all
 before the question is put.
 
@@ -168,9 +169,12 @@ design: every download fetched and inspected, then every question asked, through
 is handed the way `init` is handed `ask`, and only then anything placed — so no question is put
 about a workspace the command has already changed, and a Ctrl-C among the questions leaves the
 workspace as it found it. `update` is the same three phases, `_placed_after_asking` being the one
-copy of them both commands run, over what its comparison found moved and with its own questions in
-place of `get`'s, and `remove` puts its one question before it takes anything. `tests/test_get.py`
-asserts that order from inside it, and `tests/test_update.py` from `update`'s side.
+copy of them both commands run, over what its comparison found moved, with its own questions in
+place of `get`'s and with the hash its comparison measured of each copy, which the last phase holds
+that copy to. A copy that no longer measures it by then is refused rather than asked about again,
+since that question would be put about a workspace the command has already changed. `remove` puts
+its one question before it takes anything. `tests/test_get.py` asserts that order from inside it,
+and `tests/test_update.py` from `update`'s side.
 
 **`testing.py`** — The workflow author's harness: `harness(tmp_path, agent=…)` builds an all-fakes
 bundle, `run(...)` and `resume(...)` drive `api` over it, `recorded` is every journal entry,
@@ -698,39 +702,65 @@ cannot be asked for and a split that only ever takes one of its two arms is not 
 
 **A `TaskGroup` hands back several answers at once, so a group has its own rule**: unwrap a
 single-exception group and map its leaf; several leaves whose codes agree take that code; leaves
-that disagree take 70, naming all of them, because a run that failed several different ways is
+that disagree take 8, naming all of them, because a run that failed several different ways is
 genuinely not attributable to one code and a guess would be this module inventing a precedence over
-the table. `leaves` flattens recursively — a workflow that fans out opens a `TaskGroup` and a child
-may open its own — so "a single-leaf group" is a fact about what the run did rather than about how
-deeply the workflow nested its concurrency. Agreement is compared on the resolved *code* and never on the
-class, which is why `UpstreamUnavailable` beside `UpstreamUnexpected` agrees at 6 with no second
-rule to keep in step with the table. `exit_status` and `leaves` take `Exception` and walk
-`ExceptionGroup`, deliberately not `BaseException` and `BaseExceptionGroup`: a Ctrl-C is the
-operator taking the process back rather than an outcome to report, and the faithful way to end on
-one is to die of the signal, which is what CPython does when nothing catches it. A shell tells the
-two apart even though `$?` reads 130 for both — a child that *died of* `SIGINT` stops the enclosing
-loop and one that merely exited 130 does not — so a handler answering 130 here would make
-`for label in a b c; do agl run ...; done` unstoppable by the key that was pressed to stop it.
+the table — so the disagreement gets a number of its own rather than one of theirs. A `Stop` beside
+a failure is such a pair, 7 saying the workflow ended on purpose and 6 that something broke, and it
+is not excused from the comparison for being deliberate. **The one code a disagreement does not
+settle is 70, and holding a group at it is not a precedence among answers.** 70 says AGL had no
+name for what was raised, or broke an invariant of its own, where 8 says every outcome in the run
+was named — so a leaf resolving to 70 holds the whole group at 70 whatever sits beside it, and a
+failure nobody named cannot hide behind a disagreement with one somebody did. `leaves` flattens
+recursively — a workflow that fans out opens a `TaskGroup` and a child may open its own — so "a
+single-leaf group" is a fact about what the run did rather than about how deeply the workflow nested
+its concurrency, and a 70 one group down decides the run as surely as one at the top. Agreement is
+compared on the resolved *code* and never on the class, which is why `UpstreamUnavailable` beside
+`UpstreamUnexpected` agrees at 6 with no second rule to keep in step with the table. `exit_status`
+and `leaves` take `Exception` and walk `ExceptionGroup`, deliberately not `BaseException` and
+`BaseExceptionGroup`: a Ctrl-C is the operator taking the process back rather than an outcome to
+report, and the faithful way to end on one is to die of the signal, which is what CPython does when
+nothing catches it. A shell tells the two apart even though `$?` reads 130 for both — a child that
+*died of* `SIGINT` stops the enclosing loop and one that merely exited 130 does not — so a handler
+answering 130 here would make `for label in a b c; do agl run ...; done` unstoppable by the key
+that was pressed to stop it.
 `mypy --strict` is the enforcement, since `except BaseException as error: return exit_status(error)`
 will not type-check, and `tests/cli/test_exit_codes.py` pins both the annotation and the group rule.
 
-**A command that goes on past each refusal is not a run that failed several ways, so it does not
-borrow the group's 70.** `agl get` and `agl update` each refuse one workflow and carry on with the
-next, so refusals with different codes are an ending both are built to reach, and a 70 there would
-send an operator to
-report a bug about a command that did what it could. Refusals that agree exit with the code they
-share — compared on the resolved code, exactly as leaves are — and refusals that disagree exit 8,
-`DisagreeingRefusals`' row, which means that and nothing else. The rule is `_refusal_status`, in
-`cli/commands/__init__.py` rather than `cli/exit_codes.py` because its first answer — nothing
-refused, 0 — is a command's to return and no row of the table's, and the group rule above stays
-`exit_status`'s, for the groups a workflow's own `TaskGroup` hands `run` and `resume`. Nor is it a
-precedence: no refusal's code is preferred to another's, which is the guess the paragraph above
-refuses to make, and the disagreement gets a number of its own rather than one of theirs. So the
-hierarchy holds one class that exists for its row alone and that nothing raises — the table is
-keyed on a class and is the one place a published number is written, and `exit_code_for` reads it
-there. `tests/cli/test_get_command.py` holds the rule on its own and through `agl get`,
+**A command that goes on past each refusal answers by that same rule, and the rule is written
+once.** `agl get` and `agl update` each refuse one workflow and carry on with the next, so refusals
+with different codes are an ending both are built to reach, as chunks failing in different named
+ways are for a run, and a 70 for either would send an operator to report a bug about a command that
+did what it could. `cli/exit_codes.py`'s `joint_status` is the rule over a set of resolved codes —
+70 where one of them is 70, their code where they agree, 8 otherwise — and nothing else states it:
+`exit_status` hands it a group's leaves, and `cli/commands/__init__.py`'s `_refusal_status` a
+command's refusals. So an `InternalError` refusal beside a 3 would exit 70 as that leaf would,
+though no refusal site builds one: a code with two rules has two rules free to drift apart. What
+`_refusal_status` keeps for itself is its first answer — nothing refused, 0 — which is a command's
+to return and no row of the table's, and is why it sits in `cli/commands/` rather than beside the
+rule. 8 is `DisagreeingRefusals`' row, and it means several named outcomes whose codes differ,
+whether a run or a command reached them. The hierarchy holds that one class for its row alone and
+nothing raises it — the table is keyed on a class and is the one place a published number is
+written, and `exit_code_for` reads it there. `tests/cli/test_exit_codes.py` holds `exit_status` and
+`_refusal_status` to one answer over the same outcomes, 70 among them;
+`tests/cli/test_get_command.py` holds the rule on its own and through `agl get`,
 `tests/cli/test_update_command.py` through `agl update` with refusals from every phase of it, and
-`tests/cli/test_main.py` holds a resumed run's disagreeing chunks at 70 beside a started one's.
+`tests/cli/test_main.py` holds a resumed run's disagreeing chunks at 8 beside a started one's, and a
+chunk nobody translated beside a named failure at 70.
+
+**The sync both commands end with is one more of their outcomes, and it joins their refusals by the
+same rule.** Each hands its summary to `report` before the sync starts, so when the sync fails — uv
+missing, or refusing with no environment to fall back on — every refusal's reason is already on the
+terminal, and a failure left to reach `main` would answer with the sync's 6 alone and hide their
+codes. `cli/commands/__init__.py`'s `_status_after_summary` catches it instead: `AglError` and
+nothing wider, and only once the summary is out. It prints the failure through `_print_refusal`, the
+line `main` prints for any refusal, which lives below `main` because `main` imports that package,
+and hands its code to `_refusal_status` beside theirs, so a 3 and a sync's 6 exit 8. What was raised
+before the summary is re-raised untouched, and an exception AGL has no name for is never caught, so
+`main` answers both as it answers anything else; only the sync runs after the summary, and nothing
+in `src/` raises a `Stop`, so none can reach the fold. `_sync_workspace` keeps its one contract at
+every caller — it raises — since `run`, `resume` and `new` have no refusals for a failure to join.
+`tests/cli/test_get_command.py` and `tests/cli/test_update_command.py` hold the fold under every
+rule, byte for byte where nothing was refused, and hold both things it must not reach.
 
 ## Invariants where a mistake is silent
 
@@ -917,52 +947,71 @@ holds a value and a head, not what the world looked like.
 
 **A resume finishes against the files the run was recorded by.** `api.run` digests every file of
 the workflow's own directory — `config/workflow_files.py`, `__pycache__` left out because the
-import that loads a workflow writes bytecode into the directory about to be hashed — and stamps
-that map into `run.json` as `workflow_digests`; `api.resume` measures the directory again, refuses
-a difference rather than migrating it, and names the files that changed, were added or are gone,
-five per kind before it starts counting. That refusal is the only thing between edited code and a
+import that loads a workflow writes bytecode into the directory about to be hashed, and a
+`.DS_Store` because Finder leaves one in a folder it opens — and stamps that map into `run.json`
+as `workflow_digests`; `api.resume` measures the directory again, refuses a difference rather
+than migrating it, and names the files that changed, were added or are gone, five per kind before
+it starts counting. That refusal is the only thing between edited code and a
 ledger replayed into reordered steps: an edit reaching a fingerprint term merely re-runs those
 steps, while inserting, removing or reordering them is silently wrong. What it reads is the
 operator's own directory and not a number an author has to remember to move, and the price is the
 other direction — a comment added to a prompt, or a `[project] version` bumped in the file that
 declares the workflow, refuses a resume that would have replayed correctly, which
 `tests/config/test_workflow_files.py` writes down as a decision rather than leaving it to be
-discovered. A caller handing its own entry points over walked no workspace and read its workflow
-out of no directory, so its map is empty at both ends and the comparison passes; `sdk/params.py`'s
-own refusal is what still stands behind it there.
+discovered. A record is not migrated across upgrades of AGL either, so a name added to what the
+walk leaves out refuses the resume of any run recorded while a file of that name stood, and for
+good: the map names the file and no later walk will, so the refusal calls it gone while it stands,
+and `agl clear` is the only way past. A caller handing its own entry points over walked no
+workspace and read its workflow out of no directory, so its map is empty at both ends and the
+comparison passes; `sdk/params.py`'s own refusal is what still stands behind it there.
 
-**A placed workflow's hash leaves out its provenance file and its bytecode, and the scheme under it
-never moves.** `agl get` and `agl update` write `.agl-provenance.json` into each workflow they
-place — the repository, path and ref it was asked for, the commit it got and a `content_hash` — and
-always their own, one arriving in a download being dropped
+**A placed workflow's hash leaves out its provenance file, its bytecode and Finder's `.DS_Store`,
+and the scheme under it never moves.** `agl get` and `agl update` write `.agl-provenance.json`
+into each workflow they place — the repository, path and ref it was asked for, the commit it got
+and a `content_hash` — and always their own, one arriving in a download being dropped
 (`tests/config/test_inspection.py::test_a_provenance_file_arriving_in_a_download_is_replaced_by_agls_own`).
 Unedited means `config/provenance.py`'s `placed_hash` of the directory equals the hash that file
 records, and that comparison, in `config/comparison.py`, is the whole of what decides whether
 `agl update` asks before it discards a copy's changes. So an edit the hash cannot see — a file's
-mode, anything under `__pycache__`, the provenance file itself — is replaced without that question,
-and a mistake that leaves anything else out replaces the operator's edit to it with nothing said
-and nothing keeping it. The file is left out because it holds the hash: a hash counting it would
-have to contain itself, and no directory would ever measure to what its file records. `__pycache__`
-is left out at any depth, as the resume's digests leave it out, and that is sound only because a
-download's own is never placed — a repository can ship bytecode CPython runs without checking it
-against the source beside it, which would be code no hash here measured. The scheme is
-`config/workflow_files.py`'s: the per-file digests `api.run` stamps into `run.json`, run together
-by `content_hash`. A provenance file keeps its answer across upgrades of AGL, so a byte moved in
-either leaves every workflow already placed measuring as edited, and `agl update` asks of each one
-whose ref moves whether to discard changes nobody made. None of it can announce itself: a wrong
-hash is written by a command that succeeds, and the bytes it measured are kept nowhere else, so no
-later reading can correct it.
+mode, anything under `__pycache__`, a `.DS_Store`, the provenance file itself — is replaced without
+that question, and a mistake that leaves anything else out replaces the operator's edit to it with
+nothing said and nothing keeping it. The file is left out because it holds the hash: a hash
+counting it would have to contain itself, and no directory would ever measure to what its file
+records. `__pycache__` is left out at any depth, as the resume's digests leave it out, and that is
+sound only because a download's own is never placed — a repository can ship bytecode CPython runs
+without checking it against the source beside it, which would be code no hash here measured. A
+`.DS_Store` is left out at any depth too, as the resume's digests leave it out, because Finder
+leaves one in a folder it opens and a copy only looked at would be asked about as though it held
+changes; nothing runs one, so a download's own is placed all the same. **What is left out is a set
+of names and not a rule.** "Anything dot-led" would be tidier and would be exactly the mistake
+above: a workflow carries a `.gitignore` or a `.env` legitimately, and an edit to either would be
+replaced unasked, where a name the set misses costs only a question nobody needed. `.git` is not in
+it: an operator versioning a copy keeps their repository inside it, replacing the copy deletes that
+too, and a copy standing as placed beside a branch nobody pushed would otherwise go with no
+question at all. The scheme is `config/workflow_files.py`'s: the per-file digests `api.run` stamps
+into `run.json`, run together by `content_hash`. A provenance file keeps its answer across upgrades
+of AGL, so a byte moved in either leaves every workflow already placed measuring as edited, and
+`agl update` asks of each one whose ref moves whether to discard changes nobody made. A name added
+to the set moves fewer: only a copy whose download shipped a file of that name, which is asked
+about until an update replaces it. None of it can announce itself: a wrong hash is written by a
+command that succeeds, and the bytes it measured are kept nowhere else, so no later reading can
+correct it.
 `tests/config/test_inspection.py::test_a_placed_workflow_measured_back_off_disk_is_the_one_its_provenance_records`
 holds the first exclusion, and
 `tests/config/test_placement.py::test_a_workflow_measured_off_disk_as_placed_is_the_one_its_provenance_records`
 holds it through the real placement;
 `tests/config/test_inspection.py::test_bytecode_arriving_in_a_download_is_never_placed_at_any_depth`
-holds what the second rests on;
+holds what the second rests on, and
+`::test_a_downloaded_ds_store_is_placed_and_left_out_of_the_recorded_hash` the third;
 `tests/config/test_workflow_files.py::test_the_content_hash_of_one_known_tree_is_the_answer_it_has_always_been`
-holds the scheme, its answer written out because a derived one would move with it; and
+holds the scheme, its answer written out because a derived one would move with it;
 `tests/test_update.py::test_a_changed_copy_asked_about_and_declined_keeps_every_byte_it_held` and
 `::test_a_mode_changed_or_bytecode_written_in_a_copy_is_replaced_without_a_question` hold the
-question on either side of what the hash sees.
+question on either side of what the hash sees; and
+`::test_the_file_finder_leaves_in_any_folder_of_a_copy_is_replaced_unasked`,
+`::test_a_changed_dot_led_file_that_finder_did_not_write_is_still_asked_about` and
+`::test_a_copy_whose_only_change_is_a_git_directory_or_file_is_asked_about` hold the set: Finder's
+file passed over at any depth, and every other dot-led name, `.git` among them, still asked about.
 
 **No `pyproject.toml` ever stands directly inside a staging directory.** `config/placement.py`
 stages each approved download, and each entry `agl remove` takes out, in a dot-led directory inside
@@ -1005,6 +1054,31 @@ entry under `replaced` in a staging directory nothing names or sweeps.
 rename back and where it stops;
 `::test_an_override_of_a_link_replaces_the_link_and_never_touches_what_it_named` and
 `::test_a_removed_link_goes_as_the_link_and_never_touches_what_it_named` hold the link.
+
+**For `agl update`, `_swap` measures that copy once more before the first rename, and refuses one
+that moved.** `config/comparison.py` measures each copy before anything is downloaded or asked, the
+questions rest on that hash, and `placement.placed` hands it to `_swap`, which measures the copy
+again once the download is written into staging: one that no longer measures the same — edited
+while a download was fetched or while a question was on screen, its own or another's, or gone, or a
+link or no directory at all by then — is refused with a `ConflictError`, filed in `Got.unwritten`
+as `_appeared`'s refusal is, with nothing of it moved. That leaves the workspace as a no to that
+workflow's question would have, every other workflow placed or not on its own terms, and inspection
+refuses a download that depends on another member or that another member depends on, so nothing
+placed beside a refused copy rests on it. The check stands ahead of the handler above, so a refusal
+has nothing to put back. Drop it, or pass over the copies that had changed on the ground that their
+yes settled them, and nothing raises: an edit saved while the operator read a question is replaced
+unasked. What stays open is the check itself — a file saved after the hash has read it and before
+the rename is still replaced unasked, a window measured warm at 0.16 ms for a workflow of six files
+and 136 ms for one of five thousand — and no lock the filesystem offers would keep an editor out of
+it. `agl get` measures nothing it overrides, its question claiming only that something stands there.
+`tests/test_update.py::test_an_edit_saved_while_the_downloads_are_fetched_is_refused_with_nothing_asked`,
+`::test_an_edit_to_a_copy_asked_nothing_saved_during_another_ones_question_is_refused`,
+`::test_an_edit_saved_while_its_own_dependency_question_is_up_is_refused_and_kept` and
+`::test_a_second_edit_saved_while_its_local_changes_question_is_up_is_refused` hold the four
+moments;
+`tests/config/test_placement.py::test_an_edit_saved_while_the_download_is_being_staged_is_caught_before_any_rename`
+holds where the check stands, and
+`::test_a_download_nothing_measured_overrides_a_copy_it_could_not_even_read` holds `agl get`'s side.
 
 **What `agl get` asks about a download's dependencies is everything that download asks uv to
 install, and what `agl update` asks is all of it bar what the copy it replaces already declares the

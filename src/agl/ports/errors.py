@@ -46,7 +46,7 @@ class Stop(AglError):
     """A workflow ending its own run: subclass it freely, the exit code resolves up the tree."""
 
 class DisagreeingRefusals(AglError):
-    """Refusals whose codes differ, from one command that went on past each: read every reason."""
+    """Named outcomes whose codes differ, so no one code is the answer: read the reason for each."""
 
 class InternalError(AglError):
     """An invariant of AGL's own broke, so the fault is here and not in anything a caller wrote."""

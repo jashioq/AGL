@@ -80,11 +80,16 @@ class ReplaceableWorkflow:
 
     provenance: Provenance
 
-    changed: bool
-    """Whether it measures other than its provenance records, which any change in it makes it do."""
+    measured: str
+    """Its `placed_hash` then, which `placement.placed` holds it to as it is replaced."""
 
     declared: tuple[str, ...]
     """Its `[project] dependencies` as written on disk, none where its project file reads none."""
+
+    @property
+    def changed(self) -> bool:
+        """Whether it measured other than its provenance records: files edited, added or deleted."""
+        return self.measured != self.provenance.content_hash
 
 @dataclass(frozen=True, slots=True)
 class UnreplaceableWorkflow:
@@ -118,6 +123,11 @@ class Replacements:
             if workflow not in wanted:
                 wanted.append(workflow)
         return tuple(Fetch(wanted[0].repository, tuple(wanted)) for wanted in grouped.values())
+
+    @property
+    def measured(self) -> Mapping[RequestedWorkflow, str]:
+        """What each copy measured before anything was downloaded or asked, by its workflow."""
+        return {one.provenance.workflow: one.measured for one in self.replaceable}
 
     # A dependency is compared as it is written, so a line the copy does not write the same way - a
     # new name, a changed bound, a URL repointed under an old name - is one uv has not installed for
@@ -249,11 +259,11 @@ def _replacement(
     if entry.is_symlink():
         return UnreplaceableWorkflow(entry, provenance, ConflictError(_linked(entry, provenance)))
     try:
-        changed = placed_hash(entry) != provenance.content_hash
+        measured = placed_hash(entry)
     except InputError as unmeasured:
         return UnreplaceableWorkflow(entry, provenance, InputError(_unmeasured(entry, unmeasured)))
     declared = () if member is None else member.dependencies
-    return ReplaceableWorkflow(entry, provenance, changed, declared)
+    return ReplaceableWorkflow(entry, provenance, measured, declared)
 
 def _ambiguous(name: str, spellings: Sequence[StandingEntry]) -> str:
     return (

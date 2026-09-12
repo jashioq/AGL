@@ -21,7 +21,9 @@ behind, which neither reader sees.
 link or a file as itself and never walks into what it names, so the operator's own directory at the
 far end of a link is never touched, and the staging directory's removal disposes of whatever was
 moved into it. If the rename that places the download then fails, or a Ctrl-C lands before it has
-finished, what stood there is put back; once the download is in place, it stays.
+finished, what stood there is put back; once the download is in place, it stays. A copy `agl
+update` measured is measured again first, once the download is written, and refused - nothing of it
+moved - where it no longer measures what it did before anything was asked.
 
 **The provenance hash is the invariant an edit breaks**: a workflow measured off disk the moment it
 is placed is the one its provenance file records. `tests/config/test_inspection.py` holds that for
@@ -45,6 +47,7 @@ from agl.ports.fetch import FetchAnswer, FetchedFile, FetchedWorkflow, RefusedWo
 from agl.ports.get_request import RepositoryAtRef, RequestedWorkflow
 from agl.ports.home_layout import (
     PROVENANCE_FILE,
+    STAGED_PLACING,
     STAGED_REMOVED,
     STAGING_PREFIX,
     AglHome,
@@ -91,12 +94,19 @@ def _declining(question: str) -> bool:
     return False
 
 def _placing(
-    home: AglHome, *downloads: FetchAnswer, confirm: Callable[[str], bool] = _approving
+    home: AglHome,
+    *downloads: FetchAnswer,
+    confirm: Callable[[str], bool] = _approving,
+    measured: Mapping[RequestedWorkflow, str] | None = None,
 ) -> Got:
-    """The three phases for `downloads`, answering every question `confirm`'s way."""
+    """The three phases for `downloads`, answering every question `confirm`'s way.
+
+    `measured` stands for what `agl update` measured of each copy it replaces, and is nothing where
+    it is not given, as under `agl get`.
+    """
     inspections = inspected(downloads, home)
     placeables = [one for one in inspections if isinstance(one, PlaceableWorkflow)]
-    return placed(home, downloads, inspections, answered(placeables, confirm))
+    return placed(home, downloads, inspections, answered(placeables, confirm), measured or {})
 
 def _standing(home: AglHome, name: str) -> Path:
     """A workflow directory already in the workspace, with a file only it holds."""
@@ -135,7 +145,7 @@ def test_a_placed_workflow_is_every_file_it_was_handed_and_nothing_else(tmp_path
     (placeable,) = inspected([download], home)
     assert isinstance(placeable, PlaceableWorkflow)
 
-    got = placed(home, [download], [placeable], [ApprovedWorkflow(placeable)])
+    got = placed(home, [download], [placeable], [ApprovedWorkflow(placeable)], {})
 
     assert [one.directory for one in got.placed] == [workflow_dir(home, _TRIAGE)]
     assert _tree(workflow_dir(home, _TRIAGE)) == {
@@ -275,7 +285,7 @@ def test_a_download_that_cannot_be_written_is_refused_and_leaves_nothing_anyone_
         None,
     )
 
-    got = placed(home, [], [], [ApprovedWorkflow(broken)])
+    got = placed(home, [], [], [ApprovedWorkflow(broken)], {})
 
     (refused,) = got.unwritten
     assert isinstance(refused.refusal, InputError)
@@ -365,7 +375,7 @@ def test_an_override_that_cannot_be_written_leaves_what_stood_there_as_it_was(
         standing,
     )
 
-    got = placed(home, [], [], [ApprovedWorkflow(broken)])
+    got = placed(home, [], [], [ApprovedWorkflow(broken)], {})
 
     assert len(got.unwritten) == 1
     assert _tree(standing) == before
@@ -511,7 +521,7 @@ def test_a_ctrl_c_as_the_download_lands_leaves_the_download_standing_and_still_p
 
     monkeypatch.setattr(os, "rename", interrupting_once_it_landed)
     with pytest.raises(KeyboardInterrupt):
-        placed(home, [download], [placeable], [ApprovedWorkflow(placeable)])
+        placed(home, [download], [placeable], [ApprovedWorkflow(placeable)], {})
 
     assert _tree(standing) == {name: file.content for name, file in placeable.files.items()}
     assert sorted(entry.name for entry in workflows_dir(home).iterdir()) == ["triage"]
@@ -551,6 +561,201 @@ def test_something_made_there_while_the_questions_were_asked_is_never_placed_ove
     (refused,) = got.unwritten
     assert isinstance(refused.refusal, ConflictError)
     assert _tree(workflow_dir(home, _TRIAGE)) == {"mine.py": b"# written meanwhile\n"}
+
+# --- a copy `agl update` measured, measured again as it is replaced ------------------------------
+#
+# `agl update` measures each copy it may replace before anything is downloaded or asked, and hands
+# the hash on through `placed`: the copy is replaced only while it still measures that. Here the
+# hash is taken by hand where `config/comparison.py` takes it, and each test changes the copy at the
+# moment its name says - through `confirm`, since the collision question is put while the operator
+# could be editing, or as the download is staged.
+
+def _as_measured(directory: Path) -> dict[RequestedWorkflow, str]:
+    """What `agl update` hands on for `triage` standing at `directory`: the hash it measures now."""
+    return {_requested("triage"): placed_hash(directory)}
+
+def _appending(module: Path, line: bytes) -> None:
+    """The operator's edit, saved: a line added to the end of a file of the copy."""
+    with module.open("ab") as handle:
+        handle.write(line)
+
+def test_a_copy_still_measuring_what_it_measured_is_replaced_like_any_override(
+    tmp_path: Path,
+) -> None:
+    home = _home(tmp_path)
+    standing = _standing(home, "triage")
+
+    got = _placing(home, _download("triage"), measured=_as_measured(standing))
+
+    assert [one.directory for one in got.placed] == [standing]
+    assert "notes.md" not in _tree(standing)
+    assert sorted(entry.name for entry in workflows_dir(home).iterdir()) == ["triage"]
+
+def test_a_copy_edited_since_it_was_measured_is_refused_and_keeps_every_byte(
+    tmp_path: Path,
+) -> None:
+    """Edited while its question was up: a conflict naming it, the copy as left, and no leftover."""
+    home = _home(tmp_path)
+    standing = _standing(home, "triage")
+    measured = _as_measured(standing)
+    kept: dict[str, bytes] = {}
+
+    def editing(question: str) -> bool:
+        _appending(standing / "__init__.py", b"# saved while the question was on screen\n")
+        kept.update(_tree(standing))
+        return True
+
+    got = _placing(home, _download("triage"), confirm=editing, measured=measured)
+
+    (refused,) = got.unwritten
+    assert isinstance(refused.refusal, ConflictError)
+    assert str(refused.refusal).startswith(f"{standing} changed after `agl update` measured it")
+    assert got.placed == ()
+    assert _tree(standing) == kept
+    assert sorted(entry.name for entry in workflows_dir(home).iterdir()) == ["triage"]
+
+def test_an_edit_saved_while_the_download_is_being_staged_is_caught_before_any_rename(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The copy is measured again after the staged write, and not ahead of it.
+
+    The edit lands as the first staged file is created - after every question, and before the first
+    rename - so a check made before the write would pass the copy, and the rename would take the
+    edit away with it.
+    """
+    home = _home(tmp_path)
+    standing = _standing(home, "triage")
+    measured = _as_measured(standing)
+    opened = os.open
+    kept: dict[str, bytes] = {}
+
+    def editing_as_it_is_staged(
+        path: str | os.PathLike[str], flags: int, mode: int = 0o777, *, dir_fd: int | None = None
+    ) -> int:
+        if STAGED_PLACING in Path(path).parts and not kept:
+            _appending(standing / "__init__.py", b"# saved as the download was being staged\n")
+            kept.update(_tree(standing))
+        return opened(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "open", editing_as_it_is_staged)
+    got = _placing(home, _download("triage"), measured=measured)
+
+    (refused,) = got.unwritten
+    assert isinstance(refused.refusal, ConflictError)
+    assert kept
+    assert _tree(standing) == kept
+
+@pytest.mark.parametrize("made", ["gone", "a link", "not a directory"])
+def test_a_copy_gone_linked_or_no_directory_since_it_was_measured_is_refused_saying_so(
+    tmp_path: Path, made: str
+) -> None:
+    """Made so while the question was up, and whatever stands there then is left as it stands.
+
+    The link names the very directory that was measured, moved aside, and is still refused: a hash
+    read through it would match, and replacing it would change which directory `agl run` runs - the
+    reason `config/comparison.py` refuses a copy that is a link before anything is asked.
+    """
+    home = _home(tmp_path)
+    standing = _standing(home, "triage")
+    measured = _as_measured(standing)
+    elsewhere = tmp_path / "elsewhere"
+    original = _tree(standing)
+
+    def meanwhile(question: str) -> bool:
+        if made == "a link":
+            standing.rename(elsewhere)
+            standing.symlink_to(elsewhere, target_is_directory=True)
+        else:
+            shutil.rmtree(standing)
+        if made == "not a directory":
+            standing.write_bytes(b"not a directory\n")
+        return True
+
+    got = _placing(home, _download("triage"), confirm=meanwhile, measured=measured)
+
+    (refused,) = got.unwritten
+    assert isinstance(refused.refusal, ConflictError)
+    assert str(refused.refusal).startswith(f"{standing} is {made}")
+    assert got.placed == ()
+    if made == "gone":
+        assert list(workflows_dir(home).iterdir()) == []
+    elif made == "a link":
+        assert os.readlink(standing) == str(elsewhere)
+        assert _tree(elsewhere) == original
+    else:
+        assert standing.read_bytes() == b"not a directory\n"
+
+def test_a_copy_gone_before_its_download_was_inspected_is_refused_rather_than_placed(
+    tmp_path: Path,
+) -> None:
+    """Deleted while the downloads were fetched, so inspection found nothing standing there.
+
+    The copy the update measured is not there to replace, and placing the download in its stead
+    would put back what was just taken away, with nothing asked about either.
+    """
+    home = _home(tmp_path)
+    standing = _standing(home, "triage")
+    measured = _as_measured(standing)
+    shutil.rmtree(standing)
+
+    got = _placing(home, _download("triage"), measured=measured)
+
+    (refused,) = got.unwritten
+    assert isinstance(refused.refusal, ConflictError)
+    assert str(refused.refusal).startswith(f"{standing} is gone")
+    assert list(workflows_dir(home).iterdir()) == []
+
+def test_a_copy_that_cannot_be_measured_again_is_refused_as_what_cannot_be_read(
+    tmp_path: Path,
+) -> None:
+    """Whether it changed cannot be told, so it is not replaced: an update's refusal from before."""
+    home = _home(tmp_path)
+    standing = _standing(home, "triage")
+    measured = _as_measured(standing)
+    unreadable = standing / "notes.md"
+    unreadable.chmod(0)
+    readable = os.access(unreadable, os.R_OK)
+    unreadable.chmod(0o644)
+    if readable:
+        pytest.skip("this user reads a file whatever its mode says, as root does")
+
+    def closing(question: str) -> bool:
+        unreadable.chmod(0)
+        return True
+
+    try:
+        got = _placing(home, _download("triage"), confirm=closing, measured=measured)
+    finally:
+        unreadable.chmod(0o644)
+
+    (refused,) = got.unwritten
+    assert isinstance(refused.refusal, InputError)
+    assert str(refused.refusal).startswith(f"{standing} cannot be measured again")
+    assert f"{unreadable} cannot be read" in str(refused.refusal)
+    assert "notes.md" in _tree(standing)
+
+def test_a_download_nothing_measured_overrides_a_copy_it_could_not_even_read(
+    tmp_path: Path,
+) -> None:
+    """`agl get` measures nothing it overrides: its one question claims only that something stands.
+
+    So a directory no hash could be taken of is overridden as any other is, with nothing refused.
+    """
+    home = _home(tmp_path)
+    standing = _standing(home, "triage")
+    unreadable = standing / "notes.md"
+    unreadable.chmod(0)
+    try:
+        if os.access(unreadable, os.R_OK):
+            pytest.skip("this user reads a file whatever its mode says, as root does")
+        got = _placing(home, _download("triage"))
+    finally:
+        if unreadable.exists():
+            unreadable.chmod(0o644)
+
+    assert [one.directory for one in got.placed] == [standing]
+    assert "notes.md" not in _tree(standing)
+    assert sorted(entry.name for entry in workflows_dir(home).iterdir()) == ["triage"]
 
 # --- what became of each ------------------------------------------------------------------------
 

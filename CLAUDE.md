@@ -182,7 +182,9 @@ every gate passed, 1 if any failed, 2 if the `.venv` tooling is missing (`uv syn
   This is the one import rule `.importlinter` cannot express.
 - **paid-endpoint guard** — no test can reach a paid endpoint: an AST scan for a test writing a
   guarded environment variable outside `tests/conftest.py`, plus a probe module written into
-  `tests/`, run with the real endpoints poisoned, and deleted again.
+  `tests/`, run with the real endpoints and a stand-in for the operator's AGL home poisoned into
+  its environment, required to see a lookup and a connection off this machine refused by the
+  guard, and deleted again.
 
 Refer to gates by name, never by number — gates get inserted and the numbering shifts under any
 cross-reference that names one.

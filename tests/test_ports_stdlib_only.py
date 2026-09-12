@@ -8,7 +8,7 @@ once, and a `pydantic` model in a port signature is one every adapter, every wor
 of either has to have installed to type-check.
 
 **Nothing enforced it until this file, and that is a measurement rather than a reading.** With
-`import pydantic` written into `src/agl/ports/clock.py`, `lint-imports` reports six contracts kept.
+`import pydantic` written into `src/agl/ports/clock.py`, `lint-imports` reports every contract kept.
 Contract 1 orders the `agl` layers and has no opinion about anything outside `agl`. Contract 3
 forbids `claude_agent_sdk` and `rich` *by name*, which is the only thing a `forbidden` contract can
 do. Contract 2 governs the ring's inside. So the stdlib-only rule was the one rule in

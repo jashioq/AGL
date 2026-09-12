@@ -502,17 +502,18 @@ def test_the_workspace_project_file_the_writer_writes_is_one_the_reader_accepts(
     assert read_document(workspace_pyproject(home)) is not None
     assert _members(home) == [f"{workflows_dir(home).name}/*"]
 
-def test_the_members_glob_takes_in_every_workflow_directory_and_never_the_workspace_venv(
+def test_the_members_glob_takes_in_each_workflow_and_never_the_workflows_directory_itself(
     tmp_path: Path,
 ) -> None:
-    """`workflows/*` and not `*`, measured against a workspace holding one of each.
+    """`workflows/*` and not `*`, measured against a workspace holding a workflow and a venv.
 
-    uv is what resolves this glob and nothing in this repository runs uv, so what is measured is
-    `Path.glob` over the two directories a workspace really holds side by side - the workflows, and
-    the venv `workspace_site_packages` composes. The wrong glob is run as well as the right one,
-    because "the declaration matches the workflow" is worth little without "the alternative matches
-    the venv" beside it: that is the mistake being avoided, and an assertion nobody has watched fire
-    proves the declaration is safe from nothing.
+    uv is what resolves this glob and no test here runs uv, so what is measured is `Path.glob`,
+    which expands both globs over this layout as uv 0.11.29 was measured to. `*` takes in
+    `workflows/` itself, which uv refuses the sync over once it holds a workflow and no project file
+    of its own, and the venv `workspace_site_packages` composes, which uv passes over. The wrong
+    glob is run as well as the right one, because "the declaration matches the workflow" is worth
+    little without "the alternative matches what uv refuses" beside it, and an assertion nobody has
+    watched fire proves the declaration is safe from nothing.
     """
     home = _home(tmp_path)
     make_workspace(home)
@@ -521,7 +522,7 @@ def test_the_members_glob_takes_in_every_workflow_directory_and_never_the_worksp
     root = workspace_dir(home)
 
     assert sorted(path.name for glob in _members(home) for path in root.glob(glob)) == ["triage"]
-    assert ".venv" in sorted(path.name for path in root.glob("*"))
+    assert workflows_dir(home).name in sorted(path.name for path in root.glob("*"))
 
 def test_the_workspace_root_declares_no_project_table_and_so_declares_no_workflow(
     tmp_path: Path,
