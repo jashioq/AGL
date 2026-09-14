@@ -3,6 +3,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from importlib.metadata import EntryPoint
 from pathlib import Path
+from types import MappingProxyType
 from typing import Final
 from agl import api
 from agl.config import container, registry
@@ -41,6 +42,8 @@ _LABEL: Final = "test"
 _TREES: Final = "trees"
 
 _BASE: Final = "4a91c07f2b3e8d15c6a0f31d8e2b47c9a6013f5e"
+
+_NO_CONFIG: Final[Mapping[str, str]] = MappingProxyType({})
 
 class _Interrupted(BaseException):
     ...
@@ -166,12 +169,12 @@ def harness(
     *,
     agent: Agent | None = None,
     files: Mapping[str, bytes] | None = None,
-    build: str = container.FAKE_BUILD,
+    config: Mapping[str, str] = _NO_CONFIG,
     terminal: Terminal | None = None,
     project: str = _PROJECT,
     label: str = _LABEL,
 ) -> Harness:
-    fakes = container.fakes(TreesRoot(where / _TREES), files=files, build=build, agent=agent)
+    fakes = container.fakes(TreesRoot(where / _TREES), files=files, config=config, agent=agent)
     if terminal is not None:
         fakes = fakes.with_terminal(terminal)
     return over(fakes, project=project, label=label)

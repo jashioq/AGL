@@ -15,21 +15,20 @@ the first decision, and every test below is what that decision buys: two reposit
 registered in one test, in one process, and a failure leaves no working directory behind it. A
 suite driving an ambient `Path.cwd()` would have had to `monkeypatch.chdir` for every one of them.
 
-**Nothing patches `builtins.input` either.** The question `init` asks travels as a
-parameter, so a test hands in a lambda and reads what the prompt said - and `cli/main.py` is the one
-place `input` is named at all.
+**Nothing is asked, so nothing is answered.** `api.init` takes the settings and a directory and no
+callable to put a question through, and `tests/cli/test_init_command.py` runs the command with its
+stdin closed to show the same thing from the other end.
 
 ## The ordering is the part that fails silently
 
-Everything that can refuse without asking anybody anything happens before the question, which is
-`api.run`'s rule about preflight applied to the one thing here that costs more than a syscall. An
-`init` that asked first and refused afterwards passes every test about the refusal itself and wastes
-a build command an operator typed. So the tests that arrange a refusal all hand in an `ask` that
-records, and assert it was never called.
+Everything that can refuse happens before the file is written. An `init` that wrote first and
+refused afterwards passes every test about the refusal itself and leaves a registered project behind
+it, which the next `agl init` then refuses as a conflict. So the tests that arrange a refusal assert
+that `projects/` was never made.
 """
 
+import inspect
 from pathlib import Path
-from typing import Final
 import pytest
 from agl import api
 from agl.config import sources
@@ -37,8 +36,6 @@ from agl.config.schema import Settings
 from agl.config.toml_file import read_project
 from agl.ports.errors import ConflictError, InputError, NotFoundError, exit_code_for
 from agl.ports.ids import ProjectName
-
-BUILD: Final = "./gradlew build"
 
 def _settings(tmp_path: Path) -> Settings:
     """An installation whose home is under `tmp_path`, resolved through the pure core.
@@ -64,17 +61,6 @@ def _keys(written: Path) -> list[str]:
     """
     return [line.split(" = ")[0] for line in written.read_text(encoding="utf-8").splitlines()]
 
-class _Asked:
-    """An `Ask` that records. The seam, filled in with something a test can interrogate."""
-
-    def __init__(self, answer: str = BUILD) -> None:
-        self.answer = answer
-        self.prompts: list[str] = []
-
-    def __call__(self, prompt: str) -> str:
-        self.prompts.append(prompt)
-        return self.answer
-
 # --- what it writes ------------------------------------------------------------------------------
 
 def test_the_file_it_writes_is_one_the_reader_and_the_resolver_both_accept(tmp_path: Path) -> None:
@@ -98,15 +84,15 @@ def test_the_file_it_writes_is_one_the_reader_and_the_resolver_both_accept(tmp_p
     settings = _settings(tmp_path)
     repo = _repo(tmp_path)
 
-    written = api.init(settings, repo, _Asked())
+    written = api.init(settings, repo)
 
-    assert _keys(written) == ["name", "repo", "trees_root", "build", "build_timeout"]
-    assert read_project(settings.home, ProjectName("myapp")).build == BUILD
+    assert _keys(written) == ["name", "repo", "trees_root", "build_timeout"]
+    assert read_project(settings.home, ProjectName("myapp")).config == {}
     resolved = sources.resolve_project(settings, sources.Overrides(), {}, repo)
     assert resolved.name == ProjectName("myapp")
     assert resolved.repo == repo
     assert resolved.trees.path == repo.parent / ".agl-trees" / "myapp"
-    assert resolved.build == BUILD
+    assert resolved.config == {}
     assert resolved.build_timeout == sources.DEFAULT_BUILD_TIMEOUT
 
 def test_the_timeout_in_the_file_is_what_answers_and_not_the_default_layer(
@@ -125,7 +111,7 @@ def test_the_timeout_in_the_file_is_what_answers_and_not_the_default_layer(
     """
     settings = _settings(tmp_path)
     repo = _repo(tmp_path)
-    written = api.init(settings, repo, _Asked())
+    written = api.init(settings, repo)
 
     written.write_text(
         written.read_text(encoding="utf-8").replace(
@@ -138,6 +124,26 @@ def test_the_timeout_in_the_file_is_what_answers_and_not_the_default_layer(
     assert resolved.build_timeout == 1800.0
     assert resolved.build_timeout != sources.DEFAULT_BUILD_TIMEOUT
 
+def test_keys_added_by_hand_after_init_resolve_on_the_next_read_without_a_second_init(
+    tmp_path: Path,
+) -> None:
+    """The file is read fresh at every resolution, so an operator's edit is the whole of the step.
+
+    Resolved once before the edit as well as after it, so a resolver that cached the first answer
+    for the process would hand back the empty config and fail here. `init` is not run again, and
+    could not be: it refuses a file that is already there.
+    """
+    settings = _settings(tmp_path)
+    repo = _repo(tmp_path)
+    written = api.init(settings, repo)
+    assert sources.resolve_project(settings, sources.Overrides(), {}, repo).config == {}
+
+    with written.open("a", encoding="utf-8") as handle:
+        handle.write('build = "./scripts/check"\nlinter = ""\n')
+
+    resolved = sources.resolve_project(settings, sources.Overrides(), {}, repo)
+    assert resolved.config == {"build": "./scripts/check", "linter": ""}
+
 def test_the_project_is_named_after_the_repositorys_own_directory(tmp_path: Path) -> None:
     """The example file is `repo = ".../myapp"` and `name = "myapp"`, and this is why.
 
@@ -147,7 +153,7 @@ def test_the_project_is_named_after_the_repositorys_own_directory(tmp_path: Path
     settings = _settings(tmp_path)
     repo = _repo(tmp_path, "other-thing")
 
-    written = api.init(settings, repo, _Asked())
+    written = api.init(settings, repo)
 
     assert written.name == "other-thing.toml"
     assert read_project(settings.home, ProjectName("other-thing")).repo == repo
@@ -162,7 +168,7 @@ def test_the_trees_root_is_beside_the_repository_and_never_under_it(tmp_path: Pa
     settings = _settings(tmp_path)
     repo = _repo(tmp_path)
 
-    api.init(settings, repo, _Asked())
+    api.init(settings, repo)
 
     trees = read_project(settings.home, ProjectName("myapp")).trees_root
     assert trees is not None
@@ -180,62 +186,30 @@ def test_the_git_root_is_found_from_a_directory_deep_inside_the_repository(tmp_p
     inside = repo / "src" / "deep"
     inside.mkdir(parents=True)
 
-    written = api.init(settings, inside, _Asked())
+    written = api.init(settings, inside)
 
     assert written.name == "myapp.toml"
     assert read_project(settings.home, ProjectName("myapp")).repo == repo
 
-# --- the question, and the seam it travels on ----------------------------------------------------
+# --- nothing is asked --------------------------------------------------------------------------
 
-def test_the_build_command_is_asked_for_once_and_the_prompt_says_what_it_is_for(
+def test_init_takes_the_settings_and_a_directory_and_nothing_to_ask_a_question_through() -> None:
+    """The signature is the claim: with no callable on it, there is nowhere a question could go."""
+    assert list(inspect.signature(api.init).parameters) == ["settings", "cwd"]
+
+def test_the_project_file_init_writes_has_no_build_key_and_nothing_else_supplies_one(
     tmp_path: Path,
 ) -> None:
-    """`init` asks for the build command, and nothing anywhere in AGL guesses at one.
-
-    There is no build-tool detection anywhere in AGL, so this one question is the whole mechanism,
-    and the prompt has to name the thing being asked about: there are two build commands in AGL's
-    world - the merge gate's, which is this, and the one a workflow writes into a prompt, which is
-    deliberately no business of the framework's - and "build command:" alone would not distinguish
-    them.
-    """
-    asked = _Asked()
-
+    """No key is written for `build` and no default stands in: the resolved config has no entry."""
     settings = _settings(tmp_path)
+    repo = _repo(tmp_path)
 
-    api.init(settings, _repo(tmp_path), asked)
+    written = api.init(settings, repo)
 
-    assert len(asked.prompts) == 1
-    assert "merge gate" in asked.prompts[0]
-    assert read_project(settings.home, ProjectName("myapp")).build == BUILD
-
-def test_what_the_answer_says_is_stripped_and_stored_as_typed(tmp_path: Path) -> None:
-    """A line somebody typed arrives with the whitespace they typed around it, and nothing else.
-
-    Stripped, because `input` hands back what was entered; not otherwise touched, because
-    `schema.Project` hands the string to a shell and this is not the module that gets an opinion
-    about what a shell line means.
-    """
-    settings = _settings(tmp_path)
-
-    api.init(settings, _repo(tmp_path), _Asked("  make test && ./verify.sh  "))
-
-    assert read_project(settings.home, ProjectName("myapp")).build == "make test && ./verify.sh"
-
-def test_a_blank_build_command_is_refused_and_nothing_is_written(tmp_path: Path) -> None:
-    """`schema.Project` refuses a blank build where the file is read; this is that rule earlier.
-
-    A file written blank is one every later command refuses, so the operator would learn about it
-    from a command that was not asking - and would have a registered project they then have to
-    clear by hand. Refused here, nothing is written and `agl init` can simply be run again.
-    """
-    settings = _settings(tmp_path)
-
-    with pytest.raises(InputError) as raised:
-        api.init(settings, _repo(tmp_path), _Asked("   "))
-
-    assert exit_code_for(raised.value) == 2
-    assert "merge gate" in str(raised.value)
-    assert not (settings.home.path / "projects").exists()
+    assert "build" not in _keys(written)
+    environ = {"AGL_BUILD": "make"}
+    resolved = sources.resolve_project(settings, sources.Overrides(), environ, repo)
+    assert "build" not in resolved.config
 
 # --- the refusals, and the order they are in -----------------------------------------------------
 
@@ -244,35 +218,21 @@ def test_a_second_init_in_the_same_repository_is_a_conflict(tmp_path: Path) -> N
 
     `ConflictError` - exit 4 - which is the class `api.run` answers a label that already exists
     with, and for the same reason `ports/errors.py` gives: everything named was found, and the world
-    already holds something this operation would have to overwrite. The settings are asserted intact
-    afterwards, because a refusal that fired after truncating would raise the same class.
+    already holds something this operation would have to overwrite. The file is asserted byte for
+    byte afterwards, hand edit included, because a refusal that fired after truncating would raise
+    the same class.
     """
     settings = _settings(tmp_path)
     repo = _repo(tmp_path)
-    api.init(settings, repo, _Asked("make"))
+    written = api.init(settings, repo)
+    edited = written.read_text(encoding="utf-8") + 'build = "make"\n'
+    written.write_text(edited, encoding="utf-8")
 
     with pytest.raises(ConflictError) as raised:
-        api.init(settings, repo, _Asked("ninja"))
+        api.init(settings, repo)
 
     assert exit_code_for(raised.value) == 4
-    assert read_project(settings.home, ProjectName("myapp")).build == "make"
-
-def test_the_conflict_is_refused_before_anybody_is_asked_anything(tmp_path: Path) -> None:
-    """The ordering, and it is the half that fails silently.
-
-    `api.run` puts every free refusal in front of the one that costs real turns; here the expensive
-    step is a person, and an `init` that asked first would take a build command from somebody whose
-    repository was registered last week and throw it away. The recording `ask` is what notices.
-    """
-    settings = _settings(tmp_path)
-    repo = _repo(tmp_path)
-    api.init(settings, repo, _Asked("make"))
-    asked = _Asked("ninja")
-
-    with pytest.raises(ConflictError):
-        api.init(settings, repo, asked)
-
-    assert asked.prompts == [], "a repository that was already registered was asked for a build"
+    assert written.read_text(encoding="utf-8") == edited
 
 def test_a_directory_that_is_in_no_git_repository_is_not_found(tmp_path: Path) -> None:
     """`git_root`'s own refusal, uncaught: exit 3, and the message already says to run this here.
@@ -284,14 +244,13 @@ def test_a_directory_that_is_in_no_git_repository_is_not_found(tmp_path: Path) -
     settings = _settings(tmp_path)
     elsewhere = tmp_path.resolve() / "elsewhere"
     elsewhere.mkdir()
-    asked = _Asked()
 
     with pytest.raises(NotFoundError) as raised:
-        api.init(settings, elsewhere, asked)
+        api.init(settings, elsewhere)
 
     assert exit_code_for(raised.value) == 3
     assert ".git" in str(raised.value)
-    assert asked.prompts == []
+    assert not (settings.home.path / "projects").exists()
 
 def test_a_repository_whose_directory_name_is_not_a_usable_project_name_is_refused(
     tmp_path: Path,
@@ -305,14 +264,13 @@ def test_a_repository_whose_directory_name_is_not_a_usable_project_name_is_refus
     """
     settings = _settings(tmp_path)
     repo = _repo(tmp_path, "my app")
-    asked = _Asked()
 
     with pytest.raises(InputError) as raised:
-        api.init(settings, repo, asked)
+        api.init(settings, repo)
 
     assert exit_code_for(raised.value) == 2
     assert "my app" in str(raised.value)
-    assert asked.prompts == []
+    assert not (settings.home.path / "projects").exists()
 
 def test_a_trees_root_that_only_resolution_shows_to_be_inside_is_refused_before_writing(
     tmp_path: Path,
@@ -334,14 +292,12 @@ def test_a_trees_root_that_only_resolution_shows_to_be_inside_is_refused_before_
     repo = _repo(tmp_path)
     (repo / "inside").mkdir()
     (repo.parent / ".agl-trees").symlink_to(repo / "inside", target_is_directory=True)
-    asked = _Asked()
 
     with pytest.raises(InputError) as raised:
-        api.init(settings, repo, asked)
+        api.init(settings, repo)
 
     assert exit_code_for(raised.value) == 2
     assert "trees_root" in str(raised.value)
-    assert asked.prompts == []
     assert not (settings.home.path / "projects").exists()
 
 # --- what the signature says ---------------------------------------------------------------------
@@ -354,6 +310,6 @@ def test_init_is_sync_and_starts_no_event_loop(tmp_path: Path) -> None:
     `asyncio.run`, which is what `cli/main.py` means by leaving the loop to the command: a dispatch
     that awaited everything would make a synchronous command pretend to be something it is not.
     """
-    written = api.init(_settings(tmp_path), _repo(tmp_path), _Asked())
+    written = api.init(_settings(tmp_path), _repo(tmp_path))
 
     assert isinstance(written, Path)

@@ -1040,8 +1040,8 @@ def test_every_declared_command_runs_on_fakes_with_no_way_out(
 
     **Substituted through `main`'s own seam and nothing is monkeypatched to get there.** `compose=`
     is the parameter `cli/main.py` declares for exactly this, so the bundle is `container.fakes()`,
-    the entry points are this module's own, `ask` is the canned answer `agl init` asks for and
-    `confirm` the yes `agl get`, `agl update` and `agl remove` are asked for. `syncer` is
+    the entry points are this module's own, and `confirm` is the yes `agl get`, `agl update` and
+    `agl remove` are asked for. `syncer` is
     `container.fake_syncer` - the field whose real default would start a process, and the five rows
     that reach it are `new`, `get`, `update`, `run` and `resume`, the commands a sync is folded
     into - and `fetcher` is a `FakeFetcher` holding the one workflow the `get` row asks for, served
@@ -1067,9 +1067,6 @@ def test_every_declared_command_runs_on_fakes_with_no_way_out(
     fetcher = container.fake_fetcher()
     fetcher.serves(_EIGHT_REPOSITORY, _EIGHT_DOWNLOAD)
 
-    def answer(question: str) -> str:
-        return "pytest -q"
-
     asked: list[str] = []
 
     def approve(question: str) -> bool:
@@ -1082,7 +1079,6 @@ def test_every_declared_command_runs_on_fakes_with_no_way_out(
             settings=settings,
             cwd=repo,
             points=(_EIGHT_POINT,),
-            ask=answer,
             confirm=approve,
             syncer=container.fake_syncer,
             fetcher=lambda: fetcher,

@@ -37,25 +37,29 @@ _PROJECT: Final = Project(
     name=ProjectName("myapp"),
     repo=Path("/Users/jan/dev/myapp"),
     trees=TreesRoot(Path("/Users/jan/dev/.agl-trees/myapp")),
-    build="./gradlew build",
     build_timeout=600,
+    config={"build": "./gradlew build"},
 )
 
 # --- The shapes -------------------------------------------------------------------------------
 
-def test_a_project_holds_exactly_the_five_fields_init_writes_into_the_file() -> None:
-    """`agl init` writes that file. A sixth field is a sixth thing every project answers for."""
+def test_a_project_holds_the_four_keys_agl_configures_and_one_mapping_of_the_rest() -> None:
+    """One field per key AGL reserves, and `config` holding every other key the file carries.
+
+    A sixth field is a sixth thing every project answers for; a key a workflow declares is one more
+    entry in `config` and answers to nobody but the workflows that declare it.
+    """
     assert tuple(field.name for field in fields(Project)) == (
         "name",
         "repo",
         "trees",
-        "build",
         "build_timeout",
+        "config",
     )
     assert _PROJECT.name == ProjectName("myapp")
     assert _PROJECT.repo == Path("/Users/jan/dev/myapp")
     assert _PROJECT.trees == TreesRoot(Path("/Users/jan/dev/.agl-trees/myapp"))
-    assert _PROJECT.build == "./gradlew build"
+    assert _PROJECT.config == {"build": "./gradlew build"}
     assert _PROJECT.build_timeout == 600
 
 def test_settings_holds_the_home_and_the_agent_sections_and_nothing_from_a_project() -> None:
@@ -117,7 +121,7 @@ def test_omitting_any_value_is_a_TypeError_rather_than_a_quietly_supplied_one() 
             name=ProjectName("myapp"),
             repo=Path("/repo"),
             trees=TreesRoot(Path("/trees")),
-            build="make",
+            build_timeout=60.0,
         )
 
 def test_a_missing_value_fails_before_any_validation_this_module_does() -> None:
@@ -131,7 +135,7 @@ def test_a_missing_value_fails_before_any_validation_this_module_does() -> None:
             name=ProjectName("myapp"),
             repo=Path("relative/repo"),
             trees=TreesRoot(Path("/trees")),
-            build="   ",
+            build_timeout=60.0,
         )
 
 # --- Immutability -------------------------------------------------------------------------------
@@ -158,21 +162,33 @@ def test_a_relative_repo_is_refused() -> None:
             name=ProjectName("myapp"),
             repo=Path("dev/myapp"),
             trees=TreesRoot(Path("/trees")),
-            build="make",
             build_timeout=60.0,
+            config={},
         )
 
 @pytest.mark.parametrize("build", ["", " ", "\t\n  "])
-def test_a_blank_build_command_is_refused(build: str) -> None:
-    """A gate that runs nothing passes everything, which is worse than having no gate."""
-    with pytest.raises(InputError, match="build"):
-        Project(
-            name=ProjectName("myapp"),
-            repo=Path("/repo"),
-            trees=TreesRoot(Path("/trees")),
-            build=build,
-            build_timeout=60.0,
-        )
+def test_a_blank_build_value_is_kept_exactly_as_it_was_given(build: str) -> None:
+    """An empty value is a value: it is neither refused nor stripped nor replaced."""
+    project = Project(
+        name=ProjectName("myapp"),
+        repo=Path("/repo"),
+        trees=TreesRoot(Path("/trees")),
+        build_timeout=60.0,
+        config={"build": build},
+    )
+
+    assert project.config == {"build": build}
+
+def test_an_absent_build_key_stays_absent_from_the_config_rather_than_defaulted() -> None:
+    project = Project(
+        name=ProjectName("myapp"),
+        repo=Path("/repo"),
+        trees=TreesRoot(Path("/trees")),
+        build_timeout=60.0,
+        config={},
+    )
+
+    assert "build" not in project.config
 
 @pytest.mark.parametrize("timeout", [0.0, -1.0, -600.0, inf, -inf, nan])
 def test_a_build_timeout_that_is_not_a_finite_positive_number_of_seconds_is_refused(
@@ -184,8 +200,8 @@ def test_a_build_timeout_that_is_not_a_finite_positive_number_of_seconds_is_refu
             name=ProjectName("myapp"),
             repo=Path("/repo"),
             trees=TreesRoot(Path("/trees")),
-            build="make",
             build_timeout=timeout,
+            config={},
         )
 
 def test_a_relative_cli_path_is_refused_by_each_section_under_its_own_name() -> None:
@@ -215,8 +231,8 @@ def test_nothing_is_asked_of_the_filesystem() -> None:
         name=ProjectName("myapp"),
         repo=Path("/no/such/repository"),
         trees=TreesRoot(Path("/no/such/trees")),
-        build="a-command-that-is-not-installed --please",
         build_timeout=0.5,
+        config={"build": "a-command-that-is-not-installed --please"},
     )
     assert not nowhere.repo.exists()
     assert ClaudeSettings(enabled=True, cli_path=Path("/no/such/claude")).cli_path == Path(

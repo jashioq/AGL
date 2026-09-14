@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from dataclasses import dataclass
 from agl.ports.agent import AgentRunner
 from agl.ports.clock import Clock
@@ -28,4 +29,4 @@ class Services:
 
     agents: AgentRunner
 
-    build: str
+    config: Mapping[str, str]

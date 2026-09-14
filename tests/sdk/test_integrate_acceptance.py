@@ -56,7 +56,9 @@ Beyond the five, and each of these is a question the implementer's suite has no 
     world against a run that was never interrupted, the contract-test shape - and whether
     integrating one child twice lands it twice;
   * whether a `land` that raises, a `retry` whose gate raises, or a landing cancelled while it
-    queues leaves the target leased by a call that is over.
+    queues leaves the target leased by a call that is over;
+  * whether a bundle with no `build` is refused before a real merge goes in, and whether an empty
+    one reaches a real shell as written and gates on nothing.
 
 **Where the fakes are used and where they are not.** A claim about AGL's own concurrency - the
 lease, the step lock, what run exit gives back - is a claim about `asyncio` objects in one process,
@@ -95,6 +97,7 @@ from agl.adapters.git.integrator import GitIntegrator
 from agl.adapters.git.workspace import GitWorkspaceProvider
 from agl.adapters.rich_terminal.headless import HeadlessTerminal
 from agl.adapters.routing import RoutingAgentRunner
+from agl.adapters.shell.verifier import ShellVerifier
 from agl.adapters.system_clock import SystemClock
 from agl.cli.exit_codes import exit_status
 from agl.config import container, registry
@@ -874,7 +877,7 @@ def _real(
         terminal=HeadlessTerminal(),
         clock=SystemClock(),
         agents=RoutingAgentRunner({Provider.CLAUDE: FakeAgentRunner(_agent(recorded))}),
-        build=container.FAKE_BUILD,
+        config={"build": container.FAKE_BUILD},
     )
 
 async def _real_run(world: _World, services: Services) -> Run[None]:
@@ -1001,6 +1004,64 @@ async def test_a_red_gate_leaves_a_real_target_unmerged_and_its_tree_clean(world
         f"rejected build left behind is a refusal aimed at whoever comes next"
     )
     assert _read(world.target / _file(CHILDREN[1])) == _work(CHILDREN[1])
+
+# --- no command: refused before the merge, and an empty one gates on nothing ---------------------
+
+@pytest.mark.asyncio
+async def test_integrate_without_build_leaves_a_real_run_branch_with_no_merge_on_it(
+    world: _World,
+) -> None:
+    """The ungated merge, asked of git: a bundle with no `build` is refused before `land` runs.
+
+    The gate is the real `ShellVerifier` and not a fake, because the two fail differently when the
+    refusal is missing. `asyncio.create_subprocess_shell` raises `ValueError` on a `None` command,
+    and it raises inside the gate - after `GitIntegrator.land` has committed the merge - while a
+    fake passes a command nobody scripted and would keep that merge without a word. So the run
+    branch is read from git: at its tip, with none of the child's work in it, holding nothing.
+    """
+    services = replace(_real(world, gate=ShellVerifier()), config={})
+    run = await _real_run(world, services)
+    child = run.worktree(CHILDREN[0])
+    await child.step(BUILDS[CHILDREN[0]], commit="implement T-01")
+    branch = run_branch(LABEL)
+    before = _tip(world, branch)
+    built = _tip(world, worktree_branch(LABEL, Namespace(CHILDREN[0])))
+
+    with pytest.raises(InputError) as refused:
+        await child.integrate()
+
+    assert "`run.integrate()`" in str(refused.value)
+    assert _tip(world, branch) == before, (
+        f"{branch} moved from {before!r} to {_tip(world, branch)!r} under a refused `integrate()`, "
+        f"so a merge went in that no build was ever run over"
+    )
+    assert not _contains(world, built, branch), f"{branch} holds the child's ungated work"
+    assert not _holding(world.target), "the target is mid-landing after a refusal that preceded it"
+    assert run.leases.unsettled is False
+
+@pytest.mark.asyncio
+async def test_an_empty_build_passes_a_real_gate_and_the_merge_stays_on_the_run_branch(
+    world: _World,
+) -> None:
+    """`build = ""` is used as written: `sh -c ""` exits 0 with no output, and the landing stands.
+
+    Nothing between the bundle and the shell refuses the empty string or puts a command in its
+    place, so the verdict is the shell's own answer to running nothing, and the branch holds the
+    child's work.
+    """
+    services = replace(_real(world, gate=ShellVerifier()), config={"build": ""})
+    run = await _real_run(world, services)
+    child = run.worktree(CHILDREN[0])
+    await child.step(BUILDS[CHILDREN[0]], commit="implement T-01")
+    branch = run_branch(LABEL)
+    built = _tip(world, worktree_branch(LABEL, Namespace(CHILDREN[0])))
+
+    outcome = await child.integrate()
+
+    assert outcome.conflicted is False, f"the empty build did not pass: {outcome.conflict}"
+    assert outcome.verdict == VerifierOutcome(passed=True, status=0, output="")
+    assert _tip(world, branch) == outcome.head
+    assert _contains(world, built, branch), f"{branch} does not hold the child's work"
 
 # --- criterion 3: the advance, proven where it destroys work --------------------------------------
 

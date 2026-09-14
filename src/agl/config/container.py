@@ -3,6 +3,7 @@ from dataclasses import dataclass, replace
 from functools import partial
 from inspect import isawaitable
 from pathlib import Path
+from types import MappingProxyType
 from typing import Final
 from agl.adapters.claude_code import fake as claude_fake
 from agl.adapters.filesystem.memory_store import MemoryStore
@@ -37,6 +38,7 @@ from agl.ports.store import Store
 from agl.ports.sync import Syncer
 from agl.ports.terminal import Terminal
 from agl.ports.tree_layout import TreesRoot
+from agl.sdk._engine.integration import BUILD
 from agl.sdk._engine.services import Services
 from agl.sdk.testing import Agent, Reply
 
@@ -56,6 +58,8 @@ __all__ = [
 ]
 
 FAKE_BUILD: Final = "agl-fake-build"
+
+_FAKE_CONFIG: Final[Mapping[str, str]] = MappingProxyType({BUILD: FAKE_BUILD})
 
 @dataclass(frozen=True, slots=True)
 class FakeServices:
@@ -90,14 +94,14 @@ def real(settings: Settings, project: Project) -> Services:
         terminal=_terminal(),
         clock=SystemClock(),
         agents=_agents(settings.agents),
-        build=project.build,
+        config=project.config,
     )
 
 def fakes(
     trees: TreesRoot,
     *,
     files: Mapping[str, bytes] | None = None,
-    build: str = FAKE_BUILD,
+    config: Mapping[str, str] = _FAKE_CONFIG,
     agent: Agent | None = None,
     claude: claude_fake.Script | None = None,
     openai: openai_fake.Script | None = None,
@@ -126,7 +130,7 @@ def fakes(
                     ),
                 }
             ),
-            build=build,
+            config=MappingProxyType(dict(config)),
         ),
         repository=repository,
         store=store,

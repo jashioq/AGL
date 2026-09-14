@@ -74,6 +74,7 @@ from agl.config.distribution import DISTRIBUTION, installed_version
 from agl.config.registry import (
     GROUP,
     Discovery,
+    check_configured,
     check_satisfied,
     check_unbroken,
     declarations,
@@ -81,9 +82,10 @@ from agl.config.registry import (
     load,
     names,
 )
-from agl.config.toml_file import read_document
-from agl.ports.errors import ConflictError, InputError, NotFoundError
-from agl.ports.home_layout import AglHome, workflows_dir
+from agl.config.toml_file import RESERVED_KEYS, read_document, resolve_project
+from agl.ports.errors import ConflictError, InputError, NotFoundError, exit_code_for
+from agl.ports.home_layout import AglHome, project_config, workflows_dir
+from agl.ports.ids import ProjectName
 
 # What a registered workflow looks like from here: a name, a `module:attr` value, and the group.
 # The targets are real objects in this repository, so a load that is supposed to succeed does.
@@ -469,6 +471,11 @@ def _needing(bound: str, *declarations: str) -> str:
         + f'\n[tool.agl]\nrequires = "{DISTRIBUTION}{bound}"\n'
     )
 
+def _configuring(line: str, *declarations: str, bound: str | None = None) -> str:
+    """A project file whose `[tool.agl]` table holds `config = <line>`, under `bound` if given."""
+    requires = "" if bound is None else f'requires = "{DISTRIBUTION}{bound}"\n'
+    return _declaring(*declarations) + f"\n[tool.agl]\n{requires}config = {line}\n"
+
 def test_a_workflow_needing_an_agl_this_is_not_is_refused_before_anything_is_imported(
     tmp_path: Path,
 ) -> None:
@@ -673,6 +680,8 @@ def test_the_workflows_own_missing_module_is_refused_about_the_declaration_and_n
         '[project]\nname = "triage"\nversion = "0.1.0"\n',
         _declaring("triage = 3"),
         _needing(f">={_BEYOND_REACH}", f"triage = {_UNIMPORTABLE!r}"),
+        _configuring('["build", "lint"]', _pointing_here("triage")),
+        _configuring('["build", 3]', _pointing_here("triage")),
     ],
 )
 def test_a_document_parsed_elsewhere_reads_exactly_as_the_walk_reads_it_off_disk(
@@ -680,9 +689,10 @@ def test_a_document_parsed_elsewhere_reads_exactly_as_the_walk_reads_it_off_disk
 ) -> None:
     """`agl get` hands over a project file still in memory, and it is read as the walk reads it.
 
-    The same four shapes the walk meets - declaring, declaring nothing, declaring a non-string and
-    declaring past this AGL - and the whole `Discovery` compared, so a second reading drifting on
-    any field of it fails here rather than as a download refused in other words than a listing.
+    The shapes the walk meets - declaring, declaring nothing, declaring a non-string, declaring
+    past this AGL, and a `config` line both readable and not - and the whole `Discovery` compared,
+    so a second reading drifting on any field of it fails here rather than as a download refused in
+    other words than a listing.
     """
     home = _home(tmp_path)
     directory = _directory(home, "triage", document)
@@ -690,3 +700,168 @@ def test_a_document_parsed_elsewhere_reads_exactly_as_the_walk_reads_it_off_disk
     assert parsed is not None
 
     assert declarations(directory, parsed) == discovered(home)
+
+# --- the project settings a workflow declares it reads, and the check against a project ----------
+#
+# `config` sits beside `requires` and is read in the same pass, so nothing is imported to learn it.
+# A line that cannot be read breaks its directory in `_unusable`'s manner - every offence named at
+# once - and `agl get` inherits that through `declarations`. A line that reads is checked against a
+# project's keys by `check_configured`, whose refusal `api.run` and `api.resume` raise ahead of the
+# import and of preflight; `tests/test_api.py` holds that order.
+
+_PROJECT_FILE: Final = Path("/nowhere/home/projects/myapp.toml")
+
+def test_a_config_line_is_read_into_the_declared_keys_in_the_order_it_was_written(
+    tmp_path: Path,
+) -> None:
+    home = _home(tmp_path)
+    _directory(home, "triage", _configuring('["lint", "build"]', _pointing_here("triage")))
+
+    found = discovered(home)
+
+    assert found.broken == ()
+    assert found.config_keys == {"triage": ("lint", "build")}
+
+def test_a_workflow_writing_no_config_line_declares_nothing_and_no_project_can_fail_it(
+    tmp_path: Path,
+) -> None:
+    """Undeclared is an empty declaration and never a wildcard: the check has nothing to ask."""
+    home = _home(tmp_path)
+    _directory(home, "triage", _declaring(_pointing_here("triage")))
+    found = discovered(home)
+
+    check_configured(found, "triage", {}, _PROJECT_FILE)
+
+    assert found.config_keys == {"triage": ()}
+
+def test_a_config_line_naming_every_kind_of_offence_breaks_its_directory_naming_each_once(
+    tmp_path: Path,
+) -> None:
+    """All four offences in one line and one refusal, so fixing the file takes one edit, not four.
+
+    `build` is written three times and named once. The refusal is a broken directory, which is what
+    an entry point beside a non-string gets, so `agl run` meets it at `check_unbroken`, exit 2.
+    """
+    home = _home(tmp_path)
+    line = '["build", 3, "", "repo", "build", "build"]'
+    path = _directory(home, "triage", _configuring(line, _pointing_here("triage")))
+
+    found = discovered(home)
+
+    assert found.points == ()
+    assert found.config_keys == {}
+    (entry,) = found.broken
+    said = entry.reason
+    assert str(path / "pyproject.toml") in said
+    assert "3 is not a string" in said
+    assert "the empty string" in said
+    assert "repo is a key AGL configures itself" in said
+    assert said.count("build is written more than once") == 1
+    with pytest.raises(InputError) as refused:
+        check_unbroken(found, "triage")
+    assert exit_code_for(refused.value) == 2
+
+@pytest.mark.parametrize("reserved", RESERVED_KEYS)
+def test_each_key_agl_configures_itself_is_refused_as_a_declared_config_key(
+    tmp_path: Path, reserved: str
+) -> None:
+    """A workflow declaring one would read AGL's own settings through the project config door."""
+    home = _home(tmp_path)
+    _directory(home, "triage", _configuring(f'["{reserved}"]', _pointing_here("triage")))
+
+    (entry,) = discovered(home).broken
+
+    assert f"{reserved} is a key AGL configures itself" in entry.reason
+
+def test_a_config_line_that_is_not_a_list_breaks_its_directory_rather_than_declaring_nothing(
+    tmp_path: Path,
+) -> None:
+    """`config = "build"` is the likeliest slip, and read as nothing it would run with no check."""
+    home = _home(tmp_path)
+    _directory(home, "triage", _configuring('"build"', _pointing_here("triage")))
+
+    (entry,) = discovered(home).broken
+
+    assert "rather than a list" in entry.reason
+
+def test_a_config_line_under_an_unmet_bound_goes_unread_so_the_version_is_the_refusal(
+    tmp_path: Path,
+) -> None:
+    """A line this AGL cannot read may be one a newer AGL can, and the bound says it was written
+    for that one - so the operator is told about the version, which explains the line as well."""
+    home = _home(tmp_path)
+    _directory(
+        home,
+        "triage",
+        _configuring('{ build = "x" }', _pointing_here("triage"), bound=f">={_BEYOND_REACH}"),
+    )
+
+    found = discovered(home)
+
+    assert found.broken == ()
+    assert found.config_keys == {}
+    assert sorted(found.unsatisfied) == ["triage"]
+
+def test_the_check_names_every_missing_key_and_the_project_file_and_no_key_that_is_set(
+    tmp_path: Path,
+) -> None:
+    home = _home(tmp_path)
+    path = _directory(
+        home, "triage", _configuring('["build", "lint", "test"]', _pointing_here("triage"))
+    )
+
+    with pytest.raises(InputError) as refused:
+        check_configured(discovered(home), "triage", {"build": "make"}, _PROJECT_FILE)
+
+    said = str(refused.value)
+    assert exit_code_for(refused.value) == 2
+    assert said.startswith(f"{_PROJECT_FILE}: lint, test are not set")
+    assert str(path / "pyproject.toml") in said
+    assert said.endswith("\n\n    lint =\n    test =")
+    assert "build =" not in said
+
+def test_a_key_set_to_the_empty_string_is_present_and_satisfies_the_declaration(
+    tmp_path: Path,
+) -> None:
+    home = _home(tmp_path)
+    _directory(home, "triage", _configuring('["build"]', _pointing_here("triage")))
+
+    check_configured(discovered(home), "triage", {"build": ""}, _PROJECT_FILE)
+
+def test_a_declared_name_outside_the_bare_key_alphabet_is_offered_quoted_for_pasting(
+    tmp_path: Path,
+) -> None:
+    home = _home(tmp_path)
+    _directory(home, "triage", _configuring('["my key"]', _pointing_here("triage")))
+
+    with pytest.raises(InputError) as refused:
+        check_configured(discovered(home), "triage", {}, _PROJECT_FILE)
+
+    assert str(refused.value).endswith('\n\n    "my key" =')
+
+def test_lines_pasted_from_the_refusal_as_they_stand_leave_the_project_unresolvable(
+    tmp_path: Path,
+) -> None:
+    """The paste form is chosen to fail: `build = ""` would be a working empty gate, this is not.
+
+    The refusal's own lines are appended to a registered project's file and the project is resolved
+    again. Invalid TOML is refused at resolution, before any workflow is discovered, so an operator
+    who pasted without filling in hears about it on the very next command.
+    """
+    home = _home(tmp_path)
+    repo = tmp_path / "myapp"
+    (repo / ".git").mkdir(parents=True)
+    project_file = project_config(home, ProjectName("myapp"))
+    project_file.parent.mkdir(parents=True)
+    project_file.write_text(f'repo = "{repo}"\n', encoding="utf-8")
+    _directory(home, "triage", _configuring('["lint"]', _pointing_here("triage")))
+    with pytest.raises(InputError) as refused:
+        check_configured(discovered(home), "triage", {}, project_file)
+    pasted = str(refused.value).partition("\n\n")[2]
+
+    with project_file.open("a", encoding="utf-8") as handle:
+        handle.write(f"{pasted}\n")
+
+    with pytest.raises(InputError) as unresolvable:
+        resolve_project(home, repo)
+    assert "is not valid TOML" in str(unresolvable.value)

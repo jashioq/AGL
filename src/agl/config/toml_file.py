@@ -1,7 +1,8 @@
 import tomllib
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Final
 from agl.ports.errors import ConflictError, InputError, NotFoundError
 from agl.ports.home_layout import (
@@ -20,6 +21,7 @@ from agl.ports.ids import ProjectName, WorkflowName
 from agl.ports.tree_layout import TreesRoot
 
 __all__ = [
+    "RESERVED_KEYS",
     "FileAgent",
     "FileProject",
     "FileSettings",
@@ -29,6 +31,7 @@ __all__ = [
     "make_workflow",
     "make_workspace",
     "parsed_document",
+    "quoted",
     "read_document",
     "read_project",
     "read_settings",
@@ -45,11 +48,11 @@ _CLI_PATH: Final = "cli_path"
 _NAME: Final = "name"
 _REPO: Final = "repo"
 _TREES_ROOT: Final = "trees_root"
-_BUILD: Final = "build"
 _BUILD_TIMEOUT: Final = "build_timeout"
 _SECTIONS: Final = (_CLAUDE, _OPENAI)
 _AGENT_KEYS: Final = (_ENABLED, _CLI_PATH)
-_PROJECT_KEYS: Final = (_NAME, _REPO, _TREES_ROOT, _BUILD, _BUILD_TIMEOUT)
+
+RESERVED_KEYS: Final = (_NAME, _REPO, _TREES_ROOT, _BUILD_TIMEOUT)
 
 _HOME_KEYS: Final = frozenset({"home", "agl_home", "AGL_HOME"})
 
@@ -125,9 +128,9 @@ class FileProject:
 
     trees_root: TreesRoot | None
 
-    build: str | None
-
     build_timeout: float | None
+
+    config: Mapping[str, str]
 
 _NOTHING_SAID: Final = FileSettings(
     claude=FileAgent(enabled=None, cli_path=None),
@@ -175,17 +178,15 @@ def write_project(
     project: ProjectName,
     repo: Path,
     trees_root: TreesRoot,
-    build: str,
     build_timeout: float,
 ) -> Path:
     path = project_config(home, project)
     document = "".join(
-        f"{key} = {_quoted(value)}\n"
+        f"{key} = {quoted(value)}\n"
         for key, value in (
             (_NAME, str(project)),
             (_REPO, str(repo)),
             (_TREES_ROOT, str(trees_root.path)),
-            (_BUILD, build),
         )
     ) + f"{_BUILD_TIMEOUT} = {build_timeout!r}\n"
     try:
@@ -263,21 +264,27 @@ def check_trees_root(path: Path, repo: Path, trees_root: Path) -> None:
 
 def resolve_project(home: AglHome, start: Path) -> FileProject:
     root = git_root(start)
+    unreadable: list[InputError] = []
     for candidate in _project_files(home):
-        document = read_document(candidate)
-        if document is None:
+        try:
+            document = read_document(candidate)
+            repo = None if document is None else _absolute(document, _REPO, candidate, "")
+        except InputError as error:
+            unreadable.append(error)
             continue
-        project = _project(candidate, document)
-        if project.repo is None:
+        if document is None or repo is None:
             continue
         try:
             # `samefile` asks the filesystem - device and inode - so a repository reached through a
             # symlink and the same one reached directly are one project, as are two spellings
             # differing only in case.
-            if project.repo.samefile(root):
-                return project
+            if not repo.samefile(root):
+                continue
         except OSError:
             continue
+        return _project(candidate, document)
+    if unreadable:
+        raise InputError(_unreadable(root, unreadable))
     raise NotFoundError(
         f"no project is registered for the repository at {root}: AGL read every project settings "
         f"file under {home.path} and none of them names it as its repo. Run `agl init` inside "
@@ -308,7 +315,6 @@ def parsed_document(path: Path, content: bytes) -> Mapping[str, object]:
     return document
 
 def _project(path: Path, document: Mapping[str, object]) -> FileProject:
-    _only(document, _PROJECT_KEYS, path, "")
     trees = _absolute(document, _TREES_ROOT, path, "")
     repo = _absolute(document, _REPO, path, "")
     if repo is not None and trees is not None:
@@ -317,8 +323,17 @@ def _project(path: Path, document: Mapping[str, object]) -> FileProject:
         name=_project_name(path, _text(document, _NAME, path, "")),
         repo=repo,
         trees_root=None if trees is None else TreesRoot(trees),
-        build=_text(document, _BUILD, path, ""),
         build_timeout=_seconds(document, _BUILD_TIMEOUT, path, ""),
+        config=_config(path, document),
+    )
+
+def _config(path: Path, document: Mapping[str, object]) -> Mapping[str, str]:
+    unreserved = {key: raw for key, raw in document.items() if key not in RESERVED_KEYS}
+    refused = {key: raw for key, raw in unreserved.items() if not isinstance(raw, str)}
+    if refused:
+        raise InputError(_not_strings(path, refused))
+    return MappingProxyType(
+        {key: raw for key, raw in unreserved.items() if isinstance(raw, str)}
     )
 
 def _project_name(path: Path, spelled: str | None) -> ProjectName:
@@ -410,6 +425,28 @@ def _absolute(table: Mapping[str, object], key: str, path: Path, prefix: str) ->
         )
     return value
 
+def _not_strings(path: Path, refused: Mapping[str, object]) -> str:
+    said = ", ".join(f"{key} is {raw!r}" for key, raw in refused.items())
+    verdict = "which is not a string" if len(refused) == 1 else "and none of those is a string"
+    return (
+        f"{path}: {said}, {verdict}. The keys AGL configures itself are "
+        f"{', '.join(RESERVED_KEYS)}; any other key is one a workflow declares and is handed as "
+        f"text, so its value is a TOML string, an empty one included. AGL does not coerce a "
+        f"settings value into the type it was expecting - a file that says something other than "
+        f"what it meant is worth stopping for. Quote the value, or spell a table's entries out as "
+        f"keys of their own"
+    )
+
+def _unreadable(root: Path, refusals: Sequence[InputError]) -> str:
+    named = "\n".join(f"    {refusal}" for refusal in refusals)
+    return (
+        f"no project is registered for the repository at {root} in any project settings file AGL "
+        f"could read, and the files below could not be read far enough to learn which repository "
+        f"they name - so one of them may be this repository's, and AGL will not call it "
+        f"unregistered on that guess. Fix what each says, or run `agl init` inside {root} if none "
+        f"of them is this repository's:\n{named}"
+    )
+
 def _already(path: Path, project: ProjectName) -> str:
     return (
         f"a project named {str(project)!r} is already registered: {path} exists, and `agl init` "
@@ -438,10 +475,13 @@ def _unwritable(path: Path, error: OSError) -> str:
 
 # Empty where there is no bound to write: `config/distribution.py` answers `None` on a tree with no
 # version of its own, and a workflow claiming nothing beats one claiming a version no reader parses.
+# The empty `config` line goes only under a bound, because an AGL older than the one that reads it
+# ignores the line and runs the workflow unchecked, and the bound is what refuses that AGL instead.
 def _bound_table(bound: str | None) -> str:
-    return "" if bound is None else f"\n[tool.agl]\nrequires = {_quoted(bound)}\n"
+    return "" if bound is None else f"\n[tool.agl]\nrequires = {quoted(bound)}\nconfig = []\n"
 
-def _quoted(value: str) -> str:
+def quoted(value: str) -> str:
+    """`value` as a TOML basic string, quotes included and escaped as the format requires."""
     escaped = "".join(
         _ESCAPED[character]
         if character in _ESCAPED

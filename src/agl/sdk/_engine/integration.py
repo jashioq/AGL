@@ -1,16 +1,28 @@
 import asyncio
 from collections.abc import Callable
+from typing import Final
 from agl.ports.errors import InternalError
 from agl.ports.history import History
 from agl.ports.home_layout import RunScope
 from agl.ports.integration import Conflict, IntegrationOutcome, Integrator
 from agl.ports.verifier import Verifier, VerifierOutcome
 from agl.ports.workspace import Workspace
+from agl.sdk._engine.config import required_setting
 from agl.sdk._engine.journal import Journal
 from agl.sdk._engine.services import Services
 from agl.sdk._engine.steps import Steps
 
-__all__ = ["Integration", "Leases", "integrate"]
+__all__ = ["BUILD", "Integration", "Leases", "integrate"]
+
+BUILD: Final = "build"
+
+_UNGATED_LANDING: Final = (
+    "The merge gate runs that command in the target's checkout before a landing is kept, and a "
+    "project is checked for a key before anything is spent only when the workflow declares it - so "
+    "an undeclared one is refused here, where the alternative is a merge no build has passed. "
+    "Nothing has landed and the parent's chain is untouched. Leaving it undeclared is not how a "
+    "gate is skipped: a project that wants none sets it to the empty string"
+)
 
 class Leases:
     def __init__(self) -> None:
@@ -197,6 +209,7 @@ async def integrate(
     services: Services,
     leases: Leases,
 ) -> Integration:
+    build = required_setting(services.config, BUILD, "`run.integrate()`", _UNGATED_LANDING)
     _, child = await source.landing()
     journal, parent = await target.landing()
     lease = await leases.claim(address, journal)
@@ -208,7 +221,7 @@ async def integrate(
             integrator=services.integrator,
             history=services.history,
             verifier=services.verifier,
-            build=services.build,
+            build=build,
             before=await parent.head(),
             lease=lease,
         )

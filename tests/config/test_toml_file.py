@@ -235,8 +235,10 @@ def test_a_relative_path_is_refused_wherever_a_file_holds_one(tmp_path: Path) ->
 
 # --- The project file -------------------------------------------------------------------------
 
-def test_the_project_file_round_trips_the_five_keys_init_writes(tmp_path: Path) -> None:
-    """All five keys. `trees_root` keeps its name here; `schema.Project` calls it `trees`."""
+def test_the_project_file_round_trips_its_reserved_keys_and_the_config_beside_them(
+    tmp_path: Path,
+) -> None:
+    """Every key. `trees_root` keeps its name here; `schema.Project` calls it `trees`."""
     home = _home(tmp_path)
     _project_file(
         home,
@@ -253,8 +255,8 @@ def test_the_project_file_round_trips_the_five_keys_init_writes(tmp_path: Path) 
         name=ProjectName("myapp"),
         repo=Path("/Users/jan/dev/myapp"),
         trees_root=TreesRoot(Path("/Users/jan/dev/.agl-trees/myapp")),
-        build="./gradlew build",
         build_timeout=600.0,
+        config={"build": "./gradlew build"},
     )
 
 def test_an_integer_timeout_arrives_as_the_float_the_settings_object_declares(
@@ -273,8 +275,15 @@ def test_a_boolean_timeout_is_refused_although_python_calls_it_an_integer(tmp_pa
         read_project(home, ProjectName("myapp"))
     assert "build_timeout" in str(raised.value)
 
-def test_the_typo_that_would_silently_keep_a_default_is_refused(tmp_path: Path) -> None:
-    """`build_timout` is the failure a configuration file exists to prevent."""
+def test_a_misspelt_reserved_key_holding_a_number_is_refused_naming_the_reserved_ones(
+    tmp_path: Path,
+) -> None:
+    """`build_timout` is not reserved, so it is a workflow's key, and a workflow's key is a string.
+
+    The refusal lists the reserved keys so the misspelling is visible beside the spelling. The same
+    typo holding a quoted value is admitted into the config: the namespace is open, and a key no
+    workflow declares is not one AGL can tell from a misspelt one.
+    """
     home = _home(tmp_path)
     path = _project_file(home, "myapp", "build_timout = 600\n")
     with pytest.raises(InputError) as raised:
@@ -313,6 +322,47 @@ def test_a_relative_trees_root_is_refused_before_it_reaches_the_wrapper(tmp_path
         read_project(home, ProjectName("myapp"))
     assert "trees_root" in str(raised.value)
 
+def test_every_key_holding_something_other_than_a_string_is_named_in_one_refusal(
+    tmp_path: Path,
+) -> None:
+    """All of them at once, so a file with four wrong values takes one edit and not four runs.
+
+    A number, a boolean, an array, a date, a dotted key and a table: TOML reads each of the last two
+    as a table, and every one of them would reach a workflow as something other than the text it is
+    handed. The string beside them is not named.
+    """
+    home = _home(tmp_path)
+    path = _project_file(
+        home,
+        "myapp",
+        """
+        build = "make"
+        retries = 3
+        strict = true
+        suites = ["unit", "e2e"]
+        released = 2026-09-13
+        lint.command = "ruff"
+
+        [workflows.ralph]
+        gate = "./check.sh"
+        """,
+    )
+    with pytest.raises(InputError) as raised:
+        read_project(home, ProjectName("myapp"))
+    said = str(raised.value)
+    assert said.startswith(f"{path}: ")
+    named = ("retries is 3", "strict is True", "suites is", "released is", "lint is", "workflows")
+    for key in named:
+        assert key in said, f"{key!r} is not named in: {said}"
+    assert "build is" not in said
+
+def test_a_key_agl_does_not_reserve_is_carried_verbatim_and_an_empty_one_is_kept(
+    tmp_path: Path,
+) -> None:
+    home = _home(tmp_path)
+    _project_file(home, "myapp", 'build = ""\nlinter = "ruff check"\n')
+    assert read_project(home, ProjectName("myapp")).config == {"build": "", "linter": "ruff check"}
+
 def test_a_project_that_was_never_registered_is_not_found(tmp_path: Path) -> None:
     """A name is not a guess: absence here is a refusal, unlike the global settings file."""
     with pytest.raises(NotFoundError) as raised:
@@ -330,42 +380,44 @@ def test_a_project_that_was_never_registered_is_not_found(tmp_path: Path) -> Non
 def test_a_file_the_writer_writes_is_one_the_reader_accepts(tmp_path: Path) -> None:
     """The round trip, which is the writer's entire contract: the file written and read back.
 
-    All five keys, `build_timeout` included, and the expected value is spelled as the constant
-    rather than as `600.0`: the number has one home in `sources.DEFAULT_BUILD_TIMEOUT`, `api.init`
-    reads it rather than restating it, and a literal here would be the second copy that arrangement
-    exists to prevent - one that goes on passing on the day the default moves and the writer follows
-    it.
+    Every key it writes, `build_timeout` included, and no `build`, which nothing writes, so the file
+    reads back with that key absent. The timeout is spelled as the constant rather than as `600.0`:
+    the number has one home in `sources.DEFAULT_BUILD_TIMEOUT`, `api.init` reads it rather than
+    restating it, and a literal here would be the second copy that arrangement exists to prevent -
+    one that goes on passing on the day the default moves and the writer follows it.
     """
     home = _home(tmp_path)
     repo = tmp_path.resolve() / "dev" / "myapp"
     trees = TreesRoot(tmp_path.resolve() / "dev" / ".agl-trees" / "myapp")
 
-    written = write_project(
-        home, ProjectName("myapp"), repo, trees, "./gradlew build", DEFAULT_BUILD_TIMEOUT
-    )
+    written = write_project(home, ProjectName("myapp"), repo, trees, DEFAULT_BUILD_TIMEOUT)
 
     assert written == project_config(home, ProjectName("myapp"))
     assert read_project(home, ProjectName("myapp")) == FileProject(
         name=ProjectName("myapp"),
         repo=repo,
         trees_root=trees,
-        build="./gradlew build",
         build_timeout=DEFAULT_BUILD_TIMEOUT,
+        config={},
     )
 
-def test_a_build_command_holding_the_format_s_own_punctuation_round_trips(tmp_path: Path) -> None:
-    """A build command is a shell line, so a quote and a backslash in it are ordinary.
+def test_a_repository_path_holding_the_format_s_own_punctuation_round_trips(tmp_path: Path) -> None:
+    """A directory name may hold a quote and a backslash, so the written path has to survive both.
 
     This is the assertion the escape table exists for, and it is why the value is written as a TOML
     *basic* string: a literal string admits no escapes at all, so `don't` would end the value early
     and produce a file `tomllib` refuses - a file `agl init` wrote and no later command could read.
     """
     home = _home(tmp_path)
-    build = 'sh -c "make test" && echo don\'t \\ stop'
+    dev = tmp_path.resolve() / 'say "don\'t" \\ stop'
+    repo = dev / "myapp"
 
-    write_project(home, ProjectName("myapp"), *_beside(tmp_path), build, DEFAULT_BUILD_TIMEOUT)
+    write_project(
+        home, ProjectName("myapp"), repo, TreesRoot(dev / ".agl-trees" / "myapp"),
+        DEFAULT_BUILD_TIMEOUT,
+    )
 
-    assert read_project(home, ProjectName("myapp")).build == build
+    assert read_project(home, ProjectName("myapp")).repo == repo
 
 def test_the_writer_never_writes_over_a_project_file_that_is_already_there(tmp_path: Path) -> None:
     """`agl init` runs once per repo, and running it twice must not take a file away.
@@ -375,21 +427,20 @@ def test_the_writer_never_writes_over_a_project_file_that_is_already_there(tmp_p
     truncating would raise the same class and have destroyed the settings anyway.
     """
     home = _home(tmp_path)
-    write_project(home, ProjectName("myapp"), *_beside(tmp_path), "make", DEFAULT_BUILD_TIMEOUT)
+    written = write_project(home, ProjectName("myapp"), *_beside(tmp_path), DEFAULT_BUILD_TIMEOUT)
+    written.write_text(written.read_text(encoding="utf-8") + 'build = "make"\n', encoding="utf-8")
 
     with pytest.raises(ConflictError) as raised:
-        write_project(
-            home, ProjectName("myapp"), *_beside(tmp_path), "ninja", DEFAULT_BUILD_TIMEOUT
-        )
+        write_project(home, ProjectName("myapp"), *_beside(tmp_path), DEFAULT_BUILD_TIMEOUT)
 
     assert "myapp" in str(raised.value)
-    assert read_project(home, ProjectName("myapp")).build == "make"
+    assert read_project(home, ProjectName("myapp")).config == {"build": "make"}
 
 def test_the_free_refusal_and_the_write_refusal_are_one_message(tmp_path: Path) -> None:
     """`check_unregistered` answers with the path a new project's file goes to, or refuses.
 
-    Two call sites and one sentence: `api.init` asks this before it puts a question to a person, so
-    that a build command is not typed into a prompt and thrown away, and `write_project` asks the
+    Two call sites and one sentence: `api.init` asks this before it checks the trees root it chose,
+    so a registered repository is refused before anything else is, and `write_project` asks the
     operating system the same thing again at the moment it matters. The messages are compared
     because two refusals about one fact that drifted apart would be two accounts of what happened.
     """
@@ -398,11 +449,11 @@ def test_the_free_refusal_and_the_write_refusal_are_one_message(tmp_path: Path) 
 
     assert check_unregistered(home, name) == project_config(home, name)
 
-    write_project(home, name, *_beside(tmp_path), "make", DEFAULT_BUILD_TIMEOUT)
+    write_project(home, name, *_beside(tmp_path), DEFAULT_BUILD_TIMEOUT)
     with pytest.raises(ConflictError) as free:
         check_unregistered(home, name)
     with pytest.raises(ConflictError) as written:
-        write_project(home, name, *_beside(tmp_path), "make", DEFAULT_BUILD_TIMEOUT)
+        write_project(home, name, *_beside(tmp_path), DEFAULT_BUILD_TIMEOUT)
 
     assert str(free.value) == str(written.value)
 
@@ -416,9 +467,9 @@ def test_the_writer_makes_the_projects_directory_when_there_is_none(tmp_path: Pa
     home = _home(tmp_path)
     assert not home.path.exists()
 
-    write_project(home, ProjectName("myapp"), *_beside(tmp_path), "make", DEFAULT_BUILD_TIMEOUT)
+    write_project(home, ProjectName("myapp"), *_beside(tmp_path), DEFAULT_BUILD_TIMEOUT)
 
-    assert read_project(home, ProjectName("myapp")).build == "make"
+    assert read_project(home, ProjectName("myapp")).name == ProjectName("myapp")
 
 # --- The workspace, which is created and never written over --------------------------------------
 #
@@ -933,6 +984,19 @@ def test_a_scaffolded_workflow_names_the_agl_bound_where_no_resolver_reads_it(
         f"was handed, and the table it lands in is what decides who else reads it."
     )
 
+def test_a_scaffolded_workflow_declares_an_empty_config_line_under_the_bound_beside_it(
+    tmp_path: Path,
+) -> None:
+    """Empty, so the scaffold needs nothing from any project; beside the bound, which is what stops
+    an AGL that ignores the line from running a workflow that has since filled it in."""
+    home = _home(tmp_path)
+    make_workspace(home)
+
+    make_workflow(home, _TRIAGE, _GROUP, _BOUND)
+
+    document = tomllib.loads(workflow_pyproject(home, _TRIAGE).read_text(encoding="utf-8"))
+    assert document["tool"]["agl"] == {"requires": _BOUND, "config": []}
+
 def test_an_agl_with_no_version_of_its_own_scaffolds_a_workflow_claiming_nothing(
     tmp_path: Path,
 ) -> None:
@@ -1174,22 +1238,61 @@ def test_resolution_outside_any_repository_fails_on_the_walk_and_says_so(tmp_pat
         resolve_project(home, outside)
     assert "not inside a git repository" in str(raised.value)
 
-def test_a_malformed_project_file_refuses_the_scan_rather_than_being_skipped(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    "text",
+    [
+        "repo = \n",
+        'repo = "../elsewhere"\n',
+        'repo = "/elsewhere"\nname = "bbb"\n',
+        'repo = "/elsewhere"\nlint = 42\n',
+        'repo = "/elsewhere"\nbuild_timeout = true\n',
+    ],
+)
+def test_a_broken_file_sorting_before_a_good_one_does_not_stop_the_good_one_resolving(
+    tmp_path: Path, text: str
 ) -> None:
-    """A skipped file is a project that silently stops existing, and `agl init` would be a lie.
+    """`aaa.toml` sorts first and is malformed, names a relative repo, or holds a refused value.
 
-    `aaa.toml` sorts before `myapp.toml`, so the scan meets it first. The refusal is what the
-    operator needs: the file they have to fix, rather than a `NotFoundError` about a project they
-    registered last week.
+    None of it is `myapp`'s business: a file is validated in full only once its `repo` matches, and
+    one that cannot be read far enough to learn its `repo` is passed over while a readable file
+    still might match.
     """
     home = _home(tmp_path)
     root = _repo(tmp_path, "myapp")
+    _project_file(home, "aaa", text)
     _register(home, "myapp", root)
-    broken = _project_file(home, "aaa", "repo = \n")
+    assert resolve_project(home, root).name == ProjectName("myapp")
+
+def test_with_no_readable_match_every_unreadable_file_is_named_rather_than_not_found(
+    tmp_path: Path,
+) -> None:
+    """A skipped file may be this repository's own, so "not registered" would send the operator to
+    an `agl init` that refuses because the file exists. Every unreadable file is named at once."""
+    home = _home(tmp_path)
+    root = _repo(tmp_path, "myapp")
+    malformed = _project_file(home, "aaa", "repo = \n")
+    relative = _project_file(home, "bbb", 'repo = "../myapp"\n')
+    _register(home, "ccc", _repo(tmp_path, "other"))
+
     with pytest.raises(InputError) as raised:
         resolve_project(home, root)
-    assert str(broken) in str(raised.value)
+
+    assert str(malformed) in str(raised.value)
+    assert str(relative) in str(raised.value)
+    assert "ccc" not in str(raised.value)
+    assert str(root) in str(raised.value)
+
+def test_the_matching_project_s_own_refused_value_is_refused_rather_than_skipped(
+    tmp_path: Path,
+) -> None:
+    """Once `repo` matches, the file is this repository's, and what is wrong in it is the answer."""
+    home = _home(tmp_path)
+    root = _repo(tmp_path, "myapp")
+    path = _project_file(home, "myapp", f'repo = "{root}"\nlint = 42\n')
+    with pytest.raises(InputError) as raised:
+        resolve_project(home, root)
+    assert str(path) in str(raised.value)
+    assert "lint is 42" in str(raised.value)
 
 def test_a_non_toml_entry_beside_the_project_files_is_not_parsed(tmp_path: Path) -> None:
     """The listing filters on the suffix `home_layout` composes, so a stray file changes nothing."""

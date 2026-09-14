@@ -14,7 +14,7 @@ are compared resolved, because `tmp_path` on macOS sits under a symlinked tempor
 
 Refusals are asserted on their class *and* on the variable, the value or the file appearing in the
 message: "it raised" is satisfied by a refusal that leaves the operator hunting for which of their
-seven variables was the wrong one.
+six variables was the wrong one.
 """
 
 from collections.abc import Mapping
@@ -30,10 +30,9 @@ from agl.ports.home_layout import AglHome, project_config
 from agl.ports.ids import ProjectName
 from agl.ports.tree_layout import TreesRoot
 
-# The seven variables the naming rule produces. Written out once, here, so that a rule quietly
+# The six variables the naming rule produces. Written out once, here, so that a rule quietly
 # changing shape breaks a test that names the old spelling rather than passing on the new one.
 _HOME: Final = "AGL_HOME"
-_BUILD: Final = "AGL_BUILD"
 _BUILD_TIMEOUT: Final = "AGL_BUILD_TIMEOUT"
 _CLAUDE_ENABLED: Final = "AGL_AGENT_CLAUDE_ENABLED"
 _CLAUDE_CLI_PATH: Final = "AGL_AGENT_CLAUDE_CLI_PATH"
@@ -162,15 +161,14 @@ def test_cli_path_falls_flag_then_environment_then_file_then_none(tmp_path: Path
     _settings_file(home, "")
     assert resolve_settings(Overrides(), _env(home)).agents.openai.cli_path is None
 
-def test_every_one_of_the_seven_variables_is_spelled_as_the_rule_says(tmp_path: Path) -> None:
-    """`AGL_` + the setting's path in upper snake case, pinned by driving all seven at once."""
+def test_every_one_of_the_six_variables_is_spelled_as_the_rule_says(tmp_path: Path) -> None:
+    """`AGL_` + the setting's path in upper snake case, pinned by driving all six at once."""
     home = _home(tmp_path)
     repo = _repo(tmp_path)
     _project_file(home, repo)
     environ = _env(
         home,
         **{
-            _BUILD: "make check",
             _BUILD_TIMEOUT: "12.5",
             _CLAUDE_ENABLED: "false",
             _CLAUDE_CLI_PATH: "/harness/claude",
@@ -183,7 +181,7 @@ def test_every_one_of_the_seven_variables_is_spelled_as_the_rule_says(tmp_path: 
     assert settings.agents.claude == ClaudeSettings(False, Path("/harness/claude"))
     assert settings.agents.openai == OpenAiSettings(False, Path("/harness/openai"))
     project = resolve_project(settings, Overrides(), environ, repo)
-    assert (project.build, project.build_timeout) == ("make check", 12.5)
+    assert project.build_timeout == 12.5
 
 # --- one setting, all four layers ----------------------------------------------------------------
 
@@ -217,23 +215,84 @@ def test_build_timeout_falls_from_flag_then_env_then_file_then_default(
 
 # --- the rest of the project ---------------------------------------------------------------------
 
-def test_build_falls_flag_then_environment_then_file_and_has_no_default(tmp_path: Path) -> None:
+@pytest.mark.parametrize("variable", ["from env", ""])
+def test_build_is_read_from_the_project_file_and_agl_build_beside_it_changes_nothing(
+    tmp_path: Path, variable: str
+) -> None:
+    """The file is the only source: `AGL_BUILD` is neither a layer nor, set empty, a refusal."""
+    assert "build" not in {field.name for field in fields(Overrides)}
     home = _home(tmp_path)
     repo = _repo(tmp_path)
-    path = _project_file(home, repo, keys='build = "from file"\n')
-    settings = resolve_settings(Overrides(), _env(home))
-    with_variable = _env(home, **{_BUILD: "from env"})
+    _project_file(home, repo, keys='build = "from file"\n')
+    environ = _env(home, AGL_BUILD=variable)
+    settings = resolve_settings(Overrides(), environ)
 
-    flagged = Overrides(build="from flag")
-    assert resolve_project(settings, flagged, with_variable, repo).build == "from flag"
-    assert resolve_project(settings, Overrides(), with_variable, repo).build == "from env"
-    assert resolve_project(settings, Overrides(), _env(home), repo).build == "from file"
+    assert resolve_project(settings, Overrides(), environ, repo).config == {"build": "from file"}
 
+def test_a_project_file_with_no_build_key_resolves_with_build_absent_and_not_defaulted(
+    tmp_path: Path,
+) -> None:
+    """An absent key is absent: no entry at all, not one holding `None`, and nothing substituted."""
+    home = _home(tmp_path)
+    repo = _repo(tmp_path)
     _project_file(home, repo)
+    settings = resolve_settings(Overrides(), _env(home))
+
+    assert resolve_project(settings, Overrides(), _env(home), repo).config == {}
+    with_variable = _env(home, AGL_BUILD="make")
+    assert resolve_project(settings, Overrides(), with_variable, repo).config == {}
+
+@pytest.mark.parametrize("written", ["", "   "])
+def test_an_empty_build_in_the_project_file_resolves_exactly_as_it_was_written(
+    tmp_path: Path, written: str
+) -> None:
+    """An empty value is a value, so it is neither refused nor stripped nor replaced."""
+    home = _home(tmp_path)
+    repo = _repo(tmp_path)
+    _project_file(home, repo, keys=f'build = "{written}"\n')
+    settings = resolve_settings(Overrides(), _env(home))
+
+    assert resolve_project(settings, Overrides(), _env(home), repo).config == {"build": written}
+
+def test_a_key_agl_does_not_reserve_resolves_into_the_config_under_its_own_name(
+    tmp_path: Path,
+) -> None:
+    """Admitted rather than refused, and carried verbatim: no key AGL reserves joins it there.
+
+    `name`, `repo`, `trees_root` and `build_timeout` are all in the file and none is in the config,
+    because each already has a field of its own and one fact under two names is two to keep equal.
+    """
+    home = _home(tmp_path)
+    repo = _repo(tmp_path)
+    _project_file(home, repo, keys='build = "make"\nbuild_timeout = 60\nlinter = "ruff check"\n')
+    settings = resolve_settings(Overrides(), _env(home))
+
+    project = resolve_project(settings, Overrides(), _env(home), repo)
+
+    assert project.config == {"build": "make", "linter": "ruff check"}
+    assert project.build_timeout == 60.0
+
+def test_a_project_file_with_no_trees_root_is_refused_naming_the_file_and_the_key(
+    tmp_path: Path,
+) -> None:
+    """`agl init` refuses a file that exists, so the refusal sends the operator to edit this one.
+
+    `trees_root` rather than `repo`: a file with no `repo` cannot match a repository, so the scan
+    in `toml_file.resolve_project` passes over it and the answer is `NotFoundError` instead.
+    """
+    home = _home(tmp_path)
+    repo = _repo(tmp_path)
+    path = _write(
+        project_config(home, ProjectName(_NAME)), f'name = "{_NAME}"\nrepo = "{repo}"\n'
+    )
+    settings = resolve_settings(Overrides(), _env(home))
+
     with pytest.raises(InputError) as raised:
         resolve_project(settings, Overrides(), _env(home), repo)
+
     assert str(path) in str(raised.value)
-    assert "build" in str(raised.value)
+    assert "trees_root is not set" in str(raised.value)
+    assert "init again" not in str(raised.value)
 
 def test_name_and_repo_and_trees_root_take_no_flag_and_no_environment_layer(
     tmp_path: Path,
@@ -307,7 +366,7 @@ def test_the_two_accepted_boolean_spellings_are_case_insensitive_and_stripped(
     settings = resolve_settings(Overrides(), _env(home, **{_CLAUDE_ENABLED: spelling}))
     assert settings.agents.claude.enabled == (spelling.strip().lower() == "true")
 
-@pytest.mark.parametrize("variable", [_HOME, _CLAUDE_CLI_PATH, _BUILD, _BUILD_TIMEOUT])
+@pytest.mark.parametrize("variable", [_HOME, _CLAUDE_CLI_PATH, _BUILD_TIMEOUT])
 def test_a_variable_set_to_the_empty_string_is_refused_rather_than_treated_as_unset(
     tmp_path: Path, variable: str
 ) -> None:
@@ -359,12 +418,12 @@ def test_resolve_reads_the_environment_once_and_downstream_sees_that_snapshot(
     repo = _repo(tmp_path)
     _project_file(home, repo, keys='build = "make"\n')
     monkeypatch.setenv(_HOME, str(home.path))
-    monkeypatch.setenv(_BUILD, "as it was")
+    monkeypatch.setenv(_BUILD_TIMEOUT, "30")
 
     resolved = resolve(Overrides())
     assert resolved.settings.home == home
 
-    monkeypatch.setenv(_BUILD, "changed underneath")
+    monkeypatch.setenv(_BUILD_TIMEOUT, "45")
     monkeypatch.setenv(_CLAUDE_ENABLED, "false")
-    assert resolved.project(repo).build == "as it was"
+    assert resolved.project(repo).build_timeout == 30.0
     assert resolved.settings.agents.claude.enabled

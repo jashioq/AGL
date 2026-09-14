@@ -104,8 +104,8 @@ read. Composition is per-command, and every door out of the process sits behind 
 `workflows` never build one, the `Syncer` behind a second, so `clear`, `init`, `remove` and
 `workflows` start no installer, and the `Fetcher` behind a third, which `get` and `update` alone
 call. The five that install are `run`, `resume`, `new`, `get` and `update`, and no grammar of
-AGL's asks an operator to start one. `points`, `ask` and `confirm` are the other three,
-and those six fields are the whole of what a test replaces to drive a command on fakes — `compose=`
+AGL's asks an operator to start one. `points` and `confirm` are the other two, and those
+five fields are the whole of what a test replaces to drive a command on fakes — `compose=`
 is the parameter declared for exactly that, which is what `tests/test_measurable_targets.py` runs
 every declared command through without patching a module's internals. **Commands stay dumb.**
 A command declares its own arguments, reads them off the parsed namespace, calls `api` and turns
@@ -175,9 +175,8 @@ than a project, so there is nothing to resolve and no bundle to build around one
 `remove` addresses the workspace too and takes no `Syncer` at all: discovery finds the entry gone
 at once, and the next sync drops what only it needed. `get` is three phases in an order that is the
 design: every download fetched and inspected, then every question asked, through the `confirm` it
-is handed the way `init` is handed `ask`, and only then anything placed — so no question is put
-about a workspace the command has already changed, and a Ctrl-C among the questions leaves the
-workspace as it found it. `update` is the same three phases, `_placed_after_asking` being the one
+is handed, and only then anything placed — so no question is put about a workspace the command has
+already changed, and a Ctrl-C among the questions leaves the workspace as it found it. `update` is the same three phases, `_placed_after_asking` being the one
 copy of them both commands run, over what its comparison found moved, with its own questions in
 place of `get`'s and with the hash its comparison measured of each copy, which the last phase holds
 that copy to. A copy that no longer measures it by then is refused rather than asked about again,
@@ -289,7 +288,12 @@ while a clear is a label somebody typed. "Deliberately not built" argues the res
 **`testing.py`** — The workflow author's harness: `harness(tmp_path, agent=…)` builds an all-fakes
 bundle, `run(...)` and `resume(...)` drive `api` over it, `recorded` is every journal entry,
 `answering([...])` is a terminal that can answer a screen. A sibling of `cli/`, not a layer above
-it — a second caller of `api`.
+it — a second caller of `api`. `harness(config=…)` stands in for a project file and for a
+workflow's declaration at once: the harness hands `api` its entry points and reads no
+`pyproject.toml`, so the keys it is given are the keys its runs declare, and by default that is
+none, `build` included. A harness test that reaches `integrate()` without `config={"build": …}` is
+therefore refused as a real run with no declaration would be, and what a harness pass cannot show is
+that the workflow's real `config` line is complete.
 
 **A workflow is not a layer, and `src/` holds none.** One is a directory under
 `~/.agl/workspace/workflows/<name>/`, written by the operator or placed there by `agl get`, holding
@@ -355,6 +359,54 @@ never saw. A download is read further than any of that, for uv's sake rather tha
 workspace, `requires-python` included — a bound on Python, checked against the interpreter the
 workspace is synced for — and "Invariants where a mistake is silent" says why nothing in it but
 `[project] dependencies` may name a package.
+
+**The same table carries a second line, `config`, and it names the project settings a workflow
+reads.** `config = ["build"]` is a list of key names and holds no value: a value is a fact about one
+project and lives in that project's settings file, so one workflow serves every project that sets
+it. `config/registry.py` reads the line on the pass that reads `requires`, into
+`Discovery.config_keys`, and only where the bound is met — a line written for an AGL this is not may
+be one this AGL would refuse, and the version is what explains it. A line that is not a list of
+distinct, non-empty strings, or that names a key AGL configures itself, makes the directory a
+`BrokenWorkflow`, so `agl workflows` prints the reason and `agl get` refuses the download. `api.run`
+and `api.resume` then ask `registry.check_configured` straight after discovery — before
+`registry.load` imports anything, before `params.parse`, and well before `preflight.check`, whose
+Claude probe spends a real turn — and a project file that does not set every declared key is refused
+with an `InputError` naming each missing key and the file, the lines it offers for pasting ending
+where a value goes so that one pasted as it stands is invalid TOML rather than an empty value.
+Missing means absent. Nothing fills the gap: there is no default, and no environment variable, so
+the project file is the only source a value has. **This is the one line of the table whose older
+reader is not harmless.** An AGL that predates `config` walks past a key it does not know, as uv
+walks past the table, and runs the workflow with nothing checked — so what keeps such a workflow
+from such an AGL is `requires`, and only a bound that AGL does not meet. `agl new` writes
+`config = []` beside the bound it writes and never without one, and a bound admitting a version that
+predates `config` protects nothing.
+
+**A project's settings file is AGL's four keys and, beside them at the top level, every key a
+workflow declares.** `toml_file.RESERVED_KEYS` — `name`, `repo`, `trees_root`, `build_timeout` — are
+the keys AGL configures itself, and the ones `agl init` writes, asking nothing. Every other
+top-level key is a workflow's, and it is shared rather than namespaced per workflow: how a project
+builds is a property of the project, so two workflows declaring `build` read one value. Each such
+value is a TOML string held exactly as written, `""` included, and a number, a boolean or a table
+there is refused at resolution with every offender named, AGL coercing nothing into the type a
+reader might have wanted. Every command that resolves a project reads the file afresh, so a hand
+edit takes effect without `agl init`, and no writer rewrites a file that exists.
+`toml_file.resolve_project` validates only the file whose `repo` names the repository, so a file
+broken in some other way is seen by nobody until AGL runs in the repository it names; a file that
+cannot be read far enough to learn its `repo` is passed over, and named only where nothing readable
+matched. The open top level has one hole no reader can close: a misspelt reserved key holding a
+string, `build_timout = "600"`, is indistinguishable from a key some workflow declares, and
+`build_timeout` keeps its default.
+
+**A workflow reads what it declared and nothing else.** `Run.config` is `sdk/_engine/config.py`'s
+`DeclaredConfig`, which `api._configured` builds over the resolved project's mapping and puts onto a
+copy of the bundle, so the `Services` a workflow is handed is the composed one with `config`
+narrowed, `run.services.config` is that same object, and every child shares it. A read of a key the
+line does not declare — `[]`, `.get` and `in` alike — raises `InputError` and not `KeyError`,
+because `Mapping.get` and `Mapping.__contains__` catch `KeyError` and would answer `None` or
+`False`, and a prompt built from either goes out with a hole in it. That makes `in` the one member
+that departs from the `Mapping` contract: it never answers no. A run handed its entry points rather
+than a workspace read no `pyproject.toml`, and there the bundle's own keys are the declaration.
+`tests/sdk/test_run_config.py` holds all three reads.
 
 ## The dependency rule
 
@@ -904,6 +956,22 @@ pressed retry, the text they typed lived only in that worktree — in no git obj
 and it goes. A known cost pinned by `tests/sdk/test_integrate_acceptance.py`: the gate has to run
 on that landing too.
 
+**The merge gate's command is read before anything lands.** `integrate()` in
+`sdk/_engine/integration.py` takes `build` through `sdk/_engine/config.py`'s `required_setting`
+ahead of `source.landing()`, the lease and `Integrator.land`, and a workflow that did not declare it
+is refused there, the message naming the `config` line to write. Move that read below `land` and a
+merge is committed into the parent before the refusal, which leaves the run branch holding work no
+build ever ran over — the ungated merge the check exists to prevent, arriving as the exception that
+was meant to prevent it. The check is at the call and not at discovery because discovery reads no
+code and cannot know that a workflow integrates, so a refused run has already spent its earlier
+steps, and the fix is a new run: the declaration lives in the workflow's own `pyproject.toml`, which
+a resume refuses to see changed. A declared `build = ""` is the other half and is not a defect: it
+reaches the verifier as written, `sh -c ""` exits 0, and that is how a project skips the gate on
+purpose, where leaving `build` undeclared is not.
+`tests/sdk/test_integrate_acceptance.py::test_integrate_without_build_leaves_a_real_run_branch_with_no_merge_on_it`
+and `::test_an_empty_build_passes_a_real_gate_and_the_merge_stays_on_the_run_branch` hold both
+against real git.
+
 **Every path out of a hold must settle it.** `Integration.retry` and `Integration.abort` in
 `sdk/_engine/integration.py` are the two verbs a workflow calls on a live conflict, and each reaches
 an `Integrator` that may raise — `land` refuses over unrecorded work in the target, which is exactly
@@ -951,7 +1019,14 @@ an environment variable, a directory listing, randomness or a mutable global, an
 another path: paid-for work is silently redone, and where an off-branch fingerprint happens to
 match, a recorded result comes back for a call that never produced it. The ordinal is never
 persisted — it is rebuilt by re-walking — so order counts too: swap two same-fingerprint steps and
-each returns the other's answer.
+each returns the other's answer. **`run.verify` is the call that most invites the mistake**, a gate
+between steps being what it is for: a verdict is not a step result and writes no entry, and a
+replayed step never touches the checkout, so a verdict taken between replayed steps is taken on the
+checkout as it stands, which on a resume can be past the head the ledger replayed. A verdict fed
+forward into the next step's inputs then misses that step's fingerprint, and the miss restores the
+branch back to the replayed head and pays again for everything after it.
+`tests/sdk/test_run_verify.py::test_a_verdict_between_replayed_steps_is_taken_on_the_checkout_as_it_stands`
+pins the half the engine controls.
 
 **A repeat call needs no discriminator of its own, and adding one buys nothing.** The ordinal is
 counted per `(scope, folded step name, base)` and `Fingerprints.digest` is
@@ -1363,11 +1438,28 @@ The reasoning is the point — without it these get re-proposed.
   restated something the framework could already read, and the copy is the half free to be wrong —
   `Run` is covariant, so a `@workflow(params=SomeParams)` over an `async def wf(run: Run)` annotated
   with a *different* params type type-checked fine, the decorator's copy and the signature's
-  disagreeing in silence. `version=` was the last one out and went the other way: nothing in `src/`
-  ever read it, a resume being refused by the digests of the workflow's own directory instead.
+  disagreeing in silence. `version=` was the last one out and went for the same reason in another
+  shape: a resume compared it with the version its run recorded, and a number an author has to
+  remember to move is a copy of the code's state that an edit nobody numbered leaves wrong, so the
+  digests of the workflow's own directory answer that question from the files instead.
   `@workflow()` is therefore the one wrong spelling left, and `fn` carries a default it is never
   legitimately called with so that the refusal names the bare spelling rather than arriving as
   Python's own `TypeError` about a missing argument.
+- **No step lock, restore or entry behind `run.verify`.** It runs the command in the checkout
+  `Steps` opens for that run — a child's own, where `WorkspaceProvider.open(label, None, base)`
+  answers the root's `_base` from anywhere — and adds nothing around it. An entry would make a
+  verdict a step with a fingerprint, replaying a build's answer about a tree nobody built. The
+  namespace's step lock would hang a tool handler that verifies from inside a step, which holds that
+  lock until the handler returns, and would wait out a landing held into the run. A restore to the
+  ledger's head would make a verdict replay-stable and move the branch back under every step
+  replayed after it. What doing none of the three costs is the replay price under "A workflow
+  branches only on step results", and a verdict taken beside a concurrent step in the same namespace
+  measures a tree that step is changing.
+- **No default for a project setting, and no environment variable for one.** A declared key is
+  required or it is not declared: a default would be a value no project file records, chosen by a
+  workflow about a project it has never seen. `AGL_BUILD` answered for one key, and with keys a
+  workflow declares, one variable for one of them would make `build` settable from the environment
+  and `lint` not; generalising it to `AGL_<KEY>` is a decision nothing here forecloses.
 - **No fan-out or parallelism helper.** The framework never spawns a task for a workflow; steps
   serialise within a namespace, so real concurrency is more worktrees, and a helper would wrap
   `asyncio.TaskGroup` while owning nothing.

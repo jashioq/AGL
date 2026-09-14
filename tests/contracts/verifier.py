@@ -109,8 +109,9 @@ made to reveal, not a test somebody forgot.
 ## Where the port is silent, and what this suite assumed
 
 **That a verifier answers more than once.** The port describes one call and says nothing about the
-next. The consumer settles it: there is one call site and a run lands many children through it, so
-an implementation good for a single answer is one no run could use. The test that pins it also
+next. The consumers settle it: a run lands many children through the merge gate, and `run.verify`
+answers a workflow as often as it asks, so an implementation good for a single answer is one no run
+could use. The test that pins it also
 pins the sharper half - a failed build must not poison the runner - which is the ordinary case in
 a merge train and would otherwise be discovered on the second child.
 
@@ -301,12 +302,12 @@ class VerifierContract:
     async def test_the_gate_answers_every_time_it_is_asked_and_a_red_build_does_not_poison_it(
         self, verifier: Verifier, workdir: Path, passing_command: str, failing_command: str
     ) -> None:
-        """One call site, called once per landing, and a run lands children all afternoon.
+        """Called once per landing and per `run.verify`, and a run lands children all afternoon.
 
         The port describes a single call and says nothing about the next one, so this is a reading
-        rather than a quotation - and it is settled by the consumer: `integrate()` is the only
-        thing that calls `verify`, every child a run lands goes through it, and an implementation
-        good for one answer is one no run could use past its first ticket.
+        rather than a quotation - and it is settled by the consumers: every child a run lands goes
+        through `integrate()`'s gate, `run.verify` runs between steps as often as a workflow likes,
+        and an implementation good for one answer is one no run could use past its first ticket.
 
         The order below is the one that bites. A failing build first, then a passing one on the
         same verifier: a runner that kept the failure - a session it did not reopen, a directory it

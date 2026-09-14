@@ -129,7 +129,7 @@ def projects_dir(home: AglHome) -> Path:
     return _root(home) / _PROJECTS
 
 def project_config(home: AglHome, project: ProjectName) -> Path:
-    """One project's settings file - a repository, a trees root, a build command.
+    """One project's settings file - a repository, a trees root, and what its workflows declare.
 
     :param home: where AGL keeps its own state, which is never where code is checked out
     :param project: refused when `.toml` would push the filename past a path segment's 255 bytes

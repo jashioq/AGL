@@ -839,7 +839,7 @@ async def test_a_run_can_be_started_from_a_ref_other_than_the_default(tmp_path: 
 
 @pytest.mark.asyncio
 async def test_the_merge_gate_runs_the_build_command_the_harness_was_given(tmp_path: Path) -> None:
-    """`build=` is the project's own command, and the merge gate is the only thing that runs it.
+    """`config=`'s `build` is the project's command, and the merge gate is what runs it.
 
     `Verifier.verify(command, workdir)` takes the command as a parameter, so what the bundle
     carries is what the gate asks about - and the verdict is scripted against that exact string and
@@ -852,7 +852,7 @@ async def test_the_merge_gate_runs_the_build_command_the_harness_was_given(tmp_p
     conflict screen rather than anything the framework acts on.
     """
     harness = testing.harness(
-        tmp_path, agent=_building(), files={"src/a.py": b"pass\n"}, build=BUILD
+        tmp_path, agent=_building(), files={"src/a.py": b"pass\n"}, config={"build": BUILD}
     )
     harness.fakes.verifier.answers(BUILD, passed=False, output=RED)
 
@@ -862,6 +862,50 @@ async def test_the_merge_gate_runs_the_build_command_the_harness_was_given(tmp_p
         "the gate did not answer with the verdict scripted against this harness's own build "
         "command, so what reached `Verifier.verify` is not what the bundle was built with"
     )
+
+@pytest.mark.asyncio
+async def test_a_harness_without_build_refuses_integrate_and_names_the_config_to_give_it(
+    tmp_path: Path,
+) -> None:
+    """A harness built with no `config=` declares no key, so the landing it reaches has no gate.
+
+    Refused at `integrate()` with the harness's own vocabulary for the fix, and before the merge:
+    the workflow never got an outcome back, and the run branch holds nothing the child made.
+    """
+    harness = testing.harness(tmp_path, agent=_building(), files={"src/a.py": b"pass\n"})
+    repository = harness.fakes.repository
+    main = repository.tip("main")
+
+    with pytest.raises(InputError) as refused:
+        await harness.run(landing, "-r", "add oauth")
+
+    said = str(refused.value)
+    assert "calls `run.integrate()`" in said and '`config = ["build"]`' in said, said
+    assert "`agl.testing.harness(config=...)`" in said, said
+    assert gated == [], "the workflow got an outcome back from a landing that had no gate to run"
+    assert repository.tip(str(run_branch(harness.scope.label))) in (None, main)
+
+@pytest.mark.asyncio
+async def test_integrate_on_a_child_of_a_run_refuses_before_landing_when_no_build_is_given(
+    tmp_path: Path,
+) -> None:
+    """`a_run` builds its `Run` over the harness's plain mapping, which no walk ever narrowed.
+
+    Its keys are still the declaration, so the refusal is the same `InputError` and comes before
+    the merge - which is what an author unit-testing a function that integrates will meet first.
+    """
+    harness = testing.harness(tmp_path, agent=_building(), files={"src/a.py": b"pass\n"})
+    repository = harness.fakes.repository
+    main = repository.tip("main")
+    assert main is not None
+    run = testing.a_run(harness, DemoParams(request="add oauth"), base=main)
+    ticket = run.worktree("T-01")
+    await ticket.step(implement(), commit="implement add oauth")
+
+    with pytest.raises(InputError, match=r"calls `run\.integrate\(\)`"):
+        await ticket.integrate()
+
+    assert repository.tip(str(run_branch(harness.scope.label))) in (None, main)
 
 @pytest.mark.asyncio
 async def test_two_harnesses_in_one_directory_are_told_apart_by_project_and_label(

@@ -2,7 +2,6 @@ import argparse
 from pathlib import Path
 from typing import Final
 from agl import api
-from agl.api import Ask
 from agl.config.schema import Settings
 from agl.sdk.params import RefusingParser
 
@@ -21,15 +20,15 @@ def declare(commands: _Commands) -> RefusingParser:
         NAME,
         help="register this repository as a project",
         description=(
-            "Register the repository you are in. AGL finds its git root, asks for the command "
-            "that builds and tests it, picks a place beside it for the working checkouts, and "
-            "writes the project's settings under AGL_HOME - never into the repository, so AGL "
-            "never appears in `git status`. Run it once per repository."
+            "Register the repository you are in. AGL finds its git root, picks a place beside it "
+            "for the working checkouts, and writes the project's settings under AGL_HOME - never "
+            "into the repository, so AGL never appears in `git status`. It asks nothing. Run it "
+            "once per repository."
         ),
         allow_abbrev=False,
     )
 
-def execute(settings: Settings, cwd: Path, ask: Ask) -> int:
-    written = api.init(settings, cwd, ask)
+def execute(settings: Settings, cwd: Path) -> int:
+    written = api.init(settings, cwd)
     print(f"init wrote {written}")
     return _NOTHING_TO_REPORT

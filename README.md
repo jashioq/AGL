@@ -28,11 +28,11 @@ that succeeds says nothing at all; one that is refused stops the command on uv's
 your workspace already has an environment, in which case AGL warns and carries on against what the
 last successful install left.
 
-`agl new` also writes one line about AGL itself into the workflow it scaffolds —
-`[tool.agl] requires = "agents-gl>=<version>"`, naming the AGL that wrote it. AGL reads that line
-back and refuses a workflow written against a newer AGL than the one you are running, *before*
-importing the workflow, so what you are told about is a version rather than whichever name moved
-inside your own file. It is a floor and not a pin, so any later AGL satisfies it. The table is
+`agl new` also writes two lines about AGL itself into the workflow it scaffolds, under `[tool.agl]`:
+`requires = "agents-gl>=<version>"`, naming the AGL that wrote it, and `config = []`, the project
+settings the workflow reads, described below. AGL reads the bound back and refuses a workflow
+written against a newer AGL than the one you are running, *before* importing the workflow, so what
+you are told about is a version rather than whichever name moved inside your own file. It is a floor and not a pin, so any later AGL satisfies it. The table is
 `[tool.agl]` and deliberately not `[project] dependencies`: uv walks past a `[tool]` table it does
 not own, so nothing ever goes off to an index looking for that version.
 
@@ -63,6 +63,58 @@ it on stderr so you can read that branch before you decide what to do with it.
 and the record. Deleting a branch deletes that branch's reflog, so `git reflog` is not a way back
 afterwards — `git fsck --unreachable` still names the commit each branch was at until those objects
 are pruned, and noting a sha before you clear is the reliable half.
+
+## Project settings
+
+`agl init` asks nothing. Run inside a repository, it writes `projects/<name>.toml` under AGL_HOME
+with the four keys AGL configures itself — `name`, `repo`, `trees_root` and `build_timeout` — and
+everything else in that file belongs to your workflows. A workflow names the settings it reads in
+its own pyproject.toml, and each project gives them a value, so one workflow serves many projects:
+
+```toml
+# the workflow's pyproject.toml
+[tool.agl]
+requires = "agents-gl>=<version>"
+config = ["build"]
+```
+
+```toml
+# projects/food.toml under AGL_HOME
+build = "./gradlew test"
+
+# projects/agl.toml under AGL_HOME
+build = "./scripts/check"
+```
+
+The keys sit at the top level of the project file and are shared: two workflows that both declare
+`build` read the one value, because how a project builds is a fact about the project. Each value is
+a TOML string used exactly as written, so `build = ""` is a value and not a gap, and a number, a
+boolean or a table there is refused, each one named. The four keys AGL configures itself cannot be
+declared. Edit the file by hand whenever you like: the next command reads it, and `agl init` never
+writes over a file that is already there.
+
+Before `agl run` or `agl resume` imports a workflow or asks an agent anything, it checks that the
+project file sets every key the workflow declares, and refuses otherwise, naming each missing key
+and the file to add it to. Nothing stands in for a missing key — there are no defaults, and nothing
+is read from the environment, `AGL_BUILD` included — so a project whose gate lived in that variable
+needs a `build` line in its file. A project file that already sets what its workflows declare needs
+nothing else.
+
+A workflow reads a value as `run.config["build"]`, and only the keys it declared: any other key
+refuses, through `get` and `in` too, rather than answering `None`. `run.integrate()` runs `build`
+at the merge gate, so a workflow that integrates declares `build`; one that does not is refused at
+the call, before anything lands, and since the declaration is in one of the workflow's own files,
+that run is started again rather than resumed. A project that wants no merge gate sets `build = ""`.
+`run.verify(command)` runs a command of the workflow's choosing in the run's own checkout — a
+child's own, called from a child — and hands back the verdict, reading no setting to do it:
+`run.verify(run.config["build"])` needs `build` declared, and a gate the workflow's params carry
+needs nothing. It records nothing either, so a resume runs it again against the checkout as it then
+stands. In a test, `agl.testing.harness(config={"build": "..."})` is the project file and the
+declaration at once, and a harness given no `config` declares nothing.
+
+**Keep `requires` at a version of AGL that reads `config`.** An AGL older than that does not know
+the line, passes over it, and runs the workflow with nothing checked, and the bound is the only
+thing that refuses it instead.
 
 ## Getting workflows from GitHub
 
@@ -96,7 +148,8 @@ somebody else wrote — code that `agl run` then runs as you.
 
 Everything is downloaded and checked before anything is placed. A download that is not a workflow
 this AGL can run as it stands — no pyproject.toml declaring one, no `__init__.py`, a bound on a
-newer AGL, a name another workflow in your workspace already declares — is refused, and nothing of
+newer AGL, a `config` line that cannot be read, a name another workflow in your workspace already
+declares — is refused, and nothing of
 it is placed. Then every question is asked, one after another, and only then is anything written.
 There are two, and each is asked only where it applies:
 

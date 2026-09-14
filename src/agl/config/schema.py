@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from dataclasses import dataclass
 from math import isfinite
 from pathlib import Path
@@ -45,9 +46,9 @@ class Project:
 
     trees: TreesRoot
 
-    build: str
-
     build_timeout: float
+
+    config: Mapping[str, str]
 
     def __post_init__(self) -> None:
         if not self.repo.is_absolute():
@@ -55,13 +56,6 @@ class Project:
                 f"repo {str(self.repo)!r} cannot be used: it is a relative path, and a relative "
                 f"repository resolves against whatever directory the process started in - which "
                 f"for an agent step is a worktree AGL chose, not the one the operator typed it in"
-            )
-        if not self.build.strip():
-            raise InputError(
-                f"build {self.build!r} cannot be used: it is the command the merge gate runs, and "
-                f"a blank one would make every run's gate pass without building anything. If this "
-                f"project has no build, that is a decision to make where the gate is configured, "
-                f"not a value that arrives here empty"
             )
         if not isfinite(self.build_timeout) or self.build_timeout <= 0:
             raise InputError(

@@ -279,7 +279,7 @@ class _Driver:
             agents=RoutingAgentRunner(
                 {Provider.CLAUDE: claude_fake.FakeAgentRunner(self._script)}
             ),
-            build=GREEN if config.gate == "green" else RED,
+            config={"build": GREEN if config.gate == "green" else RED},
         )
 
     async def _script(self, conversation: claude_fake.Conversation) -> AgentOutcome:

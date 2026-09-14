@@ -22,10 +22,12 @@ three calls, each of which fails silently or destructively rather than loudly:
   * **The root refusal.** `main` is unaddressable rather than policy-protected, and
     the message has to say which, because the difference decides whether a reader goes looking for
     a flag.
-  * **The gate.** "The framework runs exactly one build: the merge gate." It stands between a
-    landing and the advance and is the only thing in AGL that catches a semantic conflict - two
-    pieces of work that each build alone and are broken together, which every check before it has
-    already said yes to. A red one reverts with `Workspace.restore` and comes back as a `Conflict`
+  * **The gate.** The merge gate is the one build `sdk/_engine/integration.py` runs. It stands
+    between a landing and the advance and is the only thing in AGL that catches a semantic conflict
+    - two pieces of work that each build alone and are broken together, which every check before it
+    has already said yes to. Its command is the declared `build`, and an undeclared one is refused
+    before `Integrator.land` is reached, because a gate that could not run would otherwise find the
+    merge already in. A red one reverts with `Workspace.restore` and comes back as a `Conflict`
     with the lease still held, so its tests sit beside the textual ones rather than in a file of
     their own: the two conflicts have one shape and one pair of verbs, and the only thing that tells
     them apart is `Integration.verdict`, which `Integration.refused_by_the_gate` reads as a
@@ -71,12 +73,13 @@ from agl import api
 from agl.config import container, registry
 from agl.ports.agent import AgentTask, Claude, Restriction
 from agl.ports.errors import InputError, InternalError, UpstreamUnexpected
-from agl.ports.home_layout import RunScope
+from agl.ports.home_layout import AglHome, RunScope, workflows_dir
 from agl.ports.ids import Namespace, ProjectName, RunLabel
 from agl.ports.integration import IntegrationOutcome, Integrator
-from agl.ports.tree_layout import TreesRoot
+from agl.ports.tree_layout import TreesRoot, run_branch
 from agl.ports.verifier import Verifier, VerifierOutcome
 from agl.ports.workspace import Workspace
+from agl.sdk._engine.integration import Integration
 from agl.sdk.roles import Role, role
 from agl.sdk.testing import Agent, Call, Reply
 from agl.sdk.tools import reporting_tool
@@ -265,7 +268,10 @@ def _harness(
     Named only by the one test that asks whether the *project's* command is what reaches the port.
     """
     return container.fakes(
-        TreesRoot(tmp_path / "trees"), files={SEEDED: SEED}, build=build, agent=_agent(pause)
+        TreesRoot(tmp_path / "trees"),
+        files={SEEDED: SEED},
+        config={"build": build},
+        agent=_agent(pause),
     )
 
 async def _base(harness: container.FakeServices) -> str:
@@ -1044,9 +1050,9 @@ async def test_a_failing_gate_reverts_the_landing_and_never_reaches_the_advance(
 async def test_the_gate_runs_the_configured_command_in_the_targets_own_checkout(
     tmp_path: Path,
 ) -> None:
-    """`verify(services.build, target.path)`, and both arguments are a decision.
+    """`verify(services.config["build"], target.path)`, and both arguments are a decision.
 
-    **The command is the project's**, carried to this call site on `Services.build` because
+    **The command is the project's**, carried to this call site on `Services.config` because
     `Verifier.verify` takes it as a parameter and that method has one caller. So the bundle
     is built with a command that is deliberately not the default a test scripts against: an
     implementation that reached for a constant, or for the fake's unscripted answer, would agree
@@ -1073,12 +1079,160 @@ async def test_the_gate_runs_the_configured_command_in_the_targets_own_checkout(
     assert outcome.conflicted is False, f"the landing did not reach the advance: {outcome.conflict}"
     assert gate.calls == [(CONFIGURED, _target_dir(tmp_path))], (
         f"the gate ran {gate.calls}, and the one call it owes is the project's own build command "
-        f"in the target's own checkout. `Verifier.verify` has exactly one call site in "
-        f"AGL and this is it, so a second call would be a second build the framework runs"
+        f"in the target's own checkout. `integrate()` calls `Verifier.verify` once per "
+        f"landing, so a second call would be a second build the framework runs"
     )
     assert (_target_dir(tmp_path) / ARTIFACT).is_file(), (
         "what the build wrote into the directory it was pointed at is not in the target's "
         "checkout, so the working directory that reached the port is not the one named above"
+    )
+
+_INTEGRATED: Final[list[Integration]] = []
+"""Where `integrates` hands back the one outcome it got, for a test to read after the walk."""
+
+@workflow
+async def integrates(run: Run[NoParams]) -> None:
+    """One child, one committing step, one landing - the smallest walk that reaches the gate."""
+    ticket = run.worktree("T-01")
+    await ticket.step(IMPLEMENT_FIRST, commit="implement T-01")
+    _INTEGRATED.append(await ticket.integrate())
+
+def _declaring(tmp_path: Path, keys: str) -> tuple[AglHome, Path]:
+    """A home whose one workflow directory declares `keys` and registers `integrates`."""
+    home = AglHome(tmp_path / "home")
+    directory = workflows_dir(home) / "integrates"
+    directory.mkdir(parents=True)
+    (directory / "pyproject.toml").write_text(
+        f'[project]\nname = "integrates"\nversion = "0.1.0"\n\n'
+        f'[project.entry-points."{registry.GROUP}"]\nintegrates = "{__name__}:integrates"\n\n'
+        f"[tool.agl]\nconfig = {keys}\n",
+        encoding="utf-8",
+    )
+    return home, directory
+
+@pytest.mark.asyncio
+async def test_integrate_refuses_an_undeclared_build_before_landing_and_names_the_line_to_add(
+    tmp_path: Path,
+) -> None:
+    """The project file sets `build` and the workflow's `config` line declares only `lint`.
+
+    Discovery reads that line and never the workflow's code, so nothing ahead of the walk can know
+    that `integrate()` is going to be called - the refusal is the call's own. It comes ahead of
+    `Steps.landing`, `Leases.claim` and `Integrator.land`, so the gate never ran and the run branch
+    is where the run cut it. The message names `run.integrate()` as the reader, because a refusal
+    naming only the workflow would say it read a key its author never wrote, and it names the line
+    to paste.
+    """
+    _INTEGRATED.clear()
+    home, directory = _declaring(tmp_path, '["lint"]')
+    harness = _harness(tmp_path, build=CONFIGURED)
+    gate = _Recorded(passed=True)
+    services = replace(harness.services, verifier=gate, config={"build": CONFIGURED, "lint": ""})
+    base = await _base(harness)
+
+    with pytest.raises(InputError) as refused:
+        await api.run(services, PROJECT, "integrates", LABEL, (), home=home)
+
+    said = str(refused.value)
+    assert said.startswith(
+        "the workflow 'integrates' calls `run.integrate()`, which reads the project setting 'build'"
+    ), said
+    line = '`config = ["lint", "build"]`'
+    assert f"{line} in the [tool.agl] table of {directory / 'pyproject.toml'}" in said, said
+    assert "Nothing has landed" in said
+    assert gate.calls == [], "the gate ran for a landing that had no declared command to run"
+    assert harness.repository.tip(str(run_branch(LABEL))) == base, (
+        "the run branch moved, so something landed before the refusal - which is the ungated merge"
+    )
+    assert _INTEGRATED == []
+
+@pytest.mark.asyncio
+async def test_a_declared_empty_build_is_the_command_the_gate_runs_and_the_landing_stands(
+    tmp_path: Path,
+) -> None:
+    """`build = ""` is an operator's choice of no gate, and it reaches the verifier as written.
+
+    Present-but-empty is present, so nothing refuses it and nothing substitutes a command for it:
+    the one call the gate owes is the empty string, in the target's own checkout, and the landing
+    is kept and becomes the run branch's tip.
+    """
+    _INTEGRATED.clear()
+    home, _ = _declaring(tmp_path, '["build"]')
+    harness = _harness(tmp_path)
+    gate = _Recorded(passed=True)
+    services = replace(harness.services, verifier=gate, config={"build": ""})
+
+    await api.run(services, PROJECT, "integrates", LABEL, (), home=home)
+
+    [outcome] = _INTEGRATED
+    assert outcome.conflicted is False, f"the landing did not stand: {outcome.conflict}"
+    assert gate.calls == [("", _target_dir(tmp_path))], (
+        f"the gate ran {gate.calls}, and the one call it owes is the empty string as declared"
+    )
+    tip = harness.repository.tip(str(run_branch(LABEL)))
+    assert tip is not None and tip == outcome.head
+    assert FIRST in harness.repository.tree_of(tip), "the run branch does not hold the child's work"
+
+@pytest.mark.asyncio
+async def test_a_hand_built_bundle_without_build_refuses_integrate_before_landing_or_gating(
+    tmp_path: Path,
+) -> None:
+    """A `Services` built by hand over a plain mapping lacking `build`, which `mypy` admits.
+
+    No walk narrowed it, so the keys it was built with are its declaration, and the refusal is the
+    same `InputError` a walked run gets - never the `ValueError` a shell raises when handed `None`
+    after the merge is in. Refused before `Integrator.land`, so the parent's checkout is where it
+    was, the gate never ran, and no lease is left behind for teardown to find.
+    """
+    harness = _harness(tmp_path)
+    gate = _Recorded(passed=True)
+    run = Run(
+        params=None,
+        services=replace(harness.services, verifier=gate, config={}),
+        scope=SCOPE,
+        base=await _base(harness),
+    )
+    ticket = run.worktree("T-01")
+    await ticket.step(IMPLEMENT_FIRST, commit="implement T-01")
+    before = await _head(harness, None)
+
+    with pytest.raises(InputError) as raised:
+        await ticket.integrate()
+
+    said = str(raised.value)
+    assert said.startswith("the workflow calls `run.integrate()`"), said
+    assert '`config = ["build"]`' in said and "`agl.testing.harness(config=...)`" in said, said
+    assert gate.calls == []
+    assert await _head(harness, None) == before
+    assert not (_target_dir(tmp_path) / FIRST).exists()
+    assert run.leases.unsettled is False
+
+@pytest.mark.asyncio
+async def test_a_resumed_run_meeting_a_held_landing_refuses_an_undeclared_build_before_landing(
+    tmp_path: Path,
+) -> None:
+    """The one other way into the gate: a resume whose `integrate()` meets a hold left behind.
+
+    `Integration` is built only inside `integrate()`, and `retry` reuses the command it was built
+    with, so a resume re-calling `integrate()` is the remaining path. Entry points handed over read
+    no `pyproject.toml`, so the bundle a resume is given can lack `build` where the first run's had
+    it. The refusal still comes before `Integrator.land`: the gate never runs, and the hold is left
+    for an invocation that can gate it.
+    """
+    _LEFT_HOLDING.clear()
+    harness = _harness(tmp_path)
+    points: Sequence[EntryPoint] = (_point(),)
+    await api.run(harness.services, PROJECT, "walks-away", LABEL, (), points=points)
+    gate = _Recorded(passed=True)
+    bare = replace(harness.services, verifier=gate, config={})
+
+    with pytest.raises(InputError, match=r"calls `run\.integrate\(\)`"):
+        await api.resume(bare, PROJECT, LABEL, points=points)
+
+    assert gate.calls == []
+    assert len(_LEFT_HOLDING) == 2, "the resumed walk got past a refused `integrate()`"
+    assert (_target_dir(tmp_path) / CONTESTED).read_bytes() not in (PARENT_BODY, CHILD_BODY), (
+        "the hold the first run left is gone, so the refused resume touched the landing"
     )
 
 @pytest.mark.asyncio

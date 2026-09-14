@@ -55,7 +55,7 @@ import ast
 import asyncio
 import inspect
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Final, cast
@@ -75,6 +75,7 @@ from agl.ports.home_layout import RunScope
 from agl.ports.ids import ProjectName, RunLabel
 from agl.ports.sync import Syncer
 from agl.ports.tree_layout import TreesRoot, run_branch
+from agl.sdk._engine.services import Services
 from agl.sdk.roles import Claude, Role, role
 from agl.sdk.terminal import Screen
 from agl.sdk.tools import ToolResult, tool
@@ -400,14 +401,21 @@ def test_the_workflow_is_handed_the_bundle_that_was_composed(tmp_path: Path) -> 
     reach the workflow.
 
     `Git(Path.cwd())` was constructed four times and the whole `RunContext` twice. Identity is what
-    makes this a test of that - an equal-looking second bundle would pass anything weaker.
+    makes this a test of that - an equal-looking second bundle would pass anything weaker. Port by
+    port, because the bundle itself is a copy: `api.run` narrows `config` to what the workflow
+    declares, and that field is the one replaced.
     """
     handed.clear()
     harness = _fakes(tmp_path)
 
     assert _main(harness, "run", "probe", "-n", "auth") == 0
 
-    assert handed[0].services is harness.services
+    reached = handed[0].services
+    assert all(
+        getattr(reached, port.name) is getattr(harness.services, port.name)
+        for port in fields(Services)
+        if port.name != "config"
+    )
 
 def test_the_same_label_twice_exits_four(tmp_path: Path) -> None:
     """The second criterion: exit 4, with the refusal's own message reaching the user on stderr.

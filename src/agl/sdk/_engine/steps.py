@@ -2,9 +2,11 @@ import asyncio
 from collections.abc import Mapping, Sequence
 from typing import cast
 from agl.ports.agent import AgentOutcome, AgentTask, StopReason, Tool, ToolResult
+from agl.ports.errors import InputError
 from agl.ports.home_layout import RunScope
 from agl.ports.ids import Namespace, StepName
 from agl.ports.run import JsonValue
+from agl.ports.verifier import VerifierOutcome
 from agl.ports.workspace import Workspace
 from agl.sdk._engine.journal import Fingerprints, Journal
 from agl.sdk._engine.preflight import Capabilities, checked_inputs
@@ -38,6 +40,16 @@ class Steps:
 
     async def landing(self) -> tuple[Journal, Workspace]:
         return await self._namespace()
+
+    # No entry, no step lock and no restore. A tool handler calling this from inside a step would
+    # wait on the lock that step holds, and a restore would move the branch under a replayed step.
+    # So a verdict measures the checkout as it stands, which on a resume can be past the replayed
+    # head - "Invariants where a mistake is silent" carries that price.
+    async def verify(self, command: str) -> VerifierOutcome:
+        if not isinstance(command, str):
+            raise InputError(_not_a_command(command))
+        _, workspace = await self._namespace()
+        return await self._services.verifier.verify(command, workspace.path)
 
     async def step[R](
         self, role: Role[R], passed: Sequence[object], *, commit: str | None
@@ -153,6 +165,15 @@ class _Capture[P]:
 
 def _namespace_of(scope: RunScope) -> Namespace | None:
     return scope.namespaces[-1] if scope.namespaces else None
+
+def _not_a_command(command: object) -> str:
+    return (
+        f"`run.verify` was handed {command!r}, a {type(command).__name__}, and what it runs is one "
+        f"command line handed to a shell exactly as written - so there is no text here to run. "
+        f"Nothing was run and no checkout was opened for it. Pass a string: a declared "
+        f"`run.config[\"build\"]` is one, an empty one included, and so is a gate the workflow's "
+        f"own params carry"
+    )
 
 def _unreported(tool: str, outcome: AgentOutcome) -> str:
     return (

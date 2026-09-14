@@ -35,7 +35,7 @@ import sys
 import sysconfig
 from collections.abc import AsyncIterator, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields, replace
 from importlib import import_module
 from importlib.metadata import EntryPoint
 from pathlib import Path
@@ -47,7 +47,16 @@ from agl.adapters.git.history import GitHistory
 from agl.adapters.git.workspace import GitWorkspaceProvider
 from agl.adapters.uv.fake import FakeSyncer
 from agl.config import container, distribution, registry, sources
-from agl.ports.agent import AgentOutcome, Claude, StopReason
+from agl.ports.agent import (
+    ActivityReporter,
+    AgentOutcome,
+    AgentRunner,
+    AgentTask,
+    Capability,
+    Claude,
+    ModelId,
+    StopReason,
+)
 from agl.ports.errors import (
     ConflictError,
     InputError,
@@ -59,6 +68,7 @@ from agl.ports.errors import (
 from agl.ports.home_layout import (
     AglHome,
     RunScope,
+    project_config,
     workflows_dir,
     workspace_dir,
     workspace_site_packages,
@@ -68,6 +78,7 @@ from agl.ports.run import JsonValue, RunSpec
 from agl.ports.sync import Syncer, SyncOutcome
 from agl.ports.tree_layout import TreesRoot, base_worktree, run_branch
 from agl.ports.workspace import Workspace, WorkspaceProvider
+from agl.sdk._engine.services import Services
 from agl.sdk.params import arg
 from agl.sdk.roles import Role, role
 from agl.sdk.workflow import Run, Stop, workflow
@@ -214,7 +225,13 @@ async def test_a_workflow_that_returns_runs_to_completion(tmp_path: Path) -> Non
     await _run(harness)
 
     assert len(handed) == 1
-    assert handed[0].services is harness.services
+    reached = handed[0].services
+    assert all(
+        getattr(reached, port.name) is getattr(harness.services, port.name)
+        for port in fields(Services)
+        if port.name != "config"
+    ), "a port the workflow was handed is not the one the bundle was built with"
+    assert reached.config == harness.services.config
 
 @pytest.mark.asyncio
 async def test_the_record_holds_exactly_the_published_fields(tmp_path: Path) -> None:
@@ -914,6 +931,121 @@ def test_a_declared_workflow_keeps_the_name_a_broken_directory_happens_to_share(
     assert [entry.directory for entry in listing.broken] == ["triage"]
     assert "usage: agl run triage" in api.workflow_help("triage", home=home)
 
+# --- the project settings a workflow declares, checked before the import and before preflight ---
+#
+# `registry.check_configured` is asked straight after discovery in both walking verbs. What it has
+# to precede is `preflight.check`, whose Claude probe spends a real turn; it precedes the import as
+# well, so a module-level line of the workflow's own never runs for a run that cannot start.
+
+class _Readiness(AgentRunner):
+    """A backend that records each readiness question and refuses it, so being asked is visible."""
+
+    def __init__(self) -> None:
+        self.asked: Final[list[ModelId]] = []
+
+    async def capabilities(self, model: ModelId) -> frozenset[Capability]:
+        raise AssertionError("a capability was asked of a backend preflight should have refused")
+
+    async def check_ready(self, model: ModelId) -> None:
+        self.asked.append(model)
+        raise UpstreamUnavailable("the harness is not ready")
+
+    async def run(
+        self,
+        task: AgentTask,
+        *,
+        on_activity: ActivityReporter | None = None,
+    ) -> AgentOutcome:
+        raise AssertionError("an agent was dispatched by a run that should not have started")
+
+def _configuring(named: str, attribute: str, keys: str) -> str:
+    """`_declaring`'s project file with a `[tool.agl]` table holding `config = <keys>`."""
+    return _declaring(named, attribute) + f"\n[tool.agl]\nconfig = {keys}\n"
+
+@pytest.mark.asyncio
+async def test_a_run_missing_a_declared_key_is_refused_before_the_workflow_is_imported(
+    tmp_path: Path,
+) -> None:
+    """The declaration names a module nothing holds, so an import reached first would say so."""
+    home = _home(tmp_path)
+    _directory(
+        home,
+        "triage",
+        f'[project]\nname = "triage"\nversion = "0.1.0"\n\n'
+        f'[project.entry-points."{registry.GROUP}"]\ntriage = "no_such_module:anything"\n\n'
+        f'[tool.agl]\nconfig = ["build", "lint"]\n',
+    )
+    harness = _fakes(tmp_path)
+    services = replace(harness.services, config={"build": "make"})
+
+    with pytest.raises(InputError) as refused:
+        await api.run(services, PROJECT, "triage", LABEL, (), home=home)
+
+    said = str(refused.value)
+    assert exit_code_for(refused.value) == 2
+    assert said.startswith(f"{project_config(home, PROJECT)}: lint is not set")
+    assert "loading it failed" not in said
+
+@pytest.mark.asyncio
+async def test_a_run_missing_a_declared_key_never_asks_a_backend_whether_it_is_ready(
+    tmp_path: Path,
+) -> None:
+    """Both halves, so the empty list is about an ordering and not about a probe never armed.
+
+    The second run sets the missing key to the empty string, which is present: it passes the check
+    and reaches preflight, whose probe refuses it after asking exactly once.
+    """
+    home = _home(tmp_path)
+    _directory(home, "gated", _configuring("gated", "probe", '["build", "lint"]'))
+    probe = _Readiness()
+    services = replace(_fakes(tmp_path).services, agents=probe, config={"build": "make"})
+
+    with pytest.raises(InputError):
+        await api.run(services, PROJECT, "gated", LABEL, ("-r", "add oauth"), home=home)
+
+    assert probe.asked == []
+    with pytest.raises(UpstreamUnavailable):
+        await api.run(
+            replace(services, config={"build": "make", "lint": ""}),
+            PROJECT,
+            "gated",
+            LABEL,
+            ("-r", "add oauth"),
+            home=home,
+        )
+    assert len(probe.asked) == 1
+
+@pytest.mark.asyncio
+async def test_a_workflow_with_no_config_line_runs_against_a_project_holding_no_keys_at_all(
+    tmp_path: Path,
+) -> None:
+    home = _home(tmp_path)
+    _directory(home, "plain", _declaring("plain", "probe"))
+    probe = _Readiness()
+    services = replace(_fakes(tmp_path).services, agents=probe, config={})
+
+    with pytest.raises(UpstreamUnavailable):
+        await api.run(services, PROJECT, "plain", LABEL, ("-r", "add oauth"), home=home)
+
+    assert len(probe.asked) == 1
+
+@pytest.mark.asyncio
+async def test_a_resume_refuses_a_declared_key_the_project_file_has_lost_since_the_run_began(
+    tmp_path: Path,
+) -> None:
+    """No value is recorded with a run, so a resume is checked against the file as it is now."""
+    home = _home(tmp_path)
+    _directory(home, "gated", _configuring("gated", "probe", '["lint"]'))
+    services = replace(_fakes(tmp_path).services, config={"lint": "ruff check"})
+    await api.run(services, PROJECT, "gated", LABEL, ("-r", "add oauth"), home=home)
+    probe = _Readiness()
+
+    with pytest.raises(InputError) as refused:
+        await api.resume(replace(services, agents=probe, config={}), PROJECT, LABEL, home=home)
+
+    assert str(refused.value).startswith(f"{project_config(home, PROJECT)}: lint is not set")
+    assert probe.asked == []
+
 # --- the install `run` and `resume` fold in, and the three answers it can end on -----------------
 #
 # There is no `agl sync`, so nothing an operator types installs anything: `run`, `resume` and
@@ -1247,7 +1379,7 @@ def test_init_needs_neither_a_bundle_nor_a_registered_repository(
     (repo / ".git").mkdir(parents=True)
     settings = sources.resolve_settings(sources.Overrides(), {"AGL_HOME": str(home)})
 
-    written = api.init(settings, repo, lambda _: "make test")
+    written = api.init(settings, repo)
 
     assert written == home / "projects" / "myapp.toml"
     assert written.read_text(encoding="utf-8").splitlines()[0] == 'name = "myapp"'
@@ -1265,10 +1397,10 @@ def test_every_operation_the_module_declares_is_built() -> None:
     it is the operation behind `agl workflows <name>`, which extends that grammar, and
     `cli/commands/workflows.py` is where the deviation is argued. `new_workflow` is a verb and is
     spelled unlike the command it serves, `agl new`, because `new` is an adjective and every other
-    name here is what the operation does. `Ask`, `Cleared`, `Listing` and `Replayed` are the four
-    entries that are not operations at all - the callable `init` asks its one question through, and
-    the three values `clear`, `list_workflows` and the two walking verbs answer with - and they are
-    here because a caller annotating any of them has to be able to name it. `get`, `remove` and
+    name here is what the operation does. `Cleared`, `Listing` and `Replayed` are the three entries
+    that are not operations at all - the values `clear`, `list_workflows` and the two walking verbs
+    answer with - and they are here because a caller annotating any of them has to be able to name
+    it. `get`, `remove` and
     `update` are the verbs whose values are defined elsewhere: they answer with
     `config/placement.py`'s `Got` and `Removed` and `config/comparison.py`'s `Updated`, and all
     three ask through `config/questions.py`'s `Confirm`, so a caller names each from there and
@@ -1287,7 +1419,6 @@ def test_every_operation_the_module_declares_is_built() -> None:
     the CLI, where the command that used to hold it would otherwise have left it.
     """
     assert set(api.__all__) == {
-        "Ask",
         "Cleared",
         "Listing",
         "Replayed",

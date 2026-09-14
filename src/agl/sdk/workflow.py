@@ -59,6 +59,15 @@ class Run[P = object]:
         """
         return self.services.terminal
 
+    @property
+    def config(self) -> Mapping[str, str]:
+        """The project settings this workflow declares, each exactly as the project file wrote it.
+
+        :return: only the declared keys, `""` included; any other read raises, `get` and `in` too
+        :raises InputError: on a read of a key the workflow's `config` line does not declare
+        """
+        return self.services.config
+
     async def step[R](self, role: Role[R], *inputs: object, commit: str | None = None) -> R:
         """Run one step against this run's checkout, or replay its entry and pay for nothing.
 
@@ -69,6 +78,17 @@ class Run[P = object]:
         :raises InputError: nothing accepts an input, two share a type, or one will not canonicalise
         """
         return await self._steps.step(role, inputs, commit=commit)
+
+    async def verify(self, command: str) -> VerifierOutcome:
+        """Run a command in this run's own checkout, a child's and never its root's, for a verdict.
+
+        :param command: run through a shell as written, `""` included; no project setting is read
+        :return: the verdict on the checkout as it stands, never recorded, so a resume runs it again
+        :raises InputError: `command` is not a string, refused before any checkout is opened
+        :raises UpstreamUnavailable: the command could not be started, so nothing ran at all
+        :raises UpstreamUnexpected: it started and its output could not be read
+        """
+        return await self._steps.verify(command)
 
     def worktree(self, namespace: str, base: Run[object] | str | None = None) -> Run[P]:
         """Open a child run with a checkout of its own, which is how two agents work at once.
@@ -89,7 +109,7 @@ class Run[P = object]:
         """Land this run's work into the worktree of the run that cut it, one landing at a time.
 
         :return: an outcome holding a lease until `retry` or `abort` settles it, conflicts included
-        :raises InputError: this is the root run, which has no parent and no argument naming one
+        :raises InputError: this is the root run, or `build` is undeclared - before anything lands
         """
         if self._parent is None:
             raise InputError(_unaddressable(self.scope))

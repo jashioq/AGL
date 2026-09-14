@@ -10,15 +10,12 @@ file's bytes are not.
 **These tests let `main` compose for real**, which `tests/cli/test_main.py` calls its deliberate
 exception and which is unavoidable here: `agl init` is the one command whose whole subject is the
 composition - it runs where no project file exists, so a `compose=` that handed in a ready-made
-`Invocation` would be substituting the thing under test. What is substituted instead is one field of
-the real invocation, `ask`, because the alternative is a suite that blocks on a prompt.
+`Invocation` would be substituting the thing under test. What is substituted instead is `cwd`, which
+is handed in because a test may not move the process.
 
-**Nothing patches `builtins.input`.** That is what `Invocation.ask` exists for, and a suite reaching
-past every seam a module has in order to answer one question is exactly what a seam with a signature
-prevents (`api.py` argues the pattern; `cli/main.py` holds the real default). The tests below that
-close stdin, or another standard stream, are not an exception to that: they replace the stream, let
-the real default stand, and a closed stream is the thing they report on rather than a way past a
-seam.
+**Nothing patches `builtins.input`, and nothing needs to.** `agl init` asks nothing, and the tests
+below that close stdin, or close it outright, are the evidence: the command registers the repository
+all the same.
 
 **A real `git init` here, and marker directories in the library suite.** `toml_file.git_root` asks
 git nothing, so a `.git` directory is the whole of what it can see and the library tests use one.
@@ -32,17 +29,14 @@ import inspect
 import io
 import sys
 from pathlib import Path
-from typing import Final
 import pytest
 from agl.cli import main
 from agl.cli.commands import init as init_command
 from agl.config import sources
 from agl.config.toml_file import read_project
-from agl.ports.errors import InputError, NotFoundError
+from agl.ports.errors import NotFoundError
 from agl.ports.ids import ProjectName
 from agl.sdk.params import RefusingParser
-
-BUILD: Final = "./gradlew build"
 
 def _repository(tmp_path: Path, name: str = "myapp") -> Path:
     """A real git repository, one level below a parent AGL can put a trees root in."""
@@ -68,19 +62,18 @@ def _home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("AGL_HOME", str(home))
     return home
 
-def _main(cwd: Path, *argv: str, answer: str = BUILD) -> int:
-    """One `agl` invocation composed for real, with the one question answered by a lambda.
+def _main(cwd: Path, *argv: str) -> int:
+    """One `agl` invocation composed for real, with `cwd` handed in rather than read.
 
-    `_compose()` is called and then one field of what it produced is replaced, which is the smallest
+    `_compose()` is called and its parts rebuilt into an `Invocation` at `cwd`, the smallest
     substitution that leaves the composition itself under test: the settings are the ones the
-    environment resolved, and `cwd` is handed in because a test may not move the process.
+    environment resolved.
     """
     resolved = main._compose()
     return main.main(
         argv,
         compose=lambda: main.Invocation(
-            registered=resolved.registered, settings=resolved.settings, cwd=cwd,
-            ask=lambda _: answer,
+            registered=resolved.registered, settings=resolved.settings, cwd=cwd
         ),
     )
 
@@ -108,7 +101,7 @@ def test_agl_init_registers_a_repository_that_had_no_project_file(
     the key that would otherwise be invisible: a `Project` carrying the right timeout proves nothing
     about whether the file mentions it, the default layer being able to answer either way - and the
     reason it is written is that it is the one knob on this file people revisit, in the one place
-    they would look for it.
+    they would look for it. `build` is not among the keys: nothing asks for it, so none is written.
     """
     home = _home(tmp_path, monkeypatch)
     repo = _repository(tmp_path)
@@ -118,27 +111,29 @@ def test_agl_init_registers_a_repository_that_had_no_project_file(
     written = home / "projects" / "myapp.toml"
     assert f"init wrote {written}" in capsys.readouterr().out
     settings = sources.resolve_settings(sources.Overrides(), {"AGL_HOME": str(home)})
-    assert read_project(settings.home, ProjectName("myapp")).build == BUILD
+    assert read_project(settings.home, ProjectName("myapp")).config == {}
     project = sources.resolve_project(settings, sources.Overrides(), {}, repo)
     assert project.name == ProjectName("myapp")
     assert project.repo == repo
     assert project.trees.path == repo.parent / ".agl-trees" / "myapp"
-    assert project.build == BUILD
+    assert project.config == {}
     assert project.build_timeout == sources.DEFAULT_BUILD_TIMEOUT
     assert [
         line.split(" = ")[0] for line in written.read_text(encoding="utf-8").splitlines()
-    ] == ["name", "repo", "trees_root", "build", "build_timeout"]
+    ] == ["name", "repo", "trees_root", "build_timeout"]
 
 def test_a_run_in_that_repository_now_composes_where_it_could_not_before(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Afterwards every workflow works with no further setup - the half `init` is for.
+    """Afterwards a command addressed to a run composes with no further setup - what `init` is for.
 
     Before it, `Invocation.registered()` raises `NotFoundError` naming `agl init`; after it, the
-    same callable resolves a project and builds a container. That is the whole claim of the command,
-    and it is asserted through the real composition because a substituted one proves nothing about
-    it. Nothing is run: `container.real` constructing is the evidence, and running a workflow here
-    would be `tests/cli/test_run_command.py`'s job with real adapters attached.
+    same callable resolves a project and builds a container, with no `build` in the file and none
+    carried on the bundle - which is what `run`, `resume` and `clear` each compose. That is the
+    whole claim of the command, and it is asserted through the real composition because a
+    substituted one proves nothing about it. Nothing is run: `container.real` constructing is the
+    evidence, and running a workflow here would be `tests/cli/test_run_command.py`'s job with real
+    adapters attached.
     """
     _home(tmp_path, monkeypatch)
     repo = _repository(tmp_path)
@@ -149,7 +144,7 @@ def test_a_run_in_that_repository_now_composes_where_it_could_not_before(
 
     project, services = main._registered(sources.resolve(sources.Overrides()), repo)
     assert str(project) == "myapp"
-    assert services.build == BUILD
+    assert services.config == {}
 
 # --- the refusals, through argv ------------------------------------------------------------------
 
@@ -159,18 +154,20 @@ def test_a_second_init_in_the_same_repository_exits_four(
     """`init` runs once per repo. Exit 4 is `run`'s class for a world that already holds it.
 
     The settings are asserted intact afterwards, because that is what the refusal is *for*: somebody
-    who edited `build` by hand and ran `agl init` again must not lose the edit.
+    who added `build` by hand and ran `agl init` again must not lose the edit.
     """
     home = _home(tmp_path, monkeypatch)
     repo = _repository(tmp_path)
     assert _main(repo, "init") == 0
     capsys.readouterr()
+    written = home / "projects" / "myapp.toml"
+    edited = written.read_text(encoding="utf-8") + 'build = "./gradlew build"\n'
+    written.write_text(edited, encoding="utf-8")
 
-    assert _main(repo, "init", answer="ninja") == 4
+    assert _main(repo, "init") == 4
 
     assert "already registered" in capsys.readouterr().err
-    settings = sources.resolve_settings(sources.Overrides(), {"AGL_HOME": str(home)})
-    assert read_project(settings.home, ProjectName("myapp")).build == BUILD
+    assert written.read_text(encoding="utf-8") == edited
 
 def test_init_outside_a_git_repository_exits_three(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
@@ -208,107 +205,35 @@ def test_a_trees_root_a_symlink_puts_inside_the_repository_exits_two(
     assert "trees_root" in capsys.readouterr().err
     assert not (home / "projects").exists()
 
-def test_init_with_its_stdin_closed_exits_two_rather_than_reporting_a_bug(
+def test_init_with_its_stdin_at_its_end_registers_the_repository_without_reading_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """`agl init < /dev/null`, and the one test in this file that lets the real `ask` stand.
+    """`agl init < /dev/null`, which is how a script runs it, and exit 0 with the file written.
 
-    `_main` above replaces `ask`, which is right for every case where the question has an answer
-    and wrong for this one: what is being asserted is a fact about the field's *default*. So the
-    invocation below is `_main`'s minus that one substitution, and `sys.stdin` is what the test
-    replaces instead - which is the situation being reported rather than a way past a seam.
-
-    Exit 2 is the user-visible half and the traceback's absence is the other. `input` raises
-    `EOFError`, which is not an `AglError`, so untranslated it reaches `cli/main.py`'s last clause -
-    a traceback and `_OUR_BUG`, telling somebody who pressed Ctrl-D on the first command they ever
-    ran that they had found a bug in AGL. Both are asserted, because a refusal that exited 2 and
-    printed a traceback anyway would still be that.
+    The invocation is the real default composition at `cwd`, so no field on it could be answering a
+    question in the command's place.
     """
     home = _home(tmp_path, monkeypatch)
     repo = _repository(tmp_path)
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
-    resolved = main._compose()
 
-    code = main.main(
-        ("init",),
-        compose=lambda: main.Invocation(
-            registered=resolved.registered, settings=resolved.settings, cwd=repo
-        ),
-    )
+    assert _main(repo, "init") == 0
 
-    assert code == 2
-    captured = capsys.readouterr().err
-    assert "stdin" in captured
-    assert "Traceback" not in captured
-    assert not home.exists(), "a refused init wrote something anyway"
+    assert "Traceback" not in capsys.readouterr().err
+    assert (home / "projects" / "myapp.toml").is_file()
 
-def test_the_default_ask_turns_a_closed_stdin_into_a_refusal_that_keeps_the_eof(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """`Invocation.ask`'s default on its own, for the two halves an exit code cannot show.
-
-    `cli/main.py` is where `input` is named, so it is where the `EOFError` is translated - the rule
-    `ARCHITECTURE.md` states for an adapter, applied one layer up the way `config/toml_file.py`
-    applies it to its own `OSError`. It is not translated in `api.init`, which catches nothing and
-    may not: `tests/test_api_no_except.py` holds that, and a handler there would be the first
-    `except` in a module whose whole property is having none.
-
-    So the refusal quotes the question instead of restating what a build command is for. `_asked`
-    is handed a prompt and does not know which question it asked; `api.init` owns the sentence
-    about an answer that arrived empty. One refusal per thing refused, and no second copy of the
-    question anywhere to fall out of step with `api.py`'s.
-
-    `__cause__` is the other half, and the one nothing else would notice going missing: the exit
-    code, the class and the message are all identical without `raise ... from`, and what goes is
-    the `EOFError` under the refusal on the traceback.
-    """
-    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
-
-    with pytest.raises(InputError) as raised:
-        main._asked("build command: ")
-
-    assert "build command:" in str(raised.value)
-    assert isinstance(raised.value.__cause__, EOFError)
-
-@pytest.mark.parametrize("stream", ["stdin", "stdout", "stderr"])
-def test_the_default_ask_refuses_a_stream_closed_outright_as_it_refuses_the_end_of_stdin(
-    monkeypatch: pytest.MonkeyPatch, stream: str
-) -> None:
-    """`<&-`, `>&-`, `2>&-`: `input` raises `RuntimeError` for each, and it is chained the same way.
-
-    An answer is waiting on stdin every time, so what is refused is the stream and never an empty
-    line - `api.init`'s own refusal of one would otherwise pass for this.
-    """
-    monkeypatch.setattr(sys, "stdin", io.StringIO(f"{BUILD}\n"))
-    monkeypatch.setattr(sys, stream, None)
-
-    with pytest.raises(InputError) as raised:
-        main._asked("build command: ")
-
-    assert "build command:" in str(raised.value)
-    assert isinstance(raised.value.__cause__, RuntimeError)
-
-def test_init_with_its_stdin_closed_outright_exits_two_and_prints_no_traceback(
+def test_init_with_its_stdin_closed_outright_registers_the_repository_all_the_same(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """`agl init <&-`: the refusal end of file gets, where it would otherwise be a bug report."""
+    """`agl init <&-`: a read of any kind would raise here, and the command makes none."""
     home = _home(tmp_path, monkeypatch)
     repo = _repository(tmp_path)
     monkeypatch.setattr(sys, "stdin", None)
-    resolved = main._compose()
 
-    code = main.main(
-        ("init",),
-        compose=lambda: main.Invocation(
-            registered=resolved.registered, settings=resolved.settings, cwd=repo
-        ),
-    )
+    assert _main(repo, "init") == 0
 
-    assert code == 2
-    captured = capsys.readouterr().err
-    assert "stdin" in captured
-    assert "Traceback" not in captured
-    assert not home.exists(), "a refused init wrote something anyway"
+    assert "Traceback" not in capsys.readouterr().err
+    assert (home / "projects" / "myapp.toml").is_file()
 
 # --- what the command is, read off the module ----------------------------------------------------
 
@@ -369,7 +294,6 @@ def test_the_command_never_asks_for_a_registered_repository(
                 sources.Overrides(), {"AGL_HOME": str(tmp_path / "home")}
             ),
             cwd=repo,
-            ask=lambda _: BUILD,
         ),
     )
 

@@ -224,6 +224,10 @@ def test_a_pyproject_declaring_no_workflow_is_refused_in_the_words_discovery_pri
         (b"[project\n", "is not valid TOML"),
         (b"\xff\xfe[project]\n", "cannot be read"),
         (_pyproject("triage", declares="triage = 3"), "is not a string"),
+        (
+            _pyproject("triage", tables='\n[tool.agl]\nconfig = ["repo"]\n'),
+            "repo is a key AGL configures itself",
+        ),
     ],
 )
 def test_a_project_file_discovery_would_call_broken_is_refused_before_placement(
@@ -269,6 +273,14 @@ def test_a_bound_the_running_agl_meets_is_no_obstacle_to_placing_it(tmp_path: Pa
     )
 
     _placeable(_one(_download("triage", meeting), _home(tmp_path)))
+
+def test_a_download_declaring_config_keys_is_placeable_with_no_project_to_check_them_against(
+    tmp_path: Path,
+) -> None:
+    """`agl get` resolves no project, so a well-formed declaration is only read, never checked."""
+    declaring = _pyproject("triage", tables='\n[tool.agl]\nconfig = ["build", "lint"]\n')
+
+    _placeable(_one(_download("triage", declaring), _home(tmp_path)))
 
 # --- what would stop it loading ------------------------------------------------------------------
 

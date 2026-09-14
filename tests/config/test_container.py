@@ -7,9 +7,10 @@ Four properties, and each is a thing that would be expensive to discover later.
 any bundle that happens to have been built correctly - what matters is the *declaration*, since that
 is what every consumer above sees and what would let a module branch on which implementation it got.
 One comparison covers all nine fields, and a tenth added without being written down breaks it. The
-ninth is `build`, which is not a port and is kept in a list of its own for that reason: a `str` on
+ninth is `config`, which is not a port and is kept in a list of its own for that reason: a value on
 this class has to be a deliberate act, and the argument for the one there is that `Verifier.verify`
-takes the build command as a parameter and its only caller is above the edge.
+takes the build command - `config`'s `build` entry - as a parameter and its only caller is above
+the edge.
 
 **Construction is eager but inert.** The real bundle below is built with a home, a repository and a
 trees root that do not exist, and every one of the paths handed in is a directory nothing has
@@ -89,12 +90,12 @@ _PORTS: Final = {
     "agents": AgentRunner,
 }
 
-# The ninth field, which is not a port and is the only one that is not. `Verifier.verify` takes the
-# build command as a parameter and its one call site is the merge gate inside `integrate()`, above
-# the edge - so the bundle is what carries it (`sdk/_engine/services.py` argues the alternatives).
-# A second list rather than a row in the first: the two say different things, and a tenth field
-# arriving as a `str` should have to be added here by somebody who meant it.
-_CONFIGURED: Final = {"build": str}
+# The ninth field, which is not a port and is the only one that is not: the project file's keys AGL
+# does not reserve, `build` among them. `Verifier.verify` takes the build command as a parameter and
+# its one call site is the merge gate inside `integrate()`, above the edge - so the bundle is what
+# carries it. A second list rather than a row in the first: the two say different things, and a
+# tenth field arriving as a value should have to be added here by somebody who meant it.
+_CONFIGURED: Final = {"config": Mapping[str, str]}
 
 # The two adapter modules that import a vendor package at module level, and so the two that must
 # not be reachable from a path that has not been told to construct them.
@@ -127,21 +128,21 @@ def _project(tmp_path: Path) -> Project:
         name=ProjectName("myapp"),
         repo=tmp_path / "repo",
         trees=TreesRoot(tmp_path / "trees"),
-        build="make check",
         build_timeout=600.0,
+        config={"build": "make check", "linter": "ruff check"},
     )
 
 def _ports_are_filled(services: container.Services) -> None:
     """Every port field holds an instance of the port it is declared as, and the ninth is there.
 
-    `build` has no ABC to be an instance of, so what is asserted about it here is only that the
+    `config` has no ABC to be an instance of, so what is asserted about it here is only that the
     bundle's fields are exactly the two lists above - a field on neither breaks this - and that a
-    built bundle carries something in it. What it carries is two tests further down.
+    built bundle carries a build command in it. What it carries is two tests further down.
     """
     assert {field.name for field in fields(services)} == set(_PORTS) | set(_CONFIGURED)
     for name, port in _PORTS.items():
         assert isinstance(getattr(services, name), port), name
-    assert services.build
+    assert services.config["build"]
 
 def test_every_field_of_the_bundle_is_declared_as_a_port_and_never_as_an_adapter() -> None:
     """The one static assertion in this file, and the reason `Services` is worth having.
@@ -150,7 +151,7 @@ def test_every_field_of_the_bundle_is_declared_as_a_port_and_never_as_an_adapter
     every module that reads a bundle - which is contract 5's rule broken by a type annotation
     rather than by an import, and import-linter would not see it.
 
-    `build` is compared just as exactly, in a list of its own. It is project configuration rather
+    `config` is compared just as exactly, in a list of its own. It is project configuration rather
     than a capability, so there is no adapter it could name - and folding it into the same
     comparison is what keeps "a field arrived without anybody writing it down" a failure here.
     """
@@ -186,17 +187,30 @@ def test_the_fakes_bundle_builds_with_neither_vendor_adapter_module_importable(
     harness = container.fakes(TreesRoot(tmp_path / "trees"))
     _ports_are_filled(harness.services)
 
-def test_the_real_bundle_carries_the_projects_configured_build_command(tmp_path: Path) -> None:
+def test_the_real_bundle_carries_every_configured_key_the_build_command_among_them(
+    tmp_path: Path,
+) -> None:
     """The route nothing else can close, closed at the one place both ends are in scope.
 
-    `Verifier.verify` takes the command, its only caller is the merge gate inside `integrate()`, and
-    `Project.build` is where the command is written down - so something has to carry it across, and
+    `Verifier.verify` takes the command, the merge gate in `integrate()` reads it as `build`, and
+    `Project.config` is where the command is written down - so something has to carry it across, and
     the container is the only thing holding a `Project` *and* building the bundle a `Run` gets.
     Asserted as the project's own string rather than as "not empty", because the failure this
     catches is a plausible one: a bundle that carried a placeholder would gate every merge on a
     build nobody configured.
     """
-    assert container.real(_settings(tmp_path), _project(tmp_path)).build == "make check"
+    assert container.real(_settings(tmp_path), _project(tmp_path)).config == {
+        "build": "make check",
+        "linter": "ruff check",
+    }
+
+def test_the_real_bundle_carries_no_build_command_for_a_project_that_sets_none(
+    tmp_path: Path,
+) -> None:
+    """Absent in the file is absent on the bundle: nothing between the two supplies a command."""
+    project = replace(_project(tmp_path), config={"linter": "ruff check"})
+
+    assert "build" not in container.real(_settings(tmp_path), project).config
 
 @pytest.mark.asyncio
 async def test_the_fakes_bundle_carries_a_build_command_the_gate_answers_to(
@@ -211,18 +225,21 @@ async def test_the_fakes_bundle_carries_a_build_command_the_gate_answers_to(
     stops matching and every landing sails through the gate the test thought it had closed.
     """
     harness = container.fakes(TreesRoot(tmp_path / "trees"))
-    assert harness.services.build == container.FAKE_BUILD
+    assert harness.services.config == {"build": container.FAKE_BUILD}
 
     harness.verifier.answers(container.FAKE_BUILD, passed=False, status=2, output="2 failing")
-    outcome = await harness.services.verifier.verify(harness.services.build, tmp_path)
+    outcome = await harness.services.verifier.verify(harness.services.config["build"], tmp_path)
 
     assert (outcome.passed, outcome.status, outcome.output) == (False, 2, "2 failing")
 
-def test_the_fakes_bundle_takes_a_build_command_of_its_own(tmp_path: Path) -> None:
+def test_the_fakes_bundle_takes_a_config_of_its_own_in_place_of_the_fake_build(
+    tmp_path: Path,
+) -> None:
     """A test about a *particular* command reaching the gate has to choose it, so `fakes()` takes
-    one - keyword-only, beside the scripts, for the reason those are keyword-only."""
-    harness = container.fakes(TreesRoot(tmp_path / "trees"), build="./gradlew check")
-    assert harness.services.build == "./gradlew check"
+    the whole config - keyword-only, beside the scripts, for the reason those are keyword-only -
+    and what it is handed replaces the default rather than joining it."""
+    harness = container.fakes(TreesRoot(tmp_path / "trees"), config={"build": "./gradlew check"})
+    assert harness.services.config == {"build": "./gradlew check"}
 
 def test_the_concrete_fakes_are_the_same_objects_as_the_ports_in_the_bundle(
     tmp_path: Path,
@@ -575,7 +592,7 @@ def test_a_substitution_carries_every_other_object_across_by_identity(tmp_path: 
     assert substituted.clock is harness.clock
     assert substituted.services.workspaces is harness.services.workspaces
     assert substituted.services.agents is harness.services.agents
-    assert substituted.services.build == harness.services.build
+    assert substituted.services.config == harness.services.config
 
 @pytest.mark.asyncio
 async def test_one_agent_serves_both_providers(tmp_path: Path) -> None:

@@ -11,16 +11,17 @@ from agl.config.placement import Got, Removed, placed, removed
 from agl.config.questions import Confirm, Questions, Removal, answered, needed
 from agl.config.removal import removable
 from agl.config.schema import Settings
-from agl.ports.errors import ConflictError, InputError, InternalError, NotFoundError, UpstreamError
+from agl.ports.errors import ConflictError, InternalError, NotFoundError, UpstreamError
 from agl.ports.fetch import Fetcher
 from agl.ports.get_request import Fetch, GetRequest, RequestedWorkflow
-from agl.ports.home_layout import AglHome, RunScope, workspace_dir
+from agl.ports.home_layout import AglHome, RunScope, project_config, workspace_dir
 from agl.ports.ids import Namespace, ProjectName, RunLabel, WorkflowName
 from agl.ports.run import RunSpec, checked_text
 from agl.ports.sync import Syncer, SyncOutcome
 from agl.ports.tree_layout import BASE_DIRNAME, TreesRoot, run_branch, worktree_branch
 from agl.sdk import params
 from agl.sdk._engine import preflight, teardown
+from agl.sdk._engine.config import narrowed
 from agl.sdk._engine.integration import Leases
 from agl.sdk._engine.journal import Fingerprints
 from agl.sdk._engine.services import Services
@@ -28,7 +29,6 @@ from agl.sdk._engine.worktrees import Worktrees
 from agl.sdk.workflow import Run, Workflow
 
 __all__ = [
-    "Ask",
     "Cleared",
     "Listing",
     "Replayed",
@@ -51,14 +51,6 @@ _TREES_DIRNAME: Final = ".agl-trees"
 # message owes is enough to recognise the edit that was made - `git status` in the workspace is
 # the complete answer. `tests/test_resume.py` pins the bound.
 _SHOWN: Final = 5
-
-_BUILD_PROMPT: Final = (
-    "What command builds and tests this project? AGL runs it at the merge gate, through a shell, "
-    "in a worktree of its own - `./gradlew build`, `make test`, `npm run build`.\n"
-    "build command: "
-)
-
-type Ask = Callable[[str], str]
 
 @dataclass(frozen=True, slots=True)
 class Cleared:
@@ -100,6 +92,7 @@ async def run(
     # underneath it never runs - so the next run fails identically and nothing ever heals.
     await _sync_workspace(syncer, home)
     found = _discovery(home, points)
+    services = _configured(found, name, services, home, project)
     wf = _loaded(found, name)
     given = params.parse(wf.params, argv, prog=f"agl run {name}")
 
@@ -161,6 +154,7 @@ async def resume(
 
     await _sync_workspace(syncer, home)
     found = _discovery(home, points)
+    services = _configured(found, spec.workflow, services, home, project)
     wf = _loaded(found, spec.workflow)
 
     measured = _digests(found, spec.workflow)
@@ -221,7 +215,7 @@ async def clear(services: Services, project: ProjectName, label: RunLabel) -> Cl
         await services.store.remove(scope)
         return Cleared(branches=tuple(branches), worktrees=tuple(worktrees))
 
-def init(settings: Settings, cwd: Path, ask: Ask) -> Path:
+def init(settings: Settings, cwd: Path) -> Path:
     root = toml_file.git_root(cwd)
     name = ProjectName(root.name)
 
@@ -230,18 +224,7 @@ def init(settings: Settings, cwd: Path, ask: Ask) -> Path:
     trees = TreesRoot(root.parent / _TREES_DIRNAME / str(name))
     toml_file.check_trees_root(destination, root, trees.path)
 
-    build = ask(_BUILD_PROMPT).strip()
-    if not build:
-        raise InputError(
-            "a build command is what AGL runs at the merge gate before a run's work is landed, "
-            "so an empty one would make every gate pass without building anything. "
-            "Nothing has been written - run `agl init` again and give the command this project is "
-            "built and tested with. If it genuinely has none, that is a decision to make in the "
-            "project's settings file rather than a value that arrives here empty"
-        )
-    return toml_file.write_project(
-        settings.home, name, root, trees, build, sources.DEFAULT_BUILD_TIMEOUT
-    )
+    return toml_file.write_project(settings.home, name, root, trees, sources.DEFAULT_BUILD_TIMEOUT)
 
 # The workspace is made unconditionally rather than after a check: `make_workspace` creates each of
 # the three things it makes only where that thing is absent, so the workspace an operator already
@@ -432,6 +415,23 @@ def _refused(outcome: SyncOutcome) -> str:
         f"non-zero exit - so what uv said is printed whole below rather than "
         f"summarised:\n\n{outcome.output.rstrip()}"
     )
+
+# Without a home there was no walk, so there is no project file to check. Without a directory the
+# points were handed over - the seam `_digests` reads too - so no `pyproject.toml` declared anything
+# and the keys the caller configured are the declaration; a walked name with no directory is one
+# `_loaded` refuses next, before the workflow could read any.
+def _configured(
+    found: registry.Discovery,
+    name: str,
+    services: Services,
+    home: AglHome | None,
+    project: ProjectName,
+) -> Services:
+    if home is not None:
+        registry.check_configured(found, name, services.config, project_config(home, project))
+    directory = found.directories.get(name)
+    declared = tuple(services.config) if directory is None else found.config_keys.get(name, ())
+    return narrowed(services, name, declared, directory)
 
 def _loaded(found: registry.Discovery, name: str) -> Workflow[object]:
     registry.check_unbroken(found, name)

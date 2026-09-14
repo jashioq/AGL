@@ -21,7 +21,6 @@ __all__ = [
 _HOME: Final = "home"
 _REPO: Final = "repo"
 _TREES_ROOT: Final = "trees_root"
-_BUILD: Final = "build"
 _BUILD_TIMEOUT: Final = "build_timeout"
 _AGENT: Final = "agent"
 _CLAUDE: Final = "claude"
@@ -43,7 +42,6 @@ DEFAULT_BUILD_TIMEOUT: Final = 600.0
 @dataclass(frozen=True, slots=True)
 class Overrides:
     home: Path | None = None
-    build: str | None = None
     build_timeout: float | None = None
     claude_enabled: bool | None = None
     claude_cli_path: Path | None = None
@@ -90,15 +88,13 @@ def resolve_project(
         name=said.name,
         repo=_required(said.repo, path, _REPO),
         trees=_required(said.trees_root, path, _TREES_ROOT),
-        build=_required(
-            _first(overrides.build, _text(environ, _variable(_BUILD)), said.build), path, _BUILD
-        ),
         build_timeout=_settled(
             overrides.build_timeout,
             _seconds(environ, _variable(_BUILD_TIMEOUT)),
             said.build_timeout,
             default=DEFAULT_BUILD_TIMEOUT,
         ),
+        config=said.config,
     )
 
 def _first[T](*layers: T | None) -> T | None:
@@ -115,8 +111,8 @@ def _required[T](answer: T | None, path: Path, key: str) -> T:
     if answer is None:
         raise InputError(
             f"{path}: {key} is not set, and there is no default AGL could apply - it is a fact "
-            f"about this project that only this file holds. `agl init` inside the repository "
-            f"writes the file with all five of its keys; add {key} to it, or run init again"
+            f"about this project that only this file holds. `agl init` writes it into a new file "
+            f"and never over one that is already there, so add {key} to this one by hand"
         )
     return answer
 

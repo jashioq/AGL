@@ -7,7 +7,6 @@ from pathlib import Path
 from traceback import print_exception
 from types import TracebackType
 from typing import Final
-from agl.api import Ask
 from agl.cli import commands
 from agl.cli.commands import _print_refusal
 from agl.cli.commands import clear as clear_command
@@ -62,20 +61,6 @@ _CLOSED: Final = "n - stdin was closed, and that is taken as no"
 
 _LOST: Final = "n - a standard stream is closed, so nothing can be read, and that is taken as no"
 
-def _asked(prompt: str) -> str:
-    try:
-        return input(prompt)
-    # `input` raises `EOFError` on a closed stdin - a Ctrl-D at the prompt, or a command run as
-    # `agl init < /dev/null` - and `RuntimeError` where a standard stream is closed outright, as
-    # `<&-`, `>&-` and `2>&-` each leave one.
-    except (EOFError, RuntimeError) as closed:
-        raise InputError(
-            f"stdin was closed before this question could be answered, or another standard stream "
-            f"was - a Ctrl-D, a command run with nothing on its input, or one run with a stream "
-            f"closed outright. Nothing has been written, so run it again somewhere the question "
-            f"can be answered: {prompt.strip()}"
-        ) from closed
-
 def _confirmed(question: str) -> bool:
     while True:
         print(f"{question} {_CHOICES} ", end="", file=sys.stderr, flush=True)
@@ -107,8 +92,6 @@ class Invocation:
     cwd: Path
 
     points: Iterable[EntryPoint] | None = None
-
-    ask: Ask = _asked
 
     confirm: Confirm = _confirmed
 
@@ -207,7 +190,7 @@ def _dispatch(invocation: Invocation, parsed: argparse.Namespace, tail: Sequence
         return clear_command.execute(invocation.registered, parsed)
     if command == init_command.NAME:
         _no_tail(command, tail)
-        return init_command.execute(invocation.settings, invocation.cwd, invocation.ask)
+        return init_command.execute(invocation.settings, invocation.cwd)
     if command == new_command.NAME:
         _no_tail(command, tail)
         return new_command.execute(invocation.settings.home, parsed, syncer=invocation.syncer())
