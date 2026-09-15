@@ -3,8 +3,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import Final
-from agl.ports.agent import ModelId, OpenAI, Restriction
+from typing import Final, assert_never
+from agl.ports.agent import ChosenClaude, ChosenOpenAI, ModelChoice, ModelId, OpenAI, Restriction
 from agl.ports.errors import AglError, InputError, UpstreamUnavailable, UpstreamUnexpected
 from agl.ports.run import JsonValue
 
@@ -12,6 +12,7 @@ __all__ = [
     "APPROVAL",
     "Sandbox",
     "activity",
+    "effort_options",
     "failure",
     "launch_failure",
     "model_slug",
@@ -39,6 +40,11 @@ _NETWORK: Final = "sandbox_workspace_write.network_access"
 # running commands plausibly has a second route - and nothing establishes that a feature switched
 # off in the registry removes the tool from what the model is offered, which is why words go.
 _SHELL_FEATURES: Final = ("features.shell_tool", "features.unified_exec")
+
+# An override because `codex exec` has no effort flag: its `-e` is the alias of `exec` itself. On
+# 0.152.0 the value reaches the request as `reasoning.effort` verbatim, and a level above the
+# model's top is lowered to that top rather than refused.
+_EFFORT: Final = "model_reasoning_effort"
 
 _IN_WORDS: Final[Mapping[Restriction, str]] = MappingProxyType(
     {
@@ -124,14 +130,19 @@ def sandbox(restrictions: frozenset[Restriction]) -> Sandbox:
 def model_slug(model: ModelId) -> str:
     slug = _MODEL_SLUGS.get(model)
     if slug is None:
-        served = sorted(str(member) for member in _MODEL_SLUGS)
-        raise InputError(
-            f"the OpenAI adapter cannot run {str(model)!r}: it serves {served} and nothing else. "
-            f"It will not stand in another model for this one - the model was named beside the "
-            f"prompt because the choice was semantic, and substituting answers a different "
-            f"question than the one the workflow asked"
-        )
+        raise _unserved(model)
     return slug
+
+def effort_options(choice: ModelChoice) -> tuple[str, ...]:
+    match choice:
+        case ChosenOpenAI():
+            return ("-c", f'{_EFFORT}="{choice.effort}"')
+        case ChosenClaude():
+            raise _unserved(choice.model)
+        case ModelId():
+            return ()
+        case _:
+            assert_never(choice)
 
 def launch_failure(error: OSError) -> UpstreamUnavailable:
     if isinstance(error, FileNotFoundError):
@@ -245,3 +256,12 @@ def _said(reported: object) -> str:
 
 def _status(exit_code: int) -> str:
     return f"it exited {exit_code}, a status this backend documents no meaning for"
+
+def _unserved(model: ModelId) -> InputError:
+    served = sorted(str(member) for member in _MODEL_SLUGS)
+    return InputError(
+        f"the OpenAI adapter cannot run {str(model)!r}: it serves {served} and nothing else. "
+        f"It will not stand in another model for this one - the model was named beside the "
+        f"prompt because the choice was semantic, and substituting answers a different "
+        f"question than the one the workflow asked"
+    )

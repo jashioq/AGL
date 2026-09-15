@@ -9,8 +9,11 @@ from agl.ports.agent import (
     ActivityReporter,
     Capability,
     Claude,
+    ClaudeEffort,
+    ModelChoice,
     ModelId,
     OpenAI,
+    OpenAIEffort,
     Restriction,
     Tool,
 )
@@ -23,8 +26,10 @@ __all__ = [
     "ActivityReporter",
     "Capability",
     "Claude",
+    "ClaudeEffort",
     "ModelId",
     "OpenAI",
+    "OpenAIEffort",
     "Restriction",
     "Role",
     "RoleFactory",
@@ -42,7 +47,7 @@ class Role[P = None]:
 
     instructions: str
 
-    _model: ModelId | None = None
+    _model: ModelChoice | None = None
 
     _accepts: tuple[type[object], ...] = ()
 
@@ -88,7 +93,7 @@ class Role[P = None]:
         object.__setattr__(self, "requires", requires)
 
     @property
-    def model(self) -> ModelId:
+    def model(self) -> ModelChoice:
         """Which model runs this role, bound by its factory rather than written on the `Role`.
 
         :return: the model and so the provider; a fingerprint term, so changing it replays nothing
@@ -121,12 +126,15 @@ class RoleFactory[**P, R]:
 
     name: str
 
-    model: ModelId
+    model: ModelChoice
 
     accepts: tuple[type[object], ...]
 
     def __init__(
-        self, declaration: Callable[P, Role[R]], model: ModelId, accepts: tuple[type[object], ...]
+        self,
+        declaration: Callable[P, Role[R]],
+        model: ModelChoice,
+        accepts: tuple[type[object], ...],
     ) -> None:
         # Here and not beside the `check_placeholders` call below: `accepts=` is the decorator's
         # own argument and is answerable at the decoration, where a prompt is not - the text is
@@ -152,10 +160,10 @@ class RoleFactory[**P, R]:
 class _RoleDecorator(Protocol):
     def __call__[**P, R](self, declaration: Callable[P, Role[R]], /) -> RoleFactory[P, R]: ...
 
-def role(*, model: ModelId, accepts: Sequence[type[object]] = ()) -> _RoleDecorator:
+def role(*, model: ModelChoice, accepts: Sequence[type[object]] = ()) -> _RoleDecorator:
     """Declare a role factory, naming the model and the inputs so both are readable uncalled.
 
-    :param model: fingerprinted into every step this role runs, and asked about before step one
+    :param model: fingerprinted with any effort into each step; the bare model is probed up front
     :param accepts: classes with distinct names; the prompt names each `{{TypeName}}` and no other
     :return: a decorator binding the model and the accepted types onto each `Role` it returns
     """

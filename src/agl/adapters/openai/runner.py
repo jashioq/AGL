@@ -9,6 +9,7 @@ from agl.adapters.openai._tools import Caller, Supply
 from agl.adapters.openai.translate import (
     APPROVAL,
     Sandbox,
+    effort_options,
     launch_failure,
     model_slug,
     sandbox,
@@ -22,6 +23,7 @@ from agl.ports.agent import (
     AgentTask,
     Capability,
     ModelId,
+    model_of,
 )
 from agl.ports.errors import InputError
 
@@ -117,19 +119,26 @@ class OpenAiRunner(AgentRunner):
         *,
         on_activity: ActivityReporter | None = None,
     ) -> AgentOutcome:
-        slug = _not_a_flag(model_slug(task.model), "model")
+        slug = _not_a_flag(model_slug(model_of(task.model)), "model")
+        effort = effort_options(task.model)
         limits = sandbox(task.restrictions)
         caller = Caller()
         async with Supply(task.tools, caller) as supply:
             return await outcome_of(
-                _argv(self._cli, slug, limits, supply.urls),
+                _argv(self._cli, slug, effort, limits, supply.urls),
                 prompt=_prompt(task, limits),
                 workspace=task.workspace,
                 caller=caller,
                 on_activity=on_activity,
             )
 
-def _argv(cli: str, slug: str, limits: Sandbox, urls: Mapping[str, str]) -> list[str]:
+def _argv(
+    cli: str,
+    slug: str,
+    effort: tuple[str, ...],
+    limits: Sandbox,
+    urls: Mapping[str, str],
+) -> list[str]:
     return [
         cli,
         _EXEC,
@@ -139,6 +148,7 @@ def _argv(cli: str, slug: str, limits: Sandbox, urls: Mapping[str, str]) -> list
         *limits.options,
         "-m",
         slug,
+        *effort,
         *_supplied(urls),
         _FROM_STDIN,
     ]

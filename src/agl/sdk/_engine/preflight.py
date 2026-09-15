@@ -2,7 +2,7 @@ import sys
 from collections.abc import Callable, Mapping, Sequence
 from types import MappingProxyType, ModuleType
 from typing import Any, Final
-from agl.ports.agent import AgentRunner, Capability, ModelId, Provider
+from agl.ports.agent import AgentRunner, Capability, ModelId, Provider, model_of
 from agl.ports.errors import DeniedError, InputError, InternalError, UpstreamUnavailable
 from agl.ports.history import History
 from agl.sdk.roles import Role, RoleFactory
@@ -37,10 +37,11 @@ class Capabilities:
         self._known: dict[ModelId, frozenset[Capability]] = {}
 
     async def require(self, runner: AgentRunner, role: Role[object], *, step: str) -> None:
-        held = self._known.get(role.model)
+        model = model_of(role.model)
+        held = self._known.get(model)
         if held is None:
-            held = await runner.capabilities(role.model)
-            self._known[role.model] = held
+            held = await runner.capabilities(model)
+            self._known[model] = held
         missing = frozenset(role.requires) - held
         if missing:
             raise DeniedError(_unmet(step, role, missing, held))
@@ -75,7 +76,7 @@ async def check(runner: AgentRunner, history: History, declared_by: _Declaration
     # `_demanded` handed them, which is the order the author wrote their roles in.
     for factory in sorted(_demanded(_declared_beside(declared_by)), key=_cost_of):
         try:
-            await runner.check_ready(factory.model)
+            await runner.check_ready(model_of(factory.model))
         except UpstreamUnavailable as unavailable:
             raise UpstreamUnavailable(
                 _not_ready(unavailable, factory, declared_by.__module__)
@@ -91,7 +92,7 @@ def _narrowest(matched: Sequence[type[object]]) -> type[object] | None:
     return below if all(issubclass(below, declared) for declared in matched) else None
 
 def _cost_of(factory: RoleFactory[..., Any]) -> int:
-    return _PROBE_COST[factory.model.provider]
+    return _PROBE_COST[model_of(factory.model).provider]
 
 def _declared_beside(declared_by: _Declaration) -> tuple[RoleFactory[..., Any], ...]:
     written_in = sys.modules.get(declared_by.__module__)
@@ -116,7 +117,7 @@ def _declared_beside(declared_by: _Declaration) -> tuple[RoleFactory[..., Any], 
 def _demanded(factories: tuple[RoleFactory[..., Any], ...]) -> tuple[RoleFactory[..., Any], ...]:
     first: dict[ModelId, RoleFactory[..., Any]] = {}
     for factory in factories:
-        first.setdefault(factory.model, factory)
+        first.setdefault(model_of(factory.model), factory)
     return tuple(first.values())
 
 def _no_identity(refusal: UpstreamUnavailable) -> str:
@@ -132,8 +133,9 @@ def _no_identity(refusal: UpstreamUnavailable) -> str:
 def _not_ready(
     refusal: UpstreamUnavailable, factory: RoleFactory[..., Any], workflow_module: str
 ) -> str:
+    model = model_of(factory.model)
     return (
-        f"{refusal} - and AGL asked because {str(factory.model)!r} is the model of the role "
+        f"{refusal} - and AGL asked because {str(model)!r} is the model of the role "
         f"factory `{factory.name}`, declared in {factory.__module__!r} and reached from "
         f"{workflow_module!r}, which is the module this run's workflow is written in. Preflight "
         f"reads the `@role(model=…)` factories in that namespace - and in any module bound in it - "
@@ -152,8 +154,9 @@ def _unmet(
 ) -> str:
     wanted = sorted(str(member) for member in missing)
     offered = sorted(str(member) for member in held)
+    model = model_of(role.model)
     message = (
-        f"the role handed to step {step!r} cannot run on {str(role.model)!r}: it requires "
+        f"the role handed to step {step!r} cannot run on {str(model)!r}: it requires "
         f"{wanted}, which the backend serving that model does not offer - it reports {offered}. "
         f"A capability is what a backend can be asked for at all, so this does not clear up on "
         f"its own: either the role names a model whose backend has it, or it stops requiring it"

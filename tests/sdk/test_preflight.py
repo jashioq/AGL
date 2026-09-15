@@ -35,7 +35,8 @@ factories bound directly over two models - the right shape for dedup and orderin
 shape for every claim about what a namespace does not hold or about how a factory reaches it.
 `tests/instruments/preflight/` is where those live, one module each: no factory at all, a factory
 written below the workflow function, a factory reached only as `roles.implementer()` through a
-bound module, and a `Role` already built and imported by name with no factory beside it. Another -
+bound module, a `Role` already built and imported by name with no factory beside it, and two
+factories naming one model at two efforts with no second model beside them. Another -
 a factory imported and never used - went with the shipped workflow whose role it imported; the
 section that used to read it says what is unmeasured in its absence.
 
@@ -111,6 +112,7 @@ from agl.ports.agent import (
     AgentTask,
     Capability,
     Claude,
+    ClaudeEffort,
     ModelId,
     OpenAI,
     Provider,
@@ -283,6 +285,7 @@ POINTS: Final = (
     _point("late", "instruments.preflight.late:late"),
     _point("qualified", "instruments.preflight.qualified:qualified"),
     _point("prebuilt", "instruments.preflight.prebuilt:prebuilt"),
+    _point("efforts", "instruments.preflight.efforts:efforts"),
 )
 
 # --- the runner this file drives preflight with --------------------------------------------------
@@ -650,6 +653,34 @@ async def test_the_free_probe_is_asked_first_so_a_refusal_never_costs_a_turn(
         "with both backends ready the paid probe went first, so the assertion above was about a "
         "preflight that stops at its first refusal rather than about an order"
     )
+
+@pytest.mark.asyncio
+async def test_two_efforts_on_one_model_are_one_readiness_question_about_the_bare_model(
+    tmp_path: Path,
+) -> None:
+    """De-duplication is over the model a role runs on, never over the level it reasons at.
+
+    `instruments/preflight/efforts.py` declares `Claude.OPUS` at two efforts and nothing else. The
+    port's `check_ready` takes a bare `ModelId`, and the Claude harness's costs a turn, so a
+    preflight keyed on the whole choice would ask twice and pay twice for one fact about the world.
+
+    The dispatch is asserted with it, because the other half is that nothing was unwrapped to get
+    there: the tasks the adapter was handed carry each role's level, and the one step-time
+    capability question the two steps share is asked about the bare model too.
+    """
+    entered.clear()
+    harness = _fakes(tmp_path)
+    stub = _Stub()
+
+    await _start(harness, "efforts", agents=stub)
+
+    assert stub.asked_ready == [Claude.OPUS]
+    assert [task.model for task in stub.ran] == [
+        Claude.OPUS(effort=ClaudeEffort.XHIGH),
+        Claude.OPUS(effort=ClaudeEffort.LOW),
+    ]
+    assert stub.asked_offers == [Claude.OPUS]
+    assert entered == ["efforts"]
 
 def test_every_provider_is_ranked_so_a_new_one_cannot_land_where_a_default_puts_it() -> None:
     """The mechanical half of the ordering: the table is total over the enum it is keyed on.
@@ -1074,6 +1105,32 @@ async def test_the_step_time_check_costs_one_capabilities_call_per_model_per_run
 
     assert stub.asked_offers == [Claude.OPUS, OpenAI.SOL]
     assert len(stub.ran) == 4
+
+@pytest.mark.asyncio
+async def test_the_capability_cache_keeps_one_entry_for_one_model_at_two_efforts() -> None:
+    """`Capabilities` is keyed by the bare model, so a second level is a hit and not a question.
+
+    Keyed on the whole choice, the second `require` would miss and ask again - and, worse, a table
+    keyed on a union that answered `.get` with the bare model would type-check and miss every time.
+    The entry is read directly, because the count of questions alone cannot tell one entry from two
+    entries filled by two calls that happened to be de-duplicated somewhere else.
+    """
+    stub = _Stub()
+    capabilities = preflight.Capabilities()
+
+    @role(model=Claude.OPUS(effort=ClaudeEffort.MAX))
+    def thorough() -> Role:
+        return Role(name="thorough", instructions="read all of it")
+
+    @role(model=Claude.OPUS(effort=ClaudeEffort.LOW))
+    def brief() -> Role:
+        return Role(name="brief", instructions="read the summary")
+
+    await capabilities.require(stub, thorough(), step="thorough")
+    await capabilities.require(stub, brief(), step="brief")
+
+    assert stub.asked_offers == [Claude.OPUS]
+    assert capabilities._known == {Claude.OPUS: EVERYTHING}
 
 @pytest.mark.asyncio
 async def test_check_ready_is_not_repeated_at_the_step(tmp_path: Path) -> None:

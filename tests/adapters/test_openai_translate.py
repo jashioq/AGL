@@ -55,6 +55,7 @@ different directories would collide at import.
 """
 
 import re
+import tomllib
 from collections.abc import Iterator
 from itertools import combinations
 from pathlib import Path
@@ -64,6 +65,7 @@ from agl.adapters.openai.translate import (
     APPROVAL,
     Sandbox,
     activity,
+    effort_options,
     failure,
     launch_failure,
     model_slug,
@@ -71,7 +73,7 @@ from agl.adapters.openai.translate import (
     unreadable,
     unready,
 )
-from agl.ports.agent import Claude, ModelId, OpenAI, Restriction
+from agl.ports.agent import Claude, ClaudeEffort, ModelId, OpenAI, OpenAIEffort, Restriction
 from agl.ports.errors import (
     AglError,
     InputError,
@@ -405,6 +407,44 @@ class TestModelSlugs:
         message = str(refused.value)
         for served in OpenAI:
             assert str(served) in message
+
+class TestEffortOptions:
+    """(b) The override a chosen effort travels as, nothing for a bare model, and a refusal."""
+
+    @pytest.mark.parametrize("effort", list(OpenAIEffort))
+    def test_every_openai_effort_travels_as_one_override_whose_toml_value_is_the_level(
+        self, effort: OpenAIEffort
+    ) -> None:
+        """Exhaustiveness over the port's enum, and the quoting read back by a TOML parser.
+
+        The harness parses a `-c` value as TOML, so the quoting is part of what is sent. Reading the
+        pair back with `tomllib` is what says the value that arrives is the level and nothing
+        around it, whatever spelling the string in `translate.py` is given.
+        """
+        options = effort_options(OpenAI.SOL(effort=effort))
+        assert len(options) == 2 and options[0] == "-c", f"{effort!r} travels as {options}"
+        assert tomllib.loads(options[1]) == {"model_reasoning_effort": effort.value}
+        assert not options[1].startswith("-"), "the override is its own argument"
+
+    @pytest.mark.parametrize("model", list(OpenAI))
+    def test_a_bare_openai_model_adds_no_override_at_all(self, model: ModelId) -> None:
+        """A member written without an effort leaves the harness its catalog default, as before."""
+        assert effort_options(model) == ()
+
+    @pytest.mark.parametrize("model", list(Claude))
+    def test_a_composite_of_the_other_provider_is_refused_as_that_model_is(
+        self, model: Claude
+    ) -> None:
+        """A Claude model at an effort is still a Claude model, and the refusal says so verbatim.
+
+        An empty tuple would read as "no effort chosen" and let the slug lookup be the only thing
+        standing between a Claude choice and a run, so the words are `model_slug`'s own.
+        """
+        with pytest.raises(InputError) as refused:
+            effort_options(model(effort=ClaudeEffort.HIGH))
+        with pytest.raises(InputError) as bare:
+            model_slug(model)
+        assert str(refused.value) == str(bare.value)
 
 class TestTheApprovalSettingIsAdapterLocalAndConstant:
     """The R2 checkpoint, in the shape the module gives it: a constant, not a translation."""

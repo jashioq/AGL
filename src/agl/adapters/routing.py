@@ -8,6 +8,7 @@ from agl.ports.agent import (
     Capability,
     ModelId,
     Provider,
+    model_of,
 )
 from agl.ports.errors import InputError
 
@@ -37,7 +38,7 @@ class RoutingAgentRunner(AgentRunner):
         *,
         on_activity: ActivityReporter | None = None,
     ) -> AgentOutcome:
-        return await self._serving(task.model).run(task, on_activity=on_activity)
+        return await self._serving(model_of(task.model)).run(task, on_activity=on_activity)
 
     def _serving(self, model: ModelId) -> AgentRunner:
         provider = model.provider

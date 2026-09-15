@@ -1011,9 +1011,10 @@ drops when its holder dies is the one kind no crash can falsify.
 
 **A workflow branches only on step results.** Resume is not a continuation — `api.resume`
 re-invokes the workflow from its first line in a fresh process, so every line runs again and only
-`run.step(...)` short-circuits. It fingerprints the role, its tools, the inputs, the prompt those
-two compose into and the head the previous step ended at, appends an ordinal for repeats, and looks
-it up. A hit returns the recorded value; **a miss just runs the step — a miss is not an error, it
+`run.step(...)` short-circuits. It fingerprints the role — its instructions, its model with the
+effort when one is chosen, its restrictions and its tools — the inputs, the prompt the instructions
+and the inputs compose into, and the head the previous step ended at, appends an ordinal for
+repeats, and looks it up. A hit returns the recorded value; **a miss just runs the step — a miss is not an error, it
 is the definition of a new step**, so divergence has nothing to raise. Branch on wall-clock time,
 an environment variable, a directory listing, randomness or a mutable global, and a resume can take
 another path: paid-for work is silently redone, and where an off-branch fingerprint happens to
@@ -1077,6 +1078,30 @@ no second order for one to come out in.
 `tests/sdk/test_journal.py::test_a_prompt_with_a_placeholder_in_it_composes_the_same_in_every_process`
 is one of those, and it renders a filled placeholder and an unfilled one in the same prompt so that
 neither half can go unmeasured.
+
+**A model with its effort chosen reaches the fingerprint as itself, and never as its bare model's
+text.** `base_of` in `sdk/_engine/journal.py` writes the `model` term through `_canonical`, as it
+writes every other role term. A bare member is a `StrEnum` member and so a `str`, and contributes
+its value text alone — `Claude.OPUS` is `"claude:opus"`; a member called with an effort,
+`Claude.OPUS(effort=ClaudeEffort.XHIGH)`, is a `ChosenClaude` from `ports/agent.py` and is walked
+as the dataclass it is,
+`{"__agl_type__":"agl.ports.agent.ChosenClaude","effort":"xhigh","model":"claude:opus"}`. Spell
+the term `str(model)` instead and any choice whose `str()` is the model id — a `__str__` answering
+it, or a `str` subclass — hashes to the bare member's digest: a step recorded at the tool's default
+effort replays for a role that now asks for `xhigh`, or the other way round, and a recorded result
+comes back for a call nobody made. `_canonical` does not close the second shape by itself, a `str`
+subclass taking its text branch before the dataclass one, which is why `ChosenClaude` and
+`ChosenOpenAI` are frozen slotted dataclasses that subclass nothing. What the walk costs is a stored
+format wider than the enum values: the composite's module path, its class name and both its field
+names are in every digest recorded at a chosen effort, so moving either class out of
+`ports/agent.py`, renaming it or renaming a field re-runs every one of those steps, as moving a
+payload class does.
+`tests/sdk/test_journal.py::test_a_bare_model_member_reaches_the_hashed_document_as_its_value_text_alone`
+and `::test_a_chosen_effort_reaches_the_hashed_document_as_its_type_its_model_and_its_level` pin
+the bytes of both documents, `::test_a_composite_whose_str_is_the_model_id_is_not_that_members_fingerprint`
+is the collision, and
+`tests/ports/test_agent.py::test_a_chosen_effort_is_recorded_under_its_class_path_and_two_field_names`
+holds the classes' side.
 
 **Nothing a substitution writes is ever scanned again.** `composed` is a single `re.sub` pass, and
 `re.sub` resumes at the end of each match in the string it was handed, so a value whose own text
@@ -1316,6 +1341,33 @@ so binding order in the workflow's module namespace still decides between two mo
 cost the same. Both refusals are `UpstreamUnavailable` — a state of the world the operator changes,
 after which the same run works — so both leave on exit 6.
 
+**Readiness and capabilities belong to the model, and the effort goes no further than the task and
+the digest.** `model_of` in `ports/agent.py` is the one place a bare `ModelId` is derived from a
+`ModelChoice`, and everything that asks about a model asks with it: `AgentRunner.capabilities` and
+`check_ready` take a bare `ModelId`; `preflight.py`'s `_demanded` de-duplicates declarations on it,
+`_cost_of` ranks them by its provider and `Capabilities` caches under it; `adapters/routing.py`
+dispatches on `model_of(task.model).provider`; and every table keyed by model — `_MODEL_NAMES` in
+`claude_code/translate.py`, `_MODEL_SLUGS` in `openai/translate.py`, `Capabilities._known` and
+`_demanded`'s own — is keyed by `ModelId` and looked up with the bare member. Claude's `check_ready`
+spends a turn, so two roles on one model at two efforts are one readiness question and one bill,
+and no readiness probe sends an effort. The effort itself travels only on `AgentTask.model`, into
+`base_of` and into the adapter that serves it, as one translation each: `claude_code/translate.py`'s
+`effort_level` fills `ClaudeAgentOptions.effort`, which the SDK hands its bundled CLI as
+`--effort <level>`, and `openai/translate.py`'s `effort_options` puts
+`-c model_reasoning_effort="<level>"` directly after `-m <slug>`, the Codex CLI having no effort
+flag — its `-e` is the alias of `exec`. A bare member sends neither, and the tool's own default for
+that model applies. **The trap is in the tables, and the type checker cannot see it.** Widen one's
+key to `ModelChoice` and a lookup with the whole choice type-checks under `mypy --strict` — which
+refuses that same lookup against a `Mapping[ModelId, …]` — and misses at run time for every
+composite, so a role declared at an effort is probed a second time, costs a second capabilities
+call, or is refused as a model its adapter does not serve.
+`tests/sdk/test_preflight.py::test_two_efforts_on_one_model_are_one_readiness_question_about_the_bare_model`
+and `::test_the_capability_cache_keeps_one_entry_for_one_model_at_two_efforts` hold the engine's
+half, and
+`tests/adapters/test_openai_runner.py::test_a_model_chosen_at_an_effort_carries_one_override_directly_after_the_model`
+and `tests/adapters/test_claude_code_runner.py::test_the_readiness_probe_sends_no_effort_to_the_cli_it_asks`
+the adapters'.
+
 **A run's label is held in two places, and the repository has to be asked as well as the store.**
 `api.run` asks `History.exists(run_branch(label))` beside reading the record, and refuses before it
 has written anything. Without that check `WorkspaceProvider.open` takes its **attaching** path,
@@ -1381,8 +1433,24 @@ The reasoning is the point — without it these get re-proposed.
   so the spelling already sanctioned is a factory parameter typed `ActivityReporter` — which is why
   `sdk/__init__.py` re-exports that alias, so the annotation costs no import from `agl.ports`.
 - **No config-level model override.** The choice is semantic — this role touches sensitive code,
-  that one needs judgement — so it is bound by `@role(model=…)`; an override buys only *why is my
-  Opus role running GPT-5?*
+  that one needs judgement — so it is bound by `@role(model=…)`, an effort with it; an override
+  buys only *why is my Opus role running GPT-5?*
+- **No table of which effort levels a model has, and no refusal of a pair.** `ClaudeEffort` and
+  `OpenAIEffort` in `ports/agent.py` each hold every level their provider's CLI accepts, and a
+  member of `Claude` or `OpenAI` takes any level of its own provider's enum: a level the model lacks
+  is sent as written and the tool handles it. The sets are per model and move whenever a vendor
+  ships one — `OpenAI.LUNA` tops out at `max` where `SOL` and `TERRA` add `ultra`, and a Claude
+  model may lack `xhigh` or take no effort at all — so a model-to-levels table here would go stale
+  the day a model gained a level, refusing a choice the tool already honours. Neither tool refuses
+  one either: the Codex CLI 0.152.0 sends the value verbatim and lowers a level above the model's
+  top to that top, and the Claude CLI the SDK bundles lowers or drops a level the model does not
+  offer — read out of that binary rather than seen in a session. The enums stay fixed in source
+  for what a list read off the installed tools could not keep: `mypy --strict` catching a misspelt
+  level or another provider's, and `model` staying a stable stored format for the fingerprint.
+  What the refusal costs is that nothing in AGL says the level run was not the level chosen, and
+  a step recorded at `ultra` on `LUNA` is recorded at `ultra`.
+  `tests/ports/test_agent.py::test_every_effort_level_is_accepted_on_every_model_of_its_provider`
+  is the measurement.
 - **No scrubbed or replaced environment for an agent harness.** What each adapter closes is the
   *target repository* as a configuration channel: `claude_code/runner.py` passes
   `setting_sources=[]`, `strict_mcp_config=True`, `settings=None` and `add_dirs=[]`, and
@@ -1493,7 +1561,8 @@ The reasoning is the point — without it these get re-proposed.
   `openai/fake.py` (195) hold 182 lines in common line for line and the same four-name `__all__`,
   with `Conversation`, `_payload`, `_value` and `_said` byte-identical and `_as_json` differing in
   one clause of its error prose. All that differs is vendor-shaped: the model check — `_check_model`,
-  Claude-only, against `translate.model_slug` — the backend's name in three message constants, and
+  Claude-only, against `translate.model_slug`, each asked of `model_of(task.model)` and neither
+  reading the effort — the backend's name in three message constants, and
   the activity line, `f"{declared.name}: {said}"` against `f"{_LABEL_CALLING}: {declared.name}"`,
   each fake keeping the shape of the line its own real adapter emits. Beside them, `Caller` with
   `_FAILED` and `_STOPPING` is 24 byte-identical lines in two `_tools.py` that are otherwise an MCP
@@ -1525,7 +1594,8 @@ The reasoning is the point — without it these get re-proposed.
   hypothetical shared `_process.py`, left there to say that nothing is pre-authorised, and warns
   against taking an exemption to spare an edit to `.importlinter`, an exemption removing a module
   from the rule where a listing applies it. `routing.py`'s own exemption is no precedent for a
-  second. It *is* an adapter: it implements `AgentRunner`, and dispatching on `task.model.provider`
+  second. It *is* an adapter: it implements `AgentRunner`, and dispatching on
+  `model_of(task.model).provider`
   to the vendor runners is its whole job, so importing them is the thing it does. A shared fake or a
   shared `Caller` would be the first module under `adapters/` that is neither an adapter nor the
   router — a library the adapters depend on, which is a different kind of thing and creates a
@@ -1621,7 +1691,10 @@ The reasoning is the point — without it these get re-proposed.
   test failure are not distinguishable from an exit code, so an OOM reads as a failed build and
   the cost is a re-run.
 - **No `auto()` on any enum.** Enum values reach the fingerprint as text and are therefore a
-  stored format; `auto()` would hand that format to declaration order.
+  stored format; `auto()` would hand that format to declaration order. `ClaudeEffort` and
+  `OpenAIEffort` are among them, and a chosen effort stores more than its value: the class path and
+  the two field names of the composite carrying it, which "Invariants where a mistake is silent"
+  pins beside the model term.
 - **No lock in `adapters/filesystem/`.** Every document has its own address, so a write is one
   `os.replace`. A mutex would be correct, slower, and invisible — it leaves every store test
   green, so `tests/adapters/test_filesystem_no_lock.py` reads the source instead.

@@ -61,12 +61,18 @@ from typing import Any, Final, Protocol, assert_type, cast, runtime_checkable
 import pytest
 from agl.ports.agent import (
     Capability,
+    ChosenClaude,
+    ChosenOpenAI,
     Claude,
+    ClaudeEffort,
+    ModelChoice,
     ModelId,
     OpenAI,
+    OpenAIEffort,
     Restriction,
     Tool,
     ToolResult,
+    model_of,
 )
 from agl.ports.errors import EXIT_CODES, AglError, InputError, UpstreamError, exit_code_for
 from agl.ports.run import JsonValue
@@ -176,7 +182,7 @@ async def _step[P](role: Role[P], payload: Mapping[str, JsonValue] | None = None
         return cast("P", None)
     return reporting.read(payload if payload is not None else {})
 
-def _base[P](built: Role[P], *, model: ModelId | None = None) -> str:
+def _base[P](built: Role[P], *, model: ModelChoice | None = None) -> str:
     """One step's base fingerprint, built from the four terms taken off a role.
 
     A declaration becomes an ordinary `Tool` the way `Run.step` will convert one - the adapter must
@@ -511,6 +517,30 @@ def test_replace_on_a_built_role_carries_the_model_and_the_accepted_types_across
     assert replace(REVIEWER, tools=()).model is OpenAI.SOL
     assert replace(REVIEWER, name="second_opinion").accepts == (Request,)
 
+def test_a_model_called_with_an_effort_reaches_the_built_role_with_the_effort_intact() -> None:
+    """The factory binds the whole choice and never unwraps it to the member it names.
+
+    Read off the factory uncalled, off the `Role` it builds, and off a `replace` of that role,
+    because each is a place the effort could be dropped with the model surviving - and a role that
+    kept only the model would run at the tool's default effort and fingerprint as the bare member,
+    with nothing anywhere saying so.
+    """
+    chosen = Claude.OPUS(effort=ClaudeEffort.XHIGH)
+
+    @role(model=chosen)
+    def deliberate() -> Role:
+        return Role(name="deliberate", instructions="think it through")
+
+    @role(model=OpenAI.LUNA(effort=OpenAIEffort.LOW))
+    def hurried() -> Role:
+        return Role(name="hurried", instructions="answer at once")
+
+    assert deliberate.model == ChosenClaude(Claude.OPUS, ClaudeEffort.XHIGH)
+    assert deliberate().model == chosen
+    assert replace(deliberate(), name="deliberate_again").model == chosen
+    assert hurried().model == ChosenOpenAI(OpenAI.LUNA, OpenAIEffort.LOW)
+    assert _base(deliberate()) != _base(replace(deliberate(), _model=Claude.OPUS))
+
 def test_the_override_surface_is_the_factorys_own_parameter_list() -> None:
     """A rejected member, measured as a type error rather than as an argument.
 
@@ -774,7 +804,7 @@ def test_two_providers_in_one_workflow_is_the_ordinary_case() -> None:
     """`src/agl/ports/agent.py`'s requirement, in the shape an author writes it: the model is
     named per role, beside the prompt, and nothing here holds an opinion about which adapter
     serves it."""
-    assert REVIEWER.model.provider != IMPLEMENTER.model.provider
+    assert model_of(REVIEWER.model).provider != model_of(IMPLEMENTER.model).provider
 
 # --- instructions are the prompt, not a path to it -----------------------------------------------
 

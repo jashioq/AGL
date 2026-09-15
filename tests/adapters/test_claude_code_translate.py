@@ -23,13 +23,14 @@ under different directories would collide at import.
 
 import re
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, get_args
 import pytest
 from claude_agent_sdk import (
     ClaudeSDKError,
     CLIConnectionError,
     CLIJSONDecodeError,
     CLINotFoundError,
+    EffortLevel,
     ProcessError,
     ResultError,
     ToolUseBlock,
@@ -38,12 +39,13 @@ from claude_agent_sdk._errors import MessageParseError
 from agl.adapters.claude_code.translate import (
     Restraint,
     activity,
+    effort_level,
     model_name,
     restraint,
     translated,
     unready,
 )
-from agl.ports.agent import Claude, ModelId, OpenAI, Restriction
+from agl.ports.agent import Claude, ClaudeEffort, ModelId, OpenAI, OpenAIEffort, Restriction
 from agl.ports.errors import InputError, UpstreamUnavailable, UpstreamUnexpected
 
 # A permission rule is `Tool` or `Tool(specifier)`, and the CLI's own validator refuses a tool
@@ -263,6 +265,48 @@ class TestModelNames:
         message = str(refused.value)
         for served in Claude:
             assert str(served) in message
+
+class TestEffortLevels:
+    """(b) The level a chosen effort reaches the SDK as, nothing for a bare model, and a refusal."""
+
+    @pytest.mark.parametrize("effort", list(ClaudeEffort))
+    def test_every_claude_effort_maps_to_a_level_the_vendor_literal_names(
+        self, effort: ClaudeEffort
+    ) -> None:
+        """Exhaustiveness over the port's enum, and agreement with the SDK's own spelling of it.
+
+        The table in `translate.py` exists because a `StrEnum` member is not assignable to the
+        SDK's `EffortLevel` literal, and a `cast` would pass a member the literal does not name.
+        A member added to `ClaudeEffort` fails here until the table says what it is sent as, and
+        the literal is read with `get_args` so an SDK that renamed a level fails here too, rather
+        than as a CLI warning on standard error that a completed run never shows.
+        """
+        level = effort_level(Claude.OPUS(effort=effort))
+        assert level == effort.value, f"{effort!r} is sent as {level!r}"
+        assert level in get_args(EffortLevel), (
+            f"{level!r} is not among the levels the SDK's literal names: {get_args(EffortLevel)}"
+        )
+        assert not level.startswith("-"), "the level is appended as its own argument"
+
+    @pytest.mark.parametrize("model", list(Claude))
+    def test_a_bare_claude_model_asks_for_no_effort_at_all(self, model: ModelId) -> None:
+        """A member written without an effort leaves the CLI its own default, exactly as before."""
+        assert effort_level(model) is None
+
+    @pytest.mark.parametrize("model", list(OpenAI))
+    def test_a_composite_of_the_other_provider_is_refused_as_that_model_is(
+        self, model: OpenAI
+    ) -> None:
+        """An OpenAI model at an effort is still an OpenAI model, and the refusal says so verbatim.
+
+        Routing never sends one here, so arriving is a bug - and the answer to it is the words
+        `model_name` gives the bare member, not `None`, which would read as "no effort chosen".
+        """
+        with pytest.raises(InputError) as refused:
+            effort_level(model(effort=OpenAIEffort.HIGH))
+        with pytest.raises(InputError) as bare:
+            model_name(model)
+        assert str(refused.value) == str(bare.value)
 
 class TestVendorExceptions:
     """(c) Every member of the SDK's hierarchy, and the base, become an `AglError`."""

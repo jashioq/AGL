@@ -7,7 +7,7 @@ from datetime import datetime
 from hashlib import sha256
 from math import isfinite
 from typing import Final
-from agl.ports.agent import ModelId, Restriction, Tool
+from agl.ports.agent import ModelChoice, Restriction, Tool
 from agl.ports.clock import Clock
 from agl.ports.errors import InputError, InternalError
 from agl.ports.home_layout import RunScope
@@ -60,7 +60,7 @@ def canonical_json(value: object) -> str:
 def base_of(
     *,
     instructions: str,
-    model: ModelId,
+    model: ModelChoice,
     restrictions: AbstractSet[Restriction],
     tools: Sequence[Tool],
     inputs: Mapping[str, object],
@@ -69,7 +69,7 @@ def base_of(
 ) -> str:
     role: JsonValue = {
         "instructions": _canonical(instructions, "role.instructions"),
-        "model": str(model),
+        "model": _canonical(model, "role.model"),
         "restrictions": _canonical(restrictions, "role.restrictions"),
         "tools": [
             {
@@ -221,7 +221,7 @@ class Journal:
         name: StepName,
         *,
         instructions: str,
-        model: ModelId,
+        model: ModelChoice,
         restrictions: AbstractSet[Restriction],
         tools: Sequence[Tool],
         inputs: Mapping[str, object],

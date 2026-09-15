@@ -96,6 +96,7 @@ import os
 import shutil
 import subprocess
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Mapping
+from dataclasses import replace
 from functools import cache
 from pathlib import Path
 from typing import Any, Final, NoReturn
@@ -103,6 +104,7 @@ from urllib.parse import urlsplit
 import pytest
 from claude_agent_sdk import ClaudeAgentOptions, ProcessError, SdkMcpTool
 from claude_agent_sdk._internal.transport import Transport
+from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITransport
 from agl.adapters.claude_code import _session, _tools
 from agl.adapters.claude_code import runner as runner_module
 from agl.adapters.claude_code.runner import ClaudeCodeRunner
@@ -113,8 +115,11 @@ from agl.ports.agent import (
     AgentTask,
     Capability,
     Claude,
+    ClaudeEffort,
+    ModelChoice,
     ModelId,
     OpenAI,
+    OpenAIEffort,
     Restriction,
     StopReason,
     Tool,
@@ -365,12 +370,14 @@ def poisoned(root: Path) -> Path:
     )
     return repo
 
-def task_in(repo: Path, *, tools: tuple[Tool, ...] = ()) -> AgentTask:
+def task_in(
+    repo: Path, *, tools: tuple[Tool, ...] = (), model: ModelChoice = Claude.HAIKU
+) -> AgentTask:
     """One ordinary task in `repo`, with restrictions so the deny rules are on the wire too."""
     return AgentTask(
         instructions="Read README.md and say in one sentence what this project does.",
         workspace=repo,
-        model=Claude.HAIKU,
+        model=model,
         restrictions=frozenset({Restriction.NO_SHELL, Restriction.NO_NETWORK}),
         tools=tools,
     )
@@ -1969,3 +1976,133 @@ def test_a_model_this_adapter_does_not_serve_is_refused_by_both_query_members() 
         asyncio.run(ClaudeCodeRunner().capabilities(OpenAI.SOL))
     with pytest.raises(InputError):
         asyncio.run(ClaudeCodeRunner().check_ready(OpenAI.SOL))
+
+# --- Effort: what a chosen level reaches the CLI as, and what a bare model leaves alone ----------
+
+async def opened(task: AgentTask, monkeypatch: pytest.MonkeyPatch) -> ClaudeAgentOptions:
+    """Run `task` offline to an ordinary finish and hand back the options its session was opened
+    with - the object `run` built, not a rebuild of it in this file."""
+    handed: list[ClaudeAgentOptions] = []
+
+    async def play(cli: Scripted) -> None:
+        await cli.say(init(task.workspace))
+        await cli.say(ends(result="done", terminal_reason="completed"))
+
+    transport = Scripted(play)
+
+    def scripted(*, prompt: str, options: ClaudeAgentOptions) -> AsyncIterator[Any]:
+        from claude_agent_sdk import query
+
+        handed.append(options)
+        return query(prompt=prompt, options=options, transport=transport)
+
+    monkeypatch.setattr(_session, "query", scripted)
+    outcome = await ClaudeCodeRunner().run(task)
+    assert outcome == AgentOutcome(stop_reason=StopReason.COMPLETED, text="done")
+    assert len(handed) == 1, f"one run opened {len(handed)} sessions"
+    return handed[0]
+
+def command_line(options: ClaudeAgentOptions) -> list[str]:
+    """The argv the vendor SDK would start its CLI with for `options`, composed and not started.
+
+    `_build_command` is the SDK's own composition, so an option that type-checks and is then dropped
+    or spelled differently on the way to the process shows up here and nowhere else offline. It
+    refuses to compose without a resolved binary, and resolving one is what `connect` would do, so
+    a path that is never executed stands in for it.
+    """
+    unstarted = SubprocessCLITransport("", replace(options, cli_path="/nonexistent/claude"))
+    return unstarted._build_command()
+
+def _flag_values(argv: list[str], flag: str) -> list[str]:
+    """Every value `flag` is given in `argv`, in the two-token form and the `--flag=value` one."""
+    spaced = [argv[at + 1] for at, token in enumerate(argv[:-1]) if token == flag]
+    joined = [token.partition("=")[2] for token in argv if token.startswith(f"{flag}=")]
+    return spaced + joined
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("effort", list(ClaudeEffort))
+async def test_a_model_chosen_at_an_effort_opens_its_session_at_that_level(
+    effort: ClaudeEffort, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The level reaches the SDK as `effort`, and the SDK's command line as one `--effort`.
+
+    The model is asserted beside it because a table keyed by the bare member and looked up with
+    the whole choice type-checks and misses: `model_name` would refuse the run outright, so a
+    session opened on `opus` is the evidence that the lookup was made with `model_of`.
+    """
+    chosen = Claude.OPUS(effort=effort)
+    options = await opened(task_in(workspace(tmp_path), model=chosen), monkeypatch)
+
+    assert options.model == "opus", f"the session was opened on {options.model!r}"
+    assert options.effort == effort.value, (
+        f"the session was opened at effort {options.effort!r} for a role that chose {effort!r}. "
+        f"A level that does not arrive runs the model at the CLI's default under a fingerprint "
+        f"that records the level the workflow asked for"
+    )
+    assert _flag_values(command_line(options), "--effort") == [effort.value]
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model", list(Claude))
+async def test_a_bare_model_opens_its_session_with_no_effort_on_the_command_line(
+    model: Claude, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A member written without an effort runs exactly as it did before efforts existed.
+
+    `None` is the SDK's "append nothing", and the command line is read as well as the option,
+    because what leaves the CLI its own default is the absence of the flag rather than the value
+    of a Python attribute.
+    """
+    options = await opened(task_in(workspace(tmp_path), model=model), monkeypatch)
+
+    assert options.effort is None, f"a bare {model!r} was opened at effort {options.effort!r}"
+    assert _flag_values(command_line(options), "--effort") == []
+
+@pytest.mark.asyncio
+async def test_the_readiness_probe_sends_no_effort_to_the_cli_it_asks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`check_ready` is asked about the bare model and spends a turn, so it chooses no level.
+
+    The port hands it a `ModelId` and never a choice, which is what keeps one paid probe per model
+    rather than one per level an author wrote; the probe's own session is read back to show the
+    level did not come in some other way.
+    """
+    handed: list[ClaudeAgentOptions] = []
+
+    async def play(cli: Scripted) -> None:
+        await cli.say(ends(result="ready", terminal_reason="completed"))
+
+    def scripted(*, prompt: str, options: ClaudeAgentOptions) -> AsyncIterator[Any]:
+        from claude_agent_sdk import query
+
+        handed.append(options)
+        return query(prompt=prompt, options=options, transport=Scripted(play))
+
+    monkeypatch.setattr(runner_module, "query", scripted)
+    await ClaudeCodeRunner().check_ready(Claude.OPUS)
+
+    assert len(handed) == 1, f"the probe opened {len(handed)} sessions"
+    assert handed[0].effort is None, f"the probe was opened at effort {handed[0].effort!r}"
+    assert _flag_values(command_line(handed[0]), "--effort") == []
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model", list(OpenAI))
+async def test_a_model_of_the_other_provider_at_an_effort_is_refused_before_anything_starts(
+    model: OpenAI, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An effort does not make an OpenAI model one this adapter serves, and nothing is opened."""
+    started = False
+
+    def never(**kwargs: object) -> AsyncIterator[Any]:
+        nonlocal started
+        started = True
+        raise AssertionError("a session was opened for a model this adapter does not serve")
+
+    monkeypatch.setattr(_session, "query", never)
+
+    with pytest.raises(InputError) as refused:
+        await ClaudeCodeRunner().run(
+            task_in(workspace(tmp_path), model=model(effort=OpenAIEffort.HIGH))
+        )
+    assert str(model) in str(refused.value)
+    assert not started, "the refusal came too late to be a refusal"

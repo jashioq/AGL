@@ -3,22 +3,32 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Final
+from typing import Any, Final, assert_never
 from claude_agent_sdk import (
     ClaudeSDKError,
     CLIConnectionError,
     CLIJSONDecodeError,
     CLINotFoundError,
+    EffortLevel,
     ProcessError,
     ResultError,
     ToolUseBlock,
 )
-from agl.ports.agent import Claude, ModelId, Restriction
+from agl.ports.agent import (
+    ChosenClaude,
+    ChosenOpenAI,
+    Claude,
+    ClaudeEffort,
+    ModelChoice,
+    ModelId,
+    Restriction,
+)
 from agl.ports.errors import AglError, InputError, UpstreamUnavailable, UpstreamUnexpected
 
 __all__ = [
     "Restraint",
     "activity",
+    "effort_level",
     "model_name",
     "restraint",
     "translated",
@@ -136,6 +146,19 @@ _MODEL_NAMES: Final[Mapping[ModelId, str]] = MappingProxyType(
     }
 )
 
+# `ClaudeAgentOptions.effort` in SDK 0.2.152 is typed as the `EffortLevel` literal and reaches the
+# CLI as `--effort <level>` unvalidated; the CLI 2.1.259 it bundles lowers or drops a level the
+# model does not offer rather than refusing it.
+_EFFORT_LEVELS: Final[Mapping[ClaudeEffort, EffortLevel]] = MappingProxyType(
+    {
+        ClaudeEffort.LOW: "low",
+        ClaudeEffort.MEDIUM: "medium",
+        ClaudeEffort.HIGH: "high",
+        ClaudeEffort.XHIGH: "xhigh",
+        ClaudeEffort.MAX: "max",
+    }
+)
+
 @dataclass(frozen=True, slots=True)
 class Restraint:
     denied_tools: tuple[str, ...]
@@ -159,14 +182,19 @@ def restraint(restrictions: frozenset[Restriction]) -> Restraint:
 def model_name(model: ModelId) -> str:
     name = _MODEL_NAMES.get(model)
     if name is None:
-        served = sorted(str(member) for member in _MODEL_NAMES)
-        raise InputError(
-            f"the Claude Code adapter cannot run {str(model)!r}: it serves {served} and nothing "
-            f"else. It will not stand in another model for this one - the model was named beside "
-            f"the prompt because the choice was semantic, and substituting answers a different "
-            f"question than the one the workflow asked"
-        )
+        raise _unserved(model)
     return name
+
+def effort_level(choice: ModelChoice) -> EffortLevel | None:
+    match choice:
+        case ChosenClaude():
+            return _EFFORT_LEVELS[choice.effort]
+        case ChosenOpenAI():
+            raise _unserved(choice.model)
+        case ModelId():
+            return None
+        case _:
+            assert_never(choice)
 
 def translated(error: ClaudeSDKError) -> AglError:
     if isinstance(error, CLINotFoundError):
@@ -239,3 +267,12 @@ def _shortened(text: str) -> str:
 def _said(error: ClaudeSDKError) -> str:
     said = str(error).strip()
     return said or f"{type(error).__name__}, with nothing said about why"
+
+def _unserved(model: ModelId) -> InputError:
+    served = sorted(str(member) for member in _MODEL_NAMES)
+    return InputError(
+        f"the Claude Code adapter cannot run {str(model)!r}: it serves {served} and nothing "
+        f"else. It will not stand in another model for this one - the model was named beside "
+        f"the prompt because the choice was semantic, and substituting answers a different "
+        f"question than the one the workflow asked"
+    )

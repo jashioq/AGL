@@ -4,7 +4,7 @@
 
 **So this file is deliberately not a fixture.** Everything above the first test is what a workflow
 author writes and nothing else: a params dataclass of `arg()` fields, a payload dataclass, a
-reporting tool, three roles, two screens, and four `@workflow` functions. Every import of AGL is one
+reporting tool, five roles, two screens, and five `@workflow` functions. Every import of AGL is one
 line - `agl.sdk` for the workflow and `agl.testing` for the test - and nothing here reaches into
 `agl.ports`, `agl.sdk._engine`, `agl.config` or `agl.adapters` except in the two places that are
 about the escape hatch and say so, plus `tree_layout.run_branch` in the last section, which has to
@@ -88,7 +88,9 @@ from agl.sdk import (
     ActivityReporter,
     Choice,
     Claude,
+    ClaudeEffort,
     OpenAI,
+    OpenAIEffort,
     Restriction,
     Role,
     Row,
@@ -196,6 +198,21 @@ def decide(*, ask: Tool | None = None) -> Role[Findings]:
         tools=[REPORT] if ask is None else [REPORT, ask],
     )
 
+@role(model=Claude.OPUS(effort=ClaudeEffort.XHIGH))
+def deliberate() -> Role:
+    """`implement` at a level of reasoning its author chose, not at the harness's default."""
+    return Role(name="deliberate", instructions="implement what the request asks for, carefully")
+
+@role(model=OpenAI.LUNA(effort=OpenAIEffort.ULTRA), accepts=(Request,))
+def scrutinise() -> Role[Findings]:
+    """`review` at a level its model does not offer, which the harness lowers and AGL does not."""
+    return Role(
+        name="scrutinise",
+        instructions="review the worktree against {{Request}} and report what you found",
+        restrictions={Restriction.NO_VCS_WRITES},
+        tools=[REPORT],
+    )
+
 @dataclass(frozen=True, slots=True)
 class Asked:
     """The payload of the asking tool `asking` supplies. AGL declares none, so a workflow does.
@@ -283,6 +300,12 @@ async def demo(run: Run[DemoParams]) -> None:
     findings = await run.step(review(), Request(run.params.request))
     if findings.high:
         await run.step(implement(), Note(findings.summary), commit="address the review")
+
+@workflow
+async def considered(run: Run[DemoParams]) -> None:
+    """`demo`'s first two steps with an effort chosen on each role, one per provider."""
+    await run.step(deliberate(), commit=f"implement {run.params.request}")
+    await run.step(scrutinise(), Request(run.params.request))
 
 @workflow
 async def asking(run: Run[DemoParams]) -> None:
@@ -597,6 +620,35 @@ async def test_a_whole_workflow_runs_with_no_agent_written_at_all(tmp_path: Path
     assert _steps(harness.recorded) == ["implement", "review"]
     reported = harness.recorded[-1].value
     assert isinstance(reported, dict) and set(reported) == {"summary", "high"}
+
+@pytest.mark.asyncio
+async def test_roles_with_a_chosen_effort_run_on_both_providers_and_their_agents_see_it(
+    tmp_path: Path,
+) -> None:
+    """A role written `Claude.OPUS(effort=...)` or `OpenAI.LUNA(effort=...)` runs on fakes.
+
+    Both providers' fakes are behind the harness, so each step here crosses routing, preflight and
+    its own provider's fake with the level attached. What the author's agent was handed is the
+    evidence the level survived the crossing: a fake that ran the bare model would record the same
+    two steps and hand over a task on `claude:opus`.
+    """
+    handed: list[AgentTask] = []
+
+    def agent(task: AgentTask) -> Reply:
+        handed.append(task)
+        if any(tool.name == REPORT.name for tool in task.tools):
+            return Reply(calls=[Call(REPORT.name, {"summary": SUMMARY, "high": 0})], says="done")
+        return Reply(says="implemented it")
+
+    harness = testing.harness(tmp_path, agent=agent, files={"src/a.py": b"pass\n"})
+
+    await harness.run(considered, "-r", "add oauth")
+
+    assert _steps(harness.recorded) == ["deliberate", "scrutinise"]
+    assert [task.model for task in handed] == [
+        Claude.OPUS(effort=ClaudeEffort.XHIGH),
+        OpenAI.LUNA(effort=OpenAIEffort.ULTRA),
+    ]
 
 @pytest.mark.asyncio
 async def test_the_run_is_recorded_where_agl_would_have_recorded_it(tmp_path: Path) -> None:

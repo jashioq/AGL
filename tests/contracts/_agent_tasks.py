@@ -50,7 +50,7 @@ from agl.ports.agent import (
     AgentOutcome,
     AgentRunner,
     AgentTask,
-    ModelId,
+    ModelChoice,
     Tool,
     ToolResult,
 )
@@ -99,7 +99,7 @@ def workspace(root: Path) -> Path:
     return repo.resolve()
 
 def task(
-    where: Path, model: ModelId, instructions: str, *, tools: Sequence[Tool] = ()
+    where: Path, model: ModelChoice, instructions: str, *, tools: Sequence[Tool] = ()
 ) -> AgentTask:
     """One task, with the fields this suite has an opinion about and defaults everywhere else."""
     return AgentTask(

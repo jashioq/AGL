@@ -12,6 +12,7 @@ from agl.ports.agent import (
     StopReason,
     Tool,
     ToolResult,
+    model_of,
 )
 from agl.ports.errors import InputError
 from agl.ports.run import JsonValue
@@ -125,7 +126,7 @@ class FakeAgentRunner(AgentRunner):
         *,
         on_activity: ActivityReporter | None = None,
     ) -> AgentOutcome:
-        _check_model(task.model)
+        _check_model(model_of(task.model))
         conversation = Conversation(task, on_activity=on_activity)
         outcome = await self._script(conversation)
         if conversation.failure is not None:

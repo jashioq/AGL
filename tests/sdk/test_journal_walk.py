@@ -92,7 +92,7 @@ from types import MappingProxyType
 from typing import Final
 import pytest
 from agl.config import container
-from agl.ports.agent import Claude, Restriction, Tool, ToolResult
+from agl.ports.agent import Claude, ClaudeEffort, ModelChoice, Restriction, Tool, ToolResult
 from agl.ports.errors import InputError, InternalError, exit_code_for
 from agl.ports.home_layout import RunScope
 from agl.ports.ids import Namespace, ProjectName, RunLabel, StepName
@@ -182,6 +182,7 @@ async def _step(
     *,
     instructions: str = INSTRUCTIONS,
     inputs: Mapping[str, object] = INPUTS,
+    model: ModelChoice = Claude.SONNET,
     commit: str | None = None,
 ) -> JsonValue:
     """One `Journal.step`, with the role's constituents at a baseline and any of them overridable.
@@ -197,7 +198,7 @@ async def _step(
     return await journal.step(
         name,
         instructions=instructions,
-        model=Claude.SONNET,
+        model=model,
         restrictions=RESTRICTIONS,
         tools=(TOOL,),
         inputs=inputs,
@@ -317,6 +318,45 @@ async def test_a_miss_runs_the_worker_writes_one_entry_and_a_second_walk_hits(
 
     assert second.runs == 0, "the entry was on the ledger and the agent was paid for again anyway"
     assert replayed == {"tickets": ["T-01"]}
+
+@pytest.mark.asyncio
+async def test_a_step_recorded_at_one_effort_runs_again_at_another_effort_or_none(
+    tmp_path: Path,
+) -> None:
+    """The effort survives from the role to the address a walk looks up, measured as runs.
+
+    Three walks after the first, each a resume with a fresh counter over the same ledger: a second
+    level and the bare member are both misses and pay for the step, and the first level again is a
+    hit. `test_journal.py` holds the same claim as digests; this is what it costs when it breaks.
+    """
+    harness, workspace, base = await _opened(tmp_path)
+    recorded = _Worker("at high")
+    await _step(
+        _journal(harness, workspace, base),
+        REVIEW,
+        recorded,
+        model=Claude.OPUS(effort=ClaudeEffort.HIGH),
+    )
+
+    lower = _Worker("at low")
+    bare = _Worker("at the default")
+    again = _Worker("this must never be reached")
+    walked = [
+        await _step(
+            _journal(harness, workspace, base),
+            REVIEW,
+            worker,
+            model=model,
+        )
+        for worker, model in (
+            (lower, Claude.OPUS(effort=ClaudeEffort.LOW)),
+            (bare, Claude.OPUS),
+            (again, Claude.OPUS(effort=ClaudeEffort.HIGH)),
+        )
+    ]
+
+    assert (recorded.runs, lower.runs, bare.runs, again.runs) == (1, 1, 1, 0)
+    assert walked == ["at low", "at the default", "at high"]
 
 # --- the tally, at the one line that tells a hit from a miss -------------------------------------
 #

@@ -43,9 +43,19 @@ from dataclasses import astuple, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from types import MappingProxyType
-from typing import Final
+from typing import Final, cast
 import pytest
-from agl.ports.agent import Claude, ModelId, Restriction, Tool, ToolResult
+from agl.ports.agent import (
+    Claude,
+    ClaudeEffort,
+    ModelChoice,
+    ModelId,
+    OpenAI,
+    OpenAIEffort,
+    Restriction,
+    Tool,
+    ToolResult,
+)
 from agl.ports.errors import InputError, exit_code_for
 from agl.ports.home_layout import AglHome, RunScope, step_entry
 from agl.ports.ids import Namespace, ProjectName, RunLabel, StepName
@@ -99,7 +109,7 @@ def _tool(
 def _base(
     *,
     instructions: str = "implement the ticket and leave the tree building",
-    model: ModelId = Claude.SONNET,
+    model: ModelChoice = Claude.SONNET,
     restrictions: AbstractSet[Restriction] = _RESTRICTIONS,
     tools: Sequence[Tool] | None = None,
     inputs: Mapping[str, object] = _INPUTS,
@@ -837,3 +847,94 @@ def test_the_same_role_inputs_and_head_are_the_same_base_twice() -> None:
     """The complement, and the half that replay actually depends on: nothing here is a nonce."""
     assert _base() == _base()
     assert len(_base()) == 64
+
+# --- The model term: its bytes are a stored format -----------------------------------------------
+
+def test_a_bare_model_member_reaches_the_hashed_document_as_its_value_text_alone() -> None:
+    """The model term's bytes, pinned inside the whole document `base_of` hashes.
+
+    Every other test of the model term compares two digests, and a respelling that moved both sides
+    together - the member's name for its value, a repr, a wrapper object - would leave all of them
+    agreeing. This one is the text itself, the way every recorded entry was addressed: `Claude.OPUS`
+    contributes `"claude:opus"` and nothing else. A value that is not a bare member and collapses
+    onto these bytes replays a bare member's recorded result, which is a false hit and raises
+    nothing.
+    """
+    document = (
+        '{"head":"4a91c07f2b3e8d15c6a0b7f31d92e8054c6a0f13","inputs":{},"prompt":"review",'
+        '"role":{"instructions":"review","model":"claude:opus","restrictions":[],"tools":[]}}'
+    )
+    computed = base_of(
+        instructions="review",
+        model=Claude.OPUS,
+        restrictions=frozenset(),
+        tools=(),
+        inputs={},
+        prompt="review",
+        head=_HEAD,
+    )
+    assert computed == hashlib.sha256(document.encode("utf-8")).hexdigest()
+
+def test_a_composite_whose_str_is_the_model_id_is_not_that_members_fingerprint() -> None:
+    """The collision `str(model)` makes, and the reason the term goes through `_canonical`.
+
+    A frozen slotted dataclass carrying the model and something beside it - an effort, here - whose
+    `__str__` answers the model id is, through `str()`, the bare member's text exactly: the effort
+    never reaches the digest, and a step recorded at one effort replays at another. Walked as a
+    dataclass instead, it carries its qualified type name and every field. The first assertion is
+    the non-vacuous half: if the two `str()`s ever stop agreeing, the second holds for free.
+    """
+
+    @dataclass(frozen=True, slots=True)
+    class Announced:
+        model: ModelId
+        effort: str
+
+        def __str__(self) -> str:
+            return str(self.model)
+
+    announced = Announced(Claude.OPUS, "low")
+    assert str(announced) == str(Claude.OPUS), "the collision this test is about is not set up"
+    assert _base(model=cast(ModelId, announced)) != _base(model=Claude.OPUS)
+
+def test_a_chosen_effort_reaches_the_hashed_document_as_its_type_its_model_and_its_level() -> None:
+    """The model term's bytes for a model with its effort chosen, pinned the way the bare one is.
+
+    The composite is walked as the dataclass it is: its qualified type name, then its two fields
+    in key order, the model as its value text and the effort as its own. So the class's module path
+    and name are a stored format as much as the level's spelling is, and
+    `tests/ports/test_agent.py` pins both from the other side.
+    """
+    document = (
+        '{"head":"4a91c07f2b3e8d15c6a0b7f31d92e8054c6a0f13","inputs":{},"prompt":"review",'
+        '"role":{"instructions":"review","model":{"__agl_type__":"agl.ports.agent.ChosenClaude",'
+        '"effort":"xhigh","model":"claude:opus"},"restrictions":[],"tools":[]}}'
+    )
+    computed = base_of(
+        instructions="review",
+        model=Claude.OPUS(effort=ClaudeEffort.XHIGH),
+        restrictions=frozenset(),
+        tools=(),
+        inputs={},
+        prompt="review",
+        head=_HEAD,
+    )
+    assert computed == hashlib.sha256(document.encode("utf-8")).hexdigest()
+
+def test_two_efforts_on_one_model_are_two_fingerprints_and_neither_is_the_bare_members() -> None:
+    """The effort is a term: a step recorded at one level does not replay at another.
+
+    Nor at no level at all - a bare member means the tool's default effort, which is a different
+    question from any level named - and nor across providers where two levels share a spelling,
+    which the type tag keeps apart even though `"max"` is the text of both.
+    """
+    bases = {
+        "bare": _base(model=Claude.OPUS),
+        "low": _base(model=Claude.OPUS(effort=ClaudeEffort.LOW)),
+        "xhigh": _base(model=Claude.OPUS(effort=ClaudeEffort.XHIGH)),
+        "another model at xhigh": _base(model=Claude.SONNET(effort=ClaudeEffort.XHIGH)),
+        "claude at max": _base(model=Claude.OPUS(effort=ClaudeEffort.MAX)),
+        "openai at max": _base(model=OpenAI.SOL(effort=OpenAIEffort.MAX)),
+    }
+    assert len(set(bases.values())) == len(bases), "two different choices share one fingerprint"
+    assert _base(model=Claude.OPUS(effort=ClaudeEffort.LOW)) == bases["low"]

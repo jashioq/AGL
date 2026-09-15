@@ -69,8 +69,10 @@ from agl.ports.agent import (
     AgentRunner,
     AgentTask,
     Claude,
+    ClaudeEffort,
     ModelId,
     OpenAI,
+    OpenAIEffort,
     Restriction,
     StopReason,
     Tool,
@@ -578,6 +580,55 @@ async def test_both_runners_refuse_exactly_the_same_models_with_the_same_words(
                 f"a model both runners refuse to answer questions about must also be one both "
                 f"refuse to run, and both must refuse {str(model)!r} before anything is attempted "
                 f"- or preflight is all that stands between a workflow and a dead step"
+            )
+
+@pytest.mark.asyncio
+async def test_a_task_on_a_model_chosen_at_an_effort_runs_and_its_script_sees_the_choice(
+    tmp_path: Path,
+) -> None:
+    """A served model called with an effort is one this fake runs, and its script sees the level.
+
+    The fake sends nothing anywhere, so there is no level for it to translate; what it owes is to
+    run the task rather than refuse it, and to hand a script the task as the workflow built it, so a
+    test that branches on the effort a role chose has the effort to branch on.
+    """
+    handed: list[AgentTask] = []
+
+    async def watching(conversation: Conversation) -> AgentOutcome:
+        handed.append(conversation.task)
+        return await unscripted(conversation)
+
+    chosen = OpenAI.LUNA(effort=OpenAIEffort.ULTRA)
+    work = task(workspace(tmp_path), chosen, "Say anything at all.")
+    outcome = await FakeAgentRunner(watching).run(work)
+
+    assert outcome.stop_reason is StopReason.COMPLETED
+    assert [seen.model for seen in handed] == [chosen], (
+        f"the script was handed {[seen.model for seen in handed]} for a task on {chosen!r}"
+    )
+
+@pytest.mark.asyncio
+async def test_both_runners_refuse_a_model_of_the_other_provider_whatever_its_effort(
+    tmp_path: Path,
+) -> None:
+    """An effort does not widen what either runner serves, and both refuse at `run` alike.
+
+    `run` is the only member a choice can reach - `capabilities` and `check_ready` take the bare
+    model - so it is the member asked, of the real adapter too, where the refusal lands before
+    anything is started. The answers are compared by class and by wording, as the rest of this
+    file's parity is.
+    """
+    fake, real = FakeAgentRunner(), OpenAiRunner()
+    for model in Claude:
+        for effort in ClaudeEffort:
+            work = task(workspace(tmp_path), model(effort=effort), "Say anything at all.")
+            refused = await _refusal(fake.run(work))
+            assert refused == await _refusal(real.run(work)), (
+                f"the two runners refuse {model!r} at {effort!r} differently: the fake said "
+                f"{refused!r}"
+            )
+            assert refused[0] == "InputError", (
+                f"{model!r} at {effort!r} was not refused as a model this runner does not serve"
             )
 
 @pytest.mark.asyncio

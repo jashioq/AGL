@@ -11,7 +11,13 @@ from claude_agent_sdk import (
 from claude_agent_sdk.types import SystemPromptPreset
 from agl.adapters.claude_code._session import Stderr, outcome_of
 from agl.adapters.claude_code._tools import ASKING_MECHANISMS_DENIED, Caller, servers
-from agl.adapters.claude_code.translate import Restraint, model_name, restraint, unready
+from agl.adapters.claude_code.translate import (
+    Restraint,
+    effort_level,
+    model_name,
+    restraint,
+    unready,
+)
 from agl.ports.agent import (
     ActivityReporter,
     AgentOutcome,
@@ -19,6 +25,7 @@ from agl.ports.agent import (
     AgentTask,
     Capability,
     ModelId,
+    model_of,
 )
 from agl.ports.errors import InputError, InternalError, UpstreamUnavailable
 
@@ -109,7 +116,8 @@ def _options(
 ) -> ClaudeAgentOptions:
     return ClaudeAgentOptions(
         cwd=task.workspace,
-        model=_inert(model_name(task.model), "model"),
+        model=_inert(model_name(model_of(task.model)), "model"),
+        effort=effort_level(task.model),
         system_prompt=_PRESET,
         setting_sources=[],
         strict_mcp_config=True,

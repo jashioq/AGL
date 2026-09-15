@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 from types import MappingProxyType
+from typing import assert_never
 from agl.ports.errors import InputError, InternalError
 from agl.ports.run import JsonValue
 
@@ -13,15 +14,21 @@ __all__ = [
     "AgentRunner",
     "AgentTask",
     "Capability",
+    "ChosenClaude",
+    "ChosenOpenAI",
     "Claude",
+    "ClaudeEffort",
+    "ModelChoice",
     "ModelId",
     "OpenAI",
+    "OpenAIEffort",
     "Provider",
     "Restriction",
     "StopReason",
     "Tool",
     "ToolResult",
     "check_tool_declaration",
+    "model_of",
 ]
 
 class Provider(StrEnum):
@@ -50,6 +57,30 @@ class ModelId(StrEnum):
                 f"nobody types one, so a malformed id was written here, not passed in"
             ) from error
 
+class ClaudeEffort(StrEnum):
+    """How long a Claude model reasons before it answers: the levels its vendor's CLI accepts."""
+
+    # The choices `claude --help` lists for `--effort` in Claude CLI 2.1.259, and the `EffortLevel`
+    # literal in `claude_agent_sdk/types.py` 0.2.152.
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    XHIGH = "xhigh"
+    MAX = "max"
+
+class OpenAIEffort(StrEnum):
+    """How long an OpenAI model reasons before it answers: the levels its vendor's CLI accepts."""
+
+    # The union of the reasoning levels the vendor CLI 0.152.0's model listing reports for the
+    # three models `OpenAI` names: `gpt-5.6-luna` lists every one of these but `ultra`, and none of
+    # the three lists `minimal` or `none`.
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    XHIGH = "xhigh"
+    MAX = "max"
+    ULTRA = "ultra"
+
 class Claude(ModelId):
     """Every model the Claude provider serves: nothing is substituted for one it cannot run."""
 
@@ -57,12 +88,82 @@ class Claude(ModelId):
     SONNET = "claude:sonnet"
     HAIKU = "claude:haiku"
 
+    def __call__(self, *, effort: ClaudeEffort) -> ChosenClaude:
+        """Choose how long this model reasons, as a value `@role(model=...)` takes in its place.
+
+        :param effort: sent unchecked; a level this model lacks is clamped by the tool, not refused
+        :return: this model at that effort, and both are fingerprinted into every step it runs
+        """
+        return ChosenClaude(self, effort)
+
 class OpenAI(ModelId):
     """Every model the OpenAI provider serves: nothing is substituted for one it cannot run."""
 
     SOL = "openai:sol"
     TERRA = "openai:terra"
     LUNA = "openai:luna"
+
+    def __call__(self, *, effort: OpenAIEffort) -> ChosenOpenAI:
+        """Choose how long this model reasons, as a value `@role(model=...)` takes in its place.
+
+        :param effort: sent unchecked; a level this model lacks is clamped by the tool, not refused
+        :return: this model at that effort, and both are fingerprinted into every step it runs
+        """
+        return ChosenOpenAI(self, effort)
+
+# Not `str` subclasses: `str()` of one would be its bare member's text, and a step recorded at one
+# effort would replay at another. `tests/sdk/test_journal.py` measures that collision in
+# `test_a_composite_whose_str_is_the_model_id_is_not_that_members_fingerprint`.
+@dataclass(frozen=True, slots=True)
+class ChosenClaude:
+    """A Claude model with its effort chosen: the model, and the level it reasons at."""
+
+    model: Claude
+
+    effort: ClaudeEffort
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.model, Claude) or not isinstance(self.effort, ClaudeEffort):
+            raise InputError(
+                _not_a_choice(self.model, self.effort, "Claude.OPUS(effort=ClaudeEffort.HIGH)")
+            )
+
+@dataclass(frozen=True, slots=True)
+class ChosenOpenAI:
+    """An OpenAI model with its effort chosen: the model, and the level it reasons at."""
+
+    model: OpenAI
+
+    effort: OpenAIEffort
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.model, OpenAI) or not isinstance(self.effort, OpenAIEffort):
+            raise InputError(
+                _not_a_choice(self.model, self.effort, "OpenAI.SOL(effort=OpenAIEffort.HIGH)")
+            )
+
+type ModelChoice = ModelId | ChosenClaude | ChosenOpenAI
+
+def model_of(choice: ModelChoice) -> ModelId:
+    """The bare model a choice names, which is what readiness, capabilities and routing ask about.
+
+    :param choice: a bare member, or one called with an effort; the effort is not carried over
+    :return: the member itself, which every table keyed by model is looked up with
+    """
+    match choice:
+        case ChosenClaude() | ChosenOpenAI():
+            return choice.model
+        case ModelId():
+            return choice
+        case _:
+            assert_never(choice)
+
+def _not_a_choice(model: object, effort: object, example: str) -> str:
+    return (
+        f"{model!r} at effort {effort!r} is not a model with its effort chosen: write a member "
+        f"called with its own provider's effort, as in `{example}`. A string is refused even where "
+        f"it spells a level, and so is another provider's effort, whose levels are that provider's"
+    )
 
 class Restriction(StrEnum):
     """What an agent may not do: a backend enforces each its own way, and tells the model so."""
@@ -126,7 +227,7 @@ class AgentTask:
 
     workspace: Path
 
-    model: ModelId
+    model: ModelChoice
 
     restrictions: frozenset[Restriction]
 

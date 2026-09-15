@@ -97,8 +97,11 @@ from agl.ports.agent import (
     AgentTask,
     Capability,
     Claude,
+    ClaudeEffort,
+    ModelChoice,
     ModelId,
     OpenAI,
+    OpenAIEffort,
     Restriction,
     StopReason,
     Tool,
@@ -313,12 +316,14 @@ async def drive(stub: Stub, task: AgentTask, **kwargs: Any) -> Any:
     """Run `task` through the real adapter against the stub, and hand back what `run` returns."""
     return await OpenAiRunner(stub.path).run(task, **kwargs)
 
-def task_in(repo: Path, *, tools: tuple[Tool, ...] = (), **fields: Any) -> AgentTask:
+def task_in(
+    repo: Path, *, tools: tuple[Tool, ...] = (), model: ModelChoice = OpenAI.LUNA, **fields: Any
+) -> AgentTask:
     """One ordinary task in `repo`, with restrictions so the sandbox overrides are on the wire."""
     return AgentTask(
         instructions="Read README.md and say in one sentence what this project does.",
         workspace=repo,
-        model=OpenAI.LUNA,
+        model=model,
         restrictions=frozenset({Restriction.NO_NETWORK}),
         tools=tools,
         **fields,
@@ -532,6 +537,69 @@ async def test_the_mcp_server_is_injected_with_a_timeout_a_person_can_answer_ins
             f"asking tool waits on a person, and an approval gate that survives only while nobody "
             f"thinks for a minute is not a gate anybody should be relying on"
         )
+
+_EFFORT_KEY: Final = "model_reasoning_effort"
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("effort", list(OpenAIEffort))
+async def test_a_model_chosen_at_an_effort_carries_one_override_directly_after_the_model(
+    effort: OpenAIEffort, tmp_path: Path
+) -> None:
+    """The level travels as one `-c` pair, once, beside the `-m` it qualifies and before `-`.
+
+    `codex exec` has no effort flag of its own, so the override is the only route and a second one
+    would leave which of two levels wins to the harness's loader. The slug is asserted beside it
+    because a table keyed by the bare member and looked up with the whole choice type-checks and
+    misses: `model_slug` would refuse the run, so `gpt-5.6-luna` on the command line is the
+    evidence that the lookup was made with `model_of`.
+    """
+    stub = Stub(tmp_path, steps=[{"say": said("done")}, {"say": started()}])
+
+    await drive(stub, task_in(workspace(tmp_path), model=OpenAI.LUNA(effort=effort)))
+    argv = stub.argv()
+
+    model_at = argv.index("-m")
+    assert argv[model_at + 1] == "gpt-5.6-luna", "the model is the slug of the bare member"
+    assert argv[model_at + 2 : model_at + 4] == ["-c", f'{_EFFORT_KEY}="{effort.value}"'], (
+        f"the override for {effort!r} is not directly after the model: {argv}"
+    )
+    assert len([token for token in argv if _EFFORT_KEY in token]) == 1, (
+        f"the command line carries the effort more than once: {argv}"
+    )
+    assert argv[-1] == "-", "the prompt still arrives on standard input, after every override"
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model", list(OpenAI))
+async def test_a_bare_model_carries_no_effort_override_and_leaves_the_catalog_default(
+    model: OpenAI, tmp_path: Path
+) -> None:
+    """A member written without an effort runs at the harness's own default, exactly as before.
+
+    The absence is asserted over every token rather than at a position, since what leaves the
+    default in place is that the key is nowhere on the command line - the MCP server's override is
+    what follows the model here, and it names no effort.
+    """
+    stub = Stub(tmp_path, steps=[{"say": said("done")}, {"say": started()}])
+
+    await drive(stub, task_in(workspace(tmp_path), model=model))
+    argv = stub.argv()
+
+    assert not [token for token in argv if _EFFORT_KEY in token], (
+        f"a bare {model!r} was sent an effort: {argv}"
+    )
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model", list(Claude))
+async def test_a_model_of_the_other_provider_at_an_effort_is_refused_before_anything_starts(
+    model: Claude, tmp_path: Path
+) -> None:
+    """An effort does not make a Claude model one this adapter serves, and no child is started."""
+    stub = Stub(tmp_path, steps=[{"say": started()}])
+
+    with pytest.raises(InputError) as refused:
+        await drive(stub, task_in(workspace(tmp_path), model=model(effort=ClaudeEffort.HIGH)))
+    assert str(model) in str(refused.value)
+    assert not stub.record.exists(), "the refusal came after the harness had been started"
 
 @pytest.mark.asyncio
 async def test_a_prompt_with_nothing_standing_around_it_is_the_instructions_verbatim(
