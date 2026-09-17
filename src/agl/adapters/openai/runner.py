@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Final
 from agl.adapters.openai._session import _halt, _signal, outcome_of
 from agl.adapters.openai._tools import Caller, Supply
+from agl.adapters.openai._version import probed
 from agl.adapters.openai.translate import (
     APPROVAL,
     Sandbox,
@@ -22,6 +23,7 @@ from agl.ports.agent import (
     AgentRunner,
     AgentTask,
     Capability,
+    Installation,
     ModelId,
     model_of,
 )
@@ -112,6 +114,10 @@ class OpenAiRunner(AgentRunner):
             status = await child.wait()
         if status != 0:
             raise unready(status, said.decode("utf-8", errors="replace").strip())
+
+    async def installation(self, model: ModelId) -> Installation:
+        model_slug(model)
+        return await probed(self._cli)
 
     async def run(
         self,

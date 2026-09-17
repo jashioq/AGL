@@ -7,7 +7,10 @@ Seven layers, one dependency rule, one composition root. For the gates, see `CLA
 **`ports/`** — The ABCs AGL is written against and the plain types they speak: `Store`,
 `Workspace`, `WorkspaceProvider`, `Integrator`, `History`, `Verifier`, `Syncer`, `Fetcher`,
 `Terminal`, `Clock`, `AgentRunner`, plus `RunSpec`, the `GetRequest` that reads `agl get`'s
-arguments into the `Fetch`es a `Fetcher` is handed, the `AglError` hierarchy with the one
+arguments into the `Fetch`es a `Fetcher` is handed, the `Installation` an `AgentRunner` describes
+its own tool with — carrying the `VersionRange` that adapter was exercised against, the `Standing`
+derived from the two and never stored, and one `ModelEfforts` per model the tool was willing to
+describe — the `AglError` hierarchy with the one
 exception-to-exit-code table in the codebase, and the id types in `ids.py`, which expose a
 casefold-then-NFC `collision_key` and do **not** compare through it —
 `RunLabel("T-01") != RunLabel("t-01")`, and a caller that must not collide asks for the key,
@@ -132,23 +135,29 @@ everything else it writes — every question, a declined or refused line, each r
 a note, on stderr, so what a script reads off stdout is what the command got. `update` splits as
 `get` does, an `updated` line standing where `get` has a `placed` one and `already up to date`
 among the notes, and so does `remove`: `removed <name>` on stdout names the entry that went, and
-its question, and a note naming what a delete that stopped part-way left, go to stderr. **Three
-lines in AGL are written where they are decided rather than handed back to be turned into output,
-and `api.py`'s `_warn` is the one place that module writes to a stream at all**:
+its question, and a note naming what a delete that stopped part-way left, go to stderr. **Four
+kinds of note in AGL are written where they are decided rather than handed back to be turned into
+output, and `api.py`'s `_warn` is the one place that module writes to a stream at all**:
 `_unchanged`, which says a sync was refused, that this workspace already had an environment, and
-that the run is carrying on against it; whatever `sdk/_engine/teardown.py` could not release at
-the end of a run; and, out of that same module, the branch a run that finished left its work on —
-`_warn` being what it is handed as `report` for both of its own. The rule about streams holds
-over all three unchanged — each is a note about a run and not a name a machine reads, and
+that the run is carrying on against it; `sdk/_engine/preflight.py`'s lines about the tool this
+machine will run the agents on, which "Invariants where a mistake is silent" describes; whatever
+`sdk/_engine/teardown.py` could not release at the end of a run; and, out of that same module, the
+branch a run that finished left its work on — `_warn` being what both of those modules are handed
+as `report`. The rule about streams holds
+over all four unchanged — each is a note about a run and not a name a machine reads, and
 `agl/<label>` in particular is `run_branch` of the label the operator typed, so a script that
 started the run knew it before the run did and nothing here is a name one learns. What none of the
-three obeys is the turning, and for two different reasons. What `run` hands back it
+four obeys is the turning, and for three different reasons. What `run` hands back it
 hands back after the walk, so a warning about the environment that run is about to import from
-would reach the terminal hours after the import it was about; and a run that ends on a `Stop` hands
+would reach the terminal hours after the import it was about; a run that ends on a `Stop` hands
 nothing back at all, the workflow's own exception being what leaves `api.run`, so a return value is
 a channel the teardown's notes structurally cannot use — which is what settles it for the branch
 as well, an operator who ended a run on purpose being exactly the one about to go and look at what
-it did. Every other answer in `api.py` is a value —
+it did; and `check` may refuse the run it is warning about, so notes held back to be returned would
+be read by nobody in the one case where the version underneath a refusal is most worth reading —
+`api.py`'s `_warn` carries all three reasons beside itself, and
+`tests/sdk/test_preflight.py::test_a_version_warning_is_out_before_a_readiness_probe_that_refuses_the_run`
+is the third. Every other answer in `api.py` is a value —
 `tests/test_api.py::test_a_refused_install_over_an_environment_that_already_stood_warns_and_runs_anyway`
 pins the stream and the case, and a sync that succeeded is asserted to add nothing to either
 stream — and
@@ -1103,6 +1112,45 @@ is the collision, and
 `tests/ports/test_agent.py::test_a_chosen_effort_is_recorded_under_its_class_path_and_two_field_names`
 holds the classes' side.
 
+**Every session the Claude adapter starts clears `CLAUDE_CODE_EFFORT_LEVEL` out of the environment
+it inherits, because that variable beats the flag AGL sends.** The level a role chose is a term of
+`base_of`, so it is fingerprinted into every step that role runs — and in the CLI
+`adapters/claude_code/_version.py`'s `TESTED` names, a shell that exports the variable decides the
+level instead, with `--effort` sent, accepted and overridden. Nothing announces it: the run journals
+the level the role asked for while the level the shell named is the one that ran, a resume keys on a
+level that never executed, and no message AGL receives carries the second for anything downstream to
+compare it with. So `adapters/claude_code/runner.py` passes `_NO_INHERITED_EFFORT` as `env=` on both
+the options a step runs under and the options `check_ready` builds. **The empty string is the fix
+and a removal is not available**: the SDK composes the child's environment by merging `options.env`
+into the inherited one, between two keys of its own, so `options.env` can set a key and can never
+take one away. Of the values that survive that merge only `""` is transparent — measured through the
+bundled binary's own `get_settings` control request, which reports the resolver's own output: `""`
+and an absent variable produce identical settings, where `unset` and `auto` suppress the effort
+parameter altogether, turning a bare model's *sent* default into no parameter at all. The variable
+is read case-insensitively and an unparseable value is ignored, so neither is a shape the guard
+could have been narrowed to. **`check_ready` is the half that looks unnecessary and is not.** Its
+options carry no `effort=` deliberately, which
+`tests/adapters/test_claude_code_runner.py::test_the_readiness_probe_sends_no_effort_to_the_cli_it_asks`
+holds and "Readiness and capabilities belong to the model" argues — and that is exactly what makes
+it the call where the variable alone would have decided, the probe running at the operator's level
+with nothing in AGL naming one.
+`tests/adapters/test_claude_code_runner.py::test_a_run_opens_its_session_with_the_operators_own_effort_level_cleared`
+and `::test_the_readiness_probe_clears_that_level_too_although_its_options_name_no_flag` hold the
+two call sites, and
+`::test_every_session_this_package_starts_clears_the_effort_level_an_environment_carries`
+holds the package against a third being added without it — discriminating on `cwd=`, because a
+session runs somewhere and says so, where the options object `_version.py` builds only so that the
+SDK's resolver can read `cli_path` off it starts nothing and names no directory.
+
+**What makes that clearing load-bearing rather than tidy is that AGL cannot read the effort back.**
+The `init` system message carries no effort on the SDK's stdio path and `ResultMessage` has no such
+field — the bundled binary's own control-protocol schema publishes that on a different kind of init
+frame, read out of that binary rather than seen in a session — and the one machine-readable source,
+the `get_settings` control request, is not something the Python SDK wraps. So after the clearing,
+"the level AGL asked for" and "the level that ran" agree because nothing can move them apart, and
+never because AGL observed the second. The guard is therefore asserted at the options the adapter
+builds and could not be asserted at an outcome, there being no outcome that carries the answer.
+
 **Nothing a substitution writes is ever scanned again.** `composed` is a single `re.sub` pass, and
 `re.sub` resumes at the end of each match in the string it was handed, so a value whose own text
 spells `{{Decisions}}` is written out and never looked at. Replace that pass with the obvious
@@ -1329,26 +1377,76 @@ step, because it costs a turn to re-learn a state of the world preflight already
 `tests/sdk/test_preflight.py` asserts the over-approximation as behaviour and measures the two
 halves against each other rather than separately.
 
-**`check` asks more than the backends now, and the order it asks in is chosen on what a question
+**`check` asks more than the backends, and the order it asks in is chosen on what a question
 costs.** First the repository, through `History.check_committer_identity`: `commit_all` invents no
 identity, so where git can derive none it refuses inside `Journal._ending` — after the agent has
 finished and before the entry is written, which is the one preflight failure a resume cannot
-repair, there being no entry for it to hit. Then the backends, cheapest probe leading, ranked by
-`Provider` inside `preflight.py` rather than by a third member on `AgentRunner`: the OpenAI
+repair, there being no entry for it to hit. Then the version notes below, which cost a local
+subprocess or two per provider and refuse nothing. Then the backends, cheapest probe leading, ranked by
+`Provider` inside `preflight.py` rather than by anything `AgentRunner` reports: the OpenAI
 adapter's `check_ready` spawns `codex login status` and the Claude adapter's spends a turn, so a
 machine logged into one and out of the other is refused without buying anything. `sorted` is stable,
 so binding order in the workflow's module namespace still decides between two models whose probes
 cost the same. Both refusals are `UpstreamUnavailable` — a state of the world the operator changes,
 after which the same run works — so both leave on exit 6.
 
+**A run says what it is about to drive before it drives it, and saying so is the whole of what the
+version notes do.** `AgentRunner.installation` is the port's fourth member, beside `capabilities`,
+`check_ready` and `run`, and it is the only one whose answer decides nothing: it never refuses, and
+nothing branches on what it said. It reports an
+`Installation` — the tool's version as the tool spelled it, unparsed, the `VersionRange` that
+adapter was exercised against, and whatever the tool would say about each model's effort levels.
+`Installation.standing` derives the verdict, and `preflight.py` writes a sentence for four of its
+five cases and nothing at all for `WITHIN`, so a machine on a tested tool reads no line. The notes
+go to stderr through `report` and touch the exit code nowhere; there is no cache, no suppression
+flag and no refusal, so the line stands on every run until the tool moves. **A probe that itself
+fails is a quieter warning and never an error**: a binary that could not be found, would not start,
+timed out, exited non-zero or answered in a spelling the adapter was not written for all arrive as
+`version=None`, which is `UNREPORTED` — a sentence saying AGL could not place this tool, and
+pointing at the readiness question the same `check` puts next, which is what refuses a backend that
+is genuinely not there. **The tool's own name travels inside the `Installation` as data**, because
+`scripts/check`'s Codex containment gate forbids every layer above `adapters/openai/` from spelling
+that binary, and the engine that builds the sentence is one of them.
+
+**One probe per provider, one effort note per distinct choice, and the two counts differ on
+purpose.** `_installations` asks once per `Provider` because an `installation` describes the tool a
+backend starts and not the model it was handed, so a second model on one provider would re-read one
+binary; `_chosen` de-duplicates on the whole `ModelChoice` where `_demanded` de-duplicates on the
+bare model, because two roles on one model at two levels are one readiness question and two
+questions about a level. An effort note fires only where the tool listed levels for that model and
+the role's own is not among them, and it names the listing in the tool's own order without claiming
+which level will run instead — what a tool substitutes for one it does not offer is nothing measured
+here. `tests/instruments/preflight/providers.py` is the namespace those two counts are measured
+over, three models across two providers being the smallest one where they differ, and
+`tests/sdk/test_preflight.py::test_the_installation_probe_is_asked_once_per_provider_and_not_once_per_role`,
+`::test_two_levels_one_model_lacks_are_two_warnings_where_readiness_is_one_probe` and
+`::test_a_version_warning_reaches_stderr_and_the_run_it_warns_about_still_finishes` hold the split,
+the counts and the stream. `tests/contracts/_agent_preflight.py`'s
+`test_the_installation_it_reports_is_one_a_version_warning_can_be_written_from` is what every
+implementation of the port owes, fakes included — both report a version inside their own tested
+range, which is what keeps a harness run silent.
+
+**Neither adapter's probe may touch what the operator's own tools keep.** The Claude probe asks the
+SDK's own `SubprocessCLITransport._find_cli()` for the binary rather than copying its order, so a
+configured `cli_path` reports the binary a session would actually start and not the bundled one the
+SDK's `__cli_version__` would have named whatever was configured. The Codex probe spawns twice —
+once for the version, once for the model catalogue that is the only free source of a per-model level
+set — under a fresh temporary `CODEX_HOME`, because that tool writes under its home on every
+invocation and AGL sets no `CODEX_HOME`, so a per-run probe would otherwise churn the operator's
+own. Both spawn into a temporary directory, read no credential and open no connection.
+
 **Readiness and capabilities belong to the model, and the effort goes no further than the task and
 the digest.** `model_of` in `ports/agent.py` is the one place a bare `ModelId` is derived from a
-`ModelChoice`, and everything that asks about a model asks with it: `AgentRunner.capabilities` and
-`check_ready` take a bare `ModelId`; `preflight.py`'s `_demanded` de-duplicates declarations on it,
+`ModelChoice`, and everything that asks about a model asks with it: `AgentRunner.capabilities`,
+`check_ready` and `installation` each take a bare `ModelId`; `preflight.py`'s `_demanded`
+de-duplicates declarations on it,
 `_cost_of` ranks them by its provider and `Capabilities` caches under it; `adapters/routing.py`
 dispatches on `model_of(task.model).provider`; and every table keyed by model — `_MODEL_NAMES` in
-`claude_code/translate.py`, `_MODEL_SLUGS` in `openai/translate.py`, `Capabilities._known` and
-`_demanded`'s own — is keyed by `ModelId` and looked up with the bare member. Claude's `check_ready`
+`claude_code/translate.py`, `_MODEL_SLUGS` in `openai/translate.py`, `Installation.efforts`,
+`openai/_version.py`'s `_MODELS_BY_SLUG`, `Capabilities._known` and
+`_demanded`'s own — is keyed by `ModelId` and looked up with the bare member. The one question that
+reads the *whole* choice is preflight's `_chosen`, and it is about the level rather than about the
+model. Claude's `check_ready`
 spends a turn, so two roles on one model at two efforts are one readiness question and one bill,
 and no readiness probe sends an effort. The effort itself travels only on `AgentTask.model`, into
 `base_of` and into the adapter that serves it, as one translation each: `claude_code/translate.py`'s
@@ -1435,32 +1533,76 @@ The reasoning is the point — without it these get re-proposed.
 - **No config-level model override.** The choice is semantic — this role touches sensitive code,
   that one needs judgement — so it is bound by `@role(model=…)`, an effort with it; an override
   buys only *why is my Opus role running GPT-5?*
-- **No table of which effort levels a model has, and no refusal of a pair.** `ClaudeEffort` and
+- **No table of which effort levels a model has *in source*, and no refusal of a pair.**
+  `ClaudeEffort` and
   `OpenAIEffort` in `ports/agent.py` each hold every level their provider's CLI accepts, and a
   member of `Claude` or `OpenAI` takes any level of its own provider's enum: a level the model lacks
   is sent as written and the tool handles it. The sets are per model and move whenever a vendor
   ships one — `OpenAI.LUNA` tops out at `max` where `SOL` and `TERRA` add `ultra`, and a Claude
-  model may lack `xhigh` or take no effort at all — so a model-to-levels table here would go stale
-  the day a model gained a level, refusing a choice the tool already honours. Neither tool refuses
+  model may lack `xhigh` or take no effort at all — so a model-to-levels table checked in here would
+  go stale the day a model gained a level, refusing a choice the tool already honours. Neither tool
+  refuses
   one either: the Codex CLI 0.152.0 sends the value verbatim and lowers a level above the model's
   top to that top, and the Claude CLI the SDK bundles lowers or drops a level the model does not
   offer — read out of that binary rather than seen in a session. The enums stay fixed in source
   for what a list read off the installed tools could not keep: `mypy --strict` catching a misspelt
   level or another provider's, and `model` staying a stable stored format for the fingerprint.
-  What the refusal costs is that nothing in AGL says the level run was not the level chosen, and
-  a step recorded at `ultra` on `LUNA` is recorded at `ultra`.
   `tests/ports/test_agent.py::test_every_effort_level_is_accepted_on_every_model_of_its_provider`
   is the measurement.
+  **What is read off the installed tool at preflight is a different thing and not this table.**
+  `Installation.efforts` carries whatever the tool itself was willing to list, per model, in the
+  tool's own spellings rather than as enum members, and it exists to put a line on stderr rather
+  than to decide anything: it is populated for the OpenAI provider, whose CLI answers a model
+  catalogue for free, and empty for Claude, which the port documents as "empty where the tool cannot
+  say". So the asymmetry is between what the two tools volunteer and never between what AGL will
+  accept — a level nothing listed is still sent, and the note says so in as many words. The cost the
+  refusal keeps is unchanged: nothing in AGL says the level run was not the level chosen, and a step
+  recorded at `ultra` on `LUNA` is recorded at `ultra`. What the warning buys is that the case is
+  audible before the run rather than closed off.
+- **No cache and no suppression flag on the version notes, and no refusal over a version or a
+  level.** The probe runs on every `agl run` and `agl resume`, and there is nothing to silence. A
+  cache would key on a tool the operator can upgrade between two runs, which is precisely the event
+  the line exists to announce, and its staleness would be invisible; a flag would be learned by
+  reflex on the first run it annoyed somebody and would then be carried for ever, which is the
+  `--force` argument under "No safe mode on `agl clear`" in another shape. A refusal is refused for
+  a plainer reason: a release nobody here has exercised is not a broken one, and AGL has measured
+  nothing about the version it is complaining about beyond its not being one of the two ends of a
+  range. What the operator is owed is the fact and not a verdict, which is why every one of the five
+  sentences `preflight.py` can write says in its own words that nothing is refused over it.
+- **No Claude per-model effort probe, though one is available and free — this one is a decision
+  waiting rather than a door closed.** `Installation.efforts` is `{}` for Claude today because the
+  Codex CLI answers a model catalogue and the Claude CLI has no subcommand that does: its `--help`
+  lists no `models`, `debug` or `config` command, `claude models` is taken as a prompt, `--list-models`
+  is not an option, and `claude doctor` reports a version and nothing about models. But the SDK's own
+  `ClaudeSDKClient.get_server_info()` — public, documented, returning the `initialize` control
+  response — carries a `models` array whose entries name `supportsEffort` and `supportedEffortLevels`
+  and resolve the `opus`/`sonnet`/`haiku` alias, and it costs a CLI spawn and a connect and **no paid
+  turn**. Measured on the bundled binary: about a third of a second, answering without credentials
+  from the catalogue that binary carries and with one entry more once there are any — the same
+  bundled-against-account question `codex debug models` raises for the other provider, whose answer
+  was measured not to move. Every model there but `haiku` reported the five levels `ClaudeEffort`
+  holds, and `haiku` reported no effort support at all, which is the same thing the run-time
+  behaviour says: `haiku` takes no level whether one is sent or not.
+  Nothing needs designing: the port already shapes the answer, the engine
+  already writes the sentence, and the work is one adapter-private module answering where
+  `_version.py` today answers `{}`. It is not built because the session that built the warning
+  decided the Claude half could only be general, and a measurement that dissolves that premise is a
+  reason to re-decide rather than to widen unasked. What re-deciding costs is the connect on every
+  run, on top of the `-v` spawn — a second the operator pays before a run either way.
 - **No scrubbed or replaced environment for an agent harness.** What each adapter closes is the
   *target repository* as a configuration channel: `claude_code/runner.py` passes
   `setting_sources=[]`, `strict_mcp_config=True`, `settings=None` and `add_dirs=[]`, and
   `openai/runner.py` passes `--ignore-rules`, `--ignore-user-config`,
   `-c project_doc_max_bytes=0` and `-c skills.include_instructions=false`, and hands the workspace
   as `cwd=` rather than on argv so that no path is interpolated into a configuration expression.
-  What neither does is build an environment for the child — neither agent adapter passes `env=` at
-  all, so a harness inherits this process's and the operator's own machine stays visible to it
-  (`adapters/git/_runner.py` is the only adapter that touches the variable, and it *adds* one key
-  to what it inherited rather than replacing anything). The one
+  What neither does is build an environment for the child — no agent adapter *replaces* one, so a
+  harness inherits this process's and the operator's own machine stays visible to it. Every adapter
+  that touches the variable at all sets one key over what it inherited and takes nothing away:
+  `adapters/git/_runner.py` adds one, `claude_code/runner.py` neutralises
+  `CLAUDE_CODE_EFFORT_LEVEL` for the reason "Invariants where a mistake is silent" gives, and
+  `openai/_version.py` redirects that tool's home for the length of a probe that starts no session.
+  Setting a key is the narrow thing, and scrubbing is what is refused: each of those three names the
+  one variable it is about, and a harness would still read every other one. The one
   thing that would take that away is moving the harness's home directory, and that directory is
   where its credential lives, so an isolated environment is an unauthenticated one: the choice is
   between a run that inherits a machine and a run that cannot start. Two harnesses whose flags have
@@ -1531,15 +1673,19 @@ The reasoning is the point — without it these get re-proposed.
 - **No fan-out or parallelism helper.** The framework never spawns a task for a workflow; steps
   serialise within a namespace, so real concurrency is more worktrees, and a helper would wrap
   `asyncio.TaskGroup` while owning nothing.
-- **No general subprocess helper.** Five modules run children — `shell/verifier.py`,
-  `git/_runner.py`, `openai/runner.py`, `openai/_session.py`, `uv/syncer.py` — and disagree on six
+- **No general subprocess helper.** Seven modules run children — `shell/verifier.py`,
+  `git/_runner.py`, `openai/runner.py`, `openai/_session.py`, `uv/syncer.py` and the two
+  `_version.py` the version notes are probed through — and disagree on six
   axes of how one is *started and read*: shell or exec, buffered or streamed, stdin, stderr,
   deadline, failure signal. The fifth widened two of them rather than fitting between the other
   four: `uv/syncer.py` deliberately sets no deadline, a resolution against a cold cache being the
   ordinary case at a terminal somebody is waiting at, and its failure signal is an exit status
-  handed back as a `SyncOutcome` where every other one of them raises. A helper would take a flag
-  per axis to say which caller it was being. Stopping is not a seventh axis, because it is where
-  the three of them that stop a child agree on purpose: the `_signal` in `verifier.py`, in
+  handed back as a `SyncOutcome` where every other one of them raises. The two probes widened that
+  same axis again and in a third direction: a failure of either is answered with `None`, because
+  the question only ever warns and a version nobody could read is not an error — which is the whole
+  of why neither is the one place a shared helper would have made them. A helper would take a flag
+  per axis to say which caller it was being. Stopping is not a seventh axis either, because the
+  three that have work to lose agree on purpose: the `_signal` in `verifier.py`, in
   `_session.py` and in `git/_runner.py` escalates SIGTERM,
   grace, SIGKILL; none of them signals a child whose `returncode` is already set,
   because a reaped pid is the kernel's to hand out again and what dies is then whatever holds that
@@ -1557,21 +1703,22 @@ The reasoning is the point — without it these get re-proposed.
   nowhere to live: the adapter-independence contract in `.importlinter` forbids one adapter
   importing another — the entry below is that sentence in its general form.
 - **No shared module under `adapters/`.** The adapters repeat themselves, and every one of the
-  repeats stays. The port fakes are the bulk of it: `claude_code/fake.py` (204 lines) and
-  `openai/fake.py` (195) hold 182 lines in common line for line and the same four-name `__all__`,
-  with `Conversation`, `_payload`, `_value` and `_said` byte-identical and `_as_json` differing in
-  one clause of its error prose. All that differs is vendor-shaped: the model check — `_check_model`,
+  repeats stays. The port fakes are the bulk of it, and the count is deliberately not written here,
+  having gone stale twice: `claude_code/fake.py` and `openai/fake.py` are within ten lines of each
+  other, the great majority of either is the other line for line, and they carry the same four-name
+  `__all__`, with `Conversation`, `_payload`, `_value` and `_said` byte-identical and `_as_json`
+  differing in one clause of its error prose. All that differs is vendor-shaped: the model check — `_check_model`,
   Claude-only, against `translate.model_slug`, each asked of `model_of(task.model)` and neither
   reading the effort — the backend's name in three message constants, and
   the activity line, `f"{declared.name}: {said}"` against `f"{_LABEL_CALLING}: {declared.name}"`,
   each fake keeping the shape of the line its own real adapter emits. Beside them, `Caller` with
-  `_FAILED` and `_STOPPING` is 24 byte-identical lines in two `_tools.py` that are otherwise an MCP
+  `_FAILED` and `_STOPPING` is byte-identical in two `_tools.py` that are otherwise an MCP
   server registration and a JSON-RPC listener; `_shortened` is seven byte-identical lines in
   `claude_code/translate.py` and `openai/translate.py`; `_translated` is four lines that
   `git/_trees.py` writes and `filesystem/store.py` writes again with one parameter renamed —
   `git/_working.py` held a third copy and now imports `_trees.py`'s, a sibling inside one package
   being the one place that is free; and
-  `_GRACE: Final = 5.0` stands in each of the three modules above that stop a child.
+  `_GRACE: Final = 5.0` stands in each of the three modules above that escalate a signal.
   `_ENCODING: Final = "utf-8"` stands three times inside `git/` alone — the free kind — and is
   refused anyway, at net zero lines: what each site decides is the handler beside it,
   `surrogatepass` where `_snapshots.py` encodes a path into a commit digest and two paths must not
@@ -1602,7 +1749,7 @@ The reasoning is the point — without it these get re-proposed.
   dependency edge contract 4 would see in neither direction. `tests/test_contract_listings.py`'s
   docstring names that ending as the one contract 4 exists to catch: without the guard, "the first
   sign of it would have been two vendors quietly sharing a helper". **The price is paid rather than
-  hidden.** Those 182 lines and those 24 get fixed twice, and both `_tools.py` have already been
+  hidden.** Every one of those shared lines gets fixed twice, and both `_tools.py` have already been
   edited in parallel once. What holds the two fakes together is grading and not sharing: each is
   subclassed into the same `AgentContract` suite under `tests/contracts/`, so a divergence in what
   they *promise* fails the build, while a divergence in how they spell it does not.
@@ -1655,8 +1802,8 @@ The reasoning is the point — without it these get re-proposed.
   them — which is a salvage route and not a record. That is why `cli/commands/clear.py`'s
   `description=` tells an operator to note a sha first rather than pointing at the reflog.
   `api.clear` therefore answers with a `Cleared`
-  rather than printing anything, which is what every operation there does with its result: the one
-  line `api.py` writes to a stream is the refused-sync warning "The layers" argues, and that is a
+  rather than printing anything, which is what every operation there does with its result: what
+  `api.py` writes to a stream is the four kinds of note "The layers" argues, every one of them a
   note in the middle of a run rather than the answer a command is waiting for.
 - **No `Integrator.revert()`.** Undoing a landing that succeeded is `Workspace.restore(head)`,
   which already exists; a second spelling would be owed by every integrator.

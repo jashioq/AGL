@@ -95,14 +95,17 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Mapping
 from dataclasses import replace
 from functools import cache
 from pathlib import Path
 from typing import Any, Final, NoReturn
 from urllib.parse import urlsplit
+import claude_agent_sdk
 import pytest
 from claude_agent_sdk import ClaudeAgentOptions, ProcessError, SdkMcpTool
+from claude_agent_sdk._cli_version import __cli_version__
 from claude_agent_sdk._internal.transport import Transport
 from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITransport
 from agl.adapters.claude_code import _session, _tools
@@ -121,6 +124,7 @@ from agl.ports.agent import (
     OpenAI,
     OpenAIEffort,
     Restriction,
+    Standing,
     StopReason,
     Tool,
     ToolResult,
@@ -871,7 +875,7 @@ def test_every_session_this_package_opens_is_opened_hermetically() -> None:
             sessions += 1
             given = {keyword.arg: keyword.value for keyword in node.keywords}
             assert HERMETIC.keys() <= given.keys(), (
-                f"{source.name}:{node.lineno} opens a session without naming all three "
+                f"{source.name}:{node.lineno} builds a session's options without naming all three "
                 f"hermeticity settings: {sorted(HERMETIC.keys() - given.keys())} are missing, "
                 f"and it passes "
                 f"{sorted(name for name in given if name)}. `setting_sources` and "
@@ -882,7 +886,8 @@ def test_every_session_this_package_opens_is_opened_hermetically() -> None:
             for setting, required in HERMETIC.items():
                 written = ast.unparse(given[setting])
                 assert written == required, (
-                    f"{source.name}:{node.lineno} opens a session with `{setting}={written}`, and "
+                    f"{source.name}:{node.lineno} builds a session's options with "
+                    f"`{setting}={written}`, and "
                     f"hermeticity wants `{setting}={required}`. Naming the option is not the "
                     f"guarantee: "
                     f"`setting_sources=['user', 'project', 'local']` names it and hands the "
@@ -2085,6 +2090,149 @@ async def test_the_readiness_probe_sends_no_effort_to_the_cli_it_asks(
     assert handed[0].effort is None, f"the probe was opened at effort {handed[0].effort!r}"
     assert _flag_values(command_line(handed[0]), "--effort") == []
 
+# What the operator's shell may be carrying when AGL starts, and the four shapes that matter: a
+# level, the two words the CLI reads as "send no effort parameter at all", and the variable simply
+# not being there. `None` is that last one and is spelled `delenv` below.
+AMBIENT_EFFORT: Final[tuple[str | None, ...]] = (None, "low", "unset", "auto")
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ambient", AMBIENT_EFFORT)
+async def test_a_run_opens_its_session_with_the_operators_own_effort_level_cleared(
+    ambient: str | None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The one variable that outranks the level a workflow chose, held to the same value always.
+
+    `CLAUDE_CODE_EFFORT_LEVEL` wins over `--effort` in the CLI `_version.TESTED` names - measured
+    through `get_settings`, which reports `applied.effort` as `low` for a session opened
+    `--effort xhigh` with `low` in the environment. `ports/agent.py` says the chosen effort is
+    fingerprinted into every step, so an uncleared variable journals a level that never ran and
+    replay keys on it, with nothing downstream able to tell. Clearing it is what makes the journal
+    true; a warning would leave it false.
+
+    **The empty string and not `"unset"`, and that is the whole of what this test holds.**
+    `subprocess_cli.py` composes the child's environment by merging `options.env` over the inherited
+    one, so a key here can be *set* and never removed - there is no value meaning "as if the
+    operator had not exported it". `"unset"` looks like that value and is not: the CLI reads it as
+    an instruction to send no effort parameter at all, which moves a bare model off the default it
+    would otherwise run at. The empty string parses as no level and falls through to `--effort`,
+    and the measurement behind that is in `_NO_INHERITED_EFFORT`'s own comment.
+
+    Parametrised over what the shell may hold because the answer must not depend on it. A reading
+    of the ambient variable here - clearing it only when it is set, or passing it through when it
+    says `auto` - would be an adapter whose fingerprints are right on one machine and wrong on the
+    next, which is the failure this is about wearing a different hat.
+    """
+    if ambient is None:
+        monkeypatch.delenv("CLAUDE_CODE_EFFORT_LEVEL", raising=False)
+    else:
+        monkeypatch.setenv("CLAUDE_CODE_EFFORT_LEVEL", ambient)
+    chosen = Claude.OPUS(effort=ClaudeEffort.XHIGH)
+
+    options = await opened(task_in(workspace(tmp_path), model=chosen), monkeypatch)
+
+    assert options.env.get("CLAUDE_CODE_EFFORT_LEVEL") == "", (
+        f"the session was opened with env {options.env!r} while the shell carried "
+        f"{ambient!r}. The variable outranks `--effort`, so the run would have been taken at the "
+        f"operator's level under a fingerprint recording {ClaudeEffort.XHIGH.value!r}"
+    )
+    assert options.effort == ClaudeEffort.XHIGH.value, (
+        f"the level the role chose stopped reaching the session: {options.effort!r}. Clearing the "
+        f"variable is only the half that stops the environment deciding; the flag still has to say"
+    )
+
+@pytest.mark.asyncio
+async def test_the_readiness_probe_clears_that_level_too_although_its_options_name_no_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The probe is the row where the environment alone decides, so it needs the clearing most.
+
+    `check_ready` deliberately sends no `--effort` at all -
+    `test_the_readiness_probe_sends_no_effort_to_the_cli_it_asks` is that decision - which leaves
+    the variable as the only thing choosing a level for it. So an operator who exports
+    `CLAUDE_CODE_EFFORT_LEVEL` for their own interactive use is one whose readiness probe is taken
+    at that level, and `unset` or `auto` is one whose probe sends no effort parameter where the
+    model's own default would otherwise go out.
+
+    That makes this the opposite of a copy of the test above. There the clearing keeps a chosen
+    level from being overruled; here there is no chosen level to overrule, and what the clearing
+    buys is that the probe asks the same question on every machine.
+    """
+    monkeypatch.setenv("CLAUDE_CODE_EFFORT_LEVEL", "low")
+    handed: list[ClaudeAgentOptions] = []
+
+    async def play(cli: Scripted) -> None:
+        await cli.say(ends(result="ready", terminal_reason="completed"))
+
+    def scripted(*, prompt: str, options: ClaudeAgentOptions) -> AsyncIterator[Any]:
+        from claude_agent_sdk import query
+
+        handed.append(options)
+        return query(prompt=prompt, options=options, transport=Scripted(play))
+
+    monkeypatch.setattr(runner_module, "query", scripted)
+    await ClaudeCodeRunner().check_ready(Claude.OPUS)
+
+    assert len(handed) == 1, f"the probe opened {len(handed)} sessions"
+    assert handed[0].env.get("CLAUDE_CODE_EFFORT_LEVEL") == "", (
+        f"the probe was opened with env {handed[0].env!r}. Its options carry no effort of their "
+        f"own, so whatever the shell exported is what the probe would have been taken at"
+    )
+
+def test_every_session_this_package_starts_clears_the_effort_level_an_environment_carries() -> None:
+    """A structural assertion, so a third session cannot arrive without the clearing.
+
+    `test_every_session_this_package_opens_is_opened_hermetically` is this test's sibling and gives
+    the argument for the shape: where a property holds of every session, the assertion that reads
+    the package beats the one that runs it, because it covers call sites that do not exist yet.
+    Both sessions here are also asserted by running them, above; this is what those two cannot say
+    about a third.
+
+    **`cwd=` is the discriminator, and it is a fact about what the options are for rather than a
+    list of filenames.** `_version.py` builds a `ClaudeAgentOptions` too, and it is right that it
+    carries no `env=`: nothing is ever started with it - `probed` hands it to the SDK's resolver
+    purely so `cli_path` can be read back off it, and a child process that is never spawned has no
+    environment to compose. A session runs somewhere and says so; that object does not, and a list
+    of exempt module names here would go stale the first time one is renamed.
+
+    The name rather than the mapping is what each call site is required to spell, which is where
+    this parts company with the hermeticity scan: that one refuses a name deliberately, because
+    three unrelated settings each have one right value and a reader wants to see it at the call
+    site. Here the two sessions must agree, and the empty string is a value no reader can check by
+    looking at it - so it is written once, with the measurement beside it, and this test reads what
+    that one name holds.
+    """
+    assert runner_module._NO_INHERITED_EFFORT == {"CLAUDE_CODE_EFFORT_LEVEL": ""}, (
+        f"the shared mapping is {runner_module._NO_INHERITED_EFFORT!r}. The empty string is the "
+        f"one value that neutralises the operator's variable transparently: `subprocess_cli.py` "
+        f"merges this over the inherited environment and cannot remove a key, and `unset` would "
+        f"send no effort parameter at all where a bare model's own default would otherwise go out"
+    )
+    package = Path(runner_module.__file__).parent
+    sessions = 0
+    for source in sorted(package.glob("*.py")):
+        for node in ast.walk(ast.parse(source.read_text(encoding="utf-8"))):
+            if not isinstance(node, ast.Call):
+                continue
+            if getattr(node.func, "id", None) != "ClaudeAgentOptions":
+                continue
+            given = {keyword.arg: keyword.value for keyword in node.keywords}
+            if "cwd" not in given:
+                continue
+            sessions += 1
+            written = "env" in given and ast.unparse(given["env"]) == "_NO_INHERITED_EFFORT"
+            assert written, (
+                f"{source.name}:{node.lineno} opens a session in a directory without passing "
+                f"`env=_NO_INHERITED_EFFORT`: it passes "
+                f"{sorted(name for name in given if name)}. The SDK hands the child the operator's "
+                f"whole environment, and `CLAUDE_CODE_EFFORT_LEVEL` in it outranks `--effort` - so "
+                f"a session opened without this runs at a level AGL neither chose nor records"
+            )
+    assert sessions >= 2, (
+        f"only {sessions} ClaudeAgentOptions call(s) in {package} name a `cwd`, and there are at "
+        f"least two - the run and the readiness probe. This test found nothing to check, which "
+        f"means it is no longer checking anything"
+    )
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("model", list(OpenAI))
 async def test_a_model_of_the_other_provider_at_an_effort_is_refused_before_anything_starts(
@@ -2106,3 +2254,144 @@ async def test_a_model_of_the_other_provider_at_an_effort_is_refused_before_anyt
         )
     assert str(model) in str(refused.value)
     assert not started, "the refusal came too late to be a refusal"
+
+# --- The version behind a model, read off the binary a session would actually start --------------
+
+def _printing(root: Path, said: str, *, status: int = 0) -> Path:
+    """A stand-in binary that prints `said` for any argument and exits, and starts no session."""
+    binary = root / "claude-stub"
+    binary.write_text(
+        f"#!{sys.executable}\nimport sys\nsys.stdout.write({said!r})\nsys.exit({status})\n",
+        encoding="utf-8",
+    )
+    binary.chmod(0o755)
+    return binary
+
+@pytest.mark.asyncio
+async def test_a_configured_cli_path_is_the_binary_the_version_is_read_from(
+    tmp_path: Path,
+) -> None:
+    """The case the whole of this probe's resolution exists for, and the one that is easy to lie in.
+
+    The SDK bundles a binary and records its version in the package, so reading that record costs
+    no process at all - and it describes the bundled binary whether or not the bundled binary is
+    what runs. `cli_path` is exactly when it is not: `SubprocessCLITransport` takes the configured
+    path outright and never resolves anything, so the bundled version would be a version reported
+    for a binary this adapter will not start.
+
+    This is the whole reason the version comes off a process rather than off `__cli_version__`: one
+    spawn costs a tenth of a second, and a run that will spend a paid turn on `check_ready` a
+    moment later is not the place to save it by reporting something that might be untrue.
+    """
+    binary = _printing(tmp_path, "9.9.9 (Claude Code)\n")
+
+    reported = await ClaudeCodeRunner(binary).installation(Claude.HAIKU)
+
+    assert reported.where == str(binary), (
+        f"the version was read from {reported.where!r} and this adapter was configured with "
+        f"{str(binary)!r}. A configured path is the binary, and no resolution runs at all"
+    )
+    assert reported.version == "9.9.9", (
+        f"the version came back as {reported.version!r} from `9.9.9 (Claude Code)`. The product's "
+        f"own name follows the number in parentheses and is no part of it"
+    )
+    assert reported.standing is Standing.ABOVE, (
+        "a version above every one this adapter was exercised on stands above the range. There is "
+        "nothing to refuse here - the run goes ahead - but there is something to say"
+    )
+
+@pytest.mark.asyncio
+async def test_the_binary_nothing_configured_resolves_to_is_the_one_the_sdk_would_start(
+    tmp_path: Path,
+) -> None:
+    """Resolution is the SDK's own, asked rather than copied, and this is what that buys.
+
+    `_find_cli` prefers the binary the wheel bundles over a `claude` on `PATH`, and the two are
+    routinely different versions on one machine - so a probe that reimplemented that order would
+    report the wrong one the day the order changed, silently and in the direction of a warning
+    nobody could act on. Compared against the resolver itself rather than against a path spelled
+    out here, because a path spelled here is the copy this is written to avoid.
+
+    The version is cross-checked against the SDK's own record of what it bundled, which is a second
+    source for the same fact and the reason this clause is worth a process: a wheel whose recorded
+    version and shipped binary disagree is invisible to either one alone.
+    """
+    resolved = SubprocessCLITransport(prompt="", options=ClaudeAgentOptions())._find_cli()
+
+    reported = await ClaudeCodeRunner().installation(Claude.HAIKU)
+
+    assert reported.where == resolved, (
+        f"the version was read from {reported.where!r} and the SDK resolves {resolved!r}. These "
+        f"are the same question, and a probe answering it differently reports a version for a "
+        f"binary no session of this adapter's will ever start"
+    )
+    bundled = Path(claude_agent_sdk.__file__).parent / "_bundled" / "claude"
+    if Path(resolved) != bundled:
+        pytest.skip(
+            f"the SDK resolved {resolved}, which is not the binary this wheel bundles, so there is "
+            f"no second record of its version to compare against"
+        )
+    assert reported.version == __cli_version__, (
+        f"the bundled binary printed {reported.version!r} and the SDK records {__cli_version__!r} "
+        f"as what it bundled. One of the two is wrong about the file that is actually there"
+    )
+
+@pytest.mark.asyncio
+async def test_a_binary_that_cannot_be_started_reports_no_version_and_still_names_it(
+    tmp_path: Path,
+) -> None:
+    """The member that never raises, on the path where `check_ready` and `run` both do.
+
+    `translate.py` turns a missing CLI into `UpstreamUnavailable` and preflight stops the run on
+    it. This one is a warning's material and stops nothing: no version came back, the path it was
+    looked for under is still reported, and the refusal is left to the member whose business it is.
+    """
+    missing = tmp_path / "no-such-binary"
+
+    reported = await ClaudeCodeRunner(missing).installation(Claude.SONNET)
+
+    assert reported.version is None
+    assert reported.standing is Standing.UNREPORTED
+    assert reported.where == str(missing)
+    assert reported.tool, "a warning about a binary nobody found still has to name what it was"
+
+@pytest.mark.parametrize(
+    ("said", "status", "why"),
+    [("", 0, "it printed nothing"), ("2.1.259 (Claude Code)\n", 3, "the binary failed")],
+)
+@pytest.mark.asyncio
+async def test_a_binary_that_answers_oddly_reports_no_version_rather_than_a_guess(
+    said: str, status: int, why: str, tmp_path: Path
+) -> None:
+    """An answer nobody measured is reported as unread, and a non-zero exit is not an answer."""
+    binary = _printing(tmp_path, said, status=status)
+
+    reported = await ClaudeCodeRunner(binary).installation(Claude.HAIKU)
+
+    assert reported.version is None, f"{why}, and something was still reported as a version"
+
+@pytest.mark.asyncio
+async def test_this_adapter_reports_no_per_model_levels_because_it_asks_for_none(
+    tmp_path: Path,
+) -> None:
+    """The asymmetry between the two backends, stated where it is decided rather than inferred.
+
+    The other backend carries a listing a subcommand prints for free, so its half of a warning can
+    name the level a task would be lowered to. This harness has one too, and reaching it costs a
+    session rather than a flag - so this probe reports the version and nothing else, and the empty
+    mapping is the port's own spelling of "the tool did not say".
+    """
+    reported = await ClaudeCodeRunner(_printing(tmp_path, "2.1.259 (Claude Code)\n")).installation(
+        Claude.OPUS
+    )
+
+    assert reported.efforts == {}
+
+def test_a_model_this_adapter_does_not_serve_is_refused_a_version_report_as_well() -> None:
+    """The refusal the other two query members make, made here for the same reason.
+
+    A runner that answered for a model it cannot run would put a warning about this harness in
+    front of an operator whose role names a model some other backend serves.
+    """
+    with pytest.raises(InputError):
+        asyncio.run(ClaudeCodeRunner().installation(OpenAI.SOL))

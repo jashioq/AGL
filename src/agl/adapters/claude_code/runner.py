@@ -11,6 +11,7 @@ from claude_agent_sdk import (
 from claude_agent_sdk.types import SystemPromptPreset
 from agl.adapters.claude_code._session import Stderr, outcome_of
 from agl.adapters.claude_code._tools import ASKING_MECHANISMS_DENIED, Caller, servers
+from agl.adapters.claude_code._version import probed
 from agl.adapters.claude_code.translate import (
     Restraint,
     effort_level,
@@ -24,6 +25,7 @@ from agl.ports.agent import (
     AgentRunner,
     AgentTask,
     Capability,
+    Installation,
     ModelId,
     model_of,
 )
@@ -53,6 +55,12 @@ _PLAN_ONLY: Final = (
 
 _CONTEXT_HEADING: Final = "AGL is running this task with the following standing context:"
 
+# `CLAUDE_CODE_EFFORT_LEVEL` beats `--effort` in the CLI `_version.TESTED` names, so an operator's
+# own shell would pick the level AGL then fingerprints. The SDK's `subprocess_cli` merges this
+# mapping over the inherited environment and can set a key but never remove one, and the empty
+# string is the one value that neutralises the variable and leaves a bare model its own default.
+_NO_INHERITED_EFFORT: Final[dict[str, str]] = {"CLAUDE_CODE_EFFORT_LEVEL": ""}
+
 class ClaudeCodeRunner(AgentRunner):
     def __init__(self, cli_path: Path | None = None) -> None:
         self._cli_path = None if cli_path is None else Path(_inert(str(cli_path), "cli_path"))
@@ -76,6 +84,7 @@ class ClaudeCodeRunner(AgentRunner):
                 max_turns=1,
                 cli_path=self._cli_path,
                 stderr=Stderr(),
+                env=_NO_INHERITED_EFFORT,
             )
             try:
                 async for message in query(prompt=_READY_PROMPT, options=options):
@@ -88,6 +97,10 @@ class ClaudeCodeRunner(AgentRunner):
                         )
             except ClaudeSDKError as error:
                 raise unready(error) from error
+
+    async def installation(self, model: ModelId) -> Installation:
+        model_name(model)
+        return await probed(self._cli_path)
 
     async def run(
         self,
@@ -133,6 +146,7 @@ def _options(
         permission_mode="bypassPermissions",
         cli_path=cli_path,
         stderr=stderr,
+        env=_NO_INHERITED_EFFORT,
     )
 
 def _prompt(task: AgentTask, limits: Restraint) -> str:
@@ -144,7 +158,8 @@ def _prompt(task: AgentTask, limits: Restraint) -> str:
     return "\n\n".join([*(part for part in standing if part), task.instructions])
 
 # The SDK appends most options as two tokens, so a value beginning with `-` reaches argv as a flag
-# of its own; it writes `--flag=value` for exactly four options, and these are not among them.
+# of its own; it writes `--flag=value` for five named options and for any `extra_args` value that
+# itself begins with a dash, and neither value this guards is one of those.
 def _inert(value: str, what: str) -> str:
     if value.startswith("-"):
         raise InputError(

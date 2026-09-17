@@ -1,7 +1,7 @@
-"""The two members preflight asks before a run: what a backend can do, and whether it can now.
+"""The three members preflight asks before a run: what a backend can do, what it runs on, if now.
 
-Split out of `agent.py` along a line the port draws itself. One of its three members runs an agent;
-these two are asked *about* one, both take a `ModelId`, and both are async for the same reason - the
+Split out of `agent.py` along a line the port draws itself. One of its four members runs an agent;
+these three are asked *about* one, all take a `ModelId`, and all are async for the same reason - the
 answer depends on the world, and probing it at construction time would break the composition root
 for every run, including the ones that never touch this backend.
 
@@ -9,22 +9,33 @@ They are deliberately not one member. Preflight asks them one after the other an
 things with the answers: a missing capability is permanent and the workflow must change,
 while not being ready is a state of the world that a login fixes in ten seconds. A single call
 reporting both would have to invent a way of saying which of the two it meant, and the caller would
-have to unpick it to know whether to tell the author or the operator.
+have to unpick it to know whether to tell the author or the operator. `installation` is a third
+thing again, and the one that never refuses anything: what it reports is material for a warning, so
+a backend at a version nobody tested runs, and the operator is told rather than stopped.
 
-Neither test here asserts anything about the other member's answer. In particular, nothing treats a
+No test here asserts anything about another member's answer. In particular, nothing treats a
 reported capability as a promise that a call using it succeeds - the port says in as many words that
 it is not one, and a suite that quietly relied on it would be teaching the next adapter author that
-`capabilities()` is a guarantee they have to honour.
+`capabilities()` is a guarantee they have to honour. Nothing reads a reported *version* as a
+promise either: an implementation reporting `None` for a tool it could not reach is correct, and the
+clause below is about the shape of what comes back rather than about what is installed here.
 
 `AgentContract` in `agent.py` inherits this class. Implementers subclass that one, never this one.
 """
 
 import pytest
-from agl.ports.agent import AgentRunner, Capability, ModelId
+from agl.ports.agent import (
+    AgentRunner,
+    Capability,
+    Installation,
+    ModelEfforts,
+    ModelId,
+    Standing,
+)
 from agl.ports.errors import UpstreamUnavailable
 
 class AgentPreflightContract:
-    """What `capabilities` and `check_ready` answer, and the difference the port draws between them.
+    """What the three members asked *about* a backend answer, and how the port keeps them apart.
 
     `pytestmark` is repeated on every contract class in this package rather than inherited from
     one of them: `asyncio_mode = "strict"` turns a missing marker into a silently skipped test,
@@ -102,3 +113,88 @@ class AgentPreflightContract:
                 f"anything else here is a run that dies as a framework bug instead of as a "
                 f"backend that is not ready"
             ) from wrong
+
+    async def test_the_installation_it_reports_is_one_a_version_warning_can_be_written_from(
+        self, runner: AgentRunner, model: ModelId
+    ) -> None:
+        """"What are you running on" - answered, never refused, and answered even where nothing is.
+
+        Nothing here asserts what is installed on the machine the suite runs on, because that is
+        not a promise any implementation makes. What it asserts is that whatever came back is a
+        report a warning could be built out of, which is four separate things.
+
+        **The tool has a name.** `tool` is the only place a vendor's binary is spelled: the layer
+        that writes the warning cannot spell one, `scripts/check`'s containment gate being what
+        stops it, so a backend that leaves this empty leaves the operator reading a sentence about
+        nothing. **A version is the tool's own text or it is `None`.** `None` is the honest report
+        of a tool that could not be reached, and the empty string is a second spelling of it that
+        `Standing` would then place as unreadable rather than as unreported. **The declared range
+        is orderable**, which is asserted by placing the range's own floor inside it - an adapter
+        that spells its tested versions in a grammar `Standing` cannot order would otherwise report
+        `UNREADABLE` forever, and the reader would blame the tool for a string AGL wrote. **And
+        every effort listing is levels the tool spells**, each one named once, with a default that
+        is one of them, because a warning naming a level no listing carries is a warning about
+        nothing and one naming a level twice is a sentence that reads as broken. Distinctness is
+        asserted here and was free while `levels` was a set; it became an implementation's promise
+        when the listing grew an order, which is the half of the change a contract can still hold.
+
+        `efforts` being empty is correct and is not asserted against. The port says so - a tool
+        that cannot enumerate what its models reason at reports nothing here - and an adapter whose
+        tool *can* is not made to by any clause a suite could write against the port.
+        """
+        reported = await runner.installation(model)
+
+        assert isinstance(reported, Installation), (
+            f"installation answered with {type(reported).__name__}. The whole of a version warning "
+            f"is read off this value, the name of the tool it is about included"
+        )
+        assert reported.tool, (
+            "installation reported an empty tool name. This is the one place a backend's binary is "
+            "named: nothing above this port may spell one, so a warning built from an empty name "
+            "is a sentence with a hole where its subject goes"
+        )
+        assert reported.version is None or reported.version, (
+            "installation reported an empty version string. A tool that could not be reached is "
+            "reported as None, which stands apart from a tool that answered - an empty string is a "
+            "second spelling of 'nothing' that gets placed as unreadable instead of unreported"
+        )
+        assert reported.where is None or reported.where, (
+            "installation reported an empty name for the binary it read. A backend that identified "
+            "none says so with None; an empty string reads as a binary called nothing at all"
+        )
+        floor = Installation(
+            tool=reported.tool,
+            version=reported.tested.lowest,
+            tested=reported.tested,
+            efforts={},
+        )
+        assert floor.standing is Standing.WITHIN, (
+            f"the range {reported.tested} does not contain its own floor, standing "
+            f"{floor.standing} instead. It is this adapter's own constant rather than anything a "
+            f"machine reported, so either its ends are the wrong way round or they are spelled in "
+            f"a grammar nothing here orders - and every run would then be warned about a tool that "
+            f"is exactly the one AGL was tested against"
+        )
+        for named, efforts in reported.efforts.items():
+            assert isinstance(named, ModelId) and isinstance(efforts, ModelEfforts), (
+                f"the efforts mapping carries {named!r} -> {efforts!r}. It is keyed by the model "
+                f"ids this port speaks and not by a backend's own slugs, because the caller "
+                f"reading it has a `ModelId` and no way to translate one"
+            )
+            strange = [level for level in efforts.levels if not isinstance(level, str) or not level]
+            assert not strange, (
+                f"{str(named)!r} offers {strange} among its levels. A level is the tool's own "
+                f"spelling as a non-empty string, deliberately not an effort enum's member: the "
+                f"point of reporting them is to notice where the two have come apart"
+            )
+            twice = sorted({level for level in efforts.levels if efforts.levels.count(level) > 1})
+            assert not twice, (
+                f"{str(named)!r} lists {twice} more than once. A listing is ordered so that a "
+                f"sentence can name its last level as the ceiling, and a level repeated in it is "
+                f"one the reader is told about twice in a row"
+            )
+            assert efforts.default is None or efforts.default in efforts.levels, (
+                f"{str(named)!r} falls back to {efforts.default!r}, which is not among the levels "
+                f"it offers. A default outside its own listing describes no model, and a warning "
+                f"naming what a task would be lowered to would name that"
+            )

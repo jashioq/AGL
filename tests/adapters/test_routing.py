@@ -198,15 +198,19 @@ async def _capabilities(runner: AgentRunner, model: ModelId, where: Path) -> Non
 async def _check_ready(runner: AgentRunner, model: ModelId, where: Path) -> None:
     await runner.check_ready(model)
 
+async def _installation(runner: AgentRunner, model: ModelId, where: Path) -> None:
+    await runner.installation(model)
+
 async def _run(runner: AgentRunner, model: ModelId, where: Path) -> None:
     await runner.run(task(where, model, SAY_WHAT_THIS_IS))
 
-# Every member of the port, so that the tests about refusing name all three rather than the one
+# Every member of the port, so that the tests about refusing name all four rather than the one
 # that was easiest to write. A member that dispatched while its neighbours did not would be a
 # preflight admitting a run that the step then cannot start.
 MEMBERS: Final[Mapping[str, Member]] = {
     "capabilities": _capabilities,
     "check_ready": _check_ready,
+    "installation": _installation,
     "run": _run,
 }
 

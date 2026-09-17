@@ -1,15 +1,15 @@
-"""Five workflow *modules* for `tests/sdk/test_preflight.py`, because a namespace is the claim.
+"""Six workflow *modules* for `tests/sdk/test_preflight.py`, because a namespace is the claim.
 
 A workflow's roles are the `@role(model=…)` factories bound in the module its `def` was executed
 in, and also those bound in any module bound there. That is one declaration and not two, which is
 why `@workflow` carries no `roles=` list - see `ARCHITECTURE.md`'s "Deliberately not built" - and
 it makes a claim about *which* roles preflight demands a provider for a claim about a module
-namespace. Five of that suite's claims therefore cannot be made inside it:
+namespace. Six of that suite's claims therefore cannot be made inside it:
 `tests/sdk/test_preflight.py` is one namespace and holds six factories bound directly over two
 models, which is the right shape for the claims about dedup and ordering and the wrong shape for
 every claim about what a namespace does *not* contain, or about how a factory reaches it.
 
-So they live here, as five modules that are each nothing but the thing they are about:
+So they live here, as six modules that are each nothing but the thing they are about:
 
   * `unstaffed` - no role factory at all, so preflight asks no backend anything: what keeps a
     workflow that runs no agent runnable on a machine with no harness.
@@ -26,6 +26,8 @@ So they live here, as five modules that are each nothing but the thing they are 
     verdict: a supported shape, pinned rather than closed, for the reasons its test carries.
   * `efforts` - two factories naming one model at two efforts and no second model, so the count of
     readiness questions is one only if preflight asks about the bare model and not the choice.
+  * `providers` - three factories over two providers, one of them declaring an effort, which is the
+    smallest namespace where "once per provider" and "once per model" are different numbers.
 
 They are modules on disk rather than `types.ModuleType` values built in a fixture, because what is
 being measured is what an author's own file does to a namespace. A synthetic module would need its

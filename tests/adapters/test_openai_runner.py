@@ -99,10 +99,12 @@ from agl.ports.agent import (
     Claude,
     ClaudeEffort,
     ModelChoice,
+    ModelEfforts,
     ModelId,
     OpenAI,
     OpenAIEffort,
     Restriction,
+    Standing,
     StopReason,
     Tool,
     ToolResult,
@@ -155,6 +157,21 @@ SKILL_MARKER: Final = "AGL-LEAK-SKILL-9f2c41"
 # What the stub CLI is asked to be, per test: a JSON plan beside a JSON record of what it saw.
 _PLAN: Final = "plan.json"
 _RECORD: Final = "record.json"
+
+# The two answers the harness gives about itself, spelled as the installed 0.152.0 spells them: the
+# version line has the tool's own name in front of it, and a level sits under `effort` inside an
+# object beside the description the harness shows in its own menu.
+_SPELLED_VERSION: Final = "codex-cli 0.152.0\n"
+
+def _listed(slug: str, levels: tuple[str, ...], fallback: str) -> dict[str, Any]:
+    """One model as the harness's own listing writes it, down to the shape of a level."""
+    return {
+        "slug": slug,
+        "supported_reasoning_levels": [
+            {"effort": level, "description": f"{level} reasoning"} for level in levels
+        ],
+        "default_reasoning_level": fallback,
+    }
 
 # The stub, written to disk and handed to the adapter as its CLI. It is deliberately small and
 # deliberately *not* a harness: it records, it plays back, and it can call an MCP tool.
@@ -229,9 +246,20 @@ def speak(call, argv):
     }})
 
 
+def probe(plan, record):
+    """Answer one of the two questions the version probe puts, into a record of its own."""
+    key = "version" if record["argv"][:1] == ["--version"] else "catalogue"
+    record["home"] = os.environ.get("CODEX_HOME")
+    pathlib.Path(plan["record"] + "." + key).write_text(json.dumps(record), encoding="utf-8")
+    sys.stdout.write(plan[key])
+    return plan.get(key + "_exit", 0)
+
+
 def main():
     plan = json.loads(PLAN.read_text(encoding="utf-8"))
     record = {{"argv": sys.argv[1:], "cwd": os.getcwd(), "stdin": None, "answers": []}}
+    if sys.argv[1:2] == ["--version"] or sys.argv[1:3] == ["debug", "models"]:
+        return probe(plan, record)
     written = pathlib.Path(plan["record"])
     try:
         if sys.argv[1:2] == ["login"]:
@@ -275,6 +303,8 @@ class Stub:
         root.mkdir(parents=True, exist_ok=True)
         self.record = root / _RECORD
         plan.setdefault("login", {"say": "Logged in using ChatGPT", "exit": 0})
+        plan.setdefault("version", _SPELLED_VERSION)
+        plan.setdefault("catalogue", json.dumps({"models": []}))
         plan["record"] = str(self.record)
         (root / _PLAN).write_text(json.dumps(plan), encoding="utf-8")
         self.path = root / "codex-stub.py"
@@ -299,6 +329,18 @@ class Stub:
         given = self.seen()["argv"]
         assert isinstance(given, list)
         return [str(token) for token in given]
+
+    def probed(self, which: str) -> Mapping[str, Any]:
+        """What the stub saw for one of the two questions the version probe puts to it."""
+        written = self.record.with_name(f"{self.record.name}.{which}")
+        assert written.is_file(), (
+            f"the stub CLI at {self.path} left no {which} record, so it was never asked that "
+            f"question. Both are put on every probe, and one that was not asked is a version or a "
+            f"catalogue reported from nothing at all"
+        )
+        seen = json.loads(written.read_text(encoding="utf-8"))
+        assert isinstance(seen, dict)
+        return seen
 
 def started(**fields: Any) -> dict[str, Any]:
     """A `turn.completed`-shaped stream: the ordinary ending, with whatever else is asked for."""
@@ -784,17 +826,17 @@ def _rendered(repo: Path, overrides: Sequence[str]) -> str:
 # *property* - but it is the strongest thing readable at the call site, which is the same standard.
 CHOSEN: Final[Mapping[str, str]] = {
     "workspace": "the run's own workspace, provisioned by WorkspaceProvider",
-    "elsewhere": "a temporary directory of the readiness probe's own",
+    "elsewhere": "a temporary directory of the probe's own, readiness probe or version probe",
 }
 
 def test_every_child_this_package_starts_is_started_somewhere_this_adapter_chose() -> None:
     """A structural assertion, so that a process added later cannot inherit AGL's own directory.
 
-    Both of this package's children are started with an explicit working directory and neither is
-    an accident: a run's is the workspace, and the readiness probe's is a temporary directory of
-    its own. The failure this catches is silent - a child with no `cwd=` runs wherever the operator
-    started `agl`, which for this harness means resolving a project root, and every `AGENTS.md`
-    above it, out of somebody else's repository.
+    Every one of this package's children is started with an explicit working directory and none of
+    them by accident: a run's is the workspace, and each probe's - the readiness one and the
+    version one - is a temporary directory of its own. The failure this catches is silent - a child
+    with no `cwd=` runs wherever the operator started `agl`, which for this harness means resolving
+    a project root, and every `AGENTS.md` above it, out of somebody else's repository.
 
     **The directory each child is given, and not only that the keyword was there.** This test began
     asserting presence alone, which reads as a check and is not one: `cwd=None` is what
@@ -838,10 +880,10 @@ def test_every_child_this_package_starts_is_started_somewhere_this_adapter_chose
                 f"directory that lives in another module is one this test cannot read and a "
                 f"reviewer cannot see here"
             )
-    assert spawns >= 2, (
+    assert spawns >= 3, (
         f"only {spawns} child process start(s) were found in {package}, and there are at least "
-        f"two - the run and the readiness probe. This test found nothing to check, which means it "
-        f"is no longer checking anything"
+        f"three - the run, the readiness probe and the version probe. This test found nothing to "
+        f"check, which means it is no longer checking anything"
     )
 
 # --- A value that would parse as a flag -----------------------------------------------------------
@@ -1680,7 +1722,7 @@ async def test_every_advertised_tool_is_marked_neither_destructive_nor_open_worl
         f"surfaces as a step that reported nothing rather than as an error"
     )
 
-# --- The two members preflight asks --------------------------------------------------------------
+# --- The three members preflight asks ------------------------------------------------------------
 
 def test_capabilities_are_the_ports_own_members_and_not_equivalent_strings() -> None:
     """The suite asserts this too; what it cannot assert is *which* three, and why they are static.
@@ -1777,6 +1819,232 @@ async def test_check_ready_refuses_against_the_real_cli_with_no_credential() -> 
     with pytest.raises(UpstreamUnavailable) as raised:
         await OpenAiRunner().check_ready(OpenAI.LUNA)
     assert str(raised.value), "the port asks for a reason a person can act on"
+
+@pytest.mark.asyncio
+async def test_the_version_probe_puts_both_of_the_harnesss_own_questions_and_reads_each_answer(
+    tmp_path: Path,
+) -> None:
+    """Two subcommands, and each one is read for a different half of what a warning is built from.
+
+    `--version` for the release and `debug models` for what each model reasons at. The second is
+    the whole reason a warning on this backend can be specific where the Claude one cannot: the
+    harness carries a listing, it costs no turn to read, and it is what lets a sentence name the
+    levels a model does offer where the one a role asked for is not among them.
+
+    The levels are asserted **in the harness's own order**, which is the half a set could not carry:
+    `sdk/_engine/preflight.py`'s `_unlisted` names the last of them as the ceiling, so a reading
+    that sorted or de-ordered them would put a level the tool never topped out at into a sentence.
+    They are asserted as the harness's own strings and never against `OpenAIEffort`, which is the
+    point of reporting them at all - the enum is the source and a listing that has come apart from
+    it is exactly what there would be something to say about.
+    """
+    stub = Stub(
+        tmp_path,
+        catalogue=json.dumps(
+            {
+                "models": [
+                    _listed("gpt-5.6-luna", ("low", "medium", "high", "xhigh", "max"), "medium"),
+                    _listed("gpt-5.6-sol", ("low", "medium"), "low"),
+                ]
+            }
+        ),
+    )
+
+    reported = await OpenAiRunner(stub.path).installation(OpenAI.LUNA)
+
+    assert stub.probed("version")["argv"] == ["--version"]
+    assert stub.probed("catalogue")["argv"] == ["debug", "models"]
+    assert reported.version == "0.152.0", (
+        f"the version came back as {reported.version!r} from {_SPELLED_VERSION!r}. The harness "
+        f"prints its own name in front of the number, so a reading that keeps the whole line puts "
+        f"`codex-cli 0.152.0` where an ordering expects dotted digits and every run is then warned "
+        f"about a version nothing could place"
+    )
+    assert reported.standing is Standing.WITHIN
+    assert reported.where == str(stub.path)
+    assert reported.efforts[OpenAI.LUNA] == ModelEfforts(
+        levels=("low", "medium", "high", "xhigh", "max"), default="medium"
+    ), (
+        f"{str(OpenAI.LUNA)!r} reported {reported.efforts.get(OpenAI.LUNA)}. A level sits under "
+        f"`effort` inside an object beside a description, so a reading that took the objects "
+        f"themselves reports levels no sentence could name"
+    )
+    assert reported.efforts[OpenAI.SOL] == ModelEfforts(
+        levels=("low", "medium"), default="low"
+    )
+
+@pytest.mark.asyncio
+async def test_neither_question_is_put_against_the_credential_home_this_process_carries(
+    tmp_path: Path,
+) -> None:
+    """The one thing this feature does outside AGL, and it is a write rather than a read.
+
+    Every invocation of this harness creates `$CODEX_HOME/tmp/arg0/…` before it answers anything,
+    pruning the one before it - so a probe on every run churns a directory the operator owns, in
+    order to ask a question that reads nothing from it. It reads nothing from it: against a home
+    holding no credential and no configuration the version and the listing come back identical,
+    over no connection, which is what makes redirecting it free rather than a trade.
+
+    Asserted against the home *this process* carries rather than against the operator's own,
+    because `tests/conftest.py` has already redirected that one for every test in the repository -
+    so the comparison here is "the probe chose its own" and not "the suite was lucky".
+    """
+    stub = Stub(tmp_path)
+    ambient = os.environ.get("CODEX_HOME")
+
+    await OpenAiRunner(stub.path).installation(OpenAI.TERRA)
+
+    homes = [stub.probed(which)["home"] for which in ("version", "catalogue")]
+    assert homes[0] and homes[0] == homes[1], (
+        f"the two questions were put against {homes}. One probe is one directory: two would be two "
+        f"sets of aliases written and neither pruned by the other"
+    )
+    assert homes[0] != ambient, (
+        f"both questions were put against {homes[0]!r}, which is the home this process carries. "
+        f"The probe hands the child one of its own, because a question that only reads has no "
+        f"business writing into a directory somebody else owns"
+    )
+    assert not Path(homes[0]).exists(), (
+        f"{homes[0]!r} is still there after the probe returned. It is a temporary directory and "
+        f"the aliases the harness wrote into it go with it; one that outlives the probe is the "
+        f"churn moved rather than stopped"
+    )
+
+@pytest.mark.asyncio
+async def test_a_listing_naming_a_model_this_adapter_does_not_serve_leaves_it_out(
+    tmp_path: Path,
+) -> None:
+    """The listing describes every model the account reaches, and AGL maps three of them.
+
+    Keyed by `ModelId` and not by slug, so a slug with no member behind it has no key to go under -
+    and inventing one would put a name in a warning that no `@role(model=…)` could ever name.
+    """
+    stub = Stub(
+        tmp_path,
+        catalogue=json.dumps(
+            {
+                "models": [
+                    _listed("gpt-5.6-luna", ("low",), "low"),
+                    _listed("some-other-model", ("low", "high"), "high"),
+                ]
+            }
+        ),
+    )
+
+    reported = await OpenAiRunner(stub.path).installation(OpenAI.LUNA)
+
+    assert reported.efforts == {OpenAI.LUNA: ModelEfforts(levels=("low",), default="low")}
+
+@pytest.mark.asyncio
+async def test_the_levels_come_back_in_the_order_the_catalogue_listed_them_and_never_sorted(
+    tmp_path: Path,
+) -> None:
+    """The order is the harness's answer too, and the reading preserves it rather than deriving one.
+
+    Measured over 0.152.0's whole catalogue, each of its ten models lists an ascending prefix of
+    `low, medium, high, xhigh, max, ultra`, so the last level a model lists is the most it reasons
+    at - which is what `sdk/_engine/preflight.py`'s `_unlisted` names when a role asks for a level
+    the model has not got. Nothing here checks that the order *is* ascending, because that is the
+    tool's claim and not AGL's; what is checked is that AGL passes it through.
+
+    The listing below is deliberately not ascending and not alphabetical, so a reading that sorted
+    either way is caught, and it repeats a level so that a tuple cannot report the same one twice
+    where the set this used to be could not have.
+    """
+    stub = Stub(
+        tmp_path,
+        catalogue=json.dumps(
+            {"models": [_listed("gpt-5.6-luna", ("max", "low", "high", "max"), "low")]}
+        ),
+    )
+
+    reported = await OpenAiRunner(stub.path).installation(OpenAI.LUNA)
+
+    assert reported.efforts[OpenAI.LUNA].levels == ("max", "low", "high"), (
+        f"{str(OpenAI.LUNA)!r} reported {reported.efforts[OpenAI.LUNA].levels}. A sentence names "
+        f"the last of these as the ceiling, so an order of AGL's own naming a level the tool never "
+        f"topped out at is the failure, and a repeat is a level named twice in one list"
+    )
+
+@pytest.mark.parametrize(
+    ("catalogue", "why"),
+    [
+        ("not json at all", "unparseable"),
+        ('{"models": "a string"}', "not a list of models"),
+        ('{"models": [{"slug": "gpt-5.6-luna"}]}', "carrying no levels"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_a_listing_that_cannot_be_read_costs_the_efforts_and_never_the_version(
+    catalogue: str, why: str, tmp_path: Path
+) -> None:
+    """Two answers, read separately, so a harness that changed one of them still reports the other.
+
+    The version is what a warning most needs and the listing is what makes one specific, so a
+    listing this reading was not written for leaves a general warning standing rather than taking
+    the whole report down with it. Nothing is refused on either path.
+    """
+    stub = Stub(tmp_path, catalogue=catalogue)
+
+    reported = await OpenAiRunner(stub.path).installation(OpenAI.LUNA)
+
+    assert reported.version == "0.152.0", f"a listing {why} took the version with it"
+    assert reported.efforts == {}
+
+@pytest.mark.parametrize(
+    ("plan", "why"),
+    [
+        ({"version": _SPELLED_VERSION, "version_exit": 1}, "the subcommand failed"),
+        ({"version": "codex-cli"}, "it printed only its own name"),
+        ({"version": "codex-cli 0.152.0 (build 7)"}, "it printed a third word"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_a_version_line_this_reading_was_not_written_for_reports_nothing_at_all(
+    plan: dict[str, Any], why: str, tmp_path: Path
+) -> None:
+    """A spelling nobody measured is reported as unread, and never as whichever word looked right.
+
+    The measured line is two words, so picking one out of three would be guessing which - and a
+    guess reaches `Standing` looking exactly like a version somebody read. The first row is a
+    perfectly well-formed line printed by a subcommand that then failed, which is the row that says
+    the exit status is read at all: text on stdout is not an answer if the process disowned it.
+    """
+    stub = Stub(tmp_path, **plan)
+
+    reported = await OpenAiRunner(stub.path).installation(OpenAI.LUNA)
+
+    assert reported.version is None, f"{why}, and something was still reported as a version"
+    assert reported.standing is Standing.UNREPORTED
+
+@pytest.mark.asyncio
+async def test_a_harness_that_is_not_installed_reports_no_version_and_refuses_nothing(
+    tmp_path: Path,
+) -> None:
+    """The member that never raises, on the path where every other one does.
+
+    `check_ready` answers a missing binary with `UpstreamUnavailable` and stops the run at second
+    zero. This one is a warning's material: a backend nobody could reach has no version, the name
+    it was looked for under is still reported, and the run carries on to be refused by the member
+    whose business that is.
+    """
+    missing = tmp_path / "no-such-binary"
+
+    reported = await OpenAiRunner(missing).installation(OpenAI.TERRA)
+
+    assert reported.version is None
+    assert reported.where == str(missing)
+    assert reported.tool
+    assert reported.efforts == {}
+
+def test_a_model_this_adapter_does_not_serve_is_refused_a_version_report_as_well() -> None:
+    """The same refusal the other two query members make, and for the same reason.
+
+    A runner that answered for a model it cannot run would put a version warning about this harness
+    in front of an operator whose role names a model some other backend serves.
+    """
+    with pytest.raises(InputError):
+        asyncio.run(OpenAiRunner().installation(Claude.OPUS))
 
 # --- The probe that never answers ----------------------------------------------------------------
 

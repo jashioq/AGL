@@ -96,6 +96,7 @@ What did not move is the provider half. A logged-out harness is still refused be
 durable exists, and the acceptance criterion is still met in as many words.
 """
 
+from collections.abc import Callable
 from collections.abc import Set as AbstractSet
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, replace
@@ -113,12 +114,16 @@ from agl.ports.agent import (
     Capability,
     Claude,
     ClaudeEffort,
+    Installation,
+    ModelEfforts,
     ModelId,
     OpenAI,
+    OpenAIEffort,
     Provider,
     StopReason,
     Tool,
     ToolResult,
+    VersionRange,
 )
 from agl.ports.errors import DeniedError, UpstreamUnavailable, exit_code_for
 from agl.ports.history import FileChange, History
@@ -132,6 +137,9 @@ from agl.sdk.roles import Role, role
 from agl.sdk.tools import reporting_tool, tool
 from agl.sdk.workflow import Run, workflow
 from instruments.preflight import NoParams, entered
+from instruments.preflight.efforts import efforts as two_levels
+from instruments.preflight.late import late
+from instruments.preflight.providers import broad
 
 # `asyncio_mode = "strict"`, so every async test below carries its own marker.
 
@@ -154,6 +162,17 @@ EVERYTHING: Final = frozenset(Capability)
 # member and the constant went when a question became an ordinary tool: the backend that cannot
 # serve `fix`'s implementer is the one that cannot call a tool, which is this one.
 CANNOT_CALL: Final = EVERYTHING - {Capability.TOOL_CALLING}
+
+# What a backend reports about itself where the version is not what a test is about: a tool sitting
+# inside the one release it was tested against, which is `Standing.WITHIN` and so is silent. It is
+# the default every `_Stub` carries, so a test asserting on stderr is asserting about its own
+# arrangement rather than about whatever an unconfigured stand-in happened to say.
+CURRENT: Final = Installation(
+    tool="a stand-in harness",
+    version="1.0.0",
+    tested=VersionRange("1.0.0", "1.0.0"),
+    efforts={},
+)
 
 @dataclass(frozen=True)
 class _Found:
@@ -286,6 +305,7 @@ POINTS: Final = (
     _point("qualified", "instruments.preflight.qualified:qualified"),
     _point("prebuilt", "instruments.preflight.prebuilt:prebuilt"),
     _point("efforts", "instruments.preflight.efforts:efforts"),
+    _point("broad", "instruments.preflight.providers:broad"),
 )
 
 # --- the runner this file drives preflight with --------------------------------------------------
@@ -306,15 +326,21 @@ class _Stub(AgentRunner):
     """
 
     def __init__(
-        self, *, offers: AbstractSet[Capability] = EVERYTHING, ready: bool = True
+        self,
+        *,
+        offers: AbstractSet[Capability] = EVERYTHING,
+        ready: bool = True,
+        installed: Installation = CURRENT,
     ) -> None:
         self.offers: Final = frozenset(offers)
         self.ready: Final = ready
+        self.installed: Final = installed
         self.refusal: Final = UpstreamUnavailable(
             "the harness is not on PATH: install it, or log in and try again"
         )
         self.asked_ready: Final[list[ModelId]] = []
         self.asked_offers: Final[list[ModelId]] = []
+        self.asked_installation: Final[list[ModelId]] = []
         self.ran: Final[list[AgentTask]] = []
 
     async def capabilities(self, model: ModelId) -> frozenset[Capability]:
@@ -325,6 +351,10 @@ class _Stub(AgentRunner):
         self.asked_ready.append(model)
         if not self.ready:
             raise self.refusal
+
+    async def installation(self, model: ModelId) -> Installation:
+        self.asked_installation.append(model)
+        return self.installed
 
     async def run(
         self,
@@ -543,6 +573,10 @@ async def test_a_repository_that_can_name_no_committer_fails_at_second_zero(
     )
     assert await _no_record(harness), "a run refused at preflight left a record to be cleared"
     assert entered == [], "the workflow ran although nothing it did could have been committed"
+    assert stub.asked_installation == [], (
+        "a backend was asked what it is running on before the free local question, and reading "
+        "that costs a subprocess on both real adapters - spent here on a run that never starts"
+    )
 
 @pytest.mark.asyncio
 async def test_a_run_installs_what_the_workspace_declares_before_preflight_is_asked_anything(
@@ -921,6 +955,271 @@ async def test_preflight_asks_whether_a_backend_is_ready_and_never_what_it_can_d
     assert passing.asked_ready == [OpenAI.SOL, Claude.OPUS]
     assert passing.asked_offers == [], "containment ran at second zero, where it cannot"
 
+# --- half one and a half: what the tool is, which warns and never refuses -------------------------
+#
+# A third question, and the only one in this file whose whole answer is a sentence: what is
+# installed, and is it what this adapter was exercised against. It refuses nothing, ever - a version
+# is not a state of the world AGL is entitled to have an opinion about beyond saying what it sees -
+# so every claim below is a claim about a *line*, and every one of them is paired with the run
+# carrying on. There is no cache and no flag: a tool outside its range warns on every run until it
+# is moved, which is the whole of why the line has to be worth reading.
+#
+# `instruments/preflight/late.py` carries the version claims because its namespace names one model
+# and so one provider - a note per provider over `two_providers` would be two copies of one
+# sentence, and a count would then say nothing about what a standing produces.
+
+# A range with two different ends, so what is printed exercises the spelling that names both of
+# them rather than the one a single-release adapter happens to produce today.
+_TESTED: Final = VersionRange("1.0.0", "1.1.0")
+
+def _installed(version: str | None, *, where: str | None = "a stand-in binary") -> Installation:
+    """What a backend reports, with only the half each test below varies left to vary."""
+    return Installation(
+        tool="a stand-in harness", version=version, tested=_TESTED, efforts={}, where=where
+    )
+
+async def _notes_for(installed: Installation, declared_by: Callable[..., object]) -> list[str]:
+    """Every note one preflight wrote, over a namespace and a backend reporting this installation.
+
+    `preflight.check` rather than `api.run`, because a note is what this half is about and a run
+    writes one of its own on the way out - `sdk/_engine/teardown.py`'s, about the branch it left.
+    """
+    notes: list[str] = []
+    await preflight.check(_Stub(installed=installed), _Repository(), declared_by, notes.append)
+    return notes
+
+@pytest.mark.asyncio
+async def test_only_a_tool_outside_its_tested_range_warns_and_each_way_warns_differently() -> None:
+    """Five arrangements over one namespace: silence inside the range, and four ways to be outside.
+
+    **Silence is the first of them and the load-bearing one.** A line on every run about a tool
+    that is exactly what AGL was tested against is noise that trains an operator to skip the place a
+    real line appears - the same argument `tests/test_api.py` makes about a sync that worked, and
+    the reason its count of stderr lines on a good run is still one.
+
+    **The other four are four different next moves**, which is why `Standing` has four members
+    outside `WITHIN` and not one. Newer: nothing to do, watch for behaviour no workflow explains.
+    Older: update the tool. Unreadable: AGL cannot order what the tool said, so compare the two
+    versions yourself. Unreported: nothing answered at all. A single sentence covering all four
+    would send every reader to the same place, and three of them to the wrong one.
+
+    So the distinctness of the four lines is asserted as well as their content: the version that was
+    read is in each one that has one, the range is in all of them, and no two are the same sentence.
+    """
+    silent = await _notes_for(_installed("1.1.0"), late.fn)
+    said = [
+        await _notes_for(_installed(version), late.fn)
+        for version in ("1.2.0", "0.9.0", "1.1.0-rc1", None)
+    ]
+
+    assert silent == [], "a tool sitting inside the range it was tested against was warned about"
+    assert [len(one) for one in said] == [1, 1, 1, 1], (
+        f"four standings produced {[len(one) for one in said]} lines. One standing is one note - "
+        f"a provider asked twice would double them and a branch that fell through would drop one"
+    )
+    lines = [one[0] for one in said]
+    assert all(line.startswith("warning: ") for line in lines), lines
+    assert all("a stand-in harness" in line for line in lines), (
+        "a line left out the name of the tool it is about, which is the one thing no layer above "
+        "`ports/agent.py` may spell for itself - `Installation.tool` carries it as data"
+    )
+    assert all("1.0.0 to 1.1.0" in line for line in lines), (
+        "a line left out the range AGL was tested against, so the reader was told their version is "
+        "wrong and not what it is being measured against"
+    )
+    assert all(
+        version in line
+        for version, line in zip(("1.2.0", "0.9.0", "1.1.0-rc1"), lines[:3], strict=True)
+    ), "a line left out the version the tool reported, which is half of what it is comparing"
+    assert len(set(lines)) == 4, (
+        f"four standings produced {len(set(lines))} distinct sentences. Each is a different next "
+        f"move for the person reading it, and two spelled alike send one of them nowhere"
+    )
+
+@pytest.mark.asyncio
+async def test_a_tool_that_answered_nothing_is_told_apart_from_one_that_was_never_found() -> None:
+    """`Installation.where` exists for this one sentence, and here is where it earns its place.
+
+    Both are `UNREPORTED` and they are two different machines. A binary that is there and would not
+    say what version it is sends somebody to that binary, named; nothing found at all sends them to
+    whether the tool is installed where AGL looks for it, and naming a path there would be naming a
+    path that is not on the machine. The port answers the second with `None`, and this is the only
+    reader that can tell them apart.
+    """
+    quiet = await _notes_for(_installed(None, where="/opt/stand-in/harness"), late.fn)
+    missing = await _notes_for(_installed(None, where=None), late.fn)
+
+    assert "/opt/stand-in/harness" in quiet[0], (
+        "a binary that was found and would not answer was not named, so the reader has nothing to "
+        "go and run by hand"
+    )
+    assert "/opt/stand-in/harness" not in missing[0]
+    assert quiet != missing, (
+        "a tool nothing could find and a tool that would not answer got the same sentence, and "
+        "they are two different things to go and do"
+    )
+
+@pytest.mark.asyncio
+async def test_a_version_warning_is_out_before_a_readiness_probe_that_refuses_the_run() -> None:
+    """**Why the note is handed to a callback and not returned**, asserted rather than argued.
+
+    `check` is allowed to raise, and a readiness probe refusing is exactly the case where the
+    version that was reported is the thing most worth having read - a harness too old to answer the
+    way this adapter asks is refused *by* that probe. Notes returned from `check` would leave with
+    the exception and reach nobody, and the operator would be told their backend is not ready with
+    no mention of the version sitting underneath it.
+
+    The ordering is also what keeps the free local question first: the test above this half asserts
+    that a repository that can name no committer spends no installation probe at all.
+    """
+    notes: list[str] = []
+    stub = _Stub(ready=False, installed=_installed("1.2.0"))
+
+    with pytest.raises(UpstreamUnavailable):
+        await preflight.check(stub, _Repository(), late.fn, notes.append)
+
+    assert len(notes) == 1 and "1.2.0" in notes[0], (
+        f"a run refused at the readiness probe reported {notes}. The version was read before that "
+        f"probe and is the likeliest explanation of it, so it has to be out before it can be lost"
+    )
+
+@pytest.mark.asyncio
+async def test_the_installation_probe_is_asked_once_per_provider_and_not_once_per_role() -> None:
+    """Two counts that differ, over `instruments/preflight/providers.py`'s three models.
+
+    `installation` describes the tool a backend starts and not the model it was handed, so a second
+    model on one provider re-reads one binary - two spawns on the OpenAI adapter and one on the
+    Claude adapter, every run, for an answer already in hand. Readiness is the other way round: it
+    is a question about serving *this* model, so it is asked once per model and the count below is
+    three against two.
+
+    Three models over two providers is the smallest namespace where those two numbers differ, which
+    is why this claim cannot be made in this file: its own namespace names one model per provider.
+    """
+    stub = _Stub()
+    notes: list[str] = []
+
+    await preflight.check(stub, _Repository(), broad.fn, notes.append)
+
+    assert stub.asked_ready == [OpenAI.SOL, OpenAI.LUNA, Claude.OPUS]
+    assert stub.asked_installation == [OpenAI.SOL, Claude.OPUS], (
+        f"the tool was asked about {[str(model) for model in stub.asked_installation]}. Two models "
+        f"of one provider are one tool, and asking twice spends a spawn to learn what was just read"
+    )
+    assert notes == [], "a backend inside its range with no listing at all still found something"
+
+@pytest.mark.asyncio
+async def test_a_role_naming_a_level_the_catalogue_lacks_is_warned_about_and_never_refused(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """**The specific half**, and the whole reason a listing is read at all.
+
+    `providers.editor` asks for `OpenAI.LUNA` at `ultra`, and the backend below lists every level
+    but that one for it. What the operator is owed is not "your version is odd" but the actual
+    disagreement: which factory, which model, which level, and what the tool does list instead - in
+    the tool's own order, so that the last of them can be named as the ceiling. `ports/agent.py`'s
+    `ModelEfforts.levels` is a tuple and not a set for exactly this sentence.
+
+    **The ceiling is named as the top of the listing and never as what this step will run at.** The
+    tool lowers a level it does not offer rather than refusing - `Claude.__call__` and
+    `OpenAI.__call__` both say so on `:param effort:` - and which level it lowers to is not
+    something measured here, so the line says what the catalogue says and stops.
+
+    Two other roles in that namespace name no level at all and one of them shares this one's
+    provider, so the single line is also the claim that a bare model is not warned about.
+
+    Driven through `api.run` because "never refuses" is the other half: the run reaches its
+    workflow, the step is dispatched at the level the role asked for, and the warning is a line on
+    stderr beside the one the release writes.
+    """
+    entered.clear()
+    harness = _fakes(tmp_path)
+    stub = _Stub(
+        installed=Installation(
+            tool="a stand-in harness",
+            version="1.0.0",
+            tested=VersionRange("1.0.0", "1.0.0"),
+            efforts={
+                OpenAI.LUNA: ModelEfforts(
+                    levels=("low", "medium", "high", "xhigh", "max"), default="medium"
+                )
+            },
+        )
+    )
+
+    await _start(harness, "broad", agents=stub)
+
+    printed = capsys.readouterr().err
+    warned = [line for line in printed.splitlines() if line.startswith("warning: ")]
+    assert len(warned) == 1, printed
+    for part in ("`editor`", "'openai:luna'", "'ultra'", "low, medium, high, xhigh, max", "'max'"):
+        assert part in warned[0], (
+            f"the line left out {part!r}: {warned[0]}. It is one sentence and each of those is a "
+            f"different half of the disagreement - the line to edit, the model, the level asked "
+            f"for, what the tool offers instead, and the most it will do"
+        )
+    assert entered == ["broad"], "a level the tool does not list refused the run instead of warning"
+    assert [task.model for task in stub.ran] == [OpenAI.LUNA(effort=OpenAIEffort.ULTRA)], (
+        "the level the role named did not reach the adapter, so AGL substituted one of its own - "
+        "the whole point of warning rather than refusing is that the tool decides this"
+    )
+
+@pytest.mark.asyncio
+async def test_two_levels_one_model_lacks_are_two_warnings_where_readiness_is_one_probe() -> None:
+    """The de-duplication here is over the whole choice, where readiness de-duplicates over the
+    model.
+
+    `instruments/preflight/efforts.py` declares `Claude.OPUS` at two efforts, and the backend below
+    lists neither. Readiness is one question - whether that backend can serve that model is one
+    fact about the world and one bill - but "the level you named is not on offer" is a different
+    sentence about each level, naming a different factory and a different line to edit. A scan that
+    reused `_demanded`'s mapping would type-check, ask readiness correctly, and drop one of the two
+    warnings on the floor.
+    """
+    listing = Installation(
+        tool="a stand-in harness",
+        version="1.0.0",
+        tested=VersionRange("1.0.0", "1.0.0"),
+        efforts={Claude.OPUS: ModelEfforts(levels=("medium",), default="medium")},
+    )
+    stub = _Stub(installed=listing)
+    notes: list[str] = []
+
+    await preflight.check(stub, _Repository(), two_levels.fn, notes.append)
+
+    assert stub.asked_ready == [Claude.OPUS], "readiness stopped being one question per model"
+    assert len(notes) == 2, notes
+    assert ["`deliberate`" in notes[0], "`hurried`" in notes[1]] == [True, True], (
+        f"the two lines named {notes}. Each is about one factory's own declaration, so a pair "
+        f"de-duplicated on the model names one line to edit and leaves the other unfindable"
+    )
+
+@pytest.mark.asyncio
+async def test_a_version_warning_reaches_stderr_and_the_run_it_warns_about_still_finishes(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The wiring, end to end: the engine builds the sentence and `api.py`'s `_warn` writes it.
+
+    `sdk/` may not import `api` - contract 1 - so the note travels as the callback `api.run` hands
+    `check`, which is `sdk/_engine/teardown.py`'s arrangement one stage earlier in the same run.
+    Stderr and never stdout, for `cli/commands/__init__.py`'s reason: a name a machine reads goes to
+    stdout and a note about the run does not.
+
+    And the run finishes. Nothing about a version reaches an exit code, so the record is there to
+    resume or clear afterwards exactly as it would have been, and the workflow ran.
+    """
+    entered.clear()
+    harness = _fakes(tmp_path)
+
+    await _start(harness, "late", agents=_Stub(installed=_installed("1.2.0")))
+
+    printed = capsys.readouterr()
+    warned = [line for line in printed.err.splitlines() if line.startswith("warning: ")]
+    assert len(warned) == 1 and "1.2.0" in warned[0], printed.err
+    assert printed.out == "", "a note about a run went to the stream a machine reads"
+    assert entered == ["late"], "a version outside the tested range stopped the workflow"
+    assert not await _no_record(harness), "the run was warned about and did not finish"
+
 # --- half two: containment, over the role a step is actually handed ------------------------------
 #
 # The four suites below measured the same claims through `api.run` once. What moved is the
@@ -1173,25 +1472,33 @@ async def test_a_step_is_refused_before_its_checkout_is_provisioned(tmp_path: Pa
 # --- the module's own surface --------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_check_takes_two_ports_and_a_workflow_function_and_never_a_services_bundle() -> None:
-    """`preflight.check` is callable with two ports and one function, which is the signature
-    decision.
+async def test_check_takes_two_ports_a_workflow_function_and_a_reporter_and_no_bundle() -> None:
+    """`preflight.check` is callable with two ports, one function and a sink, which is the
+    signature decision.
 
-    It takes the ports it asks and never a `Services`: an `AgentRunner`, which answers both of
+    It takes the ports it asks and never a `Services`: an `AgentRunner`, which answers all three of
     preflight's questions about a backend, and a `History`, which answers the one about the
     repository. The bundle would hand it eight, and six more readers would then be one field access
-    away in the module whose whole job is to refuse before anything has happened. The last argument
+    away in the module whose whole job is to refuse before anything has happened. The third argument
     is the workflow's own `async def` and not a `Workflow` - which this module could not import
     without a cycle, `sdk/workflow.py` importing `Capabilities` from here - and it is the smallest
-    thing that names the registry, since a function knows the module its `def` ran in. So the
-    composition root passes what it already holds and learns nothing about how a role is found.
+    thing that names the registry, since a function knows the module its `def` ran in.
 
-    The call below is the whole assertion - it compiles and it runs with no bundle in sight - and
-    the second half of it is that what got walked was this module's namespace: two models, cheapest
-    probe first, and no capability asked about either.
+    **The fourth is where a warning goes, and it is a callback rather than a return** for
+    `sdk/_engine/teardown.py`'s reason one layer over: `sdk/` may not import `api`, so the engine
+    builds the sentence and `api.py`'s `_warn` is what writes it to a stream. Returning the notes
+    instead would tie them to a call that is allowed to raise - and a readiness probe refusing is
+    exactly the case where the version that was reported is the thing worth having read.
+
+    So the composition root passes what it already holds and learns nothing about how a role is
+    found. The call below is the whole assertion - it compiles and it runs with no bundle in sight -
+    and the second half of it is that what got walked was this module's namespace: two models,
+    cheapest probe first, and no capability asked about either.
     """
     stub = _Stub()
+    notes: list[str] = []
 
-    await preflight.check(stub, _Repository(), two_providers.fn)
+    await preflight.check(stub, _Repository(), two_providers.fn, notes.append)
 
     assert (stub.asked_ready, stub.asked_offers) == ([OpenAI.SOL, Claude.OPUS], [])
+    assert notes == [], "a backend inside its tested range was warned about"

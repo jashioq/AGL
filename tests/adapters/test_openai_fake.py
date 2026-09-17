@@ -74,6 +74,7 @@ from agl.ports.agent import (
     OpenAI,
     OpenAIEffort,
     Restriction,
+    Standing,
     StopReason,
     Tool,
     ToolResult,
@@ -997,3 +998,27 @@ async def _refusal(member: Awaitable[object]) -> tuple[str, str]:
     except Exception as raised:
         return type(raised).__name__, str(raised)
     return "answered", ""
+
+@pytest.mark.asyncio
+async def test_this_fake_stands_in_for_a_current_installation_and_not_for_a_missing_one() -> None:
+    """A run on fakes has nothing to say about a version, and that is a decision rather than luck.
+
+    `None` is the port's report for a tool nothing could reach, and it is the wrong answer here:
+    a harness run has not failed to reach anything, and a fake reporting it would put a version
+    note in front of every workflow author testing offline and into the output of every command
+    `tests/test_measurable_targets.py` drives on fakes. So it reports a version, its range is that
+    same version, and `Standing.WITHIN` is what falls out - nothing to warn about, all the way
+    down. It names itself rather than the harness it stands in for, because a sentence naming a
+    tool nobody installed is the fiction `tests/contracts/` exists to keep out.
+    """
+    for model in OpenAI:
+        reported = await FakeAgentRunner().installation(model)
+        assert reported.standing is Standing.WITHIN, (
+            f"this fake reports {reported.standing} for {str(model)!r}. Every verdict but `WITHIN` "
+            f"is something to say about a tool, and there is no tool here to say it about"
+        )
+        assert "fake" in reported.tool, (
+            f"this fake calls its tool {reported.tool!r}. It stands in for the port and never for "
+            f"the vendor, so what it names is itself"
+        )
+        assert reported.efforts == {}, "a fake reads no catalogue of its vendor's"

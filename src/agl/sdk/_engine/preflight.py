@@ -1,8 +1,19 @@
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from types import MappingProxyType, ModuleType
-from typing import Any, Final
-from agl.ports.agent import AgentRunner, Capability, ModelId, Provider, model_of
+from typing import Any, Final, assert_never
+from agl.ports.agent import (
+    AgentRunner,
+    Capability,
+    Installation,
+    ModelChoice,
+    ModelEfforts,
+    ModelId,
+    Provider,
+    Standing,
+    VersionRange,
+    model_of,
+)
 from agl.ports.errors import DeniedError, InputError, InternalError, UpstreamUnavailable
 from agl.ports.history import History
 from agl.sdk.roles import Role, RoleFactory
@@ -67,14 +78,26 @@ def checked_inputs(
         inputs[name] = value
     return inputs
 
-async def check(runner: AgentRunner, history: History, declared_by: _Declaration) -> None:
+async def check(
+    runner: AgentRunner,
+    history: History,
+    declared_by: _Declaration,
+    report: Callable[[str], None],
+) -> None:
     try:
         await history.check_committer_identity()
     except UpstreamUnavailable as unattributable:
         raise UpstreamUnavailable(_no_identity(unattributable)) from unattributable
+    declared = _declared_beside(declared_by)
+    # Below the free local question and above the probes: `adapters/claude_code/runner.py`'s
+    # `check_ready` spends a turn of the model it asks about, so a note arriving after it would
+    # arrive after this run had been paid for, and one arriving before the question above would be
+    # bought on a run that could never have committed anything.
+    for note in await _notes(runner, declared):
+        report(note)
     # `sorted` is stable, so two models whose probes cost the same are still asked in the order
     # `_demanded` handed them, which is the order the author wrote their roles in.
-    for factory in sorted(_demanded(_declared_beside(declared_by)), key=_cost_of):
+    for factory in sorted(_demanded(declared), key=_cost_of):
         try:
             await runner.check_ready(model_of(factory.model))
         except UpstreamUnavailable as unavailable:
@@ -119,6 +142,134 @@ def _demanded(factories: tuple[RoleFactory[..., Any], ...]) -> tuple[RoleFactory
     for factory in factories:
         first.setdefault(model_of(factory.model), factory)
     return tuple(first.values())
+
+async def _notes(
+    runner: AgentRunner, declared: tuple[RoleFactory[..., Any], ...]
+) -> tuple[str, ...]:
+    installations = await _installations(runner, _demanded(declared))
+    found = [_version_note(one) for one in installations.values()]
+    found += [_effort_note(factory, installations) for factory in _chosen(declared)]
+    return tuple(note for note in found if note is not None)
+
+# One question per provider rather than per model: `installation` describes the tool a backend
+# starts and not the model it was handed, so a second model on one provider would re-read one
+# binary - and `adapters/openai/_version.py` spawns twice to answer it.
+async def _installations(
+    runner: AgentRunner, demanded: tuple[RoleFactory[..., Any], ...]
+) -> Mapping[Provider, Installation]:
+    found: dict[Provider, Installation] = {}
+    for factory in demanded:
+        model = model_of(factory.model)
+        if model.provider not in found:
+            found[model.provider] = await runner.installation(model)
+    return found
+
+# De-duplicated on the whole choice where `_demanded` de-duplicates on the bare model, because this
+# question is about the level a role named and two roles on one model at two levels are two of them.
+def _chosen(factories: tuple[RoleFactory[..., Any], ...]) -> tuple[RoleFactory[..., Any], ...]:
+    first: dict[ModelChoice, RoleFactory[..., Any]] = {}
+    for factory in factories:
+        if not isinstance(factory.model, ModelId):
+            first.setdefault(factory.model, factory)
+    return tuple(first.values())
+
+def _version_note(installation: Installation) -> str | None:
+    match installation.standing:
+        case Standing.WITHIN:
+            return None
+        case Standing.ABOVE:
+            return _above(installation)
+        case Standing.BELOW:
+            return _below(installation)
+        case Standing.UNREADABLE:
+            return _unreadable(installation)
+        case Standing.UNREPORTED:
+            return _unreported(installation)
+        case _:
+            assert_never(installation.standing)
+
+def _effort_note(
+    factory: RoleFactory[..., Any], installations: Mapping[Provider, Installation]
+) -> str | None:
+    choice = factory.model
+    if isinstance(choice, ModelId):
+        return None
+    model = model_of(choice)
+    installation = installations[model.provider]
+    offered = installation.efforts.get(model)
+    level = str(choice.effort)
+    # An empty listing and a missing one say the same nothing: a tool that described no level for
+    # this model has said nothing for the role's own to disagree with.
+    if offered is None or not offered.levels or level in offered.levels:
+        return None
+    return _unlisted(factory, model, level, installation, offered)
+
+def _above(installation: Installation) -> str:
+    return (
+        f"warning: {installation.tool} on this machine reports {installation.version!r}, and AGL "
+        f"was tested against {_tested_range(installation.tested)}. Nothing is refused over a "
+        f"version and this run carries on unchanged - a release nobody here has exercised is not a "
+        f"broken one. But AGL drives that tool across an interface it does not own, so an argument "
+        f"it sends or a line it reads back can have moved underneath it, and a run behaving in a "
+        f"way no workflow explains is the first place to suspect that"
+    )
+
+def _below(installation: Installation) -> str:
+    return (
+        f"warning: {installation.tool} on this machine reports {installation.version!r}, and AGL "
+        f"was tested against {_tested_range(installation.tested)}, which is newer. Nothing is "
+        f"refused over a version and this run carries on unchanged, but this is the direction with "
+        f"something to be done about it: AGL may send that tool an argument it does not have yet, "
+        f"or read for a line it does not print yet. Updating it is the whole of the fix - there is "
+        f"nothing here to silence, so the line stands on every run until the tool moves"
+    )
+
+def _unreadable(installation: Installation) -> str:
+    return (
+        f"warning: {installation.tool} on this machine reports {installation.version!r}, which is "
+        f"not something AGL can place against the {_tested_range(installation.tested)} it was "
+        f"tested against - what it orders is dotted digits and nothing else. So whether this tool "
+        f"is older or newer than the range AGL knows is unknown to this run, which carries on "
+        f"either way: this line names both, and the comparison is yours to make"
+    )
+
+def _unreported(installation: Installation) -> str:
+    asked = (
+        "AGL found no binary to ask what version it is"
+        if installation.where is None
+        else f"{installation.where!r} did not say what version it is when AGL asked"
+    )
+    return (
+        f"warning: {asked}, so this run cannot place {installation.tool} against the "
+        f"{_tested_range(installation.tested)} it was tested against. Nothing is refused over a "
+        f"version: a backend that is genuinely not there is refused by the readiness question this "
+        f"run puts next, in the tool's own words, and a version nobody could read is not that"
+    )
+
+# The levels are named in the tool's own order, `ports/agent.py`'s `ModelEfforts.levels` carrying
+# it, and the last of them is named as the ceiling and never as what this step will run at: which
+# level a tool substitutes for one it does not offer is nothing anybody here has measured.
+def _unlisted(
+    factory: RoleFactory[..., Any],
+    model: ModelId,
+    level: str,
+    installation: Installation,
+    offered: ModelEfforts,
+) -> str:
+    return (
+        f"warning: the role factory `{factory.name}`, declared in {factory.__module__!r}, asks for "
+        f"{str(model)!r} at effort {level!r}, and {installation.tool} on this machine lists no "
+        f"such level for that model. What it does list, in the order it listed them, is "
+        f"{', '.join(offered.levels)} - so {offered.levels[-1]!r} is the most that model reasons "
+        f"at on this machine. Nothing is refused over an effort: the tool lowers a level it does "
+        f"not offer rather than turning the run away, so every step on this role runs, at a level "
+        f"the tool does list and not at the one the role named"
+    )
+
+def _tested_range(tested: VersionRange) -> str:
+    if tested.lowest == tested.highest:
+        return tested.lowest
+    return f"{tested.lowest} to {tested.highest}"
 
 def _no_identity(refusal: UpstreamUnavailable) -> str:
     return (

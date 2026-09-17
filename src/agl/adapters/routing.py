@@ -6,6 +6,7 @@ from agl.ports.agent import (
     AgentRunner,
     AgentTask,
     Capability,
+    Installation,
     ModelId,
     Provider,
     model_of,
@@ -31,6 +32,9 @@ class RoutingAgentRunner(AgentRunner):
 
     async def check_ready(self, model: ModelId) -> None:
         await self._serving(model).check_ready(model)
+
+    async def installation(self, model: ModelId) -> Installation:
+        return await self._serving(model).installation(model)
 
     async def run(
         self,

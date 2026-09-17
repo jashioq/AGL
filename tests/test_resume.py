@@ -58,9 +58,11 @@ from agl.ports.agent import (
     AgentTask,
     Capability,
     Claude,
+    Installation,
     ModelId,
     Restriction,
     StopReason,
+    VersionRange,
 )
 from agl.ports.errors import (
     ConflictError,
@@ -1078,6 +1080,14 @@ class _NotReady(AgentRunner):
     async def check_ready(self, model: ModelId) -> None:
         self.asked.append(model)
         raise UpstreamUnavailable("the harness is not on PATH: install it, or log in and try again")
+
+    async def installation(self, model: ModelId) -> Installation:
+        return Installation(
+            tool="a harness that is not on PATH",
+            version=None,
+            tested=VersionRange("1.0.0", "1.0.0"),
+            efforts={},
+        )
 
     async def run(
         self,

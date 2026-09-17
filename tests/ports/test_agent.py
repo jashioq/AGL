@@ -29,14 +29,18 @@ from agl.ports.agent import (
     ChosenOpenAI,
     Claude,
     ClaudeEffort,
+    Installation,
+    ModelEfforts,
     ModelId,
     OpenAI,
     OpenAIEffort,
     Provider,
     Restriction,
+    Standing,
     StopReason,
     Tool,
     ToolResult,
+    VersionRange,
     model_of,
 )
 from agl.ports.errors import InputError, InternalError
@@ -289,6 +293,113 @@ def test_a_declared_schema_cannot_be_edited_afterwards() -> None:
     schema["type"] = "string"
     assert tool.payload_schema == {"type": "object"}
     assert isinstance(tool.payload_schema, MappingProxyType)
+
+# --- Where an installed version stands against the range an adapter was tested over --------------
+
+def _standing(version: str | None, lowest: str = "1.2.3", highest: str = "1.4.0") -> Standing:
+    """One installation over a declared range, reduced to the verdict its `standing` derives."""
+    return Installation(
+        tool="a backend's tool", version=version, tested=VersionRange(lowest, highest), efforts={}
+    ).standing
+
+@pytest.mark.parametrize(
+    ("version", "expected"),
+    [
+        ("1.2.3", Standing.WITHIN),
+        ("1.3.9", Standing.WITHIN),
+        ("1.4.0", Standing.WITHIN),
+        ("1.2.2", Standing.BELOW),
+        ("0.9.9", Standing.BELOW),
+        ("1.4.1", Standing.ABOVE),
+        ("2.0.0", Standing.ABOVE),
+    ],
+)
+def test_an_installed_version_stands_inside_a_tested_range_that_closes_on_both_ends(
+    version: str, expected: Standing
+) -> None:
+    """Both endpoints are inside, because each is a version somebody actually ran this against.
+
+    The two just outside them are what makes that assertion mean something: a range read as
+    half-open would put `1.4.0` above and warn about the newest release anybody tested.
+
+    Component-wise and never as text, which is the whole reason this comparison is written out at
+    all - `0.9.9` is below `1.2.3` as versions and above it as strings, and `packaging` is not
+    reachable from here.
+    """
+    assert _standing(version) is expected, (
+        f"{version!r} stands {_standing(version)} against 1.2.3-1.4.0 and should stand {expected}. "
+        f"This verdict is the whole of what a version warning is built from: a wrong one is either "
+        f"a warning about a release that was tested or silence about one that was not"
+    )
+
+@pytest.mark.parametrize(
+    "version", ["0.152.0-rc1", "2.1.259+build", "1.2.x", "1.2.3.4", "7", "", "1..2", "1.²"]
+)
+def test_a_version_with_a_component_that_is_not_a_number_is_refused_a_verdict(
+    version: str,
+) -> None:
+    """The honest answer where no ordering is available, and it is a fifth verdict and not silence.
+
+    A pre-release, a build tag and a four-part version are each orderable by some scheme, and this
+    port implements none of them: what it can place is two or three runs of digits, and everything
+    else is reported as unplaced so that a reader is told rather than reassured. `1.²` is here
+    because `str.isdigit` answers true for a superscript that `int` then refuses, which would be a
+    version refused by a crash rather than by a verdict.
+    """
+    assert _standing(version) is Standing.UNREADABLE, (
+        f"{version!r} was placed against a range instead of being refused one. Nothing here orders "
+        f"a pre-release, a build tag or a fourth component, and a guess that reads like a verdict "
+        f"is worse than the one word saying no ordering was available"
+    )
+
+def test_a_version_nobody_could_read_stands_apart_from_one_the_backend_never_reported() -> None:
+    """Two different failures, two verdicts: the tool said something odd, or it said nothing.
+
+    A warning has to tell them apart. "Your tool is at a version AGL cannot place" sends somebody
+    to look at the version; "AGL could not read a version at all" sends them to look at whether the
+    tool is installed where AGL thinks it is, and a single word for both sends them nowhere.
+    """
+    assert _standing(None) is Standing.UNREPORTED
+    assert _standing("what") is Standing.UNREADABLE
+
+def test_a_range_holding_a_component_no_ordering_places_is_refused_a_verdict_too() -> None:
+    """The range is AGL's own constant, so this fires on an adapter's declaration and not a tool's.
+
+    Asserted because the derivation reads three versions and only one of them comes off a machine:
+    a range nothing can place would otherwise quietly compare as though it could, and the version
+    it compared would be blamed for a spelling AGL wrote itself.
+    """
+    assert _standing("1.3.0", lowest="1.2.3-rc1") is Standing.UNREADABLE
+    assert _standing("1.3.0", highest="1.4.0+build") is Standing.UNREADABLE
+
+def test_a_two_part_version_is_placed_by_extending_it_with_a_trailing_zero() -> None:
+    """`1.4` and `1.4.0` are one version, which is what both vendors and every ordering here mean.
+
+    The first pair is the whole of the assertion and the rest is context. Python compares a short
+    tuple below a longer one that starts the same way, so `1.4.0` against a range topped at `1.4`
+    is `ABOVE` unless the two are made the same length first - a range written two-part warning
+    about the very release it was written for, in the one direction nobody would think to check.
+    """
+    assert _standing("1.4.0", highest="1.4") is Standing.WITHIN
+    assert _standing("1.2.3", lowest="1.3", highest="1.4") is Standing.BELOW
+    assert _standing("1.4") is Standing.WITHIN
+    assert _standing("1.2") is Standing.BELOW
+
+def test_the_efforts_an_installation_was_built_with_cannot_be_edited_through_it() -> None:
+    """A warning is written from this mapping, and the caller that passed it keeps its own dict."""
+    efforts: dict[ModelId, ModelEfforts] = {
+        OpenAI.LUNA: ModelEfforts(levels=("low",), default="low")
+    }
+    reported = Installation(
+        tool="a backend's tool",
+        version="1.0.0",
+        tested=VersionRange("1.0.0", "1.0.0"),
+        efforts=efforts,
+    )
+    efforts[OpenAI.SOL] = ModelEfforts(levels=(), default=None)
+
+    assert set(reported.efforts) == {OpenAI.LUNA}
+    assert isinstance(reported.efforts, MappingProxyType)
 
 def test_the_values_are_frozen() -> None:
     """Every type here is a value: checked once on the way in, and not editable afterwards."""

@@ -8,10 +8,12 @@ from agl.ports.agent import (
     AgentTask,
     Capability,
     Claude,
+    Installation,
     ModelId,
     StopReason,
     Tool,
     ToolResult,
+    VersionRange,
     model_of,
 )
 from agl.ports.errors import InputError
@@ -28,6 +30,17 @@ _CAPABILITIES: Final = frozenset(
 )
 
 _ROUNDS: Final = 8
+
+_TOOL: Final = "AGL's Claude Code fake"
+
+# A fake stands in for an installation that is there and current, which is why it answers with a
+# version rather than with `None`: `None` reports a tool nothing could reach, and a run on fakes
+# has not failed to reach anything. It has one version, and the range is that same one.
+_VERSION: Final = "1.0.0"
+
+_INSTALLATION: Final = Installation(
+    tool=_TOOL, version=_VERSION, tested=VersionRange(_VERSION, _VERSION), efforts={}
+)
 
 _OPENING: Final = "Read: the task AGL's Claude Code fake was given"
 
@@ -119,6 +132,10 @@ class FakeAgentRunner(AgentRunner):
 
     async def check_ready(self, model: ModelId) -> None:
         _check_model(model)
+
+    async def installation(self, model: ModelId) -> Installation:
+        _check_model(model)
+        return _INSTALLATION
 
     async def run(
         self,

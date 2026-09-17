@@ -345,10 +345,10 @@ def _canonical(value: object, where: str) -> JsonValue:
             )
         return tagged
     raise InputError(
-        f"{where} is a {type(value).__name__}, which cannot be canonicalised: a step's inputs are "
-        f"fingerprinted, and a fingerprint is what a resume compares to decide whether to replay "
-        f"this step or pay for it again. Pass a dataclass, a mapping, a sequence, a set, a string, "
-        f"a number, a bool or None"
+        f"{where} is a {type(value).__name__}, which cannot be canonicalised: every term a step is "
+        f"addressed by is fingerprinted, and a fingerprint is what a resume compares to decide "
+        f"whether to replay this step or pay for it again. Pass a dataclass, a mapping, a "
+        f"sequence, a set, a string, a number, a bool or None"
     )
 
 def _checked_key(key: object, where: str) -> str:

@@ -54,8 +54,10 @@ from agl.ports.agent import (
     AgentTask,
     Capability,
     Claude,
+    Installation,
     ModelId,
     StopReason,
+    VersionRange,
 )
 from agl.ports.errors import (
     ConflictError,
@@ -949,6 +951,14 @@ class _Readiness(AgentRunner):
     async def check_ready(self, model: ModelId) -> None:
         self.asked.append(model)
         raise UpstreamUnavailable("the harness is not ready")
+
+    async def installation(self, model: ModelId) -> Installation:
+        return Installation(
+            tool="a harness that is not ready",
+            version="1.0.0",
+            tested=VersionRange("1.0.0", "1.0.0"),
+            efforts={},
+        )
 
     async def run(
         self,

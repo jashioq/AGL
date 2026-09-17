@@ -18,15 +18,19 @@ __all__ = [
     "ChosenOpenAI",
     "Claude",
     "ClaudeEffort",
+    "Installation",
     "ModelChoice",
+    "ModelEfforts",
     "ModelId",
     "OpenAI",
     "OpenAIEffort",
     "Provider",
     "Restriction",
+    "Standing",
     "StopReason",
     "Tool",
     "ToolResult",
+    "VersionRange",
     "check_tool_declaration",
     "model_of",
 ]
@@ -271,8 +275,86 @@ class AgentOutcome:
 
 type ActivityReporter = Callable[[str], None]
 
+class Standing(StrEnum):
+    """Where an installed version sits against a tested range: inside it, outside, or unjudged."""
+
+    WITHIN = "within"
+    BELOW = "below"
+    ABOVE = "above"
+    UNREADABLE = "unreadable"
+    UNREPORTED = "unreported"
+
+@dataclass(frozen=True, slots=True)
+class VersionRange:
+    """The versions of its tool an adapter was exercised against: the oldest and the newest."""
+
+    lowest: str
+
+    highest: str
+
+@dataclass(frozen=True, slots=True)
+class ModelEfforts:
+    """What one model reasons at, in its own tool's words: the levels offered, and the fallback."""
+
+    # In the tool's own order and never sorted here, because the order is itself something the tool
+    # reported: the vendor CLI 0.152.0 lists every model's levels ascending, so its last entry is
+    # the most that model reasons at, and a set would throw that away.
+    levels: tuple[str, ...]
+    """The tool's own spellings, which is why these are strings and not an effort enum's members."""
+
+    default: str | None
+    """What the tool reasons at where a task names no level; `None` where it did not say."""
+
+@dataclass(frozen=True, slots=True)
+class Installation:
+    """What a backend runs on: the tool, its version, where from, the tested range, its efforts."""
+
+    tool: str
+    """What to call the tool in a sentence, supplied here because no layer above may spell it."""
+
+    version: str | None
+    """As the tool spelled it, unparsed; `None` where none was read, which is never a refusal."""
+
+    tested: VersionRange
+
+    efforts: Mapping[ModelId, ModelEfforts]
+    """Every model this backend serves that its tool described; empty where the tool cannot say."""
+
+    where: str | None = None
+    """How the binary the version came from was named; `None` where no binary was identified."""
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "efforts", MappingProxyType(dict(self.efforts)))
+
+    @property
+    def standing(self) -> Standing:
+        """Where the version that answered sits against the range, derived rather than stored.
+
+        :return: `WITHIN` where nothing needs saying, and four separate reasons to say something
+        """
+        if self.version is None:
+            return Standing.UNREPORTED
+        found = _ordered(self.version)
+        lowest = _ordered(self.tested.lowest)
+        highest = _ordered(self.tested.highest)
+        if found is None or lowest is None or highest is None:
+            return Standing.UNREADABLE
+        if found < lowest:
+            return Standing.BELOW
+        return Standing.ABOVE if found > highest else Standing.WITHIN
+
+# Two or three dot-separated runs of ASCII digits and nothing else. A component a vendor spells with
+# anything more - `0.152.0-rc1`, `2.1.259+build` - is one no ordering written here could place
+# honestly, and `Standing.UNREADABLE` is what says so; `str.isdigit` alone admits superscripts,
+# which `int` then refuses.
+def _ordered(version: str) -> tuple[int, ...] | None:
+    parts = version.split(".")
+    if not 2 <= len(parts) <= 3 or not all(part.isascii() and part.isdigit() for part in parts):
+        return None
+    return tuple(int(part) for part in parts) + (0,) * (3 - len(parts))
+
 class AgentRunner(ABC):
-    """Every agent backend behind one port: what it can do, whether it is ready, and one run."""
+    """Every agent backend behind one port: what it can do, what it runs on, if ready, one run."""
 
     @abstractmethod
     async def capabilities(self, model: ModelId) -> frozenset[Capability]:
@@ -289,6 +371,15 @@ class AgentRunner(ABC):
 
         :param model: preflight asks once per distinct model a workflow declares, before step one
         :raises UpstreamUnavailable: carrying a reason a person can act on and then start again
+        """
+        ...
+
+    @abstractmethod
+    async def installation(self, model: ModelId) -> Installation:
+        """What this backend is running on, against what it was tested. Warns; never refuses.
+
+        :param model: asked for, because a routing runner stands over one tool per provider
+        :return: the whole of what a version warning is built from, tool's name included
         """
         ...
 

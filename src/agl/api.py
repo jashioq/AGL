@@ -113,7 +113,7 @@ async def run(
             f"branch -D {branch}` frees the label, and any other label starts a run of its own."
         )
 
-    await preflight.check(services.agents, services.history, wf.fn)
+    await preflight.check(services.agents, services.history, wf.fn, _warn)
 
     ref = (
         await services.history.default_ref()
@@ -172,7 +172,7 @@ async def resume(
 
     given = params.from_json(wf.params, spec.params)
 
-    await preflight.check(services.agents, services.history, wf.fn)
+    await preflight.check(services.agents, services.history, wf.fn, _warn)
 
     async with services.workspaces.hold(label):
         return await _walk(services, wf, scope, spec, given)
@@ -384,10 +384,12 @@ async def _sync_workspace(syncer: Syncer | None, home: AglHome | None) -> None:
     _warn(_unchanged(outcome))
 
 # Never on stdout, for `cli/commands/__init__.py`'s reason: what a machine consumes goes there and
-# this is a note to whoever is reading the terminal. Both callers write here rather than hand a
-# line back for a command to print, and for two different reasons - `_sync_workspace`'s is that
-# what a run hands back it hands back hours later, and `sdk/_engine/teardown.py`'s is that a run
-# ending in a `Stop` hands nothing back at all, the workflow's own exception being what leaves.
+# this is a note to whoever is reading the terminal. Every caller writes here rather than hand a
+# line back for a command to print, and for three different reasons - `_sync_workspace`'s is that
+# what a run hands back it hands back hours later; `sdk/_engine/teardown.py`'s is that a run ending
+# in a `Stop` hands nothing back at all, the workflow's own exception being what leaves; and
+# `sdk/_engine/preflight.py`'s is that its notes are due out before a readiness probe that may
+# refuse this run, and what a call that raised would have returned is read by nobody.
 def _warn(note: str) -> None:
     print(note, file=sys.stderr)
 
