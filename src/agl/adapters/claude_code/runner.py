@@ -1,3 +1,4 @@
+import os
 import tempfile
 from pathlib import Path
 from typing import Final
@@ -9,12 +10,15 @@ from claude_agent_sdk import (
     query,
 )
 from claude_agent_sdk.types import SystemPromptPreset
+from agl.adapters.claude_code._environment import withheld
 from agl.adapters.claude_code._session import Stderr, outcome_of
 from agl.adapters.claude_code._tools import ASKING_MECHANISMS_DENIED, Caller, servers
 from agl.adapters.claude_code._version import probed
 from agl.adapters.claude_code.translate import (
+    CROSS_SESSION_DENIED,
     Restraint,
     effort_level,
+    last_words,
     model_name,
     restraint,
     unready,
@@ -55,12 +59,6 @@ _PLAN_ONLY: Final = (
 
 _CONTEXT_HEADING: Final = "AGL is running this task with the following standing context:"
 
-# `CLAUDE_CODE_EFFORT_LEVEL` beats `--effort` in the CLI `_version.TESTED` names, so an operator's
-# own shell would pick the level AGL then fingerprints. The SDK's `subprocess_cli` merges this
-# mapping over the inherited environment and can set a key but never remove one, and the empty
-# string is the one value that neutralises the variable and leaves a bare model its own default.
-_NO_INHERITED_EFFORT: Final[dict[str, str]] = {"CLAUDE_CODE_EFFORT_LEVEL": ""}
-
 class ClaudeCodeRunner(AgentRunner):
     def __init__(self, cli_path: Path | None = None) -> None:
         self._cli_path = None if cli_path is None else Path(_inert(str(cli_path), "cli_path"))
@@ -71,6 +69,7 @@ class ClaudeCodeRunner(AgentRunner):
 
     async def check_ready(self, model: ModelId) -> None:
         name = model_name(model)
+        stderr = Stderr()
         with tempfile.TemporaryDirectory(prefix="agl-ready-") as elsewhere:
             options = ClaudeAgentOptions(
                 cwd=elsewhere,
@@ -83,8 +82,8 @@ class ClaudeCodeRunner(AgentRunner):
                 permission_mode="bypassPermissions",
                 max_turns=1,
                 cli_path=self._cli_path,
-                stderr=Stderr(),
-                env=_NO_INHERITED_EFFORT,
+                stderr=stderr,
+                env=withheld(os.environ),
             )
             try:
                 async for message in query(prompt=_READY_PROMPT, options=options):
@@ -93,10 +92,11 @@ class ClaudeCodeRunner(AgentRunner):
                             f"the Claude Code CLI answered a readiness check with an error "
                             f"instead of a result: {message.result or message.subtype}. A session "
                             f"that is not authenticated, an exhausted allowance and an unusable "
-                            f"request all arrive this way, so the message above is what to act on"
+                            f"request all arrive this way, so the message above is what to act "
+                            f"on. {last_words(stderr.tail())}"
                         )
             except ClaudeSDKError as error:
-                raise unready(error) from error
+                raise unready(error, stderr.tail()) from error
 
     async def installation(self, model: ModelId) -> Installation:
         model_name(model)
@@ -141,12 +141,12 @@ def _options(
         add_dirs=[],
         extra_args={},
         mcp_servers=supplied,
-        disallowed_tools=_rules(limits, ASKING_MECHANISMS_DENIED),
+        disallowed_tools=_rules(limits, (*ASKING_MECHANISMS_DENIED, *CROSS_SESSION_DENIED)),
         # A managed policy forbidding this mode makes the CLI refuse to start, with its own message.
         permission_mode="bypassPermissions",
         cli_path=cli_path,
         stderr=stderr,
-        env=_NO_INHERITED_EFFORT,
+        env=withheld(os.environ),
     )
 
 def _prompt(task: AgentTask, limits: Restraint) -> str:

@@ -841,6 +841,67 @@ a placement, such a leftover changes nothing a caller is told. After a removal i
 left of the workflow the command reports gone, so the directory, though not the error, comes back
 as `Removed.leftover`, and `agl remove` names it on stderr.
 
+**A translation that drops what the failing program said is a translation into nothing, and where
+the adapter is what took those words away it owes them back.** `adapters/claude_code/_session.py`'s
+`Stderr` exists because the SDK pipes the CLI's stderr only when `options.stderr` is registered —
+unregistered, that stream stays on the operator's own terminal — so every line reaching that object
+is one the operator no longer sees, and the exception AGL raises is the only copy left of it.
+`ProcessError` is where that bites: the SDK builds one for every non-zero exit with its `stderr`
+attribute set to a fixed placeholder rather than to anything the CLI wrote, and replaces it with a
+`ResultError` carrying a result frame's own text *only* when a result frame arrived first — so a CLI
+refusing to start, which sends no result frame, says everything it has to say on the stream the
+adapter swallowed. `adapters/claude_code/translate.py`'s `last_words` is the sentence that hands it
+back, and `translated` appends it once over whichever branch answered rather than each branch
+writing it, so a branch added for a class a later SDK introduces carries it without being told to;
+`_session.py`'s two direct refusals and `runner.py`'s readiness refusal end with the same call, and
+that readiness one is why `check_ready` names its `Stderr` instead of building one into the options
+and forgetting it. **What reaches a message is bounded twice — fifty lines and two thousand
+characters, both taken off the end**, because the SDK's framer flushes a partial line only once it
+passes a megabyte, so a count of lines is no bound at all and an error message that is a log file is
+a second defect rather than a fix. **Which subclass answers is left alone**: telling a permanent
+condition from a transient one here means pattern-matching vendor prose, which goes stale on a
+release while still reading like a guard, and `UpstreamUnavailable` and `UpstreamUnexpected` resolve
+to the same exit code, so the classification decides nothing a script can act on where the sentence
+decides everything a person can. The Codex adapter closed this seam from the start —
+`adapters/openai/translate.py`'s `failure` and `unready` each take what the process printed — which
+is the parallel sibling the naming convention's N6 means, read the other way round.
+`tests/adapters/test_claude_code_translate.py::test_every_translation_ends_with_what_the_cli_printed_whatever_the_sdk_said`
+holds the property over the SDK's whole hierarchy,
+`tests/adapters/test_claude_code_runner.py::test_a_cli_that_dies_before_it_says_anything_reports_what_it_printed_instead`
+and `::test_a_readiness_probe_that_dies_reports_what_the_cli_printed_before_it_died` hold the two
+call sites through the real adapter, and
+`::test_the_tail_an_error_message_carries_is_bounded_in_lines_and_in_characters` holds both bounds.
+
+**A vendor's word for why a run ended is a closed list, and what happens when that list grows is a
+thing to decide before it grows.** `adapters/claude_code/_session.py`'s `_stopped` reads three
+fields of one result message in the order of how much each knows — `terminal_reason`, then the
+result `subtype`, then the model's own `stop_reason` — and `ports/agent.py`'s `StopReason` has two
+members to answer with, so most of what that CLI can say maps to neither. **`terminal_reason`
+decides alone.** It is the query loop's own statement where the other two describe the last request,
+so a value this adapter cannot read is refused there rather than passed over — because passed over
+it is overruled by whatever sits beside it, and `terminal_reason="api_error"` arriving with
+`stop_reason="stop_sequence"`, which is what an unauthenticated CLI 2.1.277 actually sends, came
+back as a turn the agent finished. `StopReason.COMPLETED` on a run that reached no model is not a
+missing answer but a wrong one, and `sdk/_engine/steps.py`'s `_because` then explains it to a person
+as a prompt that never asked for a report. **The refusal is `UpstreamUnexpected` and it sits after
+the `is_error` branch**, so the eleven reasons that release classes as errors keep the sentence
+carrying what the far side said and the promise that a retry may get past it. What is left for the
+refusal is a result that looks clean and stopped for a reason nothing here can weigh: the four
+classed as neither an error nor a cancellation — a stop hook, a deferred tool, a turn sent to the
+background — and any of the other fourteen that a later release stops flagging.
+**`stop_reason=None` is a different signal and stays one**: that schema leaves `terminal_reason`
+unset for a turn that bypassed the loop, a local slash command answers with exactly that, and "the
+backend did not say" is something `_because` reads and says out loud. Giving the refused case a
+`StopReason` member of its own is the other answer available, and it is a port's decision rather
+than an adapter's.
+`tests/adapters/test_claude_code_runner.py::test_a_terminal_reason_this_adapter_cannot_read_stops_the_run_by_name`
+holds the fourteen, `::test_an_unreadable_terminal_reason_outranks_the_stop_reason_reported_beside_it`
+holds the ordering, `::test_an_error_result_is_reported_as_unavailable_before_its_reason_is_judged`
+holds the placement, and
+`::test_the_bundled_binary_declares_every_terminal_reason_this_module_accounts_for` reads the
+binary the wheel ships, so a release that adds a twentieth value fails the build naming it instead
+of being discovered in a run.
+
 **`ports/errors.py` holds the one exception-to-exit-code table and `cli/exit_codes.py` consumes it
 without adding a number of its own.** An exception that is not an `AglError` arriving at the top of
 the CLI is one AGL has no name for, so it exits 70 — the same answer `exit_code_for` gives an
@@ -1112,24 +1173,58 @@ is the collision, and
 `tests/ports/test_agent.py::test_a_chosen_effort_is_recorded_under_its_class_path_and_two_field_names`
 holds the classes' side.
 
-**Every session the Claude adapter starts clears `CLAUDE_CODE_EFFORT_LEVEL` out of the environment
-it inherits, because that variable beats the flag AGL sends.** The level a role chose is a term of
-`base_of`, so it is fingerprinted into every step that role runs — and in the CLI
-`adapters/claude_code/_version.py`'s `TESTED` names, a shell that exports the variable decides the
-level instead, with `--effort` sent, accepted and overridden. Nothing announces it: the run journals
-the level the role asked for while the level the shell named is the one that ran, a resume keys on a
-level that never executed, and no message AGL receives carries the second for anything downstream to
-compare it with. So `adapters/claude_code/runner.py` passes `_NO_INHERITED_EFFORT` as `env=` on both
-the options a step runs under and the options `check_ready` builds. **The empty string is the fix
-and a removal is not available**: the SDK composes the child's environment by merging `options.env`
-into the inherited one, between two keys of its own, so `options.env` can set a key and can never
-take one away. Of the values that survive that merge only `""` is transparent — measured through the
-bundled binary's own `get_settings` control request, which reports the resolver's own output: `""`
-and an absent variable produce identical settings, where `unset` and `auto` suppress the effort
-parameter altogether, turning a bare model's *sent* default into no parameter at all. The variable
-is read case-insensitively and an unparseable value is ignored, so neither is a shape the guard
-could have been narrowed to. **`check_ready` is the half that looks unnecessary and is not.** Its
-options carry no `effort=` deliberately, which
+**Each agent adapter decides what environment its harness is started with, and the decision is an
+allowlist over that vendor's own namespace.** Every name the Claude Code CLI reads to configure
+itself begins with `CLAUDE` or `ANTHROPIC` — 694 distinct ones in the release
+`adapters/claude_code/_version.py`'s `TESTED` names — and every name the Codex CLI reads begins with
+`CODEX` or `OPENAI`. `adapters/claude_code/_environment.py` and `adapters/openai/_environment.py`
+each hold one vendor's namespace, the names allowed out of it with the measurement that put each one
+there, and the one function that adapter's runner calls. **Nothing outside the namespace is
+touched**, so `PATH`, `HOME`, `TMPDIR`, the proxy variables and whatever the repository's own build
+reads travel as they are, and no list here has to enumerate what a subprocess cannot run without.
+The two modules are parallel siblings in the sense the naming convention's N6 means and are
+deliberately not folded into one: "No shared module under `adapters/`" is the ruling, and it is the
+same one that keeps the two port fakes apart.
+
+**A name earns its place on either list by being one whose absence stops this machine reaching its
+endpoint at all, or sends a credential somewhere AGL did not choose.** Everything else in the
+namespace is a preference or a capability, and those are AGL's to decide rather than the shell's: a
+feature flag an operator set for their own interactive session is not a request about a run of
+AGL's. That is also what makes it an allowlist rather than a list of refusals — a release adds
+names, so a list of what to refuse is stale the day after it is written while still reading like a
+guard, and 694 names against the one this used to neutralise is the measurement of how stale.
+Three of them were measured doing real damage against that release, each through the environment
+alone: `CLAUDE_CODE_RESTRICTED` refuses `bypassPermissions` and ends every run;
+`ANTHROPIC_DEFAULT_OPUS_MODEL` takes the `opus` row out of the catalogue and answers a different
+model under the fingerprint `Claude.OPUS` — precisely the substitution
+`adapters/claude_code/translate.py`'s `_unserved` refuses when it is asked for through the port; and
+`CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING` moves where the CLI writes whatever the option says.
+
+**The two mechanisms differ because the two spawns do, and only one of them can remove a name.** The
+Codex adapter hands `create_subprocess_exec` the whole environment, so a name left out of `composed`
+is a name the child does not have. The Claude adapter cannot take anything away: `subprocess_cli`
+merges `options.env` into what it inherited, between two keys of its own, so `withheld` maps every
+name it will not pass on to the empty string instead. Of the values that survive that merge only
+`""` is transparent — measured through the bundled binary's own `get_settings` control request, which
+reports the resolver's own output: `""` and an absent variable produce identical settings, where
+`unset` and `auto` suppress the effort parameter altogether, turning a bare model's *sent* default
+into no parameter at all. **A blank is not transparent everywhere**, and the exception is a name the
+binary reads through `??`, which passes an empty string through where it would have fallen back to a
+default: `CLAUDE_CONFIG_DIR` is that name, and holding the credential store steady is why it is on
+the allowlist rather than why the mechanism is wrong. Three further names are left out of the
+mapping altogether rather than blanked, because `subprocess_cli` writes them itself —
+`CLAUDE_CODE_ENTRYPOINT` before the merge, so a blank would replace the SDK's own `sdk-py` with
+nothing.
+
+**`CLAUDE_CODE_EFFORT_LEVEL` is the member that made all of this load-bearing rather than tidy.**
+The level a role chose is a term of `base_of`, so it is fingerprinted into every step that role runs
+— and in that same release a shell exporting the variable decides the level instead, with `--effort`
+sent, accepted and overridden. Nothing announces it: the run journals the level the role asked for
+while the level the shell named is the one that ran, a resume keys on a level that never executed,
+and no message AGL receives carries the second for anything downstream to compare it with. The
+variable is read case-insensitively and an unparseable value is ignored, so neither is a shape the
+guard could have been narrowed to. **`check_ready` is the half that looks unnecessary and is not.**
+Its options carry no `effort=` deliberately, which
 `tests/adapters/test_claude_code_runner.py::test_the_readiness_probe_sends_no_effort_to_the_cli_it_asks`
 holds and "Readiness and capabilities belong to the model" argues — and that is exactly what makes
 it the call where the variable alone would have decided, the probe running at the operator's level
@@ -1137,10 +1232,52 @@ with nothing in AGL naming one.
 `tests/adapters/test_claude_code_runner.py::test_a_run_opens_its_session_with_the_operators_own_effort_level_cleared`
 and `::test_the_readiness_probe_clears_that_level_too_although_its_options_name_no_flag` hold the
 two call sites, and
-`::test_every_session_this_package_starts_clears_the_effort_level_an_environment_carries`
+`::test_every_session_this_package_starts_is_opened_on_the_allowlisted_environment`
 holds the package against a third being added without it — discriminating on `cwd=`, because a
 session runs somewhere and says so, where the options object `_version.py` builds only so that the
 SDK's resolver can read `cli_path` off it starts nothing and names no directory.
+
+**A `Restriction` is a statement about the task, and the seam into somebody else's session is not
+about the task at all.** The CLI listens on a socket per process under `/tmp/cc-socks`, 0600 in a
+0700 directory, which takes injected user messages from anything running as the same user — and an
+AGL agent not under `NO_SHELL` *is* the same user. The vendor's own refusal setting,
+`crossSessionInbound`, is a settings key, and the session this adapter opens reads no setting
+sources, so it cannot be reached from here. What is left is the tool half, and
+`adapters/claude_code/translate.py`'s `CROSS_SESSION_DENIED` is denied on every run rather than
+under one of the four: `NO_NETWORK` speaks about reaching the network and this reach is local, and
+an author who declared no restrictions asked for an agent with a free hand rather than for a channel
+into a run they did not start. `SendMessage` carries a recipient and `ListAgents` is what lists the
+recipients to it; the three `Cron` tools and `ScheduleWakeup` arm a turn that fires later, which is
+the other of the two kinds `claude_agent_sdk.types.TaskNotificationOriginSubkind` names. Those three
+are the ones an operator turns off with `CLAUDE_CODE_DISABLE_CRON`, which `_environment.withheld`
+blanks — so the child has them whatever the shell that started it had decided, and the denial is
+what settles it instead of the shell. **The inbound half cannot be shut from here**: the socket a
+session listens on is its own and is opened unconditionally, so what `withheld` keeps out is the
+*parent's* socket and token, not the child's listener.
+
+**So the second half is read rather than prevented, and it lands in `outcome_of`.** A string prompt
+is not a one-shot on the wire — `subprocess_cli` sends every prompt through `--input-format
+stream-json`, which is the mode `ResultMessage.origin` exists for — so a turn this session injects
+on its own interleaves with the turn AGL asked for, and each arrives with a result of its own.
+`adapters/claude_code/_session.py`'s `_injected` is the predicate, and it is the SDK's own: `None`,
+which is what a prompt sent through `query` arrives as because nothing stamps it, or the `human`
+kind a host that does stamp it would use. **Narrowing it to `None` alone is the tempting mistake**,
+and it would make a release that started stamping its own turns discard every result and refuse
+every run. What a foreign result gets is to be passed over rather than refused, which is where this
+parts from the unreadable `terminal_reason` beside it: that one is this run's own answer in a word
+nothing can weigh, where an injected turn's result is not this run's answer at all — and a run left
+holding none of its own ends at the refusal that was already there for a CLI that never said how the
+run ended. Whether a foreign turn having run at all is a thing to report rather than to pass over is
+open, and it is a port's question rather than an adapter's, there being nothing on `AgentOutcome`
+that could carry it.
+`tests/adapters/test_claude_code_runner.py::test_every_run_denies_the_cross_session_tools_whatever_restrictions_the_task_declares`
+holds the unconditional half over a task declaring nothing,
+`::test_a_result_from_an_injected_turn_is_not_the_outcome_the_run_answers_with` holds the reading
+against a result scripted after AGL's own, `::test_a_result_stamped_as_a_humans_own_prompt_is_read_as_this_runs_answer`
+holds the predicate against being narrowed, and
+`::test_no_deny_rule_this_adapter_sends_names_a_tool_the_bundled_binary_removed` reads the retired
+names off the shipped binary — which is the half of "does this name still exist" a literal can
+answer, the other half going only into the file `--debug-file` names.
 
 **What makes that clearing load-bearing rather than tidy is that AGL cannot read the effort back.**
 The `init` system message carries no effort on the SDK's stdio path and `ResultMessage` has no such
@@ -1426,6 +1563,23 @@ the counts and the stream. `tests/contracts/_agent_preflight.py`'s
 implementation of the port owes, fakes included — both report a version inside their own tested
 range, which is what keeps a harness run silent.
 
+**A `VersionRange` is a claim about what was exercised, so its lower end is the half that can lie.**
+Both are points today rather than spans, and for the same reason read from two directions. The
+Claude range describes a binary that is not separately installable: upgrading the package replaces
+it, so the release before is gone from the only machine that could re-exercise it, and a span whose
+lower end nothing can reach again claims a release *is* tested where all that is left is that it
+once was. The Codex range is the sharper case, because a stale lower end there is not merely
+unproven. `adapters/openai/runner.py`'s `_ALWAYS` sends `--ephemeral` on every command line and that
+binary's argument parser exits 2 on a flag it does not know, before it runs anything — so a release
+where the flag is absent is one AGL cannot start on at all, and a range naming it would promise
+support for a version on which every run dies. An unknown `-c` key is tolerated silently and a
+flag is not, which is why the two kinds of override do not carry the same risk. **Widening a range
+is therefore an act of measurement and never of tidying**: the honest lower end is the oldest
+release the current command line has been seen accepted on, and where that cannot be established
+the point is the answer. Nothing branches on any of this — `Installation.standing` only decides
+whether a sentence reaches stderr — so the cost of a point is a line an operator reads after every
+upgrade, and the cost of a span nobody measured is a promise AGL cannot keep.
+
 **Neither adapter's probe may touch what the operator's own tools keep.** The Claude probe asks the
 SDK's own `SubprocessCLITransport._find_cli()` for the binary rather than copying its order, so a
 configured `cli_path` reports the binary a session would actually start and not the bundled one the
@@ -1434,6 +1588,30 @@ once for the version, once for the model catalogue that is the only free source 
 set — under a fresh temporary `CODEX_HOME`, because that tool writes under its home on every
 invocation and AGL sets no `CODEX_HOME`, so a per-run probe would otherwise churn the operator's
 own. Both spawn into a temporary directory, read no credential and open no connection.
+
+**The Codex *run* cannot take that escape, and what it does instead is three overrides that have to
+be carried rather than derived.** `--ignore-user-config`'s own help says authentication still reads
+`CODEX_HOME`, and nothing in that binary names an auth directory apart from it — so pointing the
+home elsewhere is a run that cannot authenticate, which is a worse defect than the one it fixes.
+`adapters/openai/runner.py` therefore leaves the home where the credential is and closes what it can
+at the three seams there are: `--ephemeral` for the rollout, which is the whole model-visible prompt
+written under `sessions/` and read back by nothing; `-c features.plugins=false` for a feature that
+clones the plugin marketplace into the home as a 90 MB git working tree, over the network, before
+the first token; and `CODEX_SQLITE_HOME`, set through `_environment.composed`'s `chosen` to a
+directory per run, for six databases whose real cost is not bytes but AGL's turns becoming rows in
+the thread history and the memories an operator's own sessions read back. **The sandbox reaches none
+of this**: what it confines is the commands the model runs, and every one of these is the harness
+writing on its own account. What is left is stated rather than implied — an `installation_id`, a
+re-extraction of the harness's own bundled skills, a rotating zero-byte `tmp/arg0` lock, and, under
+`workspace-write` only, a `[projects."<workspace>"]` trust block appended to `config.toml`, which is
+the one write measured to survive every lever this binary offers and would need the home moved to
+stop.
+`tests/adapters/test_openai_runner.py::test_every_command_line_refuses_the_rollout_and_the_plugin_clone_the_harness_would_write`
+holds the two overrides, and `::test_a_run_points_the_harness_state_at_a_directory_it_made_and_then_removed`
+with `::test_the_shells_own_state_redirect_loses_to_the_one_this_adapter_chose` hold the third off
+the child's own environment — because a redirect at a path that is not there is one the harness
+falls back out of, into the home the credential is in, and a name merely withheld is the same
+fallback reached a different way.
 
 **Readiness and capabilities belong to the model, and the effort goes no further than the task and
 the digest.** `model_of` in `ports/agent.py` is the one place a bare `ModelId` is derived from a
@@ -1589,28 +1767,30 @@ The reasoning is the point — without it these get re-proposed.
   decided the Claude half could only be general, and a measurement that dissolves that premise is a
   reason to re-decide rather than to widen unasked. What re-deciding costs is the connect on every
   run, on top of the `-v` spawn — a second the operator pays before a run either way.
-- **No scrubbed or replaced environment for an agent harness.** What each adapter closes is the
-  *target repository* as a configuration channel: `claude_code/runner.py` passes
-  `setting_sources=[]`, `strict_mcp_config=True`, `settings=None` and `add_dirs=[]`, and
-  `openai/runner.py` passes `--ignore-rules`, `--ignore-user-config`,
+- **No scrubbed environment for an agent harness — only the vendor's own namespace is decided.**
+  What each adapter closes first is the *target repository* as a configuration channel:
+  `claude_code/runner.py` passes `setting_sources=[]`, `strict_mcp_config=True`, `settings=None` and
+  `add_dirs=[]`, and `openai/runner.py` passes `--ignore-rules`, `--ignore-user-config`,
   `-c project_doc_max_bytes=0` and `-c skills.include_instructions=false`, and hands the workspace
   as `cwd=` rather than on argv so that no path is interpolated into a configuration expression.
-  What neither does is build an environment for the child — no agent adapter *replaces* one, so a
-  harness inherits this process's and the operator's own machine stays visible to it. Every adapter
-  that touches the variable at all sets one key over what it inherited and takes nothing away:
-  `adapters/git/_runner.py` adds one, `claude_code/runner.py` neutralises
-  `CLAUDE_CODE_EFFORT_LEVEL` for the reason "Invariants where a mistake is silent" gives, and
-  `openai/_version.py` redirects that tool's home for the length of a probe that starts no session.
-  Setting a key is the narrow thing, and scrubbing is what is refused: each of those three names the
-  one variable it is about, and a harness would still read every other one. The one
-  thing that would take that away is moving the harness's home directory, and that directory is
-  where its credential lives, so an isolated environment is an unauthenticated one: the choice is
-  between a run that inherits a machine and a run that cannot start. Two harnesses whose flags have
-  nothing in common landing on the same boundary independently is what settles that it is the real
-  one. `tests/contracts/_agent_hermeticity.py` asserts the half that is closed, against one
-  repository poisoned for every harness at once with markers that ride three channels, and it reads
-  no environment variable anywhere — deliberately, because the inherited half is not a thing it
-  could assert about without pinning the decision it declines to make.
+  Neither of those reaches an environment variable: `--ignore-user-config` isolates `config.toml`
+  completely and the environment not at all, its own help saying so of authentication in particular,
+  and `setting_sources=[]` shuts out the settings files and leaves every variable standing. So
+  "Invariants where a mistake is silent" is the second half, and what it settles is the vendor's own
+  namespace and nothing wider. **This entry used to refuse that too**, on the argument that isolating
+  a harness means moving its home directory and that the home is where the credential lives, so an
+  isolated environment is an unauthenticated one. That argument holds and is the reason the
+  allowlists keep the credential and endpoint names first: what it does not reach is the other 680,
+  which carry no credential and decide what the run *is*. What stays refused is the general scrub —
+  no adapter enumerates or replaces the names outside its vendor's namespace, because an agent runs
+  the repository's own build and `LANG`, `SSL_CERT_FILE`, `JAVA_HOME` and the rest are that
+  machine's business rather than a list AGL could keep. `adapters/git/_runner.py` is still the
+  narrow shape and stays it: it adds one key over what it inherited, git being a tool AGL drives
+  rather than a harness a model acts through. `tests/contracts/_agent_hermeticity.py` asserts the
+  repository half, against one repository poisoned for every harness at once with markers that ride
+  three channels, and it still reads no environment variable anywhere — the environment half is one
+  adapter's own decision about one vendor's names, which is not a thing a port contract could speak
+  for.
 - **No network probe of AGL's own, so "offline" is only ever detected as far as a backend answers.**
   What AGL has instead is preflight: `sdk/_engine/preflight.py`'s `check` runs from `api.run` and
   `api.resume` and from nowhere else, and the Claude adapter's `check_ready` is a real round trip to

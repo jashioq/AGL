@@ -81,7 +81,10 @@ What follows the contract subclass is what the suite lists as beyond it, in roug
     own test double is exactly what `tests/contracts/` exists not to rely on, and every
     clause below that it covers is covered *again*, for real, by the gated suite above.
   * **That `stop_reason` is read honestly** (its gap 10: it cannot make a run reach a limit and has
-    no second source for the fact). Every string this adapter recognises, and one it does not.
+    no second source for the fact). Every string this adapter recognises, in the field it is
+    recognised in, and every one the release declares that it does not - which stop the run instead
+    of answering. The list of those is checked against the bundled binary's own schema, and that is
+    the only assertion in this file with a real tool on the other side of it.
 
 Named `test_claude_code_runner.py`, for the module it covers: `tests/` carries no `__init__.py`
 (see `tests/conftest.py` for why it must not), so pytest's module names are the bare filenames and
@@ -93,12 +96,14 @@ import asyncio
 import ipaddress
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Mapping
 from dataclasses import replace
 from functools import cache
+from mmap import ACCESS_READ, mmap
 from pathlib import Path
 from typing import Any, Final, NoReturn
 from urllib.parse import urlsplit
@@ -110,8 +115,9 @@ from claude_agent_sdk._internal.transport import Transport
 from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITransport
 from agl.adapters.claude_code import _session, _tools
 from agl.adapters.claude_code import runner as runner_module
+from agl.adapters.claude_code._environment import withheld
 from agl.adapters.claude_code.runner import ClaudeCodeRunner
-from agl.adapters.claude_code.translate import Restraint
+from agl.adapters.claude_code.translate import CROSS_SESSION_DENIED, Restraint, restraint
 from agl.ports.agent import (
     AgentOutcome,
     AgentRunner,
@@ -129,7 +135,7 @@ from agl.ports.agent import (
     Tool,
     ToolResult,
 )
-from agl.ports.errors import InputError, InternalError, UpstreamUnavailable
+from agl.ports.errors import InputError, InternalError, UpstreamUnavailable, UpstreamUnexpected
 from agl.ports.run import JsonValue
 from contracts._agent_hermeticity import CONFIGURATIONS, markers_in, plant
 from contracts._agent_tasks import Activity, Notes, ReporterFailed, ToolFailed, workspace
@@ -587,13 +593,14 @@ async def test_the_tools_a_task_carries_are_registered_and_the_denied_ones_are_g
     The session runs to the end, so the tool list read here belongs to a session that worked. A
     deny rule the CLI rejects outright would previously have looked identical to one it honoured.
 
-    **One of the four names below is weaker than the other three and it is worth knowing which.**
+    **One of the names below is weaker than the rest and it is worth knowing which.**
     Removing `Bash` from `NO_SHELL`'s rules makes `Bash` appear here, and removing `WebFetch` and
-    `WebSearch` from `NO_NETWORK`'s makes both of those appear - measured. Removing
-    `AskUserQuestion` from `ASKING_MECHANISMS_DENIED` changes nothing, because the CLI measured here
-    does not offer that tool to an SDK session at all: the assertion is true today whether or not
-    the deny rule exists. It is kept because a later CLI may start offering it and this is where
-    that would be caught, and the deny rule itself is pinned where it *can* fail - on
+    `WebSearch` from `NO_NETWORK`'s makes both of those appear - measured, and measured again for
+    every member of `CROSS_SESSION_DENIED`, each of which the CLI offers an SDK session by default.
+    Removing `AskUserQuestion` from `ASKING_MECHANISMS_DENIED` changes nothing, because the CLI
+    measured here does not offer that tool to an SDK session at all: the assertion is true today
+    whether or not the deny rule exists. It is kept because a later CLI may start offering it and
+    this is where that would be caught, and the deny rule itself is pinned where it *can* fail - on
     `disallowed_tools` in `test_the_options_the_run_actually_built_are_the_hermetic_ones`.
     """
     notes = Notes()
@@ -605,10 +612,12 @@ async def test_the_tools_a_task_carries_are_registered_and_the_denied_ones_are_g
         f"cannot see is a tool no handler will ever be called for"
     )
     assert "Read" in registered, "nothing denies Read, so a session missing it registered nothing"
-    for gone in ("Bash", "WebFetch", "WebSearch", "AskUserQuestion"):
+    denied = ("Bash", "WebFetch", "WebSearch", "AskUserQuestion", *CROSS_SESSION_DENIED)
+    for gone in denied:
         assert gone not in registered, (
             f"{gone} is registered for a task declaring NO_SHELL and NO_NETWORK, and the vendor's "
-            f"own asking mechanism is denied for every task: {registered}"
+            f"own asking mechanism and every route into another session are denied for every "
+            f"task: {registered}"
         )
 
 # --- What the loopback makes free: a check_ready that returns, and the request that left ---------
@@ -1121,14 +1130,25 @@ async def offline(
     play: Callable[[Scripted], Awaitable[None]],
     task: AgentTask,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    printed: tuple[str, ...] = (),
     **kwargs: Any,
 ) -> Any:
-    """Run the real adapter against a scripted CLI. Returns whatever `run` returns."""
+    """Run the real adapter against a scripted CLI. Returns whatever `run` returns.
+
+    `printed` is what the CLI wrote on its stderr, and it is handed to the sink the *adapter*
+    built rather than to one this file makes: a scripted `Transport` stands in for the process and
+    with it for the SDK's stderr plumbing, so there is no other route to that object, and feeding
+    one built here would prove only that this file can call it.
+    """
     transport = Scripted(play)
 
     def scripted(*, prompt: str, options: ClaudeAgentOptions) -> AsyncIterator[Any]:
         from claude_agent_sdk import query
 
+        assert options.stderr is not None, "the run opened a session with no stderr sink at all"
+        for line in printed:
+            options.stderr(line)
         return query(prompt=prompt, options=options, transport=transport)
 
     monkeypatch.setattr(_session, "query", scripted)
@@ -1713,9 +1733,11 @@ async def test_a_subagents_last_words_are_not_the_runs_answer(
 STOPPED: Final[tuple[tuple[dict[str, Any], StopReason | None], ...]] = (
     ({"terminal_reason": "completed"}, StopReason.COMPLETED),
     ({"terminal_reason": "max_turns"}, StopReason.LIMIT),
+    ({"terminal_reason": "budget_exhausted"}, StopReason.LIMIT),
     ({"terminal_reason": "aborted_streaming"}, None),
     ({"terminal_reason": "aborted_tools"}, None),
     ({"subtype": "error_max_turns", "is_error": True}, StopReason.LIMIT),
+    ({"subtype": "error_max_budget_usd", "is_error": True}, StopReason.LIMIT),
     ({"stop_reason": "end_turn"}, StopReason.COMPLETED),
     ({"stop_reason": "stop_sequence"}, StopReason.COMPLETED),
     ({"stop_reason": "tool_use"}, StopReason.COMPLETED),
@@ -1739,9 +1761,11 @@ async def test_why_a_run_stopped_is_read_off_three_fields_and_may_be_none(
     """The contract suite pins the legal values and cannot pin that any of them is true (gap 10).
 
     So this is the other half: every string this adapter claims to read, read. `None` is asserted
-    for the aborted pair and for a string nobody has seen, because the port made `None` legal
-    precisely so that "this backend did not say anything this port can read" has a spelling that
-    is not a lie - and inventing `COMPLETED` for a cancelled turn is the lie it prevents.
+    for the aborted pair, for a `stop_reason` nobody has seen and for a result that carries no
+    field at all, because the port made `None` legal precisely so that "this backend did not say
+    anything this port can read" has a spelling that is not a lie - and inventing `COMPLETED` for a
+    cancelled turn is the lie it prevents. An unreadable `terminal_reason` is the case that gets no
+    spelling here at all, and `REFUSED_REASONS` below is where it went.
     """
     repo = workspace(tmp_path)
 
@@ -1753,6 +1777,352 @@ async def test_why_a_run_stopped_is_read_off_three_fields_and_may_be_none(
     assert outcome.stop_reason is expected, (
         f"a result carrying {fields} was read as {outcome.stop_reason!r} and should be "
         f"{expected!r}. Three fields, consulted in the order of how much each one knows"
+    )
+
+# The other fourteen `terminal_reason` values Claude Code 2.1.277 declares: everything
+# `_session._TERMINAL_REASONS` does not name. Written out rather than derived from that table,
+# because a table checked against itself measures nothing - the release's own list is what this is,
+# and the test below reads it off the bundled binary to say so.
+REFUSED_REASONS: Final[tuple[str, ...]] = (
+    "blocking_limit",
+    "rapid_refill_breaker",
+    "prompt_too_long",
+    "image_error",
+    "model_error",
+    "api_error",
+    "malformed_tool_use_exhausted",
+    "stop_hook_prevented",
+    "hook_stopped",
+    "tool_deferred",
+    "background_requested",
+    "structured_output_retry_exhausted",
+    "tool_deferred_unavailable",
+    "turn_setup_failed",
+)
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason", REFUSED_REASONS)
+async def test_a_terminal_reason_this_adapter_cannot_read_stops_the_run_by_name(
+    reason: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A result that looks clean and ended for a reason nothing here can weigh is not an answer.
+
+    `turn_setup_failed` is the sharpest of the fourteen: the CLI's own loop threw before it built
+    the turn's parameters, so no tool definition and no instruction ever reached a model. Read as
+    `COMPLETED` that is a step recorded, committed and replayed by every resume as work that was
+    done. `stop_hook_prevented`, `hook_stopped`, `tool_deferred` and `background_requested` are the
+    four the release classes as neither an error nor a cancellation, so `is_error` does not catch
+    them and this is the only thing that does.
+
+    The value is required to be in the message, because a refusal that says a version moved without
+    saying which string moved leaves a reader with the whole release to search.
+    """
+    repo = workspace(tmp_path)
+    printed = "the CLI wrote this before it stopped"
+
+    async def play(cli: Scripted) -> None:
+        await cli.say(init(repo))
+        await cli.say(ends(result="half an answer", terminal_reason=reason))
+
+    with pytest.raises(UpstreamUnexpected) as refused:
+        await offline(play, task_in(repo), monkeypatch, printed=(printed,))
+    assert reason in str(refused.value), (
+        f"the run was refused without naming what it was refused over: {refused.value}. The "
+        f"string the CLI sent is the whole of what tells a reader where to look"
+    )
+    assert str(refused.value).endswith(printed), (
+        f"the refusal dropped what the CLI printed: {refused.value}. This adapter registers the "
+        f"sink that takes that stream off the operator's terminal, so its messages owe it back"
+    )
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reported", ["stop_sequence", "max_tokens"])
+async def test_an_unreadable_terminal_reason_outranks_the_stop_reason_reported_beside_it(
+    reported: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The defect this guard was written for, and it is not that the outcome came back as `None`.
+
+    A result carries all three fields at once, and the model's `stop_reason` describes its last
+    request rather than the turn: an unauthenticated CLI 2.1.277 sends
+    `terminal_reason="api_error"` beside `stop_reason="stop_sequence"`, which is an observed frame
+    and not a constructed one. Read left to right with the first field passed over, the second
+    answers - so a turn the CLI cut short came back as one the agent finished.
+
+    `max_tokens` is the second parameter because it reaches a different line: `LIMIT` is answered
+    with an outcome before `is_error` is consulted at all, so a reason left to fall through there
+    is one no refusal further down ever sees.
+    """
+    repo = workspace(tmp_path)
+
+    async def play(cli: Scripted) -> None:
+        await cli.say(init(repo))
+        await cli.say(
+            ends(result="half an answer", terminal_reason="api_error", stop_reason=reported)
+        )
+
+    with pytest.raises(UpstreamUnexpected) as refused:
+        await offline(play, task_in(repo), monkeypatch)
+    assert "api_error" in str(refused.value), (
+        f"a reason this adapter cannot read was overruled by a field that knows less: "
+        f"{refused.value}. The query loop's own statement outranks the model's, and a value "
+        f"missing from the table is still that statement"
+    )
+
+@pytest.mark.asyncio
+async def test_an_error_result_is_reported_as_unavailable_before_its_reason_is_judged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Eleven of the fourteen are ones that release classes as errors, and that branch says more.
+
+    `UpstreamUnavailable` says the same call may get past this later and carries what the far side
+    said; the refusal above says no retry helps and carries a string from a schema. The frame
+    scripted here is the one an unauthenticated CLI 2.1.277 sends, field for field - an exhausted
+    allowance arrives the same way, so ordering the two the other way round would answer every one
+    of them with a version mismatch and drop the only sentence a person could act on.
+    """
+    repo = workspace(tmp_path)
+    said = "Not logged in - Please run /login"
+
+    async def play(cli: Scripted) -> None:
+        await cli.say(init(repo))
+        await cli.say(
+            ends(
+                is_error=True,
+                result=said,
+                terminal_reason="api_error",
+                stop_reason="stop_sequence",
+            )
+        )
+
+    with pytest.raises(UpstreamUnavailable) as raised:
+        await offline(play, task_in(repo), monkeypatch)
+    assert said in str(raised.value), (
+        f"an error result was reported as a reason AGL could not read rather than as the failure "
+        f"it is: {raised.value}. What the CLI said is what a person can act on"
+    )
+
+def test_the_bundled_binary_declares_every_terminal_reason_this_module_accounts_for() -> None:
+    """The one thing in this file that would have caught the drift that produced it.
+
+    Every other test here runs against a fake, so this suite's total was identical either side of
+    a bump that moved both agent tools, with this adapter reading four of the nineteen values below
+    throughout. This reads the binary the wheel ships: its result schema validates against one
+    array literal per group, so the two are found by a value each rather than by the minifier's
+    name for them, and a release that adds a twentieth fails here naming it. Failing rather than
+    warning is the point - the decision a new value needs is which of the two lists it belongs in,
+    and nobody makes that one unprompted.
+    """
+    bundled = Path(claude_agent_sdk.__file__).parent / "_bundled" / "claude"
+    if not bundled.is_file():
+        pytest.skip(f"this wheel bundles no binary at {bundled}, so it declares nothing to read")
+    declared = _declared_reasons(bundled)
+    if not declared:
+        pytest.skip(
+            f"neither array literal was found in {bundled}: this scan has gone stale against the "
+            f"vendor's bundler rather than the tables having gone stale against the vendor"
+        )
+    accounted = set(_session._TERMINAL_REASONS) | set(REFUSED_REASONS)
+    assert declared == accounted, (
+        f"the bundled binary declares {sorted(declared - accounted)} that nothing here accounts "
+        f"for, and this module claims {sorted(accounted - declared)} it no longer declares. Each "
+        f"new one is either a `StopReason` in `_session._TERMINAL_REASONS` or a run refused by "
+        f"name in `REFUSED_REASONS`, and reading it as an ordinary answer is neither"
+    )
+
+# Found by a member rather than by the identifier assigned to it, because the bundle is minified
+# and those identifiers are regenerated on every build; the values are the vendor's and are not.
+def _declared_reasons(bundled: Path) -> set[str]:
+    found: set[str] = set()
+    with bundled.open("rb") as handle, mmap(handle.fileno(), 0, access=ACCESS_READ) as image:
+        for anchor in (b"aborted_streaming", b"turn_setup_failed"):
+            literal = re.search(rb'\[(?:"[a-z_]+",)*"' + anchor + rb'"(?:,"[a-z_]+")*\]', image)
+            if literal is not None:
+                found.update(member.decode() for member in re.findall(rb'"([a-z_]+)"', literal[0]))
+    return found
+
+# --- The deny rules: that a name still exists, and the seam denied whatever a task asked for -----
+
+def test_no_deny_rule_this_adapter_sends_names_a_tool_the_bundled_binary_removed() -> None:
+    """The vendor's own removal channel, read off the binary rather than trusted to stay put.
+
+    A deny rule is enforced by name, so a name the CLI no longer knows is a restriction that has
+    quietly stopped existing while the rule still reads like one. The binary keeps a set of the
+    names it has retired - `TeamCreate`, `AutofixPr` and nine others in the release
+    `_version.TESTED` names - and logs a rule naming one as *removed* rather than as a typo. That
+    set is the half of the question a literal answers honestly.
+
+    **The other half is not covered here and it is worth saying which.** A name that was never in
+    the registry at all - `MultiEdit` was one until it came out of `translate._DENIALS` - draws a
+    different line, and it goes only into the file `--debug-file` names: never stderr, never
+    stdout, never the SDK's `stderr` callback. Reading it costs a CLI that starts, composes a
+    session and gets far enough to resolve its permission rules, which is not a thing this gate has
+    a cheap way to do. So this asserts what a literal can and claims no more.
+    """
+    bundled = Path(claude_agent_sdk.__file__).parent / "_bundled" / "claude"
+    if not bundled.is_file():
+        pytest.skip(f"this wheel bundles no binary at {bundled}, so it declares nothing to read")
+    retired = _retired_tools(bundled)
+    if not retired:
+        pytest.skip(
+            f"the retired-tool set was not found in {bundled}: this scan has gone stale against "
+            f"the vendor's bundler rather than the rules having gone stale against the vendor"
+        )
+    named = {
+        rule.partition("(")[0]
+        for rule in (*_every_denial(), *_tools.ASKING_MECHANISMS_DENIED, *CROSS_SESSION_DENIED)
+    }
+    assert not named & retired, (
+        f"these deny rules name tools the release has retired: {sorted(named & retired)}. The "
+        f"rule is enforced by name, so what it used to cover is now covered by nothing - either "
+        f"the tool's replacement is what belongs in the table, or nothing does"
+    )
+
+def _every_denial() -> tuple[str, ...]:
+    every = (restraint(frozenset({member})).denied_tools for member in Restriction)
+    return tuple(rule for rules in every for rule in rules)
+
+# The same reading as `_declared_reasons` above and for the same reason: found by a member, because
+# the identifier the minifier gave the set is regenerated on every build and the names are not.
+def _retired_tools(bundled: Path) -> set[str]:
+    with bundled.open("rb") as handle, mmap(handle.fileno(), 0, access=ACCESS_READ) as image:
+        literal = re.search(rb'\[(?:"[A-Za-z]+",)*"TeamCreate"(?:,"[A-Za-z]+")*\]', image)
+        if literal is None:
+            return set()
+        return {member.decode() for member in re.findall(rb'"([A-Za-z]+)"', literal[0])}
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("restrictions", "what"),
+    [(frozenset(), "a task declaring none"), (frozenset(Restriction), "a task declaring all four")],
+)
+async def test_every_run_denies_the_cross_session_tools_whatever_restrictions_the_task_declares(
+    restrictions: frozenset[Restriction], what: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Unconditional is the claim, so the unrestricted task is the row that carries it.
+
+    A `Restriction` is a workflow author's statement about what this step is for, and reaching a
+    session AGL did not start is outside every one of the four: the CLI listens on a socket per
+    process that takes injected user messages from anything running as the same user, so it is not
+    the network `NO_NETWORK` speaks about, and an author who declared nothing has asked for a free
+    agent rather than for a channel into somebody else's run.
+
+    Read off the options the real `run` composed rather than off a rebuild here, for the reason
+    `Watched` gives: a reconstruction asserts that this file can call `ClaudeAgentOptions`.
+    """
+    repo = workspace(tmp_path)
+    sent: list[str] = []
+
+    async def play(cli: Scripted) -> None:
+        await cli.say(init(repo))
+        await cli.say(ends(result="done", terminal_reason="completed"))
+
+    def capturing(*, prompt: str, options: ClaudeAgentOptions) -> AsyncIterator[Any]:
+        from claude_agent_sdk import query
+
+        sent.extend(options.disallowed_tools)
+        return query(prompt=prompt, options=options, transport=Scripted(play))
+
+    monkeypatch.setattr(_session, "query", capturing)
+    await ClaudeCodeRunner().run(replace(task_in(repo), restrictions=restrictions))
+
+    assert set(CROSS_SESSION_DENIED) <= set(sent), (
+        f"{sorted(set(CROSS_SESSION_DENIED) - set(sent))} reached the CLI undenied for {what}. "
+        f"`SendMessage` takes a recipient and `ListAgents` is what lists the recipients to it; the "
+        f"rest arm a turn that fires after this run has answered"
+    )
+
+@pytest.mark.asyncio
+async def test_a_result_from_an_injected_turn_is_not_the_outcome_the_run_answers_with(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The last result wins, and this is what stops it being somebody else's last result.
+
+    A string prompt is not a one-shot on the wire: `subprocess_cli` sends every prompt through
+    `--input-format stream-json`, which is the mode the SDK's own `MessageOrigin` was added for -
+    turns the session injects interleave with the turn this adapter asked for. A result carrying
+    one of those is the answer to a question AGL did not put, and answering with it records a step
+    on text no fingerprint covers and a stop reason nothing here asked about.
+
+    `peer` is the kind a message from another session arrives under. The injected result is scripted
+    *after* AGL's own and carries a `LIMIT` reason, so a reading that kept the last result would
+    fail on the text and on the stop reason both, rather than on whichever happened to differ.
+    """
+    repo = workspace(tmp_path)
+
+    async def play(cli: Scripted) -> None:
+        await cli.say(init(repo))
+        await cli.say(ends(result="what this run asked for", terminal_reason="completed"))
+        await cli.say(
+            ends(
+                result="what somebody else asked for",
+                terminal_reason="max_turns",
+                origin={"kind": "peer", "from": "another session"},
+            )
+        )
+
+    outcome = await offline(play, task_in(repo), monkeypatch)
+
+    answered = AgentOutcome(stop_reason=StopReason.COMPLETED, text="what this run asked for")
+    assert outcome == answered, (
+        f"the run answered {outcome!r}, which is the injected turn's result and not its own. "
+        f"`ResultMessage.origin` is `None` for a prompt `query` sent, and the CLI attributes "
+        f"everything else"
+    )
+
+@pytest.mark.asyncio
+async def test_a_run_that_saw_nothing_but_injected_results_is_refused_rather_than_answered(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Passing one over is not the same as having one, and the existing refusal is what says so.
+
+    Skipping the injected result leaves this run with no result at all, which is the case
+    `outcome_of` already refuses by name - so the seam needs no second refusal of its own and gets
+    none. The alternative, reading the injected result because it is the only one there, is the
+    defect written the other way round.
+    """
+    repo = workspace(tmp_path)
+
+    async def play(cli: Scripted) -> None:
+        await cli.say(init(repo))
+        await cli.say(
+            ends(
+                result="not this run's answer",
+                terminal_reason="completed",
+                origin={"kind": "peer"},
+            )
+        )
+
+    with pytest.raises(UpstreamUnexpected) as refused:
+        await offline(play, task_in(repo), monkeypatch)
+    assert "never said how the run ended" in str(refused.value), (
+        f"a run holding only an injected result was refused as something else: {refused.value}"
+    )
+
+@pytest.mark.asyncio
+async def test_a_result_stamped_as_a_humans_own_prompt_is_read_as_this_runs_answer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The vendor's own predicate, followed rather than narrowed, and this is what that buys.
+
+    `MessageOrigin`'s documented test for "a turn this application submitted" is `origin is None or
+    origin["kind"] == "human"`, and `human` is the one kind the CLI honours from an SDK host. AGL
+    stamps nothing, so its own results arrive unattributed today - but a release that started
+    stamping them would, under a stricter reading here, make this adapter discard its own answer
+    and refuse every run for a CLI that never said how it ended.
+    """
+    repo = workspace(tmp_path)
+
+    async def play(cli: Scripted) -> None:
+        await cli.say(init(repo))
+        await cli.say(
+            ends(result="this run's answer", terminal_reason="completed", origin={"kind": "human"})
+        )
+
+    outcome = await offline(play, task_in(repo), monkeypatch)
+
+    assert outcome.text == "this run's answer", (
+        f"a result the CLI attributed to a human prompt was passed over: {outcome!r}. That kind is "
+        f"the SDK's own spelling of a turn the host submitted"
     )
 
 @pytest.mark.asyncio
@@ -1844,6 +2214,160 @@ async def test_an_error_result_that_is_not_a_limit_is_translated_and_raised(
     assert said in str(raised.value), (
         f"the refusal does not carry what the CLI said: {raised.value}. An UpstreamUnavailable "
         f"whose message does not name the cause is the same dead end as no message at all"
+    )
+
+@pytest.mark.asyncio
+async def test_a_cli_that_dies_before_it_says_anything_reports_what_it_printed_instead(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The failure above with its result frame taken away, which is a different code path entirely.
+
+    `_internal/query.py` upgrades a trailing `ProcessError` to a `ResultError` **only** when an
+    error result preceded it; a CLI that refuses to start has sent none, so the bare `ProcessError`
+    is what arrives - and its `stderr` attribute is the fixed string
+    `"Check stderr output for details"` that `_internal/transport/subprocess_cli.py` writes for
+    every non-zero exit. Everything actionable is in the stream `Stderr` collected.
+
+    The line scripted here is verbatim what CLI 2.1.277 prints when `CLAUDE_CODE_RESTRICTED`
+    reaches it, which `adapters/claude_code/_environment.py` now keeps out of the child - so this
+    is the class of failure and not that one cause.
+    """
+    repo = workspace(tmp_path)
+    printed = "Error: bypassPermissions not supported in restricted mode"
+
+    async def play(cli: Scripted) -> None:
+        await cli.fail(
+            ProcessError(
+                "Command failed with exit code 1",
+                exit_code=1,
+                stderr="Check stderr output for details",
+            )
+        )
+
+    with pytest.raises(UpstreamUnavailable) as raised:
+        await offline(play, task_in(repo), monkeypatch, printed=(printed,))
+    assert printed in str(raised.value), (
+        f"a run that died carries no word of why: {raised.value}. AGL registers the stderr sink "
+        f"that makes the SDK pipe that stream away from the operator's terminal, so this message "
+        f"is the only copy there is and a person reading it is told to fix they know not what"
+    )
+
+@pytest.mark.asyncio
+async def test_an_error_result_with_no_exit_behind_it_also_ends_with_the_printed_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other refusal `_session.py` raises, reached when the stream ends rather than raises.
+
+    Claude Code exits non-zero after every error result, so this branch answers for a CLI that
+    did not - a version that stops emitting the exit, or a transport that swallows it. It is the
+    branch with no exception to read, which makes the printed line the only thing it has.
+    """
+    repo = workspace(tmp_path)
+    printed = "Error: config file at /etc/claude/managed.json is not readable"
+
+    async def play(cli: Scripted) -> None:
+        await cli.say(init(repo))
+        await cli.say(ends(is_error=True, result="the run did not finish"))
+
+    with pytest.raises(UpstreamUnavailable) as raised:
+        await offline(play, task_in(repo), monkeypatch, printed=(printed,))
+    assert str(raised.value).endswith(printed), (
+        f"an error result was reported without what the CLI printed beside it: {raised.value}"
+    )
+
+def probing(
+    monkeypatch: pytest.MonkeyPatch, play: Callable[[Scripted], Awaitable[None]], printed: str
+) -> None:
+    """Point `check_ready` at a scripted CLI, with `printed` fed to the sink the probe itself built.
+
+    `offline` above does this for `run`; the probe assembles its own options in `runner.py` and
+    calls the `query` imported there, so it needs the same treatment against the other name.
+    """
+
+    def scripted(*, prompt: str, options: ClaudeAgentOptions) -> AsyncIterator[Any]:
+        from claude_agent_sdk import query
+
+        assert options.stderr is not None, "the readiness probe registered no stderr sink at all"
+        options.stderr(printed)
+        return query(prompt=prompt, options=options, transport=Scripted(play))
+
+    monkeypatch.setattr(runner_module, "query", scripted)
+
+@pytest.mark.asyncio
+async def test_a_readiness_probe_that_dies_reports_what_the_cli_printed_before_it_died(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`check_ready` built a `Stderr`, handed it to the SDK and then read nothing off it.
+
+    That is the same seam as the run's: an adapter that registers the sink and drops what lands in
+    it. It is worth its own test because the object is built in `runner.py` rather than in
+    `_session.py` and is threaded through neither - so the run's fix reaches it only if this one
+    call site is changed too, and nothing but this would say it was not.
+    """
+    printed = "Error: bypassPermissions not supported in restricted mode"
+
+    async def play(cli: Scripted) -> None:
+        await cli.fail(
+            ProcessError(
+                "Command failed with exit code 1",
+                exit_code=1,
+                stderr="Check stderr output for details",
+            )
+        )
+
+    probing(monkeypatch, play, printed)
+    with pytest.raises(UpstreamUnavailable) as raised:
+        await ClaudeCodeRunner().check_ready(Claude.HAIKU)
+    assert printed in str(raised.value), (
+        f"the readiness refusal says nothing about why: {raised.value}. This message is what "
+        f"preflight prints and the whole of what an operator gets before a run is abandoned"
+    )
+
+@pytest.mark.asyncio
+async def test_a_readiness_probe_refused_by_a_result_frame_also_names_what_was_printed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The probe's other refusal, which reads the error out of a result frame rather than out of an
+    exception.
+
+    It is the branch that looks as though it needs nothing more - it has the CLI's own `result`
+    text - and the stream is still where a reason the CLI never put in a frame ends up, a managed
+    policy's complaint among them. Both of the probe's refusals end the same way for that reason.
+    """
+    printed = "Error: settings file at /Library/Application Support/ClaudeCode is unreadable"
+
+    async def play(cli: Scripted) -> None:
+        await cli.say(ends(is_error=True, subtype="error_during_execution", result=None))
+
+    probing(monkeypatch, play, printed)
+    with pytest.raises(UpstreamUnavailable) as raised:
+        await ClaudeCodeRunner().check_ready(Claude.HAIKU)
+    assert str(raised.value).endswith(printed), (
+        f"the readiness refusal stops at the frame's own subtype: {raised.value}"
+    )
+
+def test_the_tail_an_error_message_carries_is_bounded_in_lines_and_in_characters() -> None:
+    """Both bounds, because either alone lets an exception message become a log file.
+
+    The SDK frames stderr into lines but flushes a partial one only once it passes
+    `max_buffer_size` - a megabyte by default - so fifty lines is fifty megabytes and not a bound
+    an error message can rely on. Both are taken off the end, which is where a CLI's fatal line is.
+    """
+    stderr = _session.Stderr()
+    for number in range(_session._STDERR_LINES * 3):
+        stderr(f"line {number}")
+    kept = stderr.tail().splitlines()
+    assert len(kept) == _session._STDERR_LINES, f"{len(kept)} lines survived the line bound"
+    assert kept[-1] == f"line {_session._STDERR_LINES * 3 - 1}", kept[-1]
+
+    shouting = _session.Stderr()
+    shouting("x" * (_session._STDERR_CHARACTERS * 4))
+    shouting("Error: the sentence a person needs")
+    bounded = shouting.tail()
+    assert len(bounded) == _session._STDERR_CHARACTERS, len(bounded)
+    assert bounded.endswith("Error: the sentence a person needs"), (
+        "the character bound took the front of the stream and dropped the end, which is the half "
+        "a failure is described in"
     )
 
 @pytest.mark.asyncio
@@ -2109,13 +2633,18 @@ async def test_a_run_opens_its_session_with_the_operators_own_effort_level_clear
     replay keys on it, with nothing downstream able to tell. Clearing it is what makes the journal
     true; a warning would leave it false.
 
-    **The empty string and not `"unset"`, and that is the whole of what this test holds.**
-    `subprocess_cli.py` composes the child's environment by merging `options.env` over the inherited
-    one, so a key here can be *set* and never removed - there is no value meaning "as if the
-    operator had not exported it". `"unset"` looks like that value and is not: the CLI reads it as
-    an instruction to send no effort parameter at all, which moves a bare model off the default it
-    would otherwise run at. The empty string parses as no level and falls through to `--effort`,
-    and the measurement behind that is in `_NO_INHERITED_EFFORT`'s own comment.
+    **Asserted on the environment the child is handed rather than on `options.env`**, because those
+    are two different things and only the first is the claim. `subprocess_cli.py` composes the
+    child's environment by merging `options.env` over the inherited one, so a key there can be *set*
+    and never removed; `_environment.withheld` blanks a vendor name the shell is carrying and writes
+    nothing for one it is not, so the mapping alone answers differently in the two cases while the
+    child's environment answers the same. The merge below is the SDK's own, spelled out.
+
+    **The empty string and not `"unset"`** is what a blank is, and it is
+    `test_the_blank_a_withheld_name_gets_is_what_the_cli_reads_as_no_level` that holds it:
+    `"unset"` looks like "as if it had not been exported" and is not - the CLI reads it as an
+    instruction to send no effort parameter at all, which moves a bare model off the default it
+    would otherwise run at.
 
     Parametrised over what the shell may hold because the answer must not depend on it. A reading
     of the ambient variable here - clearing it only when it is set, or passing it through when it
@@ -2130,10 +2659,12 @@ async def test_a_run_opens_its_session_with_the_operators_own_effort_level_clear
 
     options = await opened(task_in(workspace(tmp_path), model=chosen), monkeypatch)
 
-    assert options.env.get("CLAUDE_CODE_EFFORT_LEVEL") == "", (
-        f"the session was opened with env {options.env!r} while the shell carried "
-        f"{ambient!r}. The variable outranks `--effort`, so the run would have been taken at the "
-        f"operator's level under a fingerprint recording {ClaudeEffort.XHIGH.value!r}"
+    handed = {**os.environ, **options.env}
+    assert handed.get("CLAUDE_CODE_EFFORT_LEVEL", "") == "", (
+        f"the child would be handed CLAUDE_CODE_EFFORT_LEVEL="
+        f"{handed['CLAUDE_CODE_EFFORT_LEVEL']!r} while the shell carried {ambient!r}, out of env "
+        f"{options.env!r}. The variable outranks `--effort`, so the run would have been taken at "
+        f"the operator's level under a fingerprint recording {ClaudeEffort.XHIGH.value!r}"
     )
     assert options.effort == ClaudeEffort.XHIGH.value, (
         f"the level the role chose stopped reaching the session: {options.effort!r}. Clearing the "
@@ -2173,13 +2704,13 @@ async def test_the_readiness_probe_clears_that_level_too_although_its_options_na
     await ClaudeCodeRunner().check_ready(Claude.OPUS)
 
     assert len(handed) == 1, f"the probe opened {len(handed)} sessions"
-    assert handed[0].env.get("CLAUDE_CODE_EFFORT_LEVEL") == "", (
+    assert {**os.environ, **handed[0].env}.get("CLAUDE_CODE_EFFORT_LEVEL", "") == "", (
         f"the probe was opened with env {handed[0].env!r}. Its options carry no effort of their "
         f"own, so whatever the shell exported is what the probe would have been taken at"
     )
 
-def test_every_session_this_package_starts_clears_the_effort_level_an_environment_carries() -> None:
-    """A structural assertion, so a third session cannot arrive without the clearing.
+def test_every_session_this_package_starts_is_opened_on_the_allowlisted_environment() -> None:
+    """A structural assertion, so a third session cannot arrive carrying the operator's own.
 
     `test_every_session_this_package_opens_is_opened_hermetically` is this test's sibling and gives
     the argument for the shape: where a property holds of every session, the assertion that reads
@@ -2194,19 +2725,12 @@ def test_every_session_this_package_starts_clears_the_effort_level_an_environmen
     environment to compose. A session runs somewhere and says so; that object does not, and a list
     of exempt module names here would go stale the first time one is renamed.
 
-    The name rather than the mapping is what each call site is required to spell, which is where
-    this parts company with the hermeticity scan: that one refuses a name deliberately, because
-    three unrelated settings each have one right value and a reader wants to see it at the call
-    site. Here the two sessions must agree, and the empty string is a value no reader can check by
-    looking at it - so it is written once, with the measurement beside it, and this test reads what
-    that one name holds.
+    The expression rather than the mapping is what each call site is required to spell, which is
+    where this parts company with the hermeticity scan: that one refuses a name deliberately,
+    because three unrelated settings each have one right value and a reader wants to see it at the
+    site. Here the two sessions must agree, and what they agree on is a decision taken over 694
+    vendor names - not a value any reader could check by looking at it.
     """
-    assert runner_module._NO_INHERITED_EFFORT == {"CLAUDE_CODE_EFFORT_LEVEL": ""}, (
-        f"the shared mapping is {runner_module._NO_INHERITED_EFFORT!r}. The empty string is the "
-        f"one value that neutralises the operator's variable transparently: `subprocess_cli.py` "
-        f"merges this over the inherited environment and cannot remove a key, and `unset` would "
-        f"send no effort parameter at all where a bare model's own default would otherwise go out"
-    )
     package = Path(runner_module.__file__).parent
     sessions = 0
     for source in sorted(package.glob("*.py")):
@@ -2219,13 +2743,13 @@ def test_every_session_this_package_starts_clears_the_effort_level_an_environmen
             if "cwd" not in given:
                 continue
             sessions += 1
-            written = "env" in given and ast.unparse(given["env"]) == "_NO_INHERITED_EFFORT"
+            written = "env" in given and ast.unparse(given["env"]) == "withheld(os.environ)"
             assert written, (
                 f"{source.name}:{node.lineno} opens a session in a directory without passing "
-                f"`env=_NO_INHERITED_EFFORT`: it passes "
+                f"`env=withheld(os.environ)`: it passes "
                 f"{sorted(name for name in given if name)}. The SDK hands the child the operator's "
-                f"whole environment, and `CLAUDE_CODE_EFFORT_LEVEL` in it outranks `--effort` - so "
-                f"a session opened without this runs at a level AGL neither chose nor records"
+                f"whole environment, and 694 names in it configure the CLI - so a session opened "
+                f"without this runs under settings AGL neither chose nor records"
             )
     assert sessions >= 2, (
         f"only {sessions} ClaudeAgentOptions call(s) in {package} name a `cwd`, and there are at "
@@ -2254,6 +2778,154 @@ async def test_a_model_of_the_other_provider_at_an_effort_is_refused_before_anyt
         )
     assert str(model) in str(refused.value)
     assert not started, "the refusal came too late to be a refusal"
+
+# --- The environment: what the allowlist lets past, and what a shell no longer decides -----------
+
+# Each of these was measured against the release `_version.TESTED` names, through `connect()` and
+# the `get_server_info` and `get_settings` control requests with no user message - so every row
+# below cost nothing. The value is what a shell might hold; the comment is what it did.
+HAZARDS: Final[tuple[tuple[str, str, str], ...]] = (
+    # The CLI refuses `bypassPermissions` outright and the process exits 1, so this one name ends
+    # every run AGL takes. Read eight times in the bundle and new in 2.1.248.
+    ("CLAUDE_CODE_RESTRICTED", "1", "the run died with a ProcessError instead of starting"),
+    # The `opus` row leaves the catalogue and `--model opus` resolves to Haiku, which fingerprints
+    # as `Claude.OPUS` and reasons at no effort at all.
+    ("ANTHROPIC_DEFAULT_OPUS_MODEL", "claude-haiku-4-5-20251001", "opus resolved to haiku"),
+    ("ANTHROPIC_DEFAULT_SONNET_MODEL", "claude-haiku-4-5-20251001", "sonnet resolved to haiku"),
+    ("ANTHROPIC_DEFAULT_HAIKU_MODEL", "claude-opus-5", "haiku resolved to opus"),
+    ("ANTHROPIC_DEFAULT_MODEL", "claude-haiku-4-5-20251001", "the default resolved to haiku"),
+    ("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001", "the model resolved to haiku"),
+    # The level that outranks `--effort`, which "Invariants where a mistake is silent" argues at
+    # length and the two tests above hold at the call sites.
+    ("CLAUDE_CODE_EFFORT_LEVEL", "low", "a session opened `--effort xhigh` applied `low`"),
+    # Where the CLI writes, regardless of what `enable_file_checkpointing` says: the SDK sets this
+    # when the option is on and never unsets it when the option is off.
+    ("CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING", "true", "the CLI checkpointed to its own store"),
+    # A socket path and a token for the parent session's injected-turn seam, both present in a
+    # Claude Code desktop session's own environment. A capability rather than a preference, and the
+    # half `translate.CROSS_SESSION_DENIED` cannot shut, the child's own socket being unconditional.
+    ("CLAUDE_CODE_MESSAGING_SOCKET", "/tmp/cc-socks/1.sock", "the child held the parent's seam"),
+    ("CLAUDE_CODE_MESSAGING_TOKEN", "deadbeef", "the child held the parent's seam"),
+)
+
+@pytest.mark.parametrize(("name", "value", "consequence"), HAZARDS)
+def test_every_measured_hazard_an_operators_shell_carries_is_blanked_before_the_cli_reads_it(
+    name: str, value: str, consequence: str
+) -> None:
+    """The named cases, each with what it was measured doing when it got through.
+
+    Parametrised over names rather than asserted as a set, because what is being claimed is one
+    thing per row: that this name, with this value, does not reach the CLI. A single assertion over
+    a set would pass with the set empty, and a set is also the wrong shape - the allowlist is not a
+    list of these, it is the whole namespace less the dozen that carry a credential or an endpoint,
+    so these rows are evidence that the general rule catches the specific cases rather than being
+    the rule.
+    """
+    blanks = withheld({name: value})
+
+    assert blanks.get(name) == "", (
+        f"{name}={value!r} reaches the CLI: the mapping is {blanks!r}. Measured consequence when "
+        f"it did: {consequence}"
+    )
+
+def test_the_blank_a_withheld_name_gets_is_what_the_cli_reads_as_no_level() -> None:
+    """`""` and not `"unset"`, which is the whole reason a blank is the mechanism.
+
+    Both look like "as if it had never been exported" and only one is. Measured through the bundled
+    binary's own `get_settings`, which reports the resolver's output: with the level blank, a bare
+    `opus` session applies `high`, the model's own default, exactly as it does with the name unset;
+    with `unset` or `auto` it applies nothing at all, so a bare model's *sent* default
+    becomes no parameter. This is asserted on the value rather than on the behaviour because the
+    behaviour costs a CLI and the gate has none - `HAZARDS` above carries what the measurement was.
+    """
+    blanks = withheld({"CLAUDE_CODE_EFFORT_LEVEL": "low"})
+
+    assert blanks == {"CLAUDE_CODE_EFFORT_LEVEL": ""}, (
+        f"a withheld name is handed {blanks!r}. `unset` and `auto` are the values that look right "
+        f"and suppress the effort parameter altogether, and `subprocess_cli` offers no third "
+        f"option - it merges this over what it inherited and cannot take a key away"
+    )
+
+# The two `tests/conftest.py` exports at every test in this repository, spelled as a tuple and not
+# as a mapping: a mapping keyed by one of these is the shape of a composed subprocess environment,
+# which is what `scripts/check`'s paid-endpoint gate scans this tree for and rightly refuses. What
+# is below is a pure function's argument and points nothing anywhere.
+GUARDED_BY_CONFTEST: Final[tuple[str, ...]] = ("ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY")
+
+def test_the_two_variables_the_paid_endpoint_guard_exports_reach_the_cli_a_test_starts() -> None:
+    """The one that would fail silently and cost money, so it is asserted by name.
+
+    `tests/conftest.py` exports a loopback base URL and a dummy key for every test in this
+    repository, and its whole mechanism is that a `claude` a test spawns *inherits* them -
+    `check_ready` above spawns one on every `scripts/check`. An allowlist that withheld either would
+    defeat the guard while every existing test stayed green: the redirect tests read `os.environ`
+    rather than the child's environment, and a run that reached the paid endpoint would answer
+    correctly and pass. Withholding the key is the worse of the two, because the CLI then falls back
+    to the operator's own OAuth bearer token and sends it to whatever is on the redirected port.
+    """
+    carried = dict.fromkeys(GUARDED_BY_CONFTEST, "whatever tests/conftest.py exported")
+
+    assert withheld(carried) == {}, (
+        f"the allowlist withholds {sorted(withheld(carried))} from a CLI a test starts. "
+        f"`scripts/check`'s paid-endpoint gate proves a newly written test file inherits both, and "
+        f"this is the other end of the same claim: that what it inherits is what the child gets"
+    )
+
+def test_no_name_outside_the_vendors_own_namespace_is_touched_by_this_allowlist() -> None:
+    """The scope, and the reason no list here enumerates what a subprocess cannot run without.
+
+    An agent runs the target repository's own build, so the environment it needs is the operator's
+    machine: a toolchain root, a locale, a CA bundle, a package manager's cache. AGL could not
+    enumerate that set and has no business deciding it - what it decides is the namespace that
+    configures the *harness*, which is why `PATH` and `HOME` never had to be argued about.
+    """
+    machine = {
+        "PATH": "/usr/bin",
+        "HOME": "/Users/someone",
+        "TMPDIR": "/var/folders/x/",
+        "SHELL": "/bin/zsh",
+        "LANG": "en_GB.UTF-8",
+        "SSL_CERT_FILE": "/etc/ssl/cert.pem",
+        "HTTPS_PROXY": "http://proxy:3128",
+        "JAVA_HOME": "/opt/jdk",
+    }
+
+    assert withheld(machine) == {}, (
+        f"the allowlist reaches {sorted(withheld(machine))}, which are the operator's machine and "
+        f"not this vendor's configuration. A run that loses one of them is a run whose agent "
+        f"cannot build the repository it was given"
+    )
+
+def test_the_three_names_the_sdk_writes_itself_are_left_for_the_sdk_to_write() -> None:
+    """Not withheld and not passed through: absent from the mapping, because the SDK decides them.
+
+    `subprocess_cli.connect` composes the child's environment as the inherited one with `CLAUDECODE`
+    dropped, then `CLAUDE_CODE_ENTRYPOINT`, then `options.env`, then `CLAUDE_AGENT_SDK_VERSION`.
+    `CLAUDE_CODE_ENTRYPOINT` is the one that bites: it is written *before* the merge, so a blank
+    there replaces the SDK's own `sdk-py` with nothing and the CLI is told it was started by no
+    entrypoint at all. The other two are harmless either way and are left out for one reason rather
+    than two - a mapping AGL builds names what AGL decided.
+    """
+    theirs = {
+        "CLAUDECODE": "1",
+        "CLAUDE_CODE_ENTRYPOINT": "claude-desktop",
+        "CLAUDE_AGENT_SDK_VERSION": "0.3.271",
+    }
+
+    assert withheld(theirs) == {}, (
+        f"the mapping names {sorted(withheld(theirs))}, which `subprocess_cli` writes itself. "
+        f"`CLAUDE_CODE_ENTRYPOINT` is merged over before `options.env` is, so a blank wins and the "
+        f"session goes out with no entrypoint rather than with the SDK's"
+    )
+
+def test_a_vendor_name_the_shell_does_not_carry_is_not_invented_to_be_blanked() -> None:
+    """An empty parent composes an empty mapping, which is what makes the blanking a response.
+
+    Writing every hazard unconditionally would be a list of names again, kept by hand and stale on
+    the next release. This reads what is there, so a name the vendor adds tomorrow is withheld the
+    day an operator exports it and never before.
+    """
+    assert withheld({}) == {}, "the allowlist invented a name nothing exported"
 
 # --- The version behind a model, read off the binary a session would actually start --------------
 
@@ -2357,7 +3029,7 @@ async def test_a_binary_that_cannot_be_started_reports_no_version_and_still_name
 
 @pytest.mark.parametrize(
     ("said", "status", "why"),
-    [("", 0, "it printed nothing"), ("2.1.259 (Claude Code)\n", 3, "the binary failed")],
+    [("", 0, "it printed nothing"), ("2.1.277 (Claude Code)\n", 3, "the binary failed")],
 )
 @pytest.mark.asyncio
 async def test_a_binary_that_answers_oddly_reports_no_version_rather_than_a_guess(
@@ -2381,7 +3053,7 @@ async def test_this_adapter_reports_no_per_model_levels_because_it_asks_for_none
     session rather than a flag - so this probe reports the version and nothing else, and the empty
     mapping is the port's own spelling of "the tool did not say".
     """
-    reported = await ClaudeCodeRunner(_printing(tmp_path, "2.1.259 (Claude Code)\n")).installation(
+    reported = await ClaudeCodeRunner(_printing(tmp_path, "2.1.277 (Claude Code)\n")).installation(
         Claude.OPUS
     )
 

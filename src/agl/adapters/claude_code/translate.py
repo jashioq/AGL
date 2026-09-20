@@ -26,9 +26,11 @@ from agl.ports.agent import (
 from agl.ports.errors import AglError, InputError, UpstreamUnavailable, UpstreamUnexpected
 
 __all__ = [
+    "CROSS_SESSION_DENIED",
     "Restraint",
     "activity",
     "effort_level",
+    "last_words",
     "model_name",
     "restraint",
     "translated",
@@ -100,12 +102,30 @@ _DENIALS: Final[Mapping[Restriction, tuple[str, ...]]] = MappingProxyType(
         # An output redirect's target is checked as a file write against `Edit` rules, and `//`
         # anchors at the filesystem root rather than at the settings source, so it reaches outside
         # the workspace too.
-        Restriction.NO_FILE_WRITES: ("Edit", "Write", "NotebookEdit", "MultiEdit", "Edit(//**)"),
+        Restriction.NO_FILE_WRITES: ("Edit", "Write", "NotebookEdit", "Edit(//**)"),
         # `Monitor` is here because the PowerShell tool's own refusal message says "Monitor runs
         # bash"; nothing in the permission reference mentions it.
         Restriction.NO_SHELL: ("Bash", "PowerShell", "Monitor"),
         Restriction.NO_NETWORK: ("WebFetch", "WebSearch"),
     }
+)
+
+# Denied on every run rather than under a `Restriction`, because none of the four is about this and
+# an unrestricted role has no more business here than a restricted one. The CLI listens on a socket
+# per process under `/tmp/cc-socks` that accepts injected user messages from anything running as the
+# same user, so the reach is a local one and `NO_NETWORK` is the wrong word for it.
+#
+# `SendMessage` carries a recipient and `ListAgents` is what lists the recipients to it; the `Cron`
+# three and `ScheduleWakeup` arm a turn that fires later, the two halves answering to
+# `claude_agent_sdk.types.TaskNotificationOriginSubkind`'s two values. `CLAUDE_CODE_DISABLE_CRON` is
+# what turns the `Cron` three off, and `_environment.withheld` blanks it.
+CROSS_SESSION_DENIED: Final = (
+    "CronCreate",
+    "CronDelete",
+    "CronList",
+    "ListAgents",
+    "ScheduleWakeup",
+    "SendMessage",
 )
 
 _IN_WORDS: Final[Mapping[Restriction, str]] = MappingProxyType(
@@ -146,8 +166,8 @@ _MODEL_NAMES: Final[Mapping[ModelId, str]] = MappingProxyType(
     }
 )
 
-# `ClaudeAgentOptions.effort` in SDK 0.2.152 is typed as the `EffortLevel` literal and reaches the
-# CLI as `--effort <level>` unvalidated; the CLI 2.1.259 it bundles lowers or drops a level the
+# `ClaudeAgentOptions.effort` in SDK 0.2.157 is typed as the `EffortLevel` literal and reaches the
+# CLI as `--effort <level>` unvalidated; the CLI 2.1.277 it bundles lowers or drops a level the
 # model does not offer rather than refusing it.
 _EFFORT_LEVELS: Final[Mapping[ClaudeEffort, EffortLevel]] = MappingProxyType(
     {
@@ -196,7 +216,17 @@ def effort_level(choice: ModelChoice) -> EffortLevel | None:
         case _:
             assert_never(choice)
 
-def translated(error: ClaudeSDKError) -> AglError:
+def last_words(printed: str) -> str:
+    return f"The CLI's last words were: {printed or '(it printed nothing)'}"
+
+# `ProcessError.stderr` is the fixed string "Check stderr output for details" in SDK 0.2.157 and
+# never the CLI's own: the SDK streams stderr to `options.stderr` instead of capturing it. So the
+# exception says nothing an operator can act on, and what `_session.Stderr` collected is the answer.
+def translated(error: ClaudeSDKError, printed: str) -> AglError:
+    reading = _reading(error)
+    return type(reading)(f"{reading}. {last_words(printed)}")
+
+def _reading(error: ClaudeSDKError) -> AglError:
     if isinstance(error, CLINotFoundError):
         return UpstreamUnavailable(
             f"the Claude Code CLI is not installed or is not on PATH: {_said(error)}. Nothing "
@@ -233,8 +263,8 @@ def translated(error: ClaudeSDKError) -> AglError:
         f"promise nothing here can keep for an error it has not seen before"
     )
 
-def unready(error: ClaudeSDKError) -> UpstreamUnavailable:
-    reported = translated(error)
+def unready(error: ClaudeSDKError, printed: str) -> UpstreamUnavailable:
+    reported = translated(error, printed)
     if isinstance(reported, UpstreamUnavailable):
         return reported
     return UpstreamUnavailable(

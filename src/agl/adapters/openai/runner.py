@@ -1,9 +1,11 @@
 import asyncio
+import os
 import signal
 import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Final
+from agl.adapters.openai._environment import composed
 from agl.adapters.openai._session import _halt, _signal, outcome_of
 from agl.adapters.openai._tools import Caller, Supply
 from agl.adapters.openai._version import probed
@@ -58,12 +60,28 @@ _ALWAYS: Final[tuple[str, ...]] = (
     "--skip-git-repo-check",
     "--ignore-rules",
     "--ignore-user-config",
+    # Without it a step writes its whole rollout - the instructions, the context and every tool
+    # call - under the home's `sessions/`, measured at 28 KB for a run that never reached a model,
+    # kept forever and read back by nothing. AGL resumes from its own journal.
+    "--ephemeral",
     "-c",
     "project_doc_max_bytes=0",
     "-c",
     "skills.include_instructions=false",
+    # On by default, and on a home that has not seen it the feature clones the plugin marketplace:
+    # a 90 MB git working tree, fetched over the network before the first token. It is also the
+    # only override here that decides whether a run reaches off this machine at all - with every
+    # outbound connection logged and refused, four attempts become none.
+    "-c",
+    "features.plugins=false",
     *APPROVAL,
 )
+
+# The harness keeps six SQLite databases - thread history, memories, goals, queue, logs and state -
+# and puts them under `CODEX_HOME`, which is the operator's own and holds the credential this
+# adapter cannot move. A directory per run is what keeps AGL's turns out of the history and the
+# memories an operator's interactive sessions read, and 2.4 MB of write-ahead log out of the home.
+_STATE_HOME: Final = "CODEX_SQLITE_HOME"
 
 # The harness gives an MCP tool call `tool_timeout_sec`, which defaults to 60 - shorter than a
 # person takes to answer, and so the number a mid-run question actually rests on.
@@ -97,6 +115,7 @@ class OpenAiRunner(AgentRunner):
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.STDOUT,
                     cwd=elsewhere,
+                    env=composed(os.environ),
                     start_new_session=True,
                 )
             except OSError as error:
@@ -129,14 +148,16 @@ class OpenAiRunner(AgentRunner):
         effort = effort_options(task.model)
         limits = sandbox(task.restrictions)
         caller = Caller()
-        async with Supply(task.tools, caller) as supply:
-            return await outcome_of(
-                _argv(self._cli, slug, effort, limits, supply.urls),
-                prompt=_prompt(task, limits),
-                workspace=task.workspace,
-                caller=caller,
-                on_activity=on_activity,
-            )
+        with tempfile.TemporaryDirectory(prefix="agl-state-") as elsewhere:
+            async with Supply(task.tools, caller) as supply:
+                return await outcome_of(
+                    _argv(self._cli, slug, effort, limits, supply.urls),
+                    prompt=_prompt(task, limits),
+                    workspace=task.workspace,
+                    environment=composed(os.environ, {_STATE_HOME: elsewhere}),
+                    caller=caller,
+                    on_activity=on_activity,
+                )
 
 def _argv(
     cli: str,

@@ -40,6 +40,7 @@ from agl.adapters.claude_code.translate import (
     Restraint,
     activity,
     effort_level,
+    last_words,
     model_name,
     restraint,
     translated,
@@ -60,6 +61,29 @@ _RULE: Final = re.compile(r"^[A-Z][A-Za-z0-9]*(\((?P<specifier>.*)\))?$")
 _UNCONSULTED_PATH_RULES: Final = ("Write", "NotebookEdit", "MultiEdit", "Glob")
 
 _WORKSPACE: Final = Path("/trees/proj/agl-fix-auth")
+
+# What CLI 2.1.277 prints and exits 1 for when `CLAUDE_CODE_RESTRICTED` reaches it, observed
+# through this adapter against the bundled binary. It is the whole answer to that failure, and
+# `str(ProcessError)` carries no word of it - the SDK's own `_internal/query.py` says why, calling
+# the transport's stderr "a generic placeholder" where it declines to carry it over.
+_PRINTED: Final = "Error: bypassPermissions not supported in restricted mode"
+
+# What the SDK puts in `ProcessError.stderr` instead, which is what an operator used to be handed.
+_PLACEHOLDER: Final = "Check stderr output for details"
+
+# Every class the SDK can fail with, written once because the three properties asserted over it
+# below have to stay in step: a class a later SDK adds belongs to all three or to none. The
+# `ProcessError` is the real one a refused startup produces, placeholder and all, rather than a
+# sketch - it is the instance that carries no word of why on its own.
+_SDK_FAILURES: Final = (
+    CLINotFoundError(),
+    CLIConnectionError("could not connect"),
+    ProcessError("Command failed with exit code 1", exit_code=1, stderr=_PLACEHOLDER),
+    ResultError("Failed to authenticate: OAuth session expired"),
+    CLIJSONDecodeError("{not json", ValueError("line 1")),
+    MessageParseError("unknown message type"),
+    ClaudeSDKError(),
+)
 
 def _call(name: str, payload: dict[str, Any]) -> ToolUseBlock:
     """One tool call, as the SDK delivers it. The id is never read and is here to satisfy it."""
@@ -340,23 +364,12 @@ class TestVendorExceptions:
         translation written in the wrong order would answer for the parent and lose the message
         that made the child actionable. Both children are here for that reason.
         """
-        translation = translated(error)
+        translation = translated(error, _PRINTED)
         assert type(translation) is expected, (
             f"{type(error).__name__} became {type(translation).__name__}, not {expected.__name__}"
         )
 
-    @pytest.mark.parametrize(
-        "error",
-        [
-            CLINotFoundError(),
-            CLIConnectionError("could not connect"),
-            ProcessError("exited badly", exit_code=2),
-            ResultError("Failed to authenticate: OAuth session expired"),
-            CLIJSONDecodeError("{not json", ValueError("line 1")),
-            MessageParseError("unknown message type"),
-            ClaudeSDKError(),
-        ],
-    )
+    @pytest.mark.parametrize("error", _SDK_FAILURES)
     def test_every_translation_says_something_actionable(self, error: ClaudeSDKError) -> None:
         """A message, always, and one that names the thing that failed.
 
@@ -365,22 +378,11 @@ class TestVendorExceptions:
         that would otherwise render as an empty string, so the fallback that puts the class name in
         is asserted rather than assumed.
         """
-        message = str(translated(error))
+        message = str(translated(error, _PRINTED))
         assert message.strip(), f"{type(error).__name__} translated to an error with no message"
         assert "Claude Code" in message or type(error).__name__ in message
 
-    @pytest.mark.parametrize(
-        "error",
-        [
-            CLINotFoundError(),
-            CLIConnectionError("could not connect"),
-            ProcessError("exited badly", exit_code=2),
-            ResultError("Failed to authenticate: OAuth session expired"),
-            CLIJSONDecodeError("{not json", ValueError("line 1")),
-            MessageParseError("unknown message type"),
-            ClaudeSDKError(),
-        ],
-    )
+    @pytest.mark.parametrize("error", _SDK_FAILURES)
     def test_a_readiness_probe_always_answers_unavailable(self, error: ClaudeSDKError) -> None:
         """`check_ready`'s one refusal, for every way the SDK can fail a probe.
 
@@ -391,9 +393,67 @@ class TestVendorExceptions:
         session. The two classes `translated` would call `UpstreamUnexpected` are in the list, since
         those are the ones a naive `unready = translated` would get wrong.
         """
-        refusal = unready(error)
+        refusal = unready(error, _PRINTED)
         assert isinstance(refusal, UpstreamUnavailable)
         assert str(refusal).strip()
+
+    @pytest.mark.parametrize("error", _SDK_FAILURES)
+    def test_every_translation_ends_with_what_the_cli_printed_whatever_the_sdk_said(
+        self, error: ClaudeSDKError
+    ) -> None:
+        """The one sentence an operator can act on, on every branch rather than on a chosen few.
+
+        `translated` appends it once, over whatever branch answered, which is what makes this a
+        property of the function and not a line six messages have to remember. A branch added for a
+        class a later SDK introduces arrives here already carrying it, and the test that would
+        otherwise have to be written for it is this one - which is why the `ProcessError` in the
+        list is the real one and not a sketch, though it is not singled out.
+
+        That one is the case a person actually meets.
+        `_internal/transport/subprocess_cli.py` builds every non-zero exit's `ProcessError` with
+        `stderr="Check stderr output for details"` - a fixed string, never the CLI's own - and
+        `_internal/query.py` replaces it with a `ResultError` only when a result frame preceded it.
+        A CLI that dies before saying anything, which is what a refused permission mode does, sends
+        no result frame, so the bare `ProcessError` arrives and `str(error)` is the placeholder
+        alone. Everything worth reading is in the stream the adapter's own sink consumed.
+        """
+        message = str(translated(error, _PRINTED))
+        assert message.endswith(_PRINTED), (
+            f"{type(error).__name__} translated to a message that does not end with what the CLI "
+            f"printed: {message}. The adapter registers a stderr sink, which is what makes the SDK "
+            f"pipe that stream away from the terminal, so a message dropping it is the only copy"
+        )
+
+    def test_a_failure_the_cli_printed_nothing_before_says_so_rather_than_trailing_off(
+        self,
+    ) -> None:
+        """An empty stderr is a finding of its own: it says stop looking, rather than looking cut.
+
+        `CLINotFoundError` is the case that reaches it honestly - there is no process to print
+        anything - and a message ending on a bare colon would read as a message that lost its end.
+        """
+        message = str(translated(CLINotFoundError(), ""))
+        assert message.endswith("(it printed nothing)"), message
+        assert last_words("") in message
+
+    def test_a_readiness_refusal_carries_the_clis_last_words_like_any_other_translation(
+        self,
+    ) -> None:
+        """`check_ready`'s own path, which loses it through `unready` rather than through
+        `translated`.
+
+        `unready` re-labels the two classes `translated` calls `UpstreamUnexpected` and hands the
+        rest back untouched, so both arms have to keep the sentence. `CLIJSONDecodeError` is the
+        re-labelled arm and `ProcessError` the passed-through one.
+        """
+        for error in (
+            ProcessError("Command failed with exit code 1", exit_code=1, stderr=_PLACEHOLDER),
+            CLIJSONDecodeError("{not json", ValueError("line 1")),
+        ):
+            assert _PRINTED in str(unready(error, _PRINTED)), (
+                f"a readiness refusal built from {type(error).__name__} does not say what the CLI "
+                f"printed, and preflight's refusal is the only thing an operator is shown"
+            )
 
 class TestActivityStrings:
     """(d) The tool's own name, and one generic rule about the payload."""

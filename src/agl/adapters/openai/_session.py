@@ -4,7 +4,7 @@ import json
 import os
 import signal
 from collections import deque
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from pathlib import Path
 from typing import Final
 from agl.adapters.openai._tools import Caller
@@ -51,6 +51,7 @@ async def outcome_of(
     *,
     prompt: str,
     workspace: Path,
+    environment: Mapping[str, str],
     caller: Caller,
     on_activity: ActivityReporter | None,
 ) -> AgentOutcome:
@@ -64,6 +65,7 @@ async def outcome_of(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=workspace,
+            env=dict(environment),
             limit=_BUFFER_BYTES,
             start_new_session=True,
         )
@@ -90,7 +92,11 @@ async def outcome_of(
     status = await _closed(child, aside, early=caller.failure is not None)
     if caller.failure is not None:
         raise caller.failure
-    if read.reported is not None or status != 0:
+    # A reported message on its own is not a failure, because the reconnect notice `_frame` latches
+    # is announced by a turn that then goes on to finish: `turn.completed` is what the harness says
+    # for that one and `turn.failed` for a turn that really stopped, so the terminal frame decides
+    # and the message only supplies the words.
+    if status != 0 or (read.reported is not None and not read.completed):
         raise failure(reported=read.reported, exit_code=status, stderr=tail.text())
     return AgentOutcome(
         stop_reason=StopReason.COMPLETED if read.completed else None,
@@ -116,10 +122,13 @@ def _frame(
     kind = frame.get("type")
     if kind == "turn.completed":
         read.completed = True
+    # The last message and not the first: a stream that loses its connection announces the retry as
+    # an `error` event of its own and carries on, so where two arrive the reconnect notice is the
+    # one in front and the cause worth acting on is the one behind it.
     elif kind == "turn.failed":
-        read.reported = read.reported or _message(frame.get("error"))
+        read.reported = _message(frame.get("error")) or read.reported
     elif kind == "error":
-        read.reported = read.reported or _message(frame)
+        read.reported = _message(frame) or read.reported
     elif kind in ("item.started", "item.updated", "item.completed"):
         _item(frame.get("item"), kind, read, workspace, on_activity)
 

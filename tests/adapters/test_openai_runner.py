@@ -89,7 +89,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any, Final, NoReturn
 import pytest
-from agl.adapters.openai import _tools
+from agl.adapters.openai import _tools, _version
 from agl.adapters.openai import runner as runner_module
 from agl.adapters.openai.runner import OpenAiRunner
 from agl.ports.agent import (
@@ -158,10 +158,11 @@ SKILL_MARKER: Final = "AGL-LEAK-SKILL-9f2c41"
 _PLAN: Final = "plan.json"
 _RECORD: Final = "record.json"
 
-# The two answers the harness gives about itself, spelled as the installed 0.152.0 spells them: the
+# The two answers the harness gives about itself, spelled as the installed 0.155.1 spells them: the
 # version line has the tool's own name in front of it, and a level sits under `effort` inside an
-# object beside the description the harness shows in its own menu.
-_SPELLED_VERSION: Final = "codex-cli 0.152.0\n"
+# object beside the description the harness shows in its own menu. It is the release
+# `_version.TESTED` names, which is what makes the standing below `WITHIN` rather than a warning.
+_SPELLED_VERSION: Final = "codex-cli 0.155.1\n"
 
 def _listed(slug: str, levels: tuple[str, ...], fallback: str) -> dict[str, Any]:
     """One model as the harness's own listing writes it, down to the shape of a level."""
@@ -250,14 +251,30 @@ def probe(plan, record):
     """Answer one of the two questions the version probe puts, into a record of its own."""
     key = "version" if record["argv"][:1] == ["--version"] else "catalogue"
     record["home"] = os.environ.get("CODEX_HOME")
+    record.update(surroundings())
     pathlib.Path(plan["record"] + "." + key).write_text(json.dumps(record), encoding="utf-8")
     sys.stdout.write(plan[key])
     return plan.get(key + "_exit", 0)
 
 
+def surroundings():
+    """The names this child was handed, in two groups and with no value recorded for any of them.
+
+    Names only, deliberately: an operator's real environment carries tokens, and a record written
+    into a temporary directory is no place for one. What the tests need is which names arrived.
+    """
+    return {{
+        "vendor": sorted(n for n in os.environ if n.startswith(("CODEX", "OPENAI"))),
+        "machine": sorted(n for n in ("PATH", "HOME", "TMPDIR", "SHELL") if n in os.environ),
+    }}
+
+
 def main():
     plan = json.loads(PLAN.read_text(encoding="utf-8"))
     record = {{"argv": sys.argv[1:], "cwd": os.getcwd(), "stdin": None, "answers": []}}
+    record["state_home"] = os.environ.get("CODEX_SQLITE_HOME")
+    record["state_home_exists"] = os.path.isdir(record["state_home"] or "")
+    record.update(surroundings())
     if sys.argv[1:2] == ["--version"] or sys.argv[1:3] == ["debug", "models"]:
         return probe(plan, record)
     written = pathlib.Path(plan["record"])
@@ -507,6 +524,40 @@ async def test_the_command_line_carries_every_setting_that_makes_a_session_agls(
     )
     assert "--dangerously-bypass-approvals-and-sandbox" not in argv, "the sandbox is the mechanism"
     assert "--approve-for-me" not in argv, "that widens the sandbox that is the whole mechanism"
+
+@pytest.mark.asyncio
+async def test_every_command_line_refuses_the_rollout_and_the_plugin_clone_the_harness_would_write(
+    tmp_path: Path,
+) -> None:
+    """The two overrides that are about the operator's home rather than about the prompt.
+
+    Every other token on this command line closes a channel *into* the model. These two close what
+    the harness writes on its way to starting one, and neither is reachable from the sandbox: the
+    sandbox constrains commands the model runs, and both of these happen before it has run any.
+    Measured on a fresh home against 0.155.1, with the run failing at a loopback endpoint so that
+    only the startup is in the number: 3,467,981 bytes with AGL's overrides as they were, 376,571
+    with these two and the state home below, and four attempted connections off the machine -
+    `github.com`, `api.github.com` and `chatgpt.com` twice - reduced to none by the second one
+    alone. Asserted by value rather than by consequence because the consequence is a directory
+    this suite must never write to: `tests/conftest.py` points the home at a scratch directory
+    precisely so that no test can measure what a run does to the operator's own.
+    """
+    stub = Stub(tmp_path, steps=[{"say": started()}])
+
+    await drive(stub, task_in(workspace(tmp_path)))
+    argv = stub.argv()
+
+    assert "--ephemeral" in argv, (
+        f"nothing on {argv} stops the harness persisting its session. The rollout it writes "
+        f"carries the instructions, the standing context and every tool call, it is 28 KB for a "
+        f"run that never reached a model, and AGL reads it back nowhere: a resume is served by "
+        f"AGL's own journal"
+    )
+    assert "features.plugins=false" in argv, (
+        f"nothing on {argv} switches the plugin feature off. On a home that has not seen it that "
+        f"feature clones the plugin marketplace - a 90 MB git working tree - over the network, "
+        f"before the first token and whatever the sandbox says"
+    )
 
 @pytest.mark.asyncio
 async def test_the_workspace_is_the_working_directory_and_is_not_on_the_command_line(
@@ -1063,17 +1114,95 @@ async def test_a_failed_turn_is_raised_with_the_harnesss_own_words(tmp_path: Pat
 async def test_a_top_level_error_event_is_raised_even_when_the_process_exits_cleanly(
     tmp_path: Path,
 ) -> None:
-    """An error the stream announced is a failure whatever the status says.
+    """An error the stream announced and never finished past is a failure whatever the status says.
 
     Nothing establishes that this harness exits non-zero for every error it reports, and the
     consequence of guessing wrong is the damaging direction: an error message returned in the one
-    field a workflow reads as the agent's answer.
+    field a workflow reads as the agent's answer. What a turn does finish past is the retry notice
+    in `test_a_reconnect_notice_before_a_completed_turn_leaves_the_run_finished_and_answered`;
+    nothing here ends the turn at all, so the message stands as the only account of the run.
     """
     stub = Stub(tmp_path, steps=[{"say": {"type": "error", "message": "the sky fell in"}}], exit=0)
 
     with pytest.raises(UpstreamUnavailable) as raised:
         await drive(stub, task_in(workspace(tmp_path)))
     assert "the sky fell in" in str(raised.value)
+
+# A dropped stream is announced as a top-level `error` whose text opens `Reconnecting... n/m`, the
+# parenthetical naming however the connection ended; measured on codex-cli 0.155.1 driven at an
+# endpoint on 127.0.0.1 that cut the stream. The opening is the stable part and the tag is the
+# only one the retry carries.
+_RECONNECT: Final = (
+    "Reconnecting... 1/5 (stream disconnected before completion: stream closed before "
+    "response.completed)"
+)
+
+@pytest.mark.asyncio
+async def test_a_reconnect_notice_before_a_completed_turn_leaves_the_run_finished_and_answered(
+    tmp_path: Path,
+) -> None:
+    """A dropped stream that reconnected and finished, replayed frame for frame as it arrives.
+
+    The harness announces a lost connection as a top-level `error` event, retries behind it, and
+    then completes the turn and exits 0. So an `error` frame is not on its own a statement that the
+    run failed, and reading it as one throws away a turn that finished along with everything the
+    agent did in it - the operator is told to act on the least informative line in the stream while
+    the work it describes is already done. `turn.completed` beside a clean exit is what says the
+    turn got past it, and it is the only thing here that does.
+    """
+    stub = Stub(
+        tmp_path,
+        steps=[
+            {"say": {"type": "turn.started"}},
+            {"say": {"type": "error", "message": _RECONNECT}},
+            {"say": said("I finished the task successfully.")},
+            {"say": started()},
+        ],
+        exit=0,
+    )
+
+    outcome = await drive(stub, task_in(workspace(tmp_path)))
+
+    assert outcome.stop_reason is StopReason.COMPLETED, (
+        f"a turn that completed after its stream reconnected answered {outcome.stop_reason!r}. A "
+        f"retry the harness recovered from is not an outcome, and a run destroyed by one is a step "
+        f"re-run for nothing"
+    )
+    assert outcome.text == "I finished the task successfully."
+
+@pytest.mark.asyncio
+async def test_a_terminal_error_after_a_reconnect_notice_is_the_message_the_refusal_carries(
+    tmp_path: Path,
+) -> None:
+    """Which of two announced errors an operator is sent to act on, when a run really does fail.
+
+    A retry can precede a genuine failure, so keeping the first message means handing over
+    `Reconnecting...` and discarding the cause. A refusal naming the wrong thing is worse than the
+    dead end of naming nothing: it sends somebody to fix a network that was fine, and the sentence
+    that would have told them their allowance is gone was read and thrown away.
+    """
+    terminal = "You've hit your usage limit."
+    stub = Stub(
+        tmp_path,
+        steps=[
+            {"say": {"type": "turn.started"}},
+            {"say": {"type": "error", "message": _RECONNECT}},
+            {"say": {"type": "error", "message": terminal}},
+            {"say": {"type": "turn.failed", "error": {"message": terminal}}},
+        ],
+        exit=1,
+    )
+
+    with pytest.raises(UpstreamUnavailable) as raised:
+        await drive(stub, task_in(workspace(tmp_path)))
+
+    assert terminal in str(raised.value), (
+        f"the refusal does not carry the error the turn failed on: {raised.value}"
+    )
+    assert "Reconnecting" not in str(raised.value), (
+        f"the refusal quotes the retry that preceded the failure: {raised.value}. That is the "
+        f"message latched first rather than the one saying why the run stopped"
+    )
 
 @pytest.mark.asyncio
 async def test_a_rejected_command_line_is_our_bug_and_not_a_backend_that_was_busy(
@@ -1854,10 +1983,10 @@ async def test_the_version_probe_puts_both_of_the_harnesss_own_questions_and_rea
 
     assert stub.probed("version")["argv"] == ["--version"]
     assert stub.probed("catalogue")["argv"] == ["debug", "models"]
-    assert reported.version == "0.152.0", (
+    assert reported.version == "0.155.1", (
         f"the version came back as {reported.version!r} from {_SPELLED_VERSION!r}. The harness "
         f"prints its own name in front of the number, so a reading that keeps the whole line puts "
-        f"`codex-cli 0.152.0` where an ordering expects dotted digits and every run is then warned "
+        f"`codex-cli 0.155.1` where an ordering expects dotted digits and every run is then warned "
         f"about a version nothing could place"
     )
     assert reported.standing is Standing.WITHIN
@@ -1941,7 +2070,7 @@ async def test_the_levels_come_back_in_the_order_the_catalogue_listed_them_and_n
 ) -> None:
     """The order is the harness's answer too, and the reading preserves it rather than deriving one.
 
-    Measured over 0.152.0's whole catalogue, each of its ten models lists an ascending prefix of
+    Measured over 0.155.1's whole catalogue, each of its nine models lists an ascending prefix of
     `low, medium, high, xhigh, max, ultra`, so the last level a model lists is the most it reasons
     at - which is what `sdk/_engine/preflight.py`'s `_unlisted` names when a role asks for a level
     the model has not got. Nothing here checks that the order *is* ascending, because that is the
@@ -1988,7 +2117,7 @@ async def test_a_listing_that_cannot_be_read_costs_the_efforts_and_never_the_ver
 
     reported = await OpenAiRunner(stub.path).installation(OpenAI.LUNA)
 
-    assert reported.version == "0.152.0", f"a listing {why} took the version with it"
+    assert reported.version == "0.155.1", f"a listing {why} took the version with it"
     assert reported.efforts == {}
 
 @pytest.mark.parametrize(
@@ -1996,7 +2125,7 @@ async def test_a_listing_that_cannot_be_read_costs_the_efforts_and_never_the_ver
     [
         ({"version": _SPELLED_VERSION, "version_exit": 1}, "the subcommand failed"),
         ({"version": "codex-cli"}, "it printed only its own name"),
-        ({"version": "codex-cli 0.152.0 (build 7)"}, "it printed a third word"),
+        ({"version": "codex-cli 0.155.1 (build 7)"}, "it printed a third word"),
     ],
 )
 @pytest.mark.asyncio
@@ -2204,3 +2333,206 @@ def _put_down(pids: Iterable[int]) -> None:
     for pid in pids:
         with suppress(ProcessLookupError, PermissionError):
             os.kill(pid, signal.SIGKILL)
+
+# --- The environment: what the allowlist lets past, and what a shell no longer decides -----------
+
+# Names an operator's shell may carry that steer this harness, and what each one does. `_HOME` is
+# the pair's counterexample: it is on the allowlist, and `tests/conftest.py` points it at a
+# credential-free directory for every test in this repository precisely so that it travels.
+SHELL_CARRIED: Final[tuple[tuple[str, str], ...]] = (
+    # What the harness sets on its *own* children to tell them they are confined. Inherited from
+    # outside, it tells this child something about its confinement that AGL did not arrange.
+    ("CODEX_SANDBOX", "the child was told it was already sandboxed"),
+    ("CODEX_SANDBOX_NETWORK_DISABLED", "the child was told its network was already off"),
+    # The credential route that is not `auth.json`. Left through deliberately - the binary names it
+    # in the same sentence as the two others when it says no credentials were found - and here to
+    # prove the pair below is asserting something.
+    ("CODEX_INTERNAL_ORIGINATOR_OVERRIDE", "the harness reported itself as something else"),
+    ("CODEX_NON_INTERACTIVE", "the harness took a different view of its own terminal"),
+)
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("name", "consequence"), SHELL_CARRIED)
+async def test_no_vendor_name_the_allowlist_refuses_reaches_the_harness_that_actually_ran(
+    name: str, consequence: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Read off the child's own environment rather than off the mapping that composed it.
+
+    This adapter hands `create_subprocess_exec` the whole environment, which is the one thing the
+    Claude adapter cannot do - so what is claimed here is *absence* and absence is worth measuring
+    on the far side. The stub records the names it was given and no value for any of them, so a real
+    process, started by the real adapter through the real spawn, is what answers.
+    """
+    monkeypatch.setenv(name, "whatever the operator exported")
+    stub = Stub(tmp_path / "stub", steps=[{"say": started()}])
+
+    await drive(stub, task_in(workspace(tmp_path)))
+
+    assert name not in stub.seen()["vendor"], (
+        f"{name} reached the harness: it was handed {stub.seen()['vendor']}. Measured consequence "
+        f"when it did: {consequence}"
+    )
+
+@pytest.mark.asyncio
+async def test_the_home_the_paid_endpoint_guard_exports_reaches_the_harness_a_test_starts(
+    tmp_path: Path,
+) -> None:
+    """The one that would fail silently and cost money, so it is asserted against a real child.
+
+    `tests/conftest.py` points this harness's home at a directory holding no `auth.json`, and its
+    whole mechanism is that a `codex` a test spawns *inherits* it - `--ignore-user-config` says of
+    itself that authentication still reads that directory. An allowlist that dropped the name would
+    hand every test the operator's own ChatGPT tokens while the suite stayed green: the existing
+    redirect tests read this process's environment, not the child's.
+
+    The name is spelled as `_version._HOME` rather than written out, because `scripts/check`'s
+    paid-endpoint gate scans this tree for a literal of it - correctly, since no scan keyed on a
+    name can tell a scratch directory from the operator's own.
+    """
+    stub = Stub(tmp_path / "stub", steps=[{"say": started()}])
+
+    await drive(stub, task_in(workspace(tmp_path)))
+
+    assert _version._HOME in stub.seen()["vendor"], (
+        f"{_version._HOME} did not reach the harness: it was handed {stub.seen()['vendor']}. That "
+        f"name is the only thing between a test and this machine's real ChatGPT credentials, and "
+        f"the guard cannot place it anywhere but the environment"
+    )
+
+@pytest.mark.asyncio
+async def test_the_machine_outside_this_vendors_namespace_reaches_the_harness_untouched(
+    tmp_path: Path,
+) -> None:
+    """The scope, measured on the far side: an agent runs the repository's own build.
+
+    This adapter replaces the child's environment outright, so everything the child has is something
+    the allowlist put there - which makes a missing `PATH` a real possibility here in a way it never
+    is for the Claude adapter. What keeps it from happening is that nothing outside the two vendor
+    prefixes is considered at all, and the child is the only witness to that.
+    """
+    stub = Stub(tmp_path / "stub", steps=[{"say": started()}])
+
+    await drive(stub, task_in(workspace(tmp_path)))
+
+    assert stub.seen()["machine"] == ["HOME", "PATH", "SHELL", "TMPDIR"], (
+        f"the harness was handed {stub.seen()['machine']} of the four this test looks for. An "
+        f"agent with no PATH runs no build, and one with no HOME or TMPDIR fails somewhere else "
+        f"entirely - which is the failure that only shows up under load"
+    )
+
+@pytest.mark.asyncio
+async def test_the_readiness_probe_asks_its_question_through_the_same_allowlist(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The third spawn in this package, which is the one a scan of the run path would miss.
+
+    `check_ready` reads the credential store, so the home has to travel and the rest has to not -
+    and it is a separate `create_subprocess_exec` from the run's, in a separate module, so nothing
+    about the run's composition says anything about it. Asserted on the child rather than on the
+    call, for the reason the run's own version gives: absence is worth measuring on the far side.
+    """
+    monkeypatch.setenv("CODEX_SANDBOX", "the operator's own")
+    stub = Stub(tmp_path, login={"say": "Logged in using ChatGPT", "exit": 0})
+
+    await OpenAiRunner(stub.path).check_ready(OpenAI.TERRA)
+
+    assert stub.seen()["vendor"] == [_version._HOME], (
+        f"the readiness probe was handed {stub.seen()['vendor']}. The home is what it reads the "
+        f"credential store out of and the only vendor name it has any use for"
+    )
+
+@pytest.mark.asyncio
+async def test_the_version_probe_is_asked_through_the_same_allowlist_with_its_own_home_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The seam a later deliverable sets this harness's home through, asserted where it already is.
+
+    `probed` is the one place in this adapter that sets a vendor name of its own - the home, to a
+    fresh directory, for the reason `_version.py`'s `_HOME` comment gives, and
+    `test_neither_question_is_put_against_the_credential_home_this_process_carries` is what holds
+    *that*. What is new here is that it sets it by handing `composed` what it chose, so the choice
+    wins over the shell while everything else still goes through the allowlist. A second name to
+    set goes in beside it and needs no second mechanism.
+    """
+    monkeypatch.setenv("CODEX_SQLITE_HOME", "the operator's own")
+    stub = Stub(tmp_path / "stub")
+
+    await OpenAiRunner(stub.path).installation(OpenAI.LUNA)
+
+    for which in ("version", "catalogue"):
+        seen = stub.probed(which)
+        assert "CODEX_SQLITE_HOME" not in seen["vendor"], (
+            f"the {which} probe was handed {seen['vendor']}, so it is asked against whatever the "
+            f"shell carried rather than through the allowlist the run itself goes through"
+        )
+        chosen = seen["home"] != os.environ.get(_version._HOME)
+        assert _version._HOME in seen["vendor"] and chosen, (
+            f"the {which} probe was asked with the home at {seen['home']!r}, which is the one this "
+            f"process carries. What `probed` chose was dropped, so the seam a later deliverable "
+            f"sets this harness's home through is not there"
+        )
+
+# --- Where the harness keeps its own state, which is the half the home cannot be moved for -------
+
+@pytest.mark.asyncio
+async def test_a_run_points_the_harness_state_at_a_directory_it_made_and_then_removed(
+    tmp_path: Path,
+) -> None:
+    """The one write this adapter redirects rather than suppresses, and why it redirects it.
+
+    The credential lives under the home, so the home stays the operator's and everything defaulted
+    into it lands there. Six SQLite databases are defaulted into it - thread history, memories,
+    goals, queue, logs and state - and the name below is the only lever that moves them. Volume is
+    the smaller half: 2.4 MB of write-ahead log a run, measured against 0.155.1. The larger half is
+    that AGL's turns would otherwise be rows in the history and the memories the operator's own
+    interactive sessions read back.
+
+    Both halves of the claim are asserted on the child, because either alone passes for an adapter
+    that got it wrong: a name pointing at a directory that was not there is a redirect the harness
+    falls back out of, and one pointing at a directory still standing afterwards is an adapter
+    accumulating somewhere else instead of somewhere else per run.
+    """
+    stub = Stub(tmp_path, steps=[{"say": started()}])
+
+    await drive(stub, task_in(workspace(tmp_path)))
+    seen = stub.seen()
+
+    assert seen["state_home_exists"], (
+        f"the harness was started with its state home at {seen['state_home']!r}, which was not a "
+        f"directory while it ran. A redirect at a path that is not there is one the harness falls "
+        f"back out of, and it falls back to the home the credential is in"
+    )
+    assert not Path(str(seen["state_home"])).exists(), (
+        f"{seen['state_home']!r} outlived the run. A directory per run is what keeps AGL's turns "
+        f"out of the operator's own thread history; one that stays is the same accumulation under "
+        f"a different name"
+    )
+
+@pytest.mark.asyncio
+async def test_the_shells_own_state_redirect_loses_to_the_one_this_adapter_chose(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The name is off the allowlist *and* set, which are two different guarantees.
+
+    Off the allowlist alone would mean the operator's value is dropped and the harness falls back
+    to the home. Set alone would mean AGL names a directory that whatever the shell carried could
+    still be read instead of. `composed` resolves it in AGL's favour by construction, and this is
+    the test that says so from the far side of a real spawn: the shell exports a path that is not
+    even a directory, and what the child got is the one the run made.
+    """
+    monkeypatch.setenv("CODEX_SQLITE_HOME", str(tmp_path / "the-operators-own"))
+    stub = Stub(tmp_path / "stub", steps=[{"say": started()}])
+
+    await drive(stub, task_in(workspace(tmp_path)))
+    seen = stub.seen()
+
+    assert seen["state_home"] != str(tmp_path / "the-operators-own"), (
+        f"the harness kept its state at {seen['state_home']!r}, which is what the shell said. An "
+        f"operator's redirect deciding where a run of AGL's writes is the defect this name being "
+        f"off the allowlist exists to stop"
+    )
+    assert seen["state_home_exists"], (
+        f"the harness was started with its state home at {seen['state_home']!r}, so the shell's "
+        f"value was dropped without one of AGL's own put there - which leaves the databases back "
+        f"in the home the credential is in"
+    )

@@ -64,8 +64,8 @@ class ModelId(StrEnum):
 class ClaudeEffort(StrEnum):
     """How long a Claude model reasons before it answers: the levels its vendor's CLI accepts."""
 
-    # The choices `claude --help` lists for `--effort` in Claude CLI 2.1.259, and the `EffortLevel`
-    # literal in `claude_agent_sdk/types.py` 0.2.152.
+    # The choices `claude --help` lists for `--effort` in Claude CLI 2.1.277, and the `EffortLevel`
+    # literal in `claude_agent_sdk/types.py` 0.2.157.
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
@@ -75,7 +75,7 @@ class ClaudeEffort(StrEnum):
 class OpenAIEffort(StrEnum):
     """How long an OpenAI model reasons before it answers: the levels its vendor's CLI accepts."""
 
-    # The union of the reasoning levels the vendor CLI 0.152.0's model listing reports for the
+    # The union of the reasoning levels the vendor CLI 0.155.1's model listing reports for the
     # three models `OpenAI` names: `gpt-5.6-luna` lists every one of these but `ultra`, and none of
     # the three lists `minimal` or `none`.
     LOW = "low"
@@ -297,7 +297,7 @@ class ModelEfforts:
     """What one model reasons at, in its own tool's words: the levels offered, and the fallback."""
 
     # In the tool's own order and never sorted here, because the order is itself something the tool
-    # reported: the vendor CLI 0.152.0 lists every model's levels ascending, so its last entry is
+    # reported: the vendor CLI 0.155.1 lists every model's levels ascending, so its last entry is
     # the most that model reasons at, and a set would throw that away.
     levels: tuple[str, ...]
     """The tool's own spellings, which is why these are strings and not an effort enum's members."""

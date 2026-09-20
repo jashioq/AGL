@@ -6,6 +6,7 @@ import tempfile
 from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Final
+from agl.adapters.openai._environment import composed
 from agl.adapters.openai.translate import model_slug
 from agl.ports.agent import Installation, ModelEfforts, ModelId, OpenAI, VersionRange
 
@@ -15,7 +16,12 @@ TOOL: Final = "the Codex CLI"
 
 # The release this adapter's command line and its event reading were exercised against, and the one
 # `ports/agent.py`'s `OpenAIEffort` names as the source of its members.
-TESTED: Final = VersionRange(lowest="0.152.0", highest="0.152.0")
+#
+# A point, and the lower end is the load-bearing half: `runner._ALWAYS` sends `--ephemeral`, and
+# this tool's argument parser exits 2 on a flag it does not know before it runs anything. So a
+# release where that flag is absent is one AGL does not merely go untested on but cannot start on,
+# and only a release the flag has been seen accepted on can honestly be claimed.
+TESTED: Final = VersionRange(lowest="0.155.1", highest="0.155.1")
 
 _VERSION: Final = ("--version",)
 
@@ -48,7 +54,7 @@ _MODELS_BY_SLUG: Final[Mapping[str, ModelId]] = MappingProxyType(
 async def probed(cli: str) -> Installation:
     """Both answers the tool gives about itself: its version, and what each model reasons at."""
     with tempfile.TemporaryDirectory(prefix="agl-version-") as elsewhere:
-        environment = {**os.environ, _HOME: elsewhere}
+        environment = composed(os.environ, {_HOME: elsewhere})
         version = _spelled(await _output(cli, _VERSION, elsewhere, environment))
         efforts = _catalogued(await _output(cli, _CATALOGUE, elsewhere, environment))
     return Installation(tool=TOOL, version=version, tested=TESTED, efforts=efforts, where=cli)
@@ -78,7 +84,7 @@ async def _output(
         return None
     return said if child.returncode == 0 else None
 
-# Measured output is exactly `codex-cli 0.152.0`: the tool's own name, then the version. Anything
+# Measured output is exactly `codex-cli 0.155.1`: the tool's own name, then the version. Anything
 # else is a spelling this reading was not written for, and reports nothing rather than a guess.
 def _spelled(said: bytes | None) -> str | None:
     if said is None:
@@ -115,9 +121,9 @@ def _catalogued(said: bytes | None) -> dict[ModelId, ModelEfforts]:
 # the tool writes for its own menu, and nothing here reports that description.
 #
 # The listing's order is kept rather than sorted, for the reason `ports/agent.py` gives beside
-# `ModelEfforts.levels`. Measured over 0.152.0's whole catalogue: each of its ten models lists an
-# ascending prefix of `low, medium, high, xhigh, max, ultra` - four stopping at `xhigh` and two at
-# `max` - and each level carries a description that ascends with it.
+# `ModelEfforts.levels`. Measured over 0.155.1's whole catalogue: each of its nine models lists an
+# ascending prefix of `low, medium, high, xhigh, max, ultra` - five reaching `ultra`, two stopping
+# at `max` and two at `xhigh` - and each level carries a description that ascends with it.
 def _offered(levels: object) -> tuple[str, ...]:
     if not isinstance(levels, list):
         return ()
