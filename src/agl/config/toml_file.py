@@ -26,7 +26,7 @@ __all__ = [
     "FileProject",
     "FileSettings",
     "check_trees_root",
-    "check_unregistered",
+    "free_project_name",
     "git_root",
     "make_workflow",
     "make_workspace",
@@ -35,6 +35,8 @@ __all__ = [
     "read_document",
     "read_project",
     "read_settings",
+    "register_repository",
+    "registered_as",
     "resolve_project",
     "write_project",
 ]
@@ -55,6 +57,13 @@ _AGENT_KEYS: Final = (_ENABLED, _CLI_PATH)
 RESERVED_KEYS: Final = (_NAME, _REPO, _TREES_ROOT, _BUILD_TIMEOUT)
 
 _HOME_KEYS: Final = frozenset({"home", "agl_home", "AGL_HOME"})
+
+# The bound on the search for a free name: `<name>-1` through `<name>-100`. Each attempt costs one
+# `exists()` and at most one read of a small file, and the cap is what keeps a `projects/` somebody
+# filled by hand from turning registration into an unbounded walk - an operator with 101 distinct
+# repositories whose directories all carry one name is naming them rather than colliding.
+_SUFFIX_SEPARATOR: Final = "-"
+_SUFFIX_LIMIT: Final = 100
 
 # Measured against uv 0.11.29: a member is a glob against the directory holding this file. With `*`
 # there uv refuses the sync over `workflows/` itself, a directory holding files and no project file,
@@ -93,6 +102,8 @@ version = "0.1.0"
 # Tested for existence and never for being a directory: a linked worktree or a submodule writes a
 # file holding a `gitdir:` line there instead.
 _GIT: Final = ".git"
+
+_TREES_DIRNAME: Final = ".agl-trees"
 
 # The escapes a TOML basic string requires, as the format defines them; every other control
 # character takes the format's own `\u00xx` fallback, `\x7f` included.
@@ -163,22 +174,44 @@ def read_project(home: AglHome, project: ProjectName) -> FileProject:
     if document is None:
         raise NotFoundError(
             f"no project named {str(project)!r} is registered: AGL looked for {path} and there is "
-            f"no such file. `agl init` inside the repository writes it"
+            f"no such file. AGL writes one itself, the first time `agl run` is used inside a "
+            f"repository, and names it after that repository's own directory"
         )
     return _project(path, document)
 
-def check_unregistered(home: AglHome, project: ProjectName) -> Path:
-    path = project_config(home, project)
-    if path.exists():
-        raise ConflictError(_already(path, project))
-    return path
+# The `repo` argument narrows this rather than widening it: a taken candidate naming this same
+# repository is refused rather than suffixed past. `cli/main.py` reaches here only where
+# `resolve_project` raised, so every readable file has been asked already and what is left to
+# catch is a second AGL that registered in between - `tests/test_registration.py` argues it.
+def free_project_name(home: AglHome, project: ProjectName, repo: Path) -> ProjectName:
+    """The name `repo` is registered under: `project` itself, or the first free `<project>-<n>`."""
+    for attempt in range(_SUFFIX_LIMIT + 1):
+        candidate, path = (
+            (project, project_config(home, project))
+            if attempt == 0
+            else _suffixed(home, project, attempt)
+        )
+        if not path.exists():
+            return candidate
+        if _names_repository(path, repo):
+            raise ConflictError(_already(path, candidate))
+    raise ConflictError(_crowded(project, projects_dir(home)))
 
+def registered_as(wanted: ProjectName, chosen: ProjectName) -> str:
+    """The note a suffixed registration owes its operator: one sentence, and no refusal in it."""
+    return (
+        f"Registered as {str(chosen)!r}: another repository is already registered as "
+        f"{str(wanted)!r}."
+    )
+
+# No `build_timeout`: `config/sources.py` resolves it from `DEFAULT_BUILD_TIMEOUT` when the file is
+# silent, so a written default and an absent key answer alike - and a file holding only what this
+# repository is keeps AGL's own default in one place, where moving it moves every project at once.
 def write_project(
     home: AglHome,
     project: ProjectName,
     repo: Path,
     trees_root: TreesRoot,
-    build_timeout: float,
 ) -> Path:
     path = project_config(home, project)
     document = "".join(
@@ -188,19 +221,31 @@ def write_project(
             (_REPO, str(repo)),
             (_TREES_ROOT, str(trees_root.path)),
         )
-    ) + f"{_BUILD_TIMEOUT} = {build_timeout!r}\n"
+    )
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("x", encoding="utf-8", newline="\n") as handle:
             handle.write(document)
     except FileExistsError as error:
-        raise ConflictError(_already(path, project)) from error
+        raise ConflictError(_appeared(path)) from error
     except OSError as error:
         raise InputError(
             f"{path} cannot be written: {error}. That is where AGL keeps this project's settings, "
-            f"so `agl init` has nowhere to record the repository it was run in"
+            f"so AGL has nowhere to record the repository this command was run in"
         ) from error
     return path
+
+# The name is settled once, here, and three things take it without ever recomputing it: the
+# settings file, the ledger root at `projects/<name>/`, and the trees root below, which is written
+# into that file and read back from it afterwards. So a suffix chosen here is what every later run
+# addresses, and two repositories of one directory name keep separate ledgers and separate trees.
+def register_repository(home: AglHome, start: Path) -> str | None:
+    """Register the repository `start` is in: the note a name AGL had to suffix owes, or `None`."""
+    root = git_root(start)
+    wanted = ProjectName(root.name)
+    name = free_project_name(home, wanted, root)
+    write_project(home, name, root, TreesRoot(root.parent / _TREES_DIRNAME / str(name)))
+    return None if name == wanted else registered_as(wanted, name)
 
 def make_workspace(home: AglHome) -> None:
     try:
@@ -245,7 +290,7 @@ def git_root(start: Path) -> Path:
     raise NotFoundError(
         f"{directory} is not inside a git repository: AGL walked up from it to "
         f"{directory.anchor} looking for a {_GIT} entry and found none. AGL works on a "
-        f"repository, so run it from inside one - and `agl init` there to register it"
+        f"repository, so run it from inside one - the first `agl run` there registers it"
     )
 
 def check_trees_root(path: Path, repo: Path, trees_root: Path) -> None:
@@ -287,8 +332,10 @@ def resolve_project(home: AglHome, start: Path) -> FileProject:
         raise InputError(_unreadable(root, unreadable))
     raise NotFoundError(
         f"no project is registered for the repository at {root}: AGL read every project settings "
-        f"file under {home.path} and none of them names it as its repo. Run `agl init` inside "
-        f"{root} to write one"
+        f"file under {home.path} and none of them names it as its repo. Registration is not a "
+        f"step you run - `agl run` registers the repository it is used in, on the way past - so "
+        f"there is nothing to write by hand here, and nothing recorded to address either: a run "
+        f"has to have been started in this repository before there is one to resume or to clear"
     )
 
 def read_document(path: Path) -> Mapping[str, object] | None:
@@ -350,6 +397,29 @@ def _project_name(path: Path, spelled: str | None) -> ProjectName:
             f"are recorded. Rename the file, or correct the key"
         )
     return name
+
+# `ids.py` admits '-' inside a name and refuses one at either end, so `<name>-1` composes from any
+# name a repository's directory can carry. What a suffix can still push past is `home_layout`'s own
+# 255-byte ceiling on `<name>.toml`, and that refusal would otherwise arrive about a name nobody
+# typed - so it is caught here and answered with where the name came from.
+def _suffixed(home: AglHome, project: ProjectName, attempt: int) -> tuple[ProjectName, Path]:
+    try:
+        candidate = ProjectName(f"{project}{_SUFFIX_SEPARATOR}{attempt}")
+        return candidate, project_config(home, candidate)
+    except InputError as error:
+        raise InputError(_too_long(project, error)) from error
+
+# `samefile` asks the filesystem - device and inode - which is the question `resolve_project` asks,
+# so the two agree about which file is a given repository's. A candidate AGL cannot read that far
+# answers no rather than raising: a file whose repository cannot be established is not one this may
+# claim, so the search steps past it and writes nothing over it.
+def _names_repository(path: Path, repo: Path) -> bool:
+    try:
+        document = read_document(path)
+        named = None if document is None else _absolute(document, _REPO, path, "")
+        return named is not None and named.samefile(repo)
+    except (InputError, OSError):
+        return False
 
 def _project_files(home: AglHome) -> list[Path]:
     directory = projects_dir(home)
@@ -443,18 +513,41 @@ def _unreadable(root: Path, refusals: Sequence[InputError]) -> str:
         f"no project is registered for the repository at {root} in any project settings file AGL "
         f"could read, and the files below could not be read far enough to learn which repository "
         f"they name - so one of them may be this repository's, and AGL will not call it "
-        f"unregistered on that guess. Fix what each says, or run `agl init` inside {root} if none "
-        f"of them is this repository's:\n{named}"
+        f"unregistered on that guess. Nor will it register a second one over the top of them, "
+        f"which is what makes this a refusal rather than a first run. Fix what each says, and "
+        f"whichever of the two answers is right arrives on the next command:\n{named}"
     )
 
 def _already(path: Path, project: ProjectName) -> str:
     return (
-        f"a project named {str(project)!r} is already registered: {path} exists, and `agl init` "
-        f"writes that file once per repository and never writes over it. If that is this "
-        f"repository, its settings are already there - edit the file to change them, or delete it "
-        f"and run `agl init` again. If it is a different repository whose directory happens to "
-        f"carry the same name, one of the two has to be renamed: a project's name is its "
-        f"directory's name, and that name is the file AGL records its runs beside"
+        f"this repository is already registered as {str(project)!r}: {path} names it, and AGL had "
+        f"just read every file under {path.parent} without finding one that did. Another AGL in "
+        f"this same repository registered it in between, so nothing has been written over and "
+        f"nothing is lost - run the command again"
+    )
+
+def _appeared(path: Path) -> str:
+    return (
+        f"{path} was created while AGL was choosing a name for it, so nothing has been "
+        f"written over: AGL picks a name no file has taken and then writes with `x`, and the two "
+        f"disagreed. Run the command again"
+    )
+
+def _crowded(project: ProjectName, directory: Path) -> str:
+    return (
+        f"no free name is left for a project called {str(project)!r}: {directory} already holds "
+        f"that name and every suffix from {_SUFFIX_SEPARATOR}1 to "
+        f"{_SUFFIX_SEPARATOR}{_SUFFIX_LIMIT}, and none of them names this repository. AGL stops "
+        f"counting there rather than searching without a bound. Rename this repository's directory "
+        f"to something the others do not share"
+    )
+
+def _too_long(project: ProjectName, error: InputError) -> str:
+    return (
+        f"{error}. That name is one AGL composed rather than one anybody typed: {str(project)!r} "
+        f"is already another repository's, so AGL was adding a suffix to tell the two apart, "
+        f"and the suffix is what pushed the filename past the limit. Rename this repository's "
+        f"directory to something shorter"
     )
 
 def _already_written(directory: Path, name: WorkflowName) -> str:

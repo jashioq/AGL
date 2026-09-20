@@ -23,13 +23,12 @@ from typing import Final
 import pytest
 from agl.config import distribution
 from agl.config.schema import AgentSettings
-from agl.config.sources import DEFAULT_BUILD_TIMEOUT
 from agl.config.toml_file import (
     FileAgent,
     FileProject,
     FileSettings,
     check_trees_root,
-    check_unregistered,
+    free_project_name,
     git_root,
     make_workflow,
     make_workspace,
@@ -37,6 +36,7 @@ from agl.config.toml_file import (
     read_document,
     read_project,
     read_settings,
+    registered_as,
     resolve_project,
     write_project,
 )
@@ -84,13 +84,26 @@ def _repo(tmp_path: Path, name: str, *, marker: str = "dir") -> Path:
         (root / ".git").write_text("gitdir: /elsewhere/.git/worktrees/w\n", encoding="utf-8")
     return root
 
-def _beside(tmp_path: Path) -> tuple[Path, TreesRoot]:
-    """A repository and a trees root laid out the way `agl init` lays them out: siblings.
+def _registered(home: AglHome, repo: Path) -> ProjectName:
+    """The whole of what `register_repository` does with a name: pick a free one, write under it.
 
-    `<parent>/myapp` and `<parent>/.agl-trees/myapp`, which is the shape `agl init` picks. The pair
-    is a helper because every write below needs one that survives `check_trees_root` - the reader
-    refuses a nested trees root, so a writer test that used `tmp_path` for both would fail on the
-    way back in and would be measuring the reader.
+    Spelled out here rather than called, because this suite is `config/toml_file.py`'s own and the
+    composer is one caller of two functions in it. What it must not drift from is the order - the
+    name is chosen first and the trees root composed from the name that was chosen, which is what
+    makes two repositories of one directory name two trees roots as well as two files, and
+    `tests/test_registration.py` is where the composer's own outcomes are asserted.
+    """
+    name = free_project_name(home, ProjectName(repo.name), repo)
+    write_project(home, name, repo, TreesRoot(repo.parent / ".agl-trees" / str(name)))
+    return name
+
+def _beside(tmp_path: Path) -> tuple[Path, TreesRoot]:
+    """A repository and a trees root laid out the way registration lays them out: siblings.
+
+    `<parent>/myapp` and `<parent>/.agl-trees/myapp`, which is the shape registration picks. The
+    pair is a helper because every write below needs one that survives `check_trees_root`: the
+    reader refuses a nested trees root, so a writer test that used `tmp_path` for both would fail
+    on the way back in and would be measuring the reader.
     """
     dev = tmp_path.resolve() / "dev"
     return dev / "myapp", TreesRoot(dev / ".agl-trees" / "myapp")
@@ -367,37 +380,37 @@ def test_a_project_that_was_never_registered_is_not_found(tmp_path: Path) -> Non
     """A name is not a guess: absence here is a refusal, unlike the global settings file."""
     with pytest.raises(NotFoundError) as raised:
         read_project(_home(tmp_path), ProjectName("nobody"))
-    assert "agl init" in str(raised.value)
+    assert "agl run" in str(raised.value)
 
 # --- The writer, which is only interesting as the reader's inverse ------------------------------
 #
 # `write_project` sits beside `read_project` because this is "the only module that knows TOML",
-# and the whole of what that buys is one property: a file `agl init` writes is a file `agl run`
-# reads. So the tests below assert the round trip rather than the bytes - a test comparing the
-# rendered text against a literal would pass while agreeing with nothing, and would have to be
-# edited by anybody who changed the spacing.
+# and the whole of what that buys is one property: the file registration writes is a file every
+# later command reads. So the tests below assert the round trip rather than the bytes - a test
+# comparing the rendered text against a literal would pass while agreeing with nothing, and would
+# have to be edited by anybody who changed the spacing.
 
 def test_a_file_the_writer_writes_is_one_the_reader_accepts(tmp_path: Path) -> None:
     """The round trip, which is the writer's entire contract: the file written and read back.
 
-    Every key it writes, `build_timeout` included, and no `build`, which nothing writes, so the file
-    reads back with that key absent. The timeout is spelled as the constant rather than as `600.0`:
-    the number has one home in `sources.DEFAULT_BUILD_TIMEOUT`, `api.init` reads it rather than
-    restating it, and a literal here would be the second copy that arrangement exists to prevent -
-    one that goes on passing on the day the default moves and the writer follows it.
+    Every key it writes, and `build_timeout` is not among them. `read_project` answers `None` for a
+    key that is absent, so the field below is what asserts nothing was pre-written under it -
+    `config/sources.py` applies `DEFAULT_BUILD_TIMEOUT` on the way past, and a copy written here
+    would freeze that number into every project file at the version that wrote it. `build` is
+    absent for the plainer reason that nothing writes it, so `config` reads back empty.
     """
     home = _home(tmp_path)
     repo = tmp_path.resolve() / "dev" / "myapp"
     trees = TreesRoot(tmp_path.resolve() / "dev" / ".agl-trees" / "myapp")
 
-    written = write_project(home, ProjectName("myapp"), repo, trees, DEFAULT_BUILD_TIMEOUT)
+    written = write_project(home, ProjectName("myapp"), repo, trees)
 
     assert written == project_config(home, ProjectName("myapp"))
     assert read_project(home, ProjectName("myapp")) == FileProject(
         name=ProjectName("myapp"),
         repo=repo,
         trees_root=trees,
-        build_timeout=DEFAULT_BUILD_TIMEOUT,
+        build_timeout=None,
         config={},
     )
 
@@ -406,68 +419,229 @@ def test_a_repository_path_holding_the_format_s_own_punctuation_round_trips(tmp_
 
     This is the assertion the escape table exists for, and it is why the value is written as a TOML
     *basic* string: a literal string admits no escapes at all, so `don't` would end the value early
-    and produce a file `tomllib` refuses - a file `agl init` wrote and no later command could read.
+    and produce a file `tomllib` refuses - one AGL wrote and no later command could read.
     """
     home = _home(tmp_path)
     dev = tmp_path.resolve() / 'say "don\'t" \\ stop'
     repo = dev / "myapp"
 
-    write_project(
-        home, ProjectName("myapp"), repo, TreesRoot(dev / ".agl-trees" / "myapp"),
-        DEFAULT_BUILD_TIMEOUT,
-    )
+    write_project(home, ProjectName("myapp"), repo, TreesRoot(dev / ".agl-trees" / "myapp"))
 
     assert read_project(home, ProjectName("myapp")).repo == repo
 
 def test_the_writer_never_writes_over_a_project_file_that_is_already_there(tmp_path: Path) -> None:
-    """`agl init` runs once per repo, and running it twice must not take a file away.
+    """The `open("x")` that makes the write create-only, which is now a race guard rather than the
+    routine refusal.
 
+    `free_project_name` picks a name no file has taken, so a `FileExistsError` here means a file
+    appeared between the two - two AGL commands registering at once, or a caller that skipped
+    the picker.
     `ConflictError` - exit 4, the class `api.run` answers a taken label with - and the file is
     asserted untouched afterwards, which is the assertion with teeth: a writer that refused *after*
     truncating would raise the same class and have destroyed the settings anyway.
     """
     home = _home(tmp_path)
-    written = write_project(home, ProjectName("myapp"), *_beside(tmp_path), DEFAULT_BUILD_TIMEOUT)
+    written = write_project(home, ProjectName("myapp"), *_beside(tmp_path))
     written.write_text(written.read_text(encoding="utf-8") + 'build = "make"\n', encoding="utf-8")
 
     with pytest.raises(ConflictError) as raised:
-        write_project(home, ProjectName("myapp"), *_beside(tmp_path), DEFAULT_BUILD_TIMEOUT)
+        write_project(home, ProjectName("myapp"), *_beside(tmp_path))
 
-    assert "myapp" in str(raised.value)
+    assert str(written) in str(raised.value)
     assert read_project(home, ProjectName("myapp")).config == {"build": "make"}
 
-def test_the_free_refusal_and_the_write_refusal_are_one_message(tmp_path: Path) -> None:
-    """`check_unregistered` answers with the path a new project's file goes to, or refuses.
+# --- Two repositories whose directories carry one name -------------------------------------------
+#
+# A name collides only inside `projects/`, where AGL is the one choosing filenames, so the second
+# repository gets `<name>-1` and a note rather than a refusal telling its operator to rename a
+# directory of their own. The refusal that stays is the one that matters: a repository the search
+# finds a file for is answered with that file. Without it a second registration in one repository
+# would write `<name>-1.toml` naming the same `repo`, and `resolve_project` - which walks
+# `sorted(iterdir())` and takes the first `repo` that matches - would resolve `myapp-1.toml` ahead
+# of `myapp.toml`, '-' being 0x2D and '.' 0x2E. One repository, one file, is what keeps that
+# state out of reach, and the resolution below is what measures it.
+#
+# Which second registration, now that only an unresolved repository reaches one, is the race:
+# `tests/test_registration.py` carries that argument, and the tests below call `free_project_name`
+# directly rather than through the composer, so what they pin is the function's own contract.
 
-    Two call sites and one sentence: `api.init` asks this before it checks the trees root it chose,
-    so a registered repository is refused before anything else is, and `write_project` asks the
-    operating system the same thing again at the moment it matters. The messages are compared
-    because two refusals about one fact that drifted apart would be two accounts of what happened.
+def test_a_second_repository_of_the_same_directory_name_is_registered_under_a_suffix(
+    tmp_path: Path,
+) -> None:
+    """Two `myapp` directories in two parents, and the second is registered as `myapp-1`."""
+    home = _home(tmp_path)
+    first = _repo(tmp_path, "one/myapp")
+    second = _repo(tmp_path, "two/myapp")
+
+    assert _registered(home, first) == ProjectName("myapp")
+    assert _registered(home, second) == ProjectName("myapp-1")
+
+    assert project_config(home, ProjectName("myapp")).is_file()
+    assert project_config(home, ProjectName("myapp-1")).is_file()
+
+def test_a_third_repository_of_that_name_takes_the_next_free_suffix_after_it(
+    tmp_path: Path,
+) -> None:
+    """The first free suffix wins, so the third is `myapp-2` and nothing is counted twice."""
+    home = _home(tmp_path)
+    names = [
+        _registered(home, _repo(tmp_path, f"{parent}/myapp"))
+        for parent in ("one", "two", "three")
+    ]
+
+    assert names == [ProjectName("myapp"), ProjectName("myapp-1"), ProjectName("myapp-2")]
+
+def test_a_suffixed_project_file_carries_the_suffixed_name_and_reads_back_under_it(
+    tmp_path: Path,
+) -> None:
+    """The round trip, and the sorting hazard measured from the side that could bite.
+
+    `_project_name` holds a file's `name` key to its own stem, so a `myapp-1.toml` carrying
+    `name = "myapp"` is an `InputError` on every read - which means the writer has to be handed the
+    name the search chose and not the one it wanted. And `resolve_project` sorts, so `myapp-1.toml`
+    is read *before* `myapp.toml`; each repository still resolves to its own file because the match
+    is `repo` and never the name.
     """
     home = _home(tmp_path)
-    name = ProjectName("myapp")
+    first = _repo(tmp_path, "one/myapp")
+    second = _repo(tmp_path, "two/myapp")
+    _registered(home, first)
+    _registered(home, second)
 
-    assert check_unregistered(home, name) == project_config(home, name)
+    assert read_project(home, ProjectName("myapp-1")).name == ProjectName("myapp-1")
+    assert read_project(home, ProjectName("myapp-1")).repo == second
+    assert resolve_project(home, second).name == ProjectName("myapp-1")
+    assert resolve_project(home, first).name == ProjectName("myapp")
 
-    write_project(home, name, *_beside(tmp_path), DEFAULT_BUILD_TIMEOUT)
-    with pytest.raises(ConflictError) as free:
-        check_unregistered(home, name)
-    with pytest.raises(ConflictError) as written:
-        write_project(home, name, *_beside(tmp_path), DEFAULT_BUILD_TIMEOUT)
+def test_the_repository_a_settings_file_already_names_is_refused_rather_than_given_a_second(
+    tmp_path: Path,
+) -> None:
+    """One repository, one file. This is the refusal the suffix does not replace.
 
-    assert str(free.value) == str(written.value)
+    A second file naming the same `repo` is the one state that makes `resolve_project`'s sorted
+    walk ambiguous, and it is also an operator's runs moving to a ledger root nothing recorded
+    anything under. So the search asks each taken candidate whose repository it names, and stops
+    where the answer is this one.
+    """
+    home = _home(tmp_path)
+    repo = _repo(tmp_path, "one/myapp")
+    _registered(home, repo)
+
+    with pytest.raises(ConflictError) as raised:
+        free_project_name(home, ProjectName("myapp"), repo)
+
+    assert "already registered" in str(raised.value)
+    assert not project_config(home, ProjectName("myapp-1")).exists()
+
+def test_the_taken_name_refusal_and_the_write_refusal_are_two_different_messages(
+    tmp_path: Path,
+) -> None:
+    """Two refusals about two facts, where there was one about one.
+
+    `free_project_name` refuses where the file it found names *this* repository, which is a second
+    AGL that registered it between the lookup and here; `write_project` refuses where a file
+    appeared between the name being chosen and the `open("x")` that writes it. Both are races and
+    they are not the same race, so one sentence covering both would send a reader to the wrong
+    step.
+    """
+    home = _home(tmp_path)
+    repo = _repo(tmp_path, "one/myapp")
+    name = _registered(home, repo)
+
+    with pytest.raises(ConflictError) as taken:
+        free_project_name(home, ProjectName("myapp"), repo)
+    with pytest.raises(ConflictError) as raced:
+        write_project(home, name, repo, TreesRoot(repo.parent / ".agl-trees" / str(name)))
+
+    assert str(taken.value) != str(raced.value)
+    assert "already registered" in str(taken.value)
+    assert str(project_config(home, name)) in str(raced.value)
+
+def test_a_settings_file_too_broken_to_read_is_stepped_past_rather_than_claimed(
+    tmp_path: Path,
+) -> None:
+    """A candidate whose repository cannot be established is not one the search may claim.
+
+    `resolve_project` has the same tolerance for the same files, and the alternative here is worse
+    than a suffix nobody expected: a file AGL cannot parse would otherwise either be written over
+    or turn every registration in every repository into a refusal about somebody else's file.
+    """
+    home = _home(tmp_path)
+    repo = _repo(tmp_path, "one/myapp")
+    _project_file(home, "myapp", "this is not toml at all\n")
+
+    assert free_project_name(home, ProjectName("myapp"), repo) == ProjectName("myapp-1")
+
+def test_a_name_whose_suffixed_file_would_exceed_the_segment_limit_is_refused_legibly(
+    tmp_path: Path,
+) -> None:
+    """`home_layout._checked_project` counts `.toml` into the 255 bytes, so 250 is the longest
+    name that registers at all and its first suffix is two bytes past.
+
+    The refusal is the layout's own with a sentence in front of it, because the name it reports is
+    one AGL composed: an operator reading `'aaa...-1' cannot be used` about a directory they named
+    `aaa...` has no way to tell where the `-1` came from.
+    """
+    home = _home(tmp_path)
+    longest = "a" * 250
+    first = _repo(tmp_path, f"one/{longest}")
+    second = _repo(tmp_path, f"two/{longest}")
+    _registered(home, first)
+
+    with pytest.raises(InputError) as raised:
+        free_project_name(home, ProjectName(longest), second)
+
+    said = str(raised.value)
+    assert "257" in said
+    assert "AGL composed" in said
+
+def test_a_hundred_taken_suffixes_exhaust_the_search_rather_than_widening_it_without_a_bound(
+    tmp_path: Path,
+) -> None:
+    """The cap, spent. An unbounded `while` here is a `projects/` somebody filled by hand turning
+    a registration into a walk with no end.
+
+    The files are empty, so none of them names this repository and every one is a candidate the
+    search steps past - which is the longest walk the bound admits, and the one the bound is for.
+    """
+    home = _home(tmp_path)
+    repo = _repo(tmp_path, "mine/myapp")
+    projects_dir(home).mkdir(parents=True)
+    for taken in ("myapp", *(f"myapp-{number}" for number in range(1, 101))):
+        project_config(home, ProjectName(taken)).write_text("", encoding="utf-8")
+
+    with pytest.raises(ConflictError) as raised:
+        free_project_name(home, ProjectName("myapp"), repo)
+
+    assert "-100" in str(raised.value)
+    assert not project_config(home, ProjectName("myapp-101")).exists()
+
+def test_the_note_names_the_suffix_it_chose_and_the_name_that_was_already_taken(
+    tmp_path: Path,
+) -> None:
+    """One sentence, and the wording lives here rather than at whichever layer prints it.
+
+    A note and not a refusal: nothing went wrong, the repository is registered, and the only thing
+    an operator has to learn is which name their runs will be recorded under. `cli/` decides the
+    stream - `tests/cli/test_main.py` is where stderr is asserted - and this decides the
+    words, so moving the print site moves neither.
+    """
+    note = registered_as(ProjectName("myapp"), ProjectName("myapp-1"))
+
+    assert note == "Registered as 'myapp-1': another repository is already registered as 'myapp'."
+    assert "\n" not in note
 
 def test_the_writer_makes_the_projects_directory_when_there_is_none(tmp_path: Path) -> None:
-    """`agl init` is the first thing an installation runs, so `projects/` does not exist yet.
+    """The first `agl run` on an installation registers, so `projects/` does not exist yet.
 
     `_project_files` already treats a missing `projects/` as an empty list rather than a refusal,
     which is the same fact read from the other side: an installation that has never registered
-    anything is a working installation, and the first `init` is what gives it a directory.
+    anything is a working installation, and the first registration is what gives it a directory.
     """
     home = _home(tmp_path)
     assert not home.path.exists()
 
-    write_project(home, ProjectName("myapp"), *_beside(tmp_path), DEFAULT_BUILD_TIMEOUT)
+    write_project(home, ProjectName("myapp"), *_beside(tmp_path))
 
     assert read_project(home, ProjectName("myapp")).name == ProjectName("myapp")
 
@@ -508,7 +682,7 @@ def test_making_a_workspace_creates_two_directories_and_a_project_file_and_nothi
 
     A sampled assertion - "the workflows directory exists" - passes just as happily against a
     function that also wrote a `config.toml` nothing reads, or the `projects/` directory the writer
-    above makes for itself on the first `agl init`. The listing is what says the three are all
+    above makes for itself on the first registration. The listing is what says the three are all
     of it.
     """
     home = _home(tmp_path)
@@ -526,7 +700,7 @@ def test_a_created_workspace_leaves_the_settings_file_and_the_projects_registry_
     """Neither is this function's to make, and the reader still answers with both of them missing.
 
     `config.toml` is the operator's own file and nothing in `src/` writes one; `projects/` belongs
-    to the writer above, which makes it on the first `agl init`. Making either here would be
+    to the writer above, which makes it on the first registration. Making either here would be
     reconciling a home rather than creating a workspace, and the read below is why neither needs
     making: a home with no settings file resolves to the same silence an empty one does.
     """
@@ -1024,7 +1198,9 @@ def test_an_agl_with_no_version_of_its_own_scaffolds_a_workflow_claiming_nothing
 # `schema.Project` cannot make this check, because seeing it needs `Path.resolve()` and that type is
 # pure - "the same values answer the same way on any machine, with any filesystem underneath".
 # It lives here instead, where a `Project` comes out of a file and where the git-root walk already
-# reads the filesystem, and is exported so that `init` refuses the same file when it writes one.
+# reads the filesystem, and the reader is the only place it runs: `register_repository` derives a
+# trees root and writes it without checking, so every value a command uses arrives through
+# `_project` - including, in the command that registered, the value that command has just written.
 
 def _nested(tmp_path: Path, trees: str) -> Path:
     """A project file whose repo is a real directory and whose trees root is spelled `trees`."""
@@ -1078,10 +1254,29 @@ def test_a_trees_root_that_only_resolution_shows_to_be_inside_is_refused(tmp_pat
         read_project(home, ProjectName("myapp"))
     assert "trees_root" in str(raised.value)
 
+def test_the_trees_root_registration_derives_is_refused_when_a_symlink_puts_it_inside(
+    tmp_path: Path,
+) -> None:
+    """The value AGL derives is checked here too, because deriving it is not what makes it safe.
+
+    `register_repository` writes `<repo's parent>/.agl-trees/<name>` without looking at it, and that
+    name is beside the repository as spelled. A symlink is what makes the spelling a lie: point
+    `.agl-trees` at a directory inside the repository and the checkouts land in the operator's own
+    working tree. The reader is where that is caught, so the file is written and the resolution
+    `cli/main.py` makes straight afterwards refuses rather than running there.
+    """
+    repo = tmp_path.resolve() / "myapp"
+    (repo / "inside").mkdir(parents=True)
+    (tmp_path.resolve() / ".agl-trees").symlink_to(repo / "inside", target_is_directory=True)
+    _nested(tmp_path, str(tmp_path.resolve() / ".agl-trees" / "myapp"))
+    with pytest.raises(InputError) as raised:
+        read_project(_home(tmp_path), ProjectName("myapp"))
+    assert "trees_root" in str(raised.value)
+
 def test_a_trees_root_beside_the_repository_is_accepted(tmp_path: Path) -> None:
-    """The control, and what `agl init` lays out is exactly this shape - `/Users/jan/dev/myapp` and
-    `/Users/jan/dev/.agl-trees/myapp`. A refusal that fired on a sibling would refuse every project
-    `agl init` writes."""
+    """The control, and what registration lays out is exactly this shape - `/Users/jan/dev/myapp`
+    and `/Users/jan/dev/.agl-trees/myapp`. A refusal that fired on a sibling would refuse every
+    project AGL writes."""
     _nested(tmp_path, str(tmp_path.resolve() / ".agl-trees" / "myapp"))
     project = read_project(_home(tmp_path), ProjectName("myapp"))
     assert project.trees_root == TreesRoot(tmp_path.resolve() / ".agl-trees" / "myapp")
@@ -1094,13 +1289,33 @@ def test_a_file_that_names_only_one_of_the_two_paths_is_not_refused(tmp_path: Pa
     _project_file(home, "myapp", 'trees_root = "/tmp/agl-trees/myapp"\n')
     assert read_project(home, ProjectName("myapp")).repo is None
 
-def test_the_check_is_exported_so_that_init_can_refuse_before_it_writes(tmp_path: Path) -> None:
-    """`init` writes the very file the tests above read, and it must refuse the same pair.
+def test_resolving_a_repository_refuses_its_nested_trees_root_rather_than_calling_it_unregistered(
+    tmp_path: Path,
+) -> None:
+    """The reader `run`, `resume` and `clear` reach, where a swallowed refusal would mislead.
 
-    Exported rather than folded into `_project`, so that one helper serves the reader and the
-    writer: a nested trees root is refused when the file is written as well as when it is read, and
-    the two refusals cannot drift into disagreeing about what "inside" means. The path argument is
-    the file the message will name - the writer has one before it writes.
+    `resolve_project` passes over a file it cannot read far enough to match on `repo`, and calls
+    `_project` outside that tolerance - so this refusal reaches the operator rather than becoming
+    "no project is registered", which would send `agl run` on to register a second file naming a
+    repository this one already names. This is the rule the composer does not check for itself.
+    """
+    home = _home(tmp_path)
+    root = _repo(tmp_path, "myapp")
+    path = _project_file(home, "myapp", f'repo = "{root}"\ntrees_root = "{root}/.agl-trees"\n')
+    with pytest.raises(InputError) as raised:
+        resolve_project(home, root)
+    assert str(path) in str(raised.value)
+    assert "trees_root" in str(raised.value)
+
+def test_the_named_check_refuses_a_nested_trees_root_and_accepts_a_sibling_one(
+    tmp_path: Path,
+) -> None:
+    """The rule in one named helper, tested as itself rather than through a file the reader parses.
+
+    `_project` is its only caller, and the file it names arrives as an argument rather than off the
+    pair, so the message can say which file to edit. Both halves are asserted because a check that
+    refused a sibling would refuse every project registration lays out, and one that accepted a
+    nested pair would refuse nothing at all.
     """
     repo = tmp_path.resolve() / "myapp"
     destination = project_config(_home(tmp_path), ProjectName("myapp"))
@@ -1173,9 +1388,9 @@ def test_a_registered_repo_spelled_through_a_symlink_still_matches(tmp_path: Pat
 def test_a_repository_spelled_in_another_case_is_the_same_project(tmp_path: Path) -> None:
     """One directory reached by two spellings, and the filesystem is what says they are one.
 
-    `agl init` records the repository as the operator spelled it that day; `Dev` on Monday and `dev`
-    on Tuesday are one directory on a case-insensitive volume and two unequal strings, which is the
-    day-one failure a comparison of resolved paths hands somebody who did nothing unusual.
+    Registration records the repository as the operator spelled it that day; `Dev` on Monday and
+    `dev` on Tuesday are one directory on a case-insensitive volume and two unequal strings, which
+    is the day-one failure a comparison of resolved paths hands somebody who did nothing unusual.
 
     The probe is the truth and the platform name would be a guess - a case-sensitive volume can be
     mounted anywhere, macOS included. Where it says the volume *is* case-sensitive there is nothing
@@ -1222,10 +1437,10 @@ def test_a_git_repository_no_project_file_names_is_not_found(tmp_path: Path) -> 
         resolve_project(home, unregistered)
     assert "no project is registered" in str(raised.value)
     assert str(unregistered) in str(raised.value)
-    assert "agl init" in str(raised.value)
+    assert "`agl run` registers the repository it is used in" in str(raised.value)
 
 def test_an_installation_with_no_projects_directory_resolves_to_not_found(tmp_path: Path) -> None:
-    """Nobody has run `agl init` yet. An empty listing, not a refusal about a missing directory."""
+    """Nothing has registered yet. An empty listing, not a refusal about a missing directory."""
     with pytest.raises(NotFoundError):
         resolve_project(_home(tmp_path), _repo(tmp_path, "myapp"))
 
@@ -1266,8 +1481,8 @@ def test_a_broken_file_sorting_before_a_good_one_does_not_stop_the_good_one_reso
 def test_with_no_readable_match_every_unreadable_file_is_named_rather_than_not_found(
     tmp_path: Path,
 ) -> None:
-    """A skipped file may be this repository's own, so "not registered" would send the operator to
-    an `agl init` that refuses because the file exists. Every unreadable file is named at once."""
+    """A skipped file may be this repository's own, so "not registered" would send `agl run` on to
+    register a second file naming it. Every unreadable file is named at once instead."""
     home = _home(tmp_path)
     root = _repo(tmp_path, "myapp")
     malformed = _project_file(home, "aaa", "repo = \n")

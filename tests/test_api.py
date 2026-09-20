@@ -46,7 +46,7 @@ from agl.adapters.claude_code.fake import Conversation, Script
 from agl.adapters.git.history import GitHistory
 from agl.adapters.git.workspace import GitWorkspaceProvider
 from agl.adapters.uv.fake import FakeSyncer
-from agl.config import container, distribution, registry, sources
+from agl.config import container, distribution, registry
 from agl.ports.agent import (
     ActivityReporter,
     AgentOutcome,
@@ -1366,51 +1366,23 @@ async def test_one_refusal_answers_the_command_that_installs_first_and_the_one_t
     assert _UNDECLARED in str(installed.value)
     assert exit_code_for(installed.value) == 2
 
-def test_init_needs_neither_a_bundle_nor_a_registered_repository(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Per-command composition for the operation it was written about, as a signature.
-
-    `init` writes `AGL_HOME/projects/<name>.toml`, so the repository it is run in is by definition
-    not registered yet and no container can be built for it. Composing before dispatching once made
-    this call unreachable rather than merely unbuilt: the `NotFoundError` would have arrived before
-    the operation did. So the settings come from `resolve_settings` with a literal mapping - the
-    pure core, no process environment touched - and what is asserted is that a real `init` runs
-    there and leaves a file, with no `Services` anywhere in the call.
-
-    **The `cwd` is a parameter and this test is what that buys.** `monkeypatch.chdir` is
-    deliberately not called: the directory below is handed over, so the process never moves, and
-    `tests/test_init.py` drives every case the same way. An `init` reading `Path.cwd()` would have
-    made this the file that had to move the process in order to test anything.
-    """
-    monkeypatch.delenv("AGL_HOME", raising=False)
-    home = tmp_path / "home"
-    repo = tmp_path / "dev" / "myapp"
-    (repo / ".git").mkdir(parents=True)
-    settings = sources.resolve_settings(sources.Overrides(), {"AGL_HOME": str(home)})
-
-    written = api.init(settings, repo)
-
-    assert written == home / "projects" / "myapp.toml"
-    assert written.read_text(encoding="utf-8").splitlines()[0] == 'name = "myapp"'
-
 def test_every_operation_the_module_declares_is_built() -> None:
     """One list, and nothing on it refuses for being unfinished.
 
     `api.py`'s operations are named in its own bullet under `ARCHITECTURE.md`'s "The layers", and
     the CLI's dispatch has been written against the whole surface from the start, one clause at a
     time as each was built. `resume` left the unbuilt list first and `clear` next, each into a
-    suite of its own - `tests/test_resume.py` and `tests/test_clear.py` - and `init` was the one
-    left.
+    suite of its own - `tests/test_resume.py` and `tests/test_clear.py` - and the list has been
+    empty since.
 
-    `workflow_help` is on `__all__` beside the nine verbs `agl` dispatches and is not one of them:
+    `workflow_help` is on `__all__` beside the eight verbs `agl` dispatches and is not one of them:
     it is the operation behind `agl workflows <name>`, which extends that grammar, and
     `cli/commands/workflows.py` is where the deviation is argued. `new_workflow` is a verb and is
     spelled unlike the command it serves, `agl new`, because `new` is an adjective and every other
-    name here is what the operation does. `Cleared`, `Listing` and `Replayed` are the three entries
-    that are not operations at all - the values `clear`, `list_workflows` and the two walking verbs
-    answer with - and they are here because a caller annotating any of them has to be able to name
-    it. `get`, `remove` and
+    name here is what the operation does. `Cleared`, `Listing` and `Replayed` are the
+    three entries that are not operations at all - the values `clear`, `list_workflows` and the
+    two walking verbs answer with - and they are here because a caller annotating any of
+    them has to be able to name it. `get`, `remove` and
     `update` are the verbs whose values are defined elsewhere: they answer with
     `config/placement.py`'s `Got` and `Removed` and `config/comparison.py`'s `Updated`, and all
     three ask through `config/questions.py`'s `Confirm`, so a caller names each from there and
@@ -1427,6 +1399,12 @@ def test_every_operation_the_module_declares_is_built() -> None:
     It is `_sync_workspace` now, one definition with five callers, which is what keeps the ordering
     of an install and the file written after it out of the five verbs that share it - and out of
     the CLI, where the command that used to hold it would otherwise have left it.
+
+    `init` left the list for a nearer reason: there is no operation to call. A repository is
+    registered by `agl run` on the way past, so nothing asks for it and nothing annotates what it
+    answers with - `Written` carried that and went with it. `config/toml_file.py`'s
+    `register_repository` is where the derivation lives now, beside the write it feeds, and
+    `tests/test_registration.py` is its suite.
     """
     assert set(api.__all__) == {
         "Cleared",
@@ -1434,7 +1412,6 @@ def test_every_operation_the_module_declares_is_built() -> None:
         "Replayed",
         "clear",
         "get",
-        "init",
         "list_workflows",
         "new_workflow",
         "remove",

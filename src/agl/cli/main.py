@@ -11,7 +11,6 @@ from agl.cli import commands
 from agl.cli.commands import _print_refusal
 from agl.cli.commands import clear as clear_command
 from agl.cli.commands import get as get_command
-from agl.cli.commands import init as init_command
 from agl.cli.commands import new as new_command
 from agl.cli.commands import remove as remove_command
 from agl.cli.commands import resume as resume_command
@@ -19,10 +18,10 @@ from agl.cli.commands import run as run_command
 from agl.cli.commands import update as update_command
 from agl.cli.commands import workflows as workflows_command
 from agl.cli.exit_codes import exit_code_for, exit_status, leaves
-from agl.config import container, distribution, sources
+from agl.config import container, distribution, sources, toml_file
 from agl.config.questions import Confirm
 from agl.config.schema import Settings
-from agl.ports.errors import AglError, InputError, InternalError, Stop
+from agl.ports.errors import AglError, InputError, InternalError, NotFoundError, Stop
 from agl.ports.fetch import Fetcher
 from agl.ports.ids import ProjectName
 from agl.ports.sync import Syncer
@@ -96,7 +95,7 @@ class Invocation:
     confirm: Confirm = _confirmed
 
     # A thunk and not a built `Syncer`, for the reason `registered` is one: every invocation
-    # carries this field and only the commands that install call it, so `clear`, `init` and
+    # carries this field and only the commands that install call it, so `clear`, `remove` and
     # `workflows` construct nothing. It is not on `Services` and takes no project -
     # `config/container.py` says why beside `real_syncer`.
     syncer: Callable[[], Syncer] = container.real_syncer
@@ -146,7 +145,6 @@ def parser() -> RefusingParser:
     run_command.declare(declared)
     resume_command.declare(declared)
     clear_command.declare(declared)
-    init_command.declare(declared)
     new_command.declare(declared)
     get_command.declare(declared)
     update_command.declare(declared)
@@ -165,11 +163,33 @@ def _registered(resolved: sources.Resolved, cwd: Path) -> tuple[ProjectName, Ser
     project = resolved.project(cwd)
     return project.name, container.real(resolved.settings, project)
 
+# The write is followed by a second resolution rather than by a `Project` built in memory:
+# `config/toml_file.py`'s `_project` is the one place `trees_root` is validated, so reading the
+# file back is what checks the value AGL has just written, in the command that wrote it.
+def _registering(invocation: Invocation) -> commands.Registered:
+    def thunk() -> tuple[ProjectName, Services]:
+        try:
+            return invocation.registered()
+        except NotFoundError:
+            note = toml_file.register_repository(invocation.settings.home, invocation.cwd)
+            # Never on stdout, for `cli/commands/__init__.py`'s reason: what a machine consumes
+            # goes there, and which name AGL settled on is a note to whoever is reading the
+            # terminal.
+            if note is not None:
+                print(note, file=sys.stderr)
+            return invocation.registered()
+
+    return thunk
+
 def _dispatch(invocation: Invocation, parsed: argparse.Namespace, tail: Sequence[str]) -> int:
     command = getattr(parsed, _COMMAND)
+    # `run` is the one command that registers, and it is handed a thunk that does rather than
+    # deciding anything itself. `resume` and `clear` address a run that already has a record
+    # under `projects/<name>/runs/<label>/`, so an unregistered repository holds nothing for
+    # either - and `clear`'s own job is to take a run away.
     if command == run_command.NAME:
         return run_command.execute(
-            invocation.registered,
+            _registering(invocation),
             parsed,
             tail,
             syncer=invocation.syncer(),
@@ -188,9 +208,6 @@ def _dispatch(invocation: Invocation, parsed: argparse.Namespace, tail: Sequence
     if command == clear_command.NAME:
         _no_tail(command, tail)
         return clear_command.execute(invocation.registered, parsed)
-    if command == init_command.NAME:
-        _no_tail(command, tail)
-        return init_command.execute(invocation.settings, invocation.cwd)
     if command == new_command.NAME:
         _no_tail(command, tail)
         return new_command.execute(invocation.settings.home, parsed, syncer=invocation.syncer())

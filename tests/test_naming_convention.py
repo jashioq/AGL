@@ -24,11 +24,12 @@ derives. So the head word of a function whose annotated return is `None` must no
 `made(...)` reads as a value and is a `mkdir`.
 
 The head word and not every word, because a participle is perfectly good English further in: a
-`_write_recorded_entry` would modify a noun with one and would not be the mistake. Three function
-names under `src/` carry a word past the first that ends in `-ed` - `adapters/git/fake.py`'s
-`_still_unresolved`, `config/toml_file.py`'s `check_unregistered` and
-`sdk/_engine/integration.py`'s `_gate_refused` - and not one of the three returns `None`, so the
-two readings agree on this tree; they are not the same rule, and the head is the one N1 states.
+`_write_recorded_entry` would modify a noun with one and would not be the mistake.
+`adapters/git/fake.py`'s `_still_unresolved` and `sdk/_engine/integration.py`'s `_gate_refused`
+are that shape and each hands back a value. Every name under `src/` carrying an `-ed` word past the
+head *and* annotated `-> None` opens with `check`, which is N2's word below and no participle at
+all - so a whole-name reading and this one part company only where N2 is already speaking. They are
+not the same rule, and the head is the one N1 states.
 
 **Two exclusion sets, and they are part of the rule rather than data behind it.**
 
@@ -55,11 +56,11 @@ of `None`, and every private `_checked…` has an annotated return that is not. 
 today, and both sets are asserted non-empty, since a scan that found neither family would be green
 over a tree that had abandoned the convention entirely.
 
-Private, which is where the convention states it. The public `check_ready` on `AgentRunner` and its
-five implementations conform, and `config/toml_file.py`'s `check_unregistered` does not - it raises
-`ConflictError` and returns the `Path` it validated. That is a name on a module's own surface, read
-by its callers rather than by whoever is editing the module, and widening this rule to reach it
-would be deciding a question this file was not asked. `git/_snapshots.py`'s `checkout_of` is the
+Private, which is where the convention states it. Every public `check…` in the tree conforms today
+- `check_ready` on `AgentRunner` and its five implementations among them - and none of them is held
+to this rule by anything here: a name on a module's own surface is read by its callers rather than
+by whoever is editing the module, and widening this rule to reach one would be deciding a question
+this file was not asked. `git/_snapshots.py`'s `checkout_of` is the
 other reason the head word is compared whole rather than by prefix: `checkout` is a git noun, and a
 `startswith("check")` draft reported it.
 
@@ -706,11 +707,11 @@ def test_the_check_scan_reports_a_check_that_returns_a_value() -> None:
     assert found == [CheckFunction(1, "_check_name", False, True)]
 
 def test_the_check_scan_reads_the_head_word_whole_and_skips_public_names() -> None:
-    """`checkout_of` is a git noun, and `check_ready` is a port's vocabulary rather than N2's."""
+    """`checkout_of` is a git noun, and a public `check…` is a surface rather than N2's business."""
     assert not private_check_functions(
         "from pathlib import Path\n"
         "def _checkout_of(branch: str) -> Path | None:\n    return None\n"
-        "def check_unregistered(name: str) -> Path:\n    return Path(name)\n"
+        "def check_anything(name: str) -> Path:\n    return Path(name)\n"
     )
 
 def test_the_private_module_scan_reports_a_reach_into_another_adapters_internals() -> None:

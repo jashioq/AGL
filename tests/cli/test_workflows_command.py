@@ -50,7 +50,8 @@ from agl.ports.ids import ProjectName
 from agl.sdk.params import RefusingParser, arg
 from agl.sdk.workflow import Run, workflow
 
-# `agl init` is the one command that reads these two and neither invocation below is one; the fields
+# Nothing below reads these two off the `Invocation`, `cli/main.py`'s `_registering` being what
+# does; the fields
 # are not optional (`cli/main.py` argues why), so both carry a real value nothing here looks at.
 ELSEWHERE: Final = Path("/nowhere")
 SETTINGS: Final = sources.resolve_settings(sources.Overrides(), {"AGL_HOME": str(ELSEWHERE)})

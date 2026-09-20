@@ -192,7 +192,7 @@ def test_build_timeout_falls_from_flag_then_env_then_file_then_default(
 
     The same `build_timeout` is resolved from a flag; then with the flag gone, from the
     environment; then with the variable gone as well, from the project file; then with all three
-    gone, from `sources.DEFAULT_BUILD_TIMEOUT`, which `agl init` also writes into a new file.
+    gone, from `sources.DEFAULT_BUILD_TIMEOUT`, which nothing writes into a project file at all.
     """
     home = _home(tmp_path)
     repo = _repo(tmp_path)
@@ -275,7 +275,7 @@ def test_a_key_agl_does_not_reserve_resolves_into_the_config_under_its_own_name(
 def test_a_project_file_with_no_trees_root_is_refused_naming_the_file_and_the_key(
     tmp_path: Path,
 ) -> None:
-    """`agl init` refuses a file that exists, so the refusal sends the operator to edit this one.
+    """Nothing writes over a file that exists, so the refusal sends the operator to edit this one.
 
     `trees_root` rather than `repo`: a file with no `repo` cannot match a repository, so the scan
     in `toml_file.resolve_project` passes over it and the answer is `NotFoundError` instead.
@@ -292,7 +292,7 @@ def test_a_project_file_with_no_trees_root_is_refused_naming_the_file_and_the_ke
 
     assert str(path) in str(raised.value)
     assert "trees_root is not set" in str(raised.value)
-    assert "init again" not in str(raised.value)
+    assert "by hand" in str(raised.value)
 
 def test_name_and_repo_and_trees_root_take_no_flag_and_no_environment_layer(
     tmp_path: Path,
@@ -317,13 +317,14 @@ def test_name_and_repo_and_trees_root_take_no_flag_and_no_environment_layer(
 def test_a_command_run_outside_a_registered_repository_gets_not_found_unchanged(
     tmp_path: Path,
 ) -> None:
-    """`toml_file`'s refusal, propagated rather than reclassified: the message says `agl init`."""
+    """`toml_file`'s refusal, propagated rather than reclassified, word for word."""
     home = _home(tmp_path)
     repo = _repo(tmp_path)
     settings = resolve_settings(Overrides(), _env(home))
     with pytest.raises(NotFoundError) as raised:
         resolve_project(settings, Overrides(), _env(home), repo)
-    assert "agl init" in str(raised.value)
+    assert "no project is registered for the repository" in str(raised.value)
+    assert "`agl run` registers the repository it is used in" in str(raised.value)
 
 def test_a_directory_in_no_git_repository_gets_not_found_unchanged(tmp_path: Path) -> None:
     home = _home(tmp_path)

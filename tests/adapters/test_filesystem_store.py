@@ -376,7 +376,7 @@ async def test_a_removed_run_takes_the_empty_directories_over_it_and_not_the_set
     )
     assert registration.read_text(encoding="utf-8") == "[project]\n", (
         "the project's settings file went with the run's records. It is the registration this "
-        "project was `agl init`ed with, and no part of any run"
+        "project was written with when it was first run, and no part of any run"
     )
     assert projects_dir(home).is_dir()
 

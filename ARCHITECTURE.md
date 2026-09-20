@@ -101,22 +101,40 @@ that `agl new`'s own scaffold puts on its first line. **Nothing in AGL reads it 
 other module in `src/` opens the file — delete it and every run behaves identically.
 
 **`cli/`** — argv in, exit code out. `main.py` dispatches to one module per subcommand (run,
-resume, clear, init, new, get, update, remove, workflows) and is the one place `Path.cwd()` is
-read. Composition is per-command, and every door out of the process sits behind a field on
-`Invocation`: the container behind a thunk, so `init`, `new`, `get`, `update`, `remove` and
-`workflows` never build one, the `Syncer` behind a second, so `clear`, `init`, `remove` and
+resume, clear, new, get, update, remove, workflows) and is the one place `Path.cwd()` is
+read: `_compose` asks the process once and puts the answer on `Invocation`, and both things that
+want it — the lookup `_registered` performs and the write `_registering` may do — take that field
+rather than asking again. Composition is per-command, and every door out of the process sits behind
+a field on `Invocation`: the container behind a thunk, so `new`, `get`, `update`, `remove` and
+`workflows` never build one, the `Syncer` behind a second, so `clear`, `remove` and
 `workflows` start no installer, and the `Fetcher` behind a third, which `get` and `update` alone
 call. The five that install are `run`, `resume`, `new`, `get` and `update`, and no grammar of
-AGL's asks an operator to start one. `points` and `confirm` are the other two, and those
+AGL's asks an operator to start one. **Registration is the same shape: a property of the dispatch
+rather than a command anybody types.** `_dispatch` hands `run` the thunk `_registering` builds and
+gives `resume` and `clear` `Invocation.registered` as it stands, so `run` is the one command that
+registers — the other two address a run that already has a record under
+`projects/<name>/runs/<label>/`, and an unregistered repository holds none for either.
+`config/toml_file.py`'s `register_repository` is the derivation and the write together: `git_root`
+up from that `cwd`, the repository directory's own name, `free_project_name` to settle it against
+what `projects/` already holds, and `write_project`. The thunk then resolves a *second* time rather
+than building a project in memory, because `toml_file`'s `_project` is the one place `trees_root`
+is checked — `check_trees_root` has no other caller — so reading the file back is what validates
+the value AGL has just written, in the command that wrote it. The name `free_project_name` settles
+on is the one everything afterwards addresses — the settings file, the ledger root under
+`projects/<name>/` and the trees root at `.agl-trees/<name>/` beside the repository all take it —
+and nothing downstream re-derives it from the repository's directory: `resolve_project` matches a
+file to a repository on its `repo` key and `Path.samefile`, never on a name. So two repositories
+whose directories carry one name are two projects, the second registered as `<name>-1` with a
+ledger and a trees root of its own, and the sentence `registered_as` builds is the one time AGL
+says which of the two this is. `points` and `confirm` are the other two, and those
 five fields are the whole of what a test replaces to drive a command on fakes — `compose=`
 is the parameter declared for exactly that, which is what `tests/test_measurable_targets.py` runs
 every declared command through without patching a module's internals. **Commands stay dumb.**
 A command declares its own arguments, reads them off the parsed namespace, calls `api` and turns
 what comes back into output and an exit status; everything that
 decides anything is one call away. So `clear` names one `api` function rather than a worktree walk
-and a `shutil.rmtree` past the `Store` port, `init` one rather than build-tool detection and TOML
-rendering, `new` one rather than a directory tree, two rendered documents and an argv for an
-installer, `get` one rather than a download, an inspection, a round of questions and a placement,
+and a `shutil.rmtree` past the `Store` port, `new` one rather than a directory tree, two rendered
+documents and an argv for an installer, `get` one rather than a download, an inspection, a round of questions and a placement,
 `update` one rather than a question about every ref and then all of `get`'s, `remove` one rather
 than a lookup, a question and a rename,
 and `workflows` two only because the listing and the help are two operations — one of them imports
@@ -135,7 +153,14 @@ everything else it writes — every question, a declined or refused line, each r
 a note, on stderr, so what a script reads off stdout is what the command got. `update` splits as
 `get` does, an `updated` line standing where `get` has a `placed` one and `already up to date`
 among the notes, and so does `remove`: `removed <name>` on stdout names the entry that went, and
-its question, and a note naming what a delete that stopped part-way left, go to stderr. **Four
+its question, and a note naming what a delete that stopped part-way left, go to stderr. `main.py`
+writes one line of its own, the only one the dispatch prints rather than a command module: where
+registration had to suffix a name, `register_repository` hands `registered_as`'s sentence back and
+`_registering` puts it on stderr — the turning done exactly as a command does it, the caller here
+being the dispatch because registering is the dispatch's to do, and the name being AGL's answer to
+a collision rather than one a script could have known.
+`tests/cli/test_main.py::test_the_note_about_a_suffixed_name_reaches_stderr_and_leaves_stdout_alone`
+pins the stream. **Four
 kinds of note in AGL are written where they are decided rather than handed back to be turned into
 output, and `api.py`'s `_warn` is the one place that module writes to a stream at all**:
 `_unchanged`, which says a sync was refused, that this workspace already had an environment, and
@@ -171,7 +196,7 @@ is it for `update`.
 Each suite under `tests/cli/` scans its own command's source for the `api.` names it reaches, so a
 use case moving back into the CLI fails a test instead of passing review.
 
-**`api.py`** — AGL's operations, callable without a terminal: `run`, `resume`, `clear`, `init`,
+**`api.py`** — AGL's operations, callable without a terminal: `run`, `resume`, `clear`,
 `new_workflow`, `get`, `update`, `remove`, `list_workflows`, `workflow_help`. Installing what a
 workspace declares is not one of them. It is `_sync_workspace`, private, with five callers — `run`,
 `resume`, `new_workflow`, `get` and `update` — because a sync is something those five *do* rather
@@ -392,13 +417,18 @@ predates `config` protects nothing.
 
 **A project's settings file is AGL's four keys and, beside them at the top level, every key a
 workflow declares.** `toml_file.RESERVED_KEYS` — `name`, `repo`, `trees_root`, `build_timeout` — are
-the keys AGL configures itself, and the ones `agl init` writes, asking nothing. Every other
+the keys AGL configures itself. Registration asks nothing and writes three of them:
+`toml_file.write_project` puts down `name`, `repo` and `trees_root` and leaves `build_timeout` to
+`config/sources.py`, which answers `DEFAULT_BUILD_TIMEOUT` where the file is silent — an absent key
+and a written default say the same thing, and leaving it out keeps AGL's own default in the one
+place where moving it moves every project at once. An operator who wants another writes that key by
+hand, exactly as they write a workflow's. Every other
 top-level key is a workflow's, and it is shared rather than namespaced per workflow: how a project
 builds is a property of the project, so two workflows declaring `build` read one value. Each such
 value is a TOML string held exactly as written, `""` included, and a number, a boolean or a table
 there is refused at resolution with every offender named, AGL coercing nothing into the type a
 reader might have wanted. Every command that resolves a project reads the file afresh, so a hand
-edit takes effect without `agl init`, and no writer rewrites a file that exists.
+edit takes effect on the next command, and no writer rewrites a file that exists.
 `toml_file.resolve_project` validates only the file whose `repo` names the repository, so a file
 broken in some other way is seen by nobody until AGL runs in the repository it names; a file that
 cannot be read far enough to learn its `repo` is passed over, and named only where nothing readable

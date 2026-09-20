@@ -63,7 +63,7 @@ def test_a_project_holds_the_four_keys_agl_configures_and_one_mapping_of_the_res
     assert _PROJECT.build_timeout == 600
 
 def test_settings_holds_the_home_and_the_agent_sections_and_nothing_from_a_project() -> None:
-    """`agl init` and `agl workflows` construct this where no project file exists yet."""
+    """`agl workflows` and `agl new` construct this where no project file exists yet."""
     assert tuple(field.name for field in fields(Settings)) == ("home", "agents")
     assert _SETTINGS.home == AglHome(Path("/agl-home"))
     assert _SETTINGS.agents is _AGENTS

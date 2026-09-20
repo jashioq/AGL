@@ -47,7 +47,7 @@ from agl.ports.tree_layout import TreesRoot
 from agl.sdk.params import RESERVED_FLAGS, RefusingParser, arg
 from agl.sdk.workflow import Run, workflow
 
-# `agl init` is the one command that reads `settings` and `cwd`, and no invocation below is one -
+# No command reads `settings` or `cwd` off the `Invocation` - `cli/main.py`'s `_registering` does -
 # but neither field is optional (`cli/main.py` argues why), so both carry a real value nothing here
 # looks at. `/nowhere` is absolute, which is the whole of what `AglHome` insists on, and no file
 # under it is ever opened: `read_settings` treats a missing `config.toml` as a file that said

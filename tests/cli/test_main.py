@@ -17,7 +17,13 @@ and the container sit behind a callable on the `Invocation`, so what has to be s
 composing no longer resolves either - and a seam that substitutes the composition cannot be used to
 assert what the real composition does. Those two set `AGL_HOME` and a working directory with no
 repository above it and let `main` compose for real, which is also the only route to the answer for
-an unregistered repository: `NotFoundError`, exit 3, naming `agl init`.
+an unregistered repository: `NotFoundError`, exit 3.
+
+**Registration has no command and is therefore a property of the dispatch.** `agl run` is handed a
+thunk that registers where the lookup refused; `agl resume` and `agl clear` are handed the lookup
+itself, and `cli/main.py::_dispatch` is the one place that difference is written. The tests under
+"registration is something `agl run` does" drive it over a real `AGL_HOME` and a real project
+file, with only the bundle faked.
 
 **The ordering criterion is pinned twice, and neither pin is the exit code.** It is an acceptance
 criterion that `Stop` is caught before `AglError`, and an outcome-only test cannot fail on a swap:
@@ -64,6 +70,7 @@ from agl.adapters.github.fake import FakeFetcher
 from agl.adapters.uv.fake import FakeSyncer
 from agl.cli import main
 from agl.config import container, distribution, registry, sources
+from agl.config.toml_file import registered_as
 from agl.ports.errors import (
     ConflictError,
     NotFoundError,
@@ -81,9 +88,10 @@ from agl.sdk.terminal import Screen
 from agl.sdk.tools import ToolResult, tool
 from agl.sdk.workflow import Run, Stop, workflow
 
-# `agl init` is the one command that reads `settings` and `cwd`, and no invocation below is one -
-# but neither field is optional (`cli/main.py` argues why), so both carry a real value nothing here
-# looks at. `/nowhere` is absolute, which is the whole of what `AglHome` insists on, and no file
+# Only `cli/main.py`'s `_registering` reads `settings` and `cwd` off an `Invocation`, and the
+# invocations below never refuse a lookup, so it never reaches either - but neither field is
+# optional (`cli/main.py` argues why), so both carry a real value nothing here looks at.
+# `/nowhere` is absolute, which is the whole of what `AglHome` insists on, and no file
 # under it is ever opened: `read_settings` treats a missing `config.toml` as a file that said
 # nothing.
 ELSEWHERE: Final = Path("/nowhere")
@@ -330,7 +338,7 @@ def _unregistered(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
     The working directory has no `.git` above it anywhere, which is the first of the two absences
     `config/toml_file.py` raises `NotFoundError` for - the other being a repository no project file
-    names. Both carry `agl init`, and this is the cheaper one to arrange.
+    names. This is the cheaper one to arrange, and it is also the one no registration can repair.
     """
     home = tmp_path / "home"
     home.mkdir()
@@ -982,10 +990,10 @@ def test_composing_resolves_settings_and_not_a_project(
     """The whole of that change, measured on the composition that would have failed it.
 
     `_compose` used to resolve the project and build the container before the dispatch chose a
-    command, so in the directory below it raised - and `agl init`, the command whose job is to make
-    that directory a project, could not have been reached from here however it was written. Now
+    command, so in the directory below it raised - and every command that resolves no repository,
+    `agl new` and `agl workflows` among them, was unreachable there however it was written. Now
     composing asks the environment and stops, and the refusal arrives only when something calls the
-    thunk that would resolve a repository.
+    thunk that would resolve a repository - which `_dispatch` hands to three commands out of eight.
 
     The private `_compose` is called on purpose: `compose=` substitutes the thing under test, and
     the two halves being asserted - that composing returns, and that calling *then* raises - are
@@ -998,27 +1006,161 @@ def test_composing_resolves_settings_and_not_a_project(
     assert isinstance(invocation, main.Invocation)
     with pytest.raises(NotFoundError) as caught:
         invocation.registered()
-    assert "agl init" in str(caught.value)
+    assert "not inside a git repository" in str(caught.value)
 
-def test_an_unregistered_repository_exits_three_naming_agl_init(
+def test_a_clear_outside_any_repository_exits_three_with_the_walk_s_own_sentence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A command invoked in an unregistered repository gets `NotFoundError` -> exit 3, naming
-    `agl init`, which is run once per project and never again.
+    """A command invoked outside a repository gets `NotFoundError` -> exit 3 and a sentence.
 
     The same fact as the test above, through the real entry point with no seam filled in at all -
     the real parser, the real `_compose`, the real dispatch, the real handler. What it adds is the
     route out: the refusal is raised inside a command, which is inside `main`'s `try`, so it leaves
     as a number and a sentence rather than as a traceback, and the sentence is the one
     `config/toml_file.py` wrote where the facts were rather than one re-worded on the way past.
+
+    `clear` rather than `run`, and that is the whole of what changed here: `run` registers the
+    repository it is used in, so it is no longer a command that can answer an unregistered one.
+    `clear` is, and a directory with no `.git` above it is refused before registration could even
+    be considered - which is why the same directory answers both commands identically.
     """
     _unregistered(tmp_path, monkeypatch)
 
-    assert main.main(("run", "probe", "-n", "auth")) == 3
+    assert main.main(("clear", "auth")) == 3
 
     captured = capsys.readouterr()
-    assert "agl init" in captured.err
+    assert "not inside a git repository" in captured.err
     assert captured.out == ""
+
+# --- registration is something `agl run` does, and nothing else does ------------------------------
+
+def _unregistered_repository(tmp_path: Path) -> tuple[Path, Path]:
+    """An AGL home holding nothing, and a repository no file under it names.
+
+    A `.git` marker directory and no git process, for `tests/test_registration.py`'s reason:
+    `toml_file.git_root` walks the filesystem looking for the entry and asks git nothing.
+    """
+    home = tmp_path / "home"
+    home.mkdir()
+    repo = tmp_path / "dev" / str(PROJECT)
+    (repo / ".git").mkdir(parents=True)
+    return home, repo
+
+def _resolving(harness: container.FakeServices, home: Path, repo: Path) -> main.Compose:
+    """`main`'s seam over a real resolution: the project comes out of a file, the bundle is fakes.
+
+    This is `cli/main.py::_registered` with `container.real` left off - the half that reads
+    `AGL_HOME` and raises `NotFoundError` where no file names this repository, which is the half
+    `_registering` is written around. Every other `compose` in this module answers without reading
+    anything, and against one of those a registration is unmeasurable: the thunk never refuses, so
+    nothing is ever registered and the tests below would pass against a `run` that registers
+    nothing at all.
+    """
+    settings = sources.resolve_settings(sources.Overrides(), {"AGL_HOME": str(home)})
+
+    def registered() -> tuple[ProjectName, Services]:
+        project = sources.resolve_project(settings, sources.Overrides(), {}, repo)
+        return project.name, harness.services
+
+    return lambda: main.Invocation(
+        registered=registered,
+        settings=settings,
+        cwd=repo,
+        points=POINTS,
+        syncer=container.fake_syncer,
+    )
+
+def test_a_run_in_an_unregistered_repository_registers_it_and_then_runs(tmp_path: Path) -> None:
+    """Registration has no command of its own: nobody is told to register, and the run proceeds.
+
+    Three things in one invocation, and the order between them is the claim. The thunk refuses,
+    because nothing under this home names this repository; `_registering` writes the file that
+    `config/toml_file.py` derives from the git root; and the thunk is called a second time, so
+    what the run is handed is a project read back out of the file rather than one built in memory.
+    The exit status is what says the third step happened - a registration that wrote an unreadable
+    `trees_root` would refuse here rather than on some later day.
+    """
+    home, repo = _unregistered_repository(tmp_path)
+    harness = _fakes(tmp_path)
+
+    assert main.main(("run", "probe", "-n", "auth"), compose=_resolving(harness, home, repo)) == 0
+
+    written = home / "projects" / f"{PROJECT}.toml"
+    assert written.is_file()
+    assert sources.resolve_project(
+        sources.resolve_settings(sources.Overrides(), {"AGL_HOME": str(home)}),
+        sources.Overrides(),
+        {},
+        repo,
+    ).repo == repo
+
+@pytest.mark.parametrize("argv", [("resume", "auth"), ("clear", "auth")])
+def test_a_resume_or_a_clear_in_an_unregistered_repository_refuses_and_writes_nothing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], argv: tuple[str, ...]
+) -> None:
+    """Neither registers, and the assertion with teeth is the directory that was never made.
+
+    `resume` addresses a run that already has a record under `projects/<name>/runs/<label>/` and
+    `clear` takes one away, so a repository nothing has registered holds nothing for either to
+    address - and registering on the way to a `clear` would create a project in order to delete
+    something out of it. `adapters/filesystem/store.py::_tidy` holds the mirror image of that, and
+    `tests/adapters/test_filesystem_store.py` is where it is pinned.
+    """
+    home, repo = _unregistered_repository(tmp_path)
+    harness = _fakes(tmp_path)
+
+    assert main.main(argv, compose=_resolving(harness, home, repo)) == 3
+
+    assert not (home / "projects").exists()
+    captured = capsys.readouterr()
+    assert "no project is registered" in captured.err
+    assert "agl run" in captured.err
+
+def test_a_second_run_in_one_repository_resolves_the_file_the_first_run_wrote(
+    tmp_path: Path,
+) -> None:
+    """Registration is reached only through a refusal, so the second run never reaches it.
+
+    One file and not two is the whole assertion. A second one naming the same `repo` is the
+    work-destroying state `free_project_name`'s repo-aware refusal exists for: `myapp-1.toml`
+    sorts ahead of `myapp.toml`, `-` being 0x2D and `.` 0x2E, so every later command would resolve
+    to a ledger root holding no runs. Two different labels, because `api.run` refuses a label its
+    store already has and that refusal would hide this one.
+    """
+    home, repo = _unregistered_repository(tmp_path)
+    harness = _fakes(tmp_path)
+    compose = _resolving(harness, home, repo)
+
+    assert main.main(("run", "probe", "-n", "auth"), compose=compose) == 0
+    assert main.main(("run", "probe", "-n", "review"), compose=compose) == 0
+
+    assert sorted(path.name for path in (home / "projects").glob("*.toml")) == [f"{PROJECT}.toml"]
+
+def test_the_note_about_a_suffixed_name_reaches_stderr_and_leaves_stdout_alone(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Where the note is printed, now that there is no command whose output it used to sit under.
+
+    `config/toml_file.py::registered_as` owns the words and this owns the stream, which is what
+    lets either move without the other. stderr because what a machine consumes goes on stdout and
+    a note about which name AGL settled on is not that - `cli/commands/__init__.py` argues the
+    rule - and it is printed from `cli/` rather than through `api.py`'s `_warn`, which
+    `ARCHITECTURE.md` keeps as the one place that module writes to a stream.
+    """
+    home, first = _unregistered_repository(tmp_path)
+    second = tmp_path / "elsewhere" / str(PROJECT)
+    (second / ".git").mkdir(parents=True)
+    harness = _fakes(tmp_path)
+    one = _resolving(harness, home, first)
+    two = _resolving(harness, home, second)
+
+    assert main.main(("run", "probe", "-n", "auth"), compose=one) == 0
+    assert "Registered as" not in capsys.readouterr().err
+    assert main.main(("run", "probe", "-n", "audit"), compose=two) == 0
+
+    captured = capsys.readouterr()
+    assert registered_as(PROJECT, ProjectName(f"{PROJECT}-1")) in captured.err
+    assert f"{PROJECT}-1" not in captured.out
 
 def test_main_writes_no_exit_code_of_its_own(tmp_path: Path) -> None:
     """"No integer literal appears in this file", made mechanical rather than promised.
@@ -1046,10 +1188,12 @@ def test_the_working_directory_is_read_exactly_once_in_the_whole_of_agl() -> Non
     """`ARCHITECTURE.md`'s "Commands stay dumb", counted: `Git(Path.cwd())` was constructed **four
     times**, once per command.
 
-    This stopped being free when `init` arrived. `Path.cwd()` used to sit inside the thunk that
-    resolves a project, which was the whole of what needed it; `agl init` is the second reader - it
-    finds its own git root - so the honest choices were a second read in the `init` path or one read
-    hoisted here and carried on the `Invocation`. Four started as two, so the count is the test.
+    This stopped being free once a second reader arrived. `Path.cwd()` used to sit inside the thunk
+    that resolves a project, which was the whole of what needed it; registration is the second
+    reader - it finds its own git root - so the honest choices were a second read on the registering
+    path or one read hoisted here and carried on the `Invocation`. It is hoisted: `_compose` reads
+    it once and `_registering` takes it off the field rather than asking again. Four started as
+    two, so the count is the test.
 
     **A source scan, for `test_main_writes_no_exit_code_of_its_own`'s reason**: "it works" is true
     of a codebase with the expression in five places, and the claim is about where the expression
@@ -1070,8 +1214,9 @@ def test_the_working_directory_is_read_exactly_once_in_the_whole_of_agl() -> Non
 
     assert [str(where) for where, _ in reads] == ["cli/main.py"], (
         f"AGL asks the process where it is standing in {reads}. It is read once, by `_compose`, "
-        f"and carried on the `Invocation`: `_registered` receives it and so does `api.init`, which "
-        f"takes a `cwd` parameter precisely so that nothing below `cli/` has to ask"
+        f"and carried on the `Invocation`: `_registered` closes over it and `_registering` reads "
+        f"the field, and `config/toml_file.py` takes a starting directory as a parameter precisely "
+        f"so that nothing below `cli/` has to ask"
     )
 
 def test_the_seam_is_a_parameter_and_the_real_composition_is_its_default() -> None:

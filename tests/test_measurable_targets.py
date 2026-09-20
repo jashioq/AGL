@@ -947,7 +947,6 @@ _EIGHT_UPDATE: Final = {
 # it gained, and `remove` takes it out behind a question of its own. The names are compared against
 # the parser's own subcommands below, so this table cannot silently fall behind the grammar.
 _INVOCATIONS: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
-    ("init", ("init",)),
     ("new", ("new", "scaffold")),
     ("get", ("get", "octo/flows/workflows/scaffold")),
     ("update", ("update",)),
@@ -1050,10 +1049,10 @@ def test_every_declared_command_runs_on_fakes_with_no_way_out(
     Nothing here reaches into a module's internals; the only patching in this test is the poison,
     which is the assertion rather than the arrangement.
 
-    **`agl init` needs a git *root*, not git.** It walks up for a `.git` entry - a filesystem read,
-    no subprocess - so a directory with an empty `.git` inside it is a repository as far as `init`
-    is concerned, and the poison stays closed throughout. That is worth knowing rather than
-    hiding: "no git" in target #8 means no git process, and `init` never wanted one.
+    **Registration needs a git *root*, not git.** The `run` row below is handed a `registered`
+    thunk that answers without reading a file, so nothing registers here; where it does, the walk
+    is for a `.git` entry - a filesystem read, no subprocess - and the poison stays closed
+    throughout. `tests/cli/test_main.py` is where the registering thunk is driven for real.
     """
     home = tmp_path / "home"
     home.mkdir()

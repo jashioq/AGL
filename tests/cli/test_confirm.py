@@ -21,7 +21,7 @@ measured on CPython 3.14 - which untranslated would reach `main`'s last clause a
 exit 70, from `agl get` and `agl remove` alike. It declines too, with a note of its own, since the
 note for end of file would be wrong about which stream went.
 
-**Nothing patches `builtins.input`**, for `tests/cli/test_init_command.py`'s reason: stdin is what
+**Nothing patches `builtins.input`**: stdin itself is what
 is replaced, and it is the situation reported on rather than a way past a seam. A stdin that fails
 rather than ending is not taken as an answer either. pytest's own captured stdin raises `OSError`,
 so a suite that leaves this default standing where it meant to answer for itself fails where it

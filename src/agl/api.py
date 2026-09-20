@@ -4,13 +4,12 @@ from dataclasses import dataclass
 from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Final
-from agl.config import distribution, registry, sources, toml_file, workflow_files, workspace_path
+from agl.config import distribution, registry, toml_file, workflow_files, workspace_path
 from agl.config.comparison import Updated, compared, replacements
 from agl.config.inspection import PlaceableWorkflow, inspected
 from agl.config.placement import Got, Removed, placed, removed
 from agl.config.questions import Confirm, Questions, Removal, answered, needed
 from agl.config.removal import removable
-from agl.config.schema import Settings
 from agl.ports.errors import ConflictError, InternalError, NotFoundError, UpstreamError
 from agl.ports.fetch import Fetcher
 from agl.ports.get_request import Fetch, GetRequest, RequestedWorkflow
@@ -18,7 +17,7 @@ from agl.ports.home_layout import AglHome, RunScope, project_config, workspace_d
 from agl.ports.ids import Namespace, ProjectName, RunLabel, WorkflowName
 from agl.ports.run import RunSpec, checked_text
 from agl.ports.sync import Syncer, SyncOutcome
-from agl.ports.tree_layout import BASE_DIRNAME, TreesRoot, run_branch, worktree_branch
+from agl.ports.tree_layout import BASE_DIRNAME, run_branch, worktree_branch
 from agl.sdk import params
 from agl.sdk._engine import preflight, teardown
 from agl.sdk._engine.config import narrowed
@@ -34,7 +33,6 @@ __all__ = [
     "Replayed",
     "clear",
     "get",
-    "init",
     "list_workflows",
     "new_workflow",
     "remove",
@@ -43,8 +41,6 @@ __all__ = [
     "update",
     "workflow_help",
 ]
-
-_TREES_DIRNAME: Final = ".agl-trees"
 
 # How many files a resume's refusal names before it starts counting, per kind of difference. A
 # directory rewritten wholesale would otherwise put its whole listing on a terminal, and what the
@@ -214,17 +210,6 @@ async def clear(services: Services, project: ProjectName, label: RunLabel) -> Cl
 
         await services.store.remove(scope)
         return Cleared(branches=tuple(branches), worktrees=tuple(worktrees))
-
-def init(settings: Settings, cwd: Path) -> Path:
-    root = toml_file.git_root(cwd)
-    name = ProjectName(root.name)
-
-    destination = toml_file.check_unregistered(settings.home, name)
-
-    trees = TreesRoot(root.parent / _TREES_DIRNAME / str(name))
-    toml_file.check_trees_root(destination, root, trees.path)
-
-    return toml_file.write_project(settings.home, name, root, trees, sources.DEFAULT_BUILD_TIMEOUT)
 
 # The workspace is made unconditionally rather than after a check: `make_workspace` creates each of
 # the three things it makes only where that thing is absent, so the workspace an operator already

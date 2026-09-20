@@ -9,8 +9,8 @@ into the workflow.
 download from public GitHub repositories with `agl get` and bring up to date with `agl update`,
 below. `agl new <name>` writes a workflow into your own workspace under AGL_HOME — a directory
 holding a module and a pyproject.toml, which runs as it stands — and `agl run <name>` runs it
-against a repository, which `agl init` registers from inside once; `agl workflows` lists what that
-workspace declares, and `agl remove` takes a workflow out of it. AGL reads workflows from there and
+against a repository, which the first `agl run` inside it registers on the way past; `agl workflows`
+lists what that workspace declares, and `agl remove` takes a workflow out of it. AGL reads workflows from there and
 from nowhere else: the `agl.workflows` entry-point group is the table key each workflow
 directory's own pyproject.toml writes, rather than a group a distribution installed beside AGL
 registers into.
@@ -45,7 +45,7 @@ agl/<label>` in that repository is the work.
 
 The agents never work in your checkout. AGL cuts git worktrees of its own — one for the run and one
 for each isolated piece of work inside it — under `.agl-trees/` beside the repository by default,
-which `agl init` writes into the project's settings. **A run that finishes gives those worktrees
+which registration writes into the project's settings. **A run that finishes gives those worktrees
 back. A run that failed, or that you interrupted, keeps every one of them**: that is the run you are
 about to resume or go and look at, and a half-written file, a build's leavings and anything an agent
 left mid-edit are in the worktree and on no branch. A run that ends holding a merge nobody settled
@@ -66,10 +66,17 @@ are pruned, and noting a sha before you clear is the reliable half.
 
 ## Project settings
 
-`agl init` asks nothing. Run inside a repository, it writes `projects/<name>.toml` under AGL_HOME
-with the four keys AGL configures itself — `name`, `repo`, `trees_root` and `build_timeout` — and
-everything else in that file belongs to your workflows. A workflow names the settings it reads in
-its own pyproject.toml, and each project gives them a value, so one workflow serves many projects:
+There is nothing to register by hand and nothing to answer. The first `agl run` inside a repository
+writes `projects/<name>.toml` under AGL_HOME, named after the repository's own directory, and puts
+three of the four keys AGL configures itself in it — `name`, `repo` and `trees_root`. The fourth,
+`build_timeout`, is left out because AGL's own default stands in for it; write it by hand to change
+it. Everything else in that file belongs to your workflows. `agl resume` and `agl clear` register
+nothing — each addresses a run that already has a record, and a repository AGL has never run in
+holds none — so both refuse there and say so. Where the name is already another repository's, yours
+is registered as `<name>-1` and a line on stderr says so; nothing says it again, every command
+afterwards finding the project by the repository's path rather than by its name. A
+workflow names the settings it reads in its own pyproject.toml, and each project gives them a
+value, so one workflow serves many projects:
 
 ```toml
 # the workflow's pyproject.toml
@@ -90,7 +97,7 @@ The keys sit at the top level of the project file and are shared: two workflows 
 `build` read the one value, because how a project builds is a fact about the project. Each value is
 a TOML string used exactly as written, so `build = ""` is a value and not a gap, and a number, a
 boolean or a table there is refused, each one named. The four keys AGL configures itself cannot be
-declared. Edit the file by hand whenever you like: the next command reads it, and `agl init` never
+declared. Edit the file by hand whenever you like: the next command reads it, and registration never
 writes over a file that is already there.
 
 Before `agl run` or `agl resume` imports a workflow or asks an agent anything, it checks that the

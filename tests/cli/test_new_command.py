@@ -82,7 +82,8 @@ TRIAGE: Final = WorkflowName("triage")
 
 PROJECT: Final = ProjectName("myapp")
 
-# `agl init` is the one command that reads `cwd`, and no invocation below is one; the field is not
+# `cli/main.py`'s `_registering` is the one reader of `cwd`, and no invocation below reaches it;
+# the field is not
 # optional (`cli/main.py` argues why), so it carries a real path nothing here opens.
 ELSEWHERE: Final = Path("/nowhere")
 

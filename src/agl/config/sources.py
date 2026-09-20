@@ -111,8 +111,9 @@ def _required[T](answer: T | None, path: Path, key: str) -> T:
     if answer is None:
         raise InputError(
             f"{path}: {key} is not set, and there is no default AGL could apply - it is a fact "
-            f"about this project that only this file holds. `agl init` writes it into a new file "
-            f"and never over one that is already there, so add {key} to this one by hand"
+            f"about this project that only this file holds. AGL writes both keys into the file it "
+            f"registers a repository with, and never over one that is already there, so add {key} "
+            f"to this one by hand"
         )
     return answer
 
