@@ -1,5 +1,5 @@
 import argparse
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
 from dataclasses import MISSING, dataclass, field, fields, is_dataclass
 from math import isfinite
 from string import ascii_letters, digits
@@ -32,17 +32,23 @@ RUN_LABEL_FLAGS: Final = ("-n", "--name")
 
 RUN_BASE_REF_FLAGS: Final = ("--from",)
 
-# `argparse` adds these to every parser that does not turn `add_help` off, and `agl run`'s does
-# not - so they are that command's without being declared anywhere in it.
-_RUN_HELP_FLAGS: Final = ("-h", "--help")
+# `RefusingParser` adds these to every parser that does not turn `add_help` off, and `agl run`'s
+# does not - so they are that command's without being declared anywhere in it.
+_HELP_FLAGS: Final = ("-h", "--help")
+
+_HELP: Final = "Show this help message and exit."
+
+_ARGUMENTS: Final = "Arguments"
+
+_OPTIONS: Final = "Options"
 
 # `agl run` is the whole of it because it is the only command that hands a workflow argv at all,
 # and `tests/cli/test_run_command.py` compares this set against the parser it actually builds - so
 # an argument added there and not here fails the build rather than becoming quietly un-refused.
-RESERVED_FLAGS: Final = frozenset(RUN_LABEL_FLAGS + RUN_BASE_REF_FLAGS + _RUN_HELP_FLAGS)
+RESERVED_FLAGS: Final = frozenset(RUN_LABEL_FLAGS + RUN_BASE_REF_FLAGS + _HELP_FLAGS)
 
 _RUN_OWNS: Final = ", ".join(
-    "/".join(spellings) for spellings in (RUN_LABEL_FLAGS, RUN_BASE_REF_FLAGS, _RUN_HELP_FLAGS)
+    "/".join(spellings) for spellings in (RUN_LABEL_FLAGS, RUN_BASE_REF_FLAGS, _HELP_FLAGS)
 )
 
 _PARSEABLE: Final = (str, int, float)
@@ -56,14 +62,35 @@ class _Declared:
     flags: tuple[str, ...]
     help: str
 
+class _Formatter(argparse.HelpFormatter):
+    # `argparse` heads a command table with a row holding its metavar and indents the commands under
+    # it; these list the commands alone, measured where they are drawn.
+    def _format_action(self, action: argparse.Action) -> str:
+        if isinstance(action, argparse._SubParsersAction):
+            return "".join(self._format_action(command) for command in action._choices_actions)
+        return super()._format_action(action)
+
+    def _iter_indented_subactions(self, action: argparse.Action) -> Generator[argparse.Action]:
+        if isinstance(action, argparse._SubParsersAction):
+            yield from action._choices_actions
+
 class RefusingParser(argparse.ArgumentParser):
-    """A parser that raises where `argparse` would exit: a bad flag leaves on AGL's own code."""
+    """An `argparse` parser that raises :class:`InputError` instead of exiting."""
+
+    def __init__(self, *, add_help: bool = True, **kwargs: Any) -> None:
+        kwargs.setdefault("formatter_class", _Formatter)
+        super().__init__(add_help=False, **kwargs)
+        self._positionals.title = _ARGUMENTS
+        self._optionals.title = _OPTIONS
+        if add_help:
+            self.add_argument(*_HELP_FLAGS, action="help", default=argparse.SUPPRESS, help=_HELP)
+        self.add_help = add_help
 
     def error(self, message: str) -> NoReturn:
-        """Raise where `argparse` would exit, so a refusal goes through AGL's own exit-code table.
+        """Raise :class:`InputError` instead of exiting.
 
-        :param message: argparse's own wording, carried out under this parser's usage line
-        :raises InputError: always - this call has no way out that returns
+        :param message: The error message from `argparse`.
+        :raises InputError: Always.
         """
         raise InputError(f"{self.format_usage().strip()}\n{message}")
 
@@ -72,13 +99,14 @@ def arg[T](*flags: str, default: T, help: str = "") -> T: ...
 @overload
 def arg(*flags: str, help: str = "") -> Any: ...
 def arg(*flags: str, default: Any = MISSING, help: str = "") -> Any:
-    """Declare one field of a params dataclass as a named flag, refused here if it cannot be one.
+    """Declare a field of a params dataclass as a command-line flag.
 
-    :param flags: every spelling this field answers to; at least one, and never a positional
-    :param default: omitted makes the flag required, and a `bool` field must declare `default=False`
-    :param help: the line `agl workflows <workflow>` prints beside the flag; cosmetic elsewhere
-    :return: a `dataclasses.field` carrying the declaration, assigned to the annotated field
-    :raises InputError: no flags, a spelling `agl run` owns or `argparse` refuses, or a bad default
+    :param flags: The flag's spellings, such as `-n` and `--name`. At least one.
+    :param default: The value when the flag isn't given. If omitted, the flag is required. A `bool`
+        field must use `default=False`.
+    :param help: What `agl workflows <workflow>` shows beside the flag.
+    :return: A `dataclasses.field` to assign to the annotated field.
+    :raises InputError: No flags, a flag `agl run` uses or `argparse` refuses, or a bad default.
     """
     if not flags:
         raise InputError(
@@ -101,12 +129,12 @@ def arg(*flags: str, default: Any = MISSING, help: str = "") -> Any:
     return field(default=default, metadata=declared)
 
 def parser_for(params: type[object], *, prog: str | None = None) -> RefusingParser:
-    """Build the flag parser for a params dataclass, apart from `parse` so it can be inspected.
+    """Build the flag parser for a params dataclass.
 
-    :param params: the dataclass; every field must be declared with `arg()` and claim its own flags
-    :param prog: the name the usage line uses, `None` leaving `argparse` to read `sys.argv[0]`
-    :return: a parser that raises instead of exiting, and that registers no `-h` of its own
-    :raises InputError: not a dataclass, a field with no `arg()`, or two fields claiming one flag
+    :param params: The params dataclass. Every field must be declared with `arg()`.
+    :param prog: The name shown in the usage line. If omitted, uses `sys.argv[0]`.
+    :return: A parser that raises :class:`InputError` instead of exiting.
+    :raises InputError: Not a dataclass, a field without `arg()`, or two fields with the same flag.
     """
     if not is_dataclass(params):
         raise InputError(f"{named(params)} is not a dataclass of `arg()` fields")
@@ -135,24 +163,24 @@ def parser_for(params: type[object], *, prog: str | None = None) -> RefusingPars
     return parser
 
 def parse[T](params: type[T], argv: Sequence[str], *, prog: str | None = None) -> T:
-    """Read a workflow's own arguments into its params instance, before any agent has been paid for.
+    """Read a workflow's flags into an instance of its params dataclass.
 
-    :param params: the dataclass of `arg()` fields, which is what `Workflow.params` hands over
-    :param argv: this workflow's flags alone - the generic parser has taken its own off the front
-    :param prog: the name the usage line uses; the front door passes `agl run <workflow>`
-    :return: an instance of `params`, each value converted by the type its field declared
-    :raises InputError: a missing required flag, an unrecognised one, or an unconvertible value
+    :param params: The params dataclass.
+    :param argv: The workflow's own flags, without the ones `agl run` takes.
+    :param prog: The name shown in the usage line. If omitted, uses `sys.argv[0]`.
+    :return: An instance of `params` holding the flags' values.
+    :raises InputError: A missing required flag, an unknown flag, or a value that won't convert.
     """
     parsed = parser_for(params, prog=prog).parse_args(argv)
     factory: Callable[..., T] = params
     return factory(**vars(parsed))
 
 def to_json(instance: object) -> Mapping[str, JsonValue]:
-    """Write the parameters a run was started with into the shape `run.json` carries them in.
+    """Convert a params instance to JSON values.
 
-    :param instance: a params instance and never the class; its field names become the keys
-    :return: a read-only mapping, in declaration order, holding the four types `arg()` admits
-    :raises InputError: a value `run.json` cannot hold - a non-finite float, or text UTF-8 refuses
+    :param instance: The params instance, not its class.
+    :return: Each field's value by name, in declaration order.
+    :raises InputError: A value that can't be saved as JSON, such as an infinite float.
     """
     if isinstance(instance, type) or not is_dataclass(instance):
         raise InputError(
@@ -166,12 +194,13 @@ def to_json(instance: object) -> Mapping[str, JsonValue]:
     })
 
 def from_json[T](params: type[T], data: Mapping[str, JsonValue]) -> T:
-    """Rebuild a resumed run's parameters from its record, refusing rather than converting anything.
+    """Rebuild a params instance from what `to_json` returned.
 
-    :param params: the class to rebuild into; `api.resume` has already matched the workflow's files
-    :param data: what `to_json` wrote, read back at the types it stored and never coerced to fit
-    :return: an instance holding the values the first invocation was given
-    :raises InputError: a field the record lacks, a key the class does not declare, or a moved type
+    :param params: The params dataclass to rebuild.
+    :param data: What `to_json` returned.
+    :return: An instance of `params` holding the saved values.
+    :raises InputError: A field missing from `data`, a key the class doesn't declare, or a value
+        whose type no longer matches its field.
     """
     kind = named(params)
     declared = _field_names(params)

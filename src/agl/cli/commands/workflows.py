@@ -17,21 +17,12 @@ _WORKFLOW: Final = "workflow"
 _NOTHING_TO_REPORT: Final = 0
 
 _NOTHING_DECLARED: Final = (
-    'no workflow is declared: nothing in the workflows/ directory of your AGL workspace declares '
-    'an agl.workflows entry point. `agl new <name>` writes one, and makes the workspace too if '
-    'that is not there yet - what it leaves behind runs as it stands, so the first edit is yours '
-    'rather than a stub to fill in. Written by hand it is the same thing: a directory there '
-    'holding its code, its prompts, and a pyproject.toml with one '
-    '`<name> = "<module>:<attribute>"` line under [project.entry-points."agl.workflows"]. That '
-    'line is the whole of registering it either way: there is nothing to install, and no central '
-    'list in AGL to add it to.'
+    "No workflows are declared in your workspace. Run `agl new <name>` to create one, or add a "
+    '`<name> = "<module>:<attribute>"` line under [project.entry-points."agl.workflows"] in a '
+    "workflow's pyproject.toml."
 )
 
-_BROKEN_PREAMBLE: Final = (
-    "these workspace directories hold a pyproject.toml that declares no workflow, so no name in "
-    "them is one `agl run` takes. Each answers only for itself, and no other directory in the "
-    "workspace is affected by it:"
-)
+_BROKEN_PREAMBLE: Final = "These directories hold a pyproject.toml that declares no workflow:"
 
 # `argparse` has no public spelling for what `add_subparsers` returns, and the alternative is
 # `Any`, which is the one thing `mypy --strict` is here to keep out of the seam.
@@ -40,20 +31,15 @@ type _Commands = argparse._SubParsersAction[RefusingParser]
 def declare(commands: _Commands) -> RefusingParser:
     parser = commands.add_parser(
         NAME,
-        help="list the workflows your workspace declares, or print one workflow's flags",
-        description=(
-            "List every workflow declared in your AGL workspace. Nothing is imported to answer "
-            "that, so a workflow whose own code will not load still appears in the list, and a "
-            "directory that declares none is reported beside it. Naming one loads it and prints "
-            "the flags `agl run <workflow>` takes for it."
-        ),
+        help="List workflows, or show the flags one takes.",
+        description="List the workflows in your AGL workspace, or show the flags one takes.",
         allow_abbrev=False,
     )
     parser.add_argument(
         _WORKFLOW,
         metavar="<workflow>",
         nargs="?",
-        help="a workflow to describe: prints the flags it declares, and loads it to read them",
+        help="Name of the workflow whose flags to show. If omitted, lists all workflows.",
     )
     return parser
 

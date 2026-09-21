@@ -141,18 +141,20 @@ and `workflows` two only because the listing and the help are two operations —
 a package and the other must never. **Which stream a line goes to
 is part of that turning**: what a machine consumes goes to stdout, and a note about it goes to
 stderr. So `workflows` prints a broken directory's reason on stderr, a name on stdout being a name
-`agl run` takes, and `run` and `resume` print `replayed <n> steps from cache` there for the same
-reason — the count arriving from `api` as a `Replayed`, the way `Cleared` does, rather than being
+`agl run` takes, and `run` and `resume` print `Replayed <n> steps from cache` there for the same
+reason — the count arriving from `api` on a `Finished`, the way `Cleared` does, rather than being
 worked out by the command. That line is silent at nought, every first run having replayed nothing,
-so its presence is the report. `new` splits the same way and says so in a comment: the path it
-wrote is on stdout, and the line telling an operator to open the *workspace* rather than that path
+so its presence is the report. The same `Finished` carries the branch the run left its changes on,
+and the stdout line that says the run finished names it: `Run "auth" finished and left its changes
+on branch: agl/auth`, or `Run "auth" finished` alone where a checkout still holds the branch.
+`new` splits the same way and says so in a comment: the path it wrote is on stdout, and the line telling an operator to open the *workspace* rather than that path
 — because PyCharm and VS Code both look for an interpreter at the root of what is open, and a
 workflow directory is a level below the venv — is a note, and goes to stderr beside it. `get`
 splits the same way: a `placed` line on stdout names a workflow the workspace now holds, and
 everything else it writes — every question, a declined or refused line, each refusal's reason — is
 a note, on stderr, so what a script reads off stdout is what the command got. `update` splits as
-`get` does, an `updated` line standing where `get` has a `placed` one and `already up to date`
-among the notes, and so does `remove`: `removed <name>` on stdout names the entry that went, and
+`get` does, an `updated` line standing where `get` has a `placed` one and `Already up to date`
+among the notes, and so does `remove`: `Removed "<name>"` on stdout names the entry that went, and
 its question, and a note naming what a delete that stopped part-way left, go to stderr. `main.py`
 writes one line of its own, the only one the dispatch prints rather than a command module: where
 registration had to suffix a name, `register_repository` hands `registered_as`'s sentence back and
@@ -160,25 +162,21 @@ registration had to suffix a name, `register_repository` hands `registered_as`'s
 being the dispatch because registering is the dispatch's to do, and the name being AGL's answer to
 a collision rather than one a script could have known.
 `tests/cli/test_main.py::test_the_note_about_a_suffixed_name_reaches_stderr_and_leaves_stdout_alone`
-pins the stream. **Four
+pins the stream. **Three
 kinds of note in AGL are written where they are decided rather than handed back to be turned into
 output, and `api.py`'s `_warn` is the one place that module writes to a stream at all**:
 `_unchanged`, which says a sync was refused, that this workspace already had an environment, and
 that the run is carrying on against it; `sdk/_engine/preflight.py`'s lines about the tool this
-machine will run the agents on, which "Invariants where a mistake is silent" describes; whatever
-`sdk/_engine/teardown.py` could not release at the end of a run; and, out of that same module, the
-branch a run that finished left its work on — `_warn` being what both of those modules are handed
-as `report`. The rule about streams holds
-over all four unchanged — each is a note about a run and not a name a machine reads, and
-`agl/<label>` in particular is `run_branch` of the label the operator typed, so a script that
-started the run knew it before the run did and nothing here is a name one learns. What none of the
-four obeys is the turning, and for three different reasons. What `run` hands back it
+machine will run the agents on, which "Invariants where a mistake is silent" describes; and
+whatever `sdk/_engine/teardown.py` could not release at the end of a run — `_warn` being what both
+of those modules are handed as `report`. The rule about streams holds over all three unchanged —
+each is a note about a run and not a name a machine reads. What none of the three obeys is the
+turning, and for three different reasons. What `run` hands back it
 hands back after the walk, so a warning about the environment that run is about to import from
 would reach the terminal hours after the import it was about; a run that ends on a `Stop` hands
 nothing back at all, the workflow's own exception being what leaves `api.run`, so a return value is
-a channel the teardown's notes structurally cannot use — which is what settles it for the branch
-as well, an operator who ended a run on purpose being exactly the one about to go and look at what
-it did; and `check` may refuse the run it is warning about, so notes held back to be returned would
+a channel the teardown's notes structurally cannot use; and `check` may refuse the run it is
+warning about, so notes held back to be returned would
 be read by nobody in the one case where the version underneath a refusal is most worth reading —
 `api.py`'s `_warn` carries all three reasons beside itself, and
 `tests/sdk/test_preflight.py::test_a_version_warning_is_out_before_a_readiness_probe_that_refuses_the_run`
@@ -250,16 +248,16 @@ nothing to do with worktrees or with the run lock, which is `_trees.run_lock`'s 
 argued under "Invariants where a mistake is silent". Nothing here fails a run: what will not go is a
 note on stderr, because the work is committed and reachable either way.
 
-**Having given the checkout back, the run says which branch its work is on**, and that line's
+**Having given the checkout back, the run says which branch its work is on**, and that clause's
 presence is the whole of the report. `agl/<label>` is only takeable once the run's own checkout has
 gone — git answers `fatal: 'agl/<label>' is already used by worktree at …` while a worktree
 holds it — so the base's own `remove` decides, and no child's: `worktree_branch` spells a child's
 name with an infix, so no child checkout can hold it. The two endings that keep everything,
 an unsettled landing and a base that would not go, therefore get the warning naming what still
-stands and no invitation to check anything out, and `tests/test_release.py` asserts the absence in
-both. The line is the release's rather than `cli/`'s because a run that stopped needs it too and
-hands nothing back to be turned into output; `run 'auth' finished` on stdout is untouched beside
-it, being the shape `agl run`, `agl resume` and `agl clear` share.
+stands and no branch, and `tests/test_release.py` asserts the absence in both. The release decides
+it and `releasing` hands it out on its `Released`, `api.py` carries it on `Finished`, and `cli/`
+names it in the line saying the run finished. A run that ends on a `Stop` hands nothing back, so
+it prints `Stopped: …` and names no branch.
 
 **`clear` asks every place whether it will go before it takes any of them.** It walks the run's
 namespaces — the ledger's, and every one `WorkspaceProvider.residue` can still find, which is the

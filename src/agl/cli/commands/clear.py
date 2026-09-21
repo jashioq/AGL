@@ -23,23 +23,18 @@ type _Commands = argparse._SubParsersAction[RefusingParser]
 def declare(commands: _Commands) -> RefusingParser:
     parser = commands.add_parser(
         NAME,
-        help="take a run away",
+        help="Delete a run with its worktrees and branches.",
         description=(
-            "Take a run away, whole: its checkouts, its branches - the run's own included, "
-            "whether or not its work is in the base ref yet - and its records. Nothing is "
-            "asked first and no flag changes it. Deleting a branch deletes that branch's "
-            "reflog, and each checkout's own goes with the checkout, so no `git reflog` entry "
-            "of AGL's is left to go back to. What each deleted branch was at is what "
-            "`git fsck --unreachable` still names, until those objects are pruned - so note "
-            "the sha of anything you may want before you run this. Whatever a checkout was "
-            "holding uncommitted goes with the directory. What went is listed on stdout."
+            "Delete a run with its worktrees, its branches and any uncommitted "
+            "changes, merged or not. To get the work back later, note its branch's sha first; "
+            "otherwise `git fsck --unreachable` finds its commits until git prunes them."
         ),
         allow_abbrev=False,
     )
     parser.add_argument(
         _LABEL,
         metavar="<label>",
-        help="the run to take away: the name `agl run -n <label>` gave it",
+        help="Name of the run to delete, as given to `agl run -n`.",
     )
     return parser
 
@@ -47,7 +42,7 @@ def execute(registered: Registered, parsed: argparse.Namespace) -> int:
     label = RunLabel(_said(parsed, _LABEL, command=NAME))
     project, services = registered()
     cleared = asyncio.run(api.clear(services, project, label))
-    print(f"clear {str(label)!r} finished")
-    print(f"branches gone: {_SEPARATOR.join(cleared.branches)}")
-    print(f"worktrees gone: {_SEPARATOR.join(cleared.worktrees)}")
+    print(f'Run "{label}" cleared')
+    print(f"Deleted branches: {_SEPARATOR.join(cleared.branches)}")
+    print(f"Deleted worktrees: {_SEPARATOR.join(cleared.worktrees)}")
     return _NOTHING_TO_REPORT

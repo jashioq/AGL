@@ -18,13 +18,13 @@ __all__ = [
 
 @dataclass(frozen=True, slots=True)
 class Text:
-    """A component that is one string: what a bare `str` becomes wherever a component is taken."""
+    """Text shown on a :class:`Screen`."""
 
     value: str
 
 @dataclass(frozen=True, slots=True, init=False)
 class Row:
-    """One line of cells, every one a `Text`: a bare `str` among them is coerced on the way in."""
+    """One line of cells on a :class:`Screen`."""
 
     cells: tuple[Text, ...]
 
@@ -33,7 +33,7 @@ class Row:
 
 @dataclass(frozen=True, slots=True, init=False)
 class Rows:
-    """Several rows as one component: drawn in the order given, with no header and no widths."""
+    """Several rows shown together, in the order given."""
 
     rows: tuple[Row, ...]
 
@@ -44,7 +44,7 @@ type Component = Text | Row | Rows
 
 @dataclass(frozen=True, slots=True)
 class Choice[T]:
-    """One answer a person can pick: the label they see, and the value `show` hands back for it."""
+    """An answer a person can pick, with the value it returns."""
 
     label: str
 
@@ -52,7 +52,7 @@ class Choice[T]:
 
 @dataclass(frozen=True, slots=True)
 class TextInput[T]:
-    """One answer a person types: the label they see, and the mapping from their text to `T`."""
+    """An answer a person types, with the function that turns it into a value."""
 
     label: str
 
@@ -62,7 +62,7 @@ type Response[T] = Choice[T] | TextInput[T]
 
 @dataclass(frozen=True, slots=True, init=False)
 class Screen[T = None]:
-    """What a person is shown: a body, plus responses - with none it is a board, not a question."""
+    """What a person is shown, and the answers they can give."""
 
     body: Component
 
@@ -76,7 +76,7 @@ def _coerced[C: Component](value: str | C) -> Text | C:
     return Text(value) if isinstance(value, str) else value
 
 class Terminal(ABC):
-    """The one way a workflow reaches a person: boards replace one another, questions queue."""
+    """How a workflow talks to a person."""
 
     @abstractmethod
     async def show[T](
@@ -87,21 +87,22 @@ class Terminal(ABC):
         priority: int = 0,
         **params: object,
     ) -> T:
-        """Put what `view` returns in front of a person, and hand back what they answered.
+        """Show a :class:`Screen` to a person and return their answer.
 
-        :param view: re-invoked every frame, so it must be pure and cheap; not the `Screen` itself
-        :param priority: where an interactive screen joins the queue; no meaning for a passive one
-        :param params: handed to `view` unchanged on every invocation, so live objects stay live
-        :return: what the chosen response mapped to, or `None` where the screen carries none
+        :param view: Function returning the :class:`Screen`. It runs every frame, so keep it fast
+            and free of side effects.
+        :param priority: A question's place in the queue; higher is shown first.
+        :param params: Arguments passed to `view` every frame.
+        :return: The value of the chosen answer, or `None` if the screen has no answers.
         """
         ...
 
     @property
     @abstractmethod
     def pending(self) -> Mapping[int, int]:
-        """How many screens are queued at each priority, excluding whatever is on screen now.
+        """How many screens are waiting at each priority.
 
-        :return: a snapshot keyed by every priority asked for, carrying a zero where none waits
+        :return: Waiting screens per priority, not counting the one on screen now.
         """
         ...
 

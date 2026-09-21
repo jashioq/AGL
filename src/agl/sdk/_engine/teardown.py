@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from agl.ports.errors import AglError, Stop
 from agl.ports.history import History
 from agl.ports.home_layout import RunScope
@@ -10,7 +11,11 @@ from agl.sdk._engine.integration import Leases
 from agl.sdk._engine.services import Services
 from agl.sdk._engine.worktrees import Worktrees
 
-__all__ = ["namespaces_under", "releasing"]
+__all__ = ["Released", "namespaces_under", "releasing"]
+
+@dataclass(slots=True)
+class Released:
+    branch: str | None = None
 
 # A run that ends deliberately gives its checkouts back; one that ends any other way keeps them.
 # Neither half is tidiness: a run that failed or was cancelled is the one an operator resumes and
@@ -23,9 +28,10 @@ async def releasing[R](
     worktrees: Worktrees[R],
     leases: Leases,
     report: Callable[[str], None],
-) -> AsyncIterator[None]:
+) -> AsyncIterator[Released]:
+    released = Released()
     try:
-        yield
+        yield released
     except Stop:
         await _hand_back(services, scope, worktrees, leases, report)
         raise
@@ -38,7 +44,7 @@ async def releasing[R](
             await _hand_back(services, scope, worktrees, leases, report)
         raise
     else:
-        await _hand_back(services, scope, worktrees, leases, report)
+        released.branch = await _hand_back(services, scope, worktrees, leases, report)
 
 async def namespaces_under(store: Store, scope: RunScope) -> tuple[Namespace, ...]:
     found: list[Namespace] = []
@@ -53,10 +59,10 @@ async def _hand_back[R](
     worktrees: Worktrees[R],
     leases: Leases,
     report: Callable[[str], None],
-) -> None:
+) -> str | None:
     if leases.unsettled:
         report(_holding(scope.label))
-        return
+        return None
     onto = run_branch(scope.label)
     kept: list[str] = []
     for namespace in await _addressed(services.store, scope, worktrees):
@@ -68,12 +74,11 @@ async def _hand_back[R](
     # spells a child's with an infix. So the base's answer alone decides whether the branch may be
     # offered, and a run that kept it is told what stands rather than promised what it cannot take.
     held = await _refused(services, scope.label, None, onto)
-    if held is None:
-        report(_free_to_take(scope.label, onto))
-    else:
+    if held is not None:
         kept.append(held)
     if kept:
         report(_still_standing(scope.label, kept))
+    return onto if held is None else None
 
 # The ledger's namespaces are the ones that recorded a step, and a checkout is cut before the first
 # entry is written - so a namespace that opened one and recorded nothing is in this walk's registry
@@ -122,37 +127,21 @@ async def _landed(history: History, branch: str, onto: str) -> bool:
 # stopped on. A live lease is one of those: `Integration` releases it on every path that settles.
 def _holding(label: RunLabel) -> str:
     return (
-        f"warning: run {str(label)!r} ended with a landing still held, so its checkouts were left "
-        f"exactly as they stand. A conflicted merge is recorded in the checkout it stopped in and "
-        f"nowhere else, and so is anything anybody typed into the files it stopped on, so taking "
-        f"that checkout back would delete both with nothing left to say they were there. "
-        f"`agl resume {label}` picks the landing up again, and `agl clear {label}` takes the whole "
-        f"run away if that is what you want"
-    )
-
-def _free_to_take(label: RunLabel, onto: str) -> str:
-    return (
-        f"run {str(label)!r} left its work on the branch {onto!r}, and the checkout that held that "
-        f"branch has been given back - so `git checkout {onto}` in this repository is that work"
+        f'WARNING: Run "{label}" ended in the middle of a merge, so its worktrees were kept. '
+        f"Run `agl resume {label}` to finish the merge."
     )
 
 def _still_standing(label: RunLabel, kept: Sequence[str]) -> str:
     named = "\n".join(f"    {one}" for one in kept)
-    return (
-        f"warning: run {str(label)!r} finished and gave back what it could, and this did not go. "
-        f"The run's own answer stands either way - nothing below was needed to produce it - but a "
-        f"branch kept here carries commits that reached no other line of work, so read it before "
-        f"you take it away:\n{named}"
-    )
+    return f'WARNING: Run "{label}" finished, and these were kept:\n{named}'
 
 def _unremoved(label: RunLabel, namespace: Namespace | None, refusal: AglError) -> str:
     return f"the checkout {_addressing(label, namespace)} could not be taken back: {refusal}"
 
 def _unlanded(branch: str, onto: str) -> str:
     return (
-        f"the branch {branch!r} was kept: nothing on it has reached {onto!r}, so it holds the only "
-        f"copy of whatever it recorded. `git log {onto}..{branch}` is what is on it, and "
-        f"`git branch -D {branch}` is what takes it away once you have read it"
+        f'Branch "{branch}" holds changes that never reached "{onto}". '
+        f"Run `git log {onto}..{branch}` to see them."
     )
 
 def _undeleted(branch: str, refusal: AglError) -> str:

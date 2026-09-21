@@ -12,7 +12,7 @@ _NO_PAYLOAD: Final[Mapping[str, JsonValue]] = MappingProxyType({})
 
 @dataclass(frozen=True, slots=True)
 class Call:
-    """One tool call an `Agent` makes: the name the role declared it under, and the arguments."""
+    """A tool call a stand-in :class:`Agent` makes in a test."""
 
     tool: str
 
@@ -32,7 +32,7 @@ class Call:
 
 @dataclass(frozen=True, slots=True)
 class Reply:
-    """One `Agent`'s answer to a task: its calls, its activity, what it says and why it stopped."""
+    """What a stand-in :class:`Agent` answers with in a test."""
 
     calls: Sequence[Call] = ()
 

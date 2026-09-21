@@ -142,7 +142,7 @@ class RunLabel(_Name):
 
 @dataclass(frozen=True, slots=True)
 class Namespace(_Name):
-    """One child worktree of a run: the trees root is flat, so a name is taken run-wide."""
+    """A worktree's name, unique across the whole run, ignoring case."""
 
     _KIND: ClassVar[str] = "namespace"
     _RESERVED: ClassVar[Mapping[str, str]] = {

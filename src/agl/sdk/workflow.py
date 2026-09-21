@@ -22,7 +22,7 @@ __all__ = ["Conflict", "Namespace", "Run", "Stop", "VerifierOutcome", "Workflow"
 
 @dataclass(frozen=True, slots=True)
 class Run[P = object]:
-    """The one object a workflow is handed: its params, its terminal, its steps and worktrees."""
+    """The run a workflow is handed, with its params, steps and worktrees."""
 
     params: P
 
@@ -53,50 +53,53 @@ class Run[P = object]:
 
     @property
     def terminal(self) -> Terminal:
-        """The display this run shows on, and the same object for every run in the tree.
+        """The terminal this run shows things on.
 
-        :return: the terminal the framework opened around the workflow; children share this one
+        :return: The :class:`Terminal`, shared with every child :class:`Run`.
         """
         return self.services.terminal
 
     @property
     def config(self) -> Mapping[str, str]:
-        """The project settings this workflow declares, each exactly as the project file wrote it.
+        """The project settings this workflow declares.
 
-        :return: only the declared keys, `""` included; any other read raises, `get` and `in` too
-        :raises InputError: on a read of a key the workflow's `config` line does not declare
+        :return: Each declared setting by key, exactly as the project file wrote it.
+        :raises InputError: Reading a key the workflow's `config` line doesn't declare.
         """
         return self.services.config
 
     async def step[R](self, role: Role[R], *inputs: object, commit: str | None = None) -> R:
-        """Run one step against this run's checkout, or replay its entry and pay for nothing.
+        """Run a :class:`Role` in the worktree this :class:`Run` owns.
 
-        :param role: names the step; two calls on it are two entries, neither replaying the other
-        :param inputs: one per accepted type, recorded under its name and filling its `{{TypeName}}`
-        :param commit: given, commits whatever is dirty; omitted, resets and cleans it all away
-        :return: the reporting tool's payload as its dataclass, or `None` for a role declaring none
-        :raises InputError: nothing accepts an input, two share a type, or one will not canonicalise
+        :param role: The agent to run
+        :param inputs: Parameters the role accepts
+        :param commit: Commit changes with this message after the step finishes. If omitted,
+            unstaged changes are wiped.
+        :return: Role's reporting_tool tool payload type.
+        :raises InputError: An input the role doesn't accept, two inputs of one type, or one that
+            can't be saved as JSON.
         """
         return await self._steps.step(role, inputs, commit=commit)
 
     async def verify(self, command: str) -> VerifierOutcome:
-        """Run a command in this run's own checkout, a child's and never its root's, for a verdict.
+        """Run a command in this run's worktree.
 
-        :param command: run through a shell as written, `""` included; no project setting is read
-        :return: the verdict on the checkout as it stands, never recorded, so a resume runs it again
-        :raises InputError: `command` is not a string, refused before any checkout is opened
-        :raises UpstreamUnavailable: the command could not be started, so nothing ran at all
-        :raises UpstreamUnexpected: it started and its output could not be read
+        :param command: The shell command to run.
+        :return: Whether the command passed, with its exit status and output.
+        :raises InputError: `command` isn't a string.
+        :raises UpstreamUnavailable: The command couldn't be started.
+        :raises UpstreamUnexpected: The command's output couldn't be read.
         """
         return await self._steps.verify(command)
 
     def worktree(self, namespace: str, base: Run[object] | str | None = None) -> Run[P]:
-        """Open a child run with a checkout of its own, which is how two agents work at once.
+        """Create a child :class:`Run` with a worktree of its own.
 
-        :param namespace: unique run-wide and not merely among siblings, compared case-insensitively
-        :param base: a run, a ref, or omitted for this run's last recorded head - not its branch tip
-        :return: the child; asking again from here hands back that same object and ignores `base`
-        :raises ConflictError: this name is held elsewhere in the run, and both scopes are named
+        :param namespace: Name of the worktree, unique across the whole run, ignoring case.
+        :param base: The :class:`Run` or ref to start from. If omitted, starts from this run's last
+            recorded commit.
+        :return: The child :class:`Run`.
+        :raises ConflictError: Another worktree in the run already has this name.
         """
         return cast(
             "Run[P]",
@@ -106,10 +109,10 @@ class Run[P = object]:
         )
 
     async def integrate(self) -> Integration:
-        """Land this run's work into the worktree of the run that cut it, one landing at a time.
+        """Merge this run's changes into the worktree of the :class:`Run` it came from.
 
-        :return: an outcome holding a lease until `retry` or `abort` settles it, conflicts included
-        :raises InputError: this is the root run, or `build` is undeclared - before anything lands
+        :return: The result of the merge. On a conflict, finish it with its `retry` or `abort`.
+        :raises InputError: This is the top-level run, or the workflow declares no `build` setting.
         """
         if self._parent is None:
             raise InputError(_unaddressable(self.scope))
@@ -159,25 +162,25 @@ class _NoParams:
 
 @dataclass(frozen=True, slots=True)
 class Workflow[P = object]:
-    """What `@workflow` returns: the function, plus the params class read off its annotation."""
+    """A workflow declared with `@workflow`."""
 
     fn: _Function[P]
 
     @property
     def params(self) -> type[P]:
-        """The params class, read off the function's first parameter at every read rather than once.
+        """The params class this workflow takes.
 
-        :return: the class `params.parse` builds from argv; an empty one for a bare `Run`
-        :raises InputError: the annotation is missing, unresolvable, or names anything but a `Run`
+        :return: The class in the `Run[...]` annotation; an empty one for a bare :class:`Run`.
+        :raises InputError: The first parameter isn't annotated as a :class:`Run`.
         """
         return cast("type[P]", _declared(self.fn))
 
 def workflow[P](fn: _Function[P] | None = None) -> Workflow[P]:
-    """Declare an async function to be a workflow, which is what makes it a name `agl run` takes.
+    """Declare an async function as a workflow `agl run` can start.
 
-    :param fn: the `async def` a bare `@workflow` is written above; `None` is the empty call
-    :return: what the entry point declaring this workflow names, holding `fn` unwrapped
-    :raises InputError: `@workflow` was written as a call, or `fn` is not an `async def`
+    :param fn: The `async def` below a bare `@workflow`.
+    :return: A :class:`Workflow` for an entry point to name.
+    :raises InputError: `@workflow` was written with parentheses, or `fn` isn't an `async def`.
     """
     if fn is None:
         raise InputError(

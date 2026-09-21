@@ -32,26 +32,19 @@ type _Commands = argparse._SubParsersAction[RefusingParser]
 def declare(commands: _Commands) -> RefusingParser:
     parser = commands.add_parser(
         NAME,
-        help="download workflows from public GitHub repositories into your workspace",
-        description=(
-            "Download workflows from public GitHub repositories into your AGL workspace. Each "
-            "argument is owner/repo/path/to/workflow[@ref]: the path runs from the repository's "
-            "root to the workflow's own directory, whose name is the one it is placed under, and "
-            "its last segment may be a comma list of siblings. Everything after the @ is the ref, "
-            "release/1.0 included, and with no @ref the default branch is fetched. A repository is "
-            "downloaded once, however many workflows are asked of it. Every workflow is checked "
-            "and every question asked before anything is placed - whether to replace a workflow "
-            "the workspace already holds, and whether to install the third-party packages one "
-            "declares - and one stdin cannot answer, at its end or closed, is answered no. What is "
-            "placed is then installed, the way `agl new` installs what it writes."
-        ),
+        help="Download workflows from GitHub.",
+        description="Download workflows from public GitHub repositories.",
         allow_abbrev=False,
     )
     parser.add_argument(
         _SPECS,
         metavar="<owner/repo/path[@ref]>",
         nargs="+",
-        help="a workflow to download, its siblings named as a comma list in the last segment",
+        help=(
+            "Path to a workflow's directory in a GitHub repository. Separate several workflows in "
+            "one directory with commas: acme/flows/triage,review. If @ref is omitted, uses the "
+            "default branch."
+        ),
     )
     return parser
 

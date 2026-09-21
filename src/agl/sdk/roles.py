@@ -40,10 +40,10 @@ __all__ = [
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Role[P = None]:
-    """What one step asks of one agent: a name, a prompt, tools, restrictions and a watcher."""
+    """An agent a step runs, with its instructions and tools."""
 
     name: str
-    """The `steps/<name>/` directory its entries file under, matched with the case folded away."""
+    """The role's name; two names that differ only in case are the same name."""
 
     instructions: str
 
@@ -58,7 +58,7 @@ class Role[P = None]:
     requires: AbstractSet[Capability] = frozenset()
 
     on_activity: ActivityReporter | None = None
-    """Each line as the agent works, nothing when a step ends: the last stands until the next."""
+    """Called with each line of progress the agent reports as it works."""
 
     def __post_init__(self) -> None:
         StepName(self.name)
@@ -94,10 +94,10 @@ class Role[P = None]:
 
     @property
     def model(self) -> ModelChoice:
-        """Which model runs this role, bound by its factory rather than written on the `Role`.
+        """The model this role runs on.
 
-        :return: the model and so the provider; a fingerprint term, so changing it replays nothing
-        :raises InputError: this `Role` came from a bare `Role(...)` no factory bound a model to
+        :return: The model set with `@role(model=...)`.
+        :raises InputError: This role was built with `Role(...)`, not by a `@role` function.
         """
         if self._model is None:
             raise InputError(
@@ -112,14 +112,14 @@ class Role[P = None]:
 
     @property
     def accepts(self) -> tuple[type[object], ...]:
-        """Which input types a step may pass it, bound by its factory rather than written here.
+        """The input types a step can pass this role.
 
-        :return: the declared types, matched by `isinstance`; empty for a role that takes no inputs
+        :return: The types set with `@role(accepts=...)`, or none.
         """
         return self._accepts
 
 class RoleFactory[**P, R]:
-    """What `@role` returns: a declaration, plus the name, model and types read without calling."""
+    """A `@role` function, which builds a :class:`Role` when called."""
 
     __name__: str
     __qualname__: str
@@ -161,11 +161,11 @@ class _RoleDecorator(Protocol):
     def __call__[**P, R](self, declaration: Callable[P, Role[R]], /) -> RoleFactory[P, R]: ...
 
 def role(*, model: ModelChoice, accepts: Sequence[type[object]] = ()) -> _RoleDecorator:
-    """Declare a role factory, naming the model and the inputs so both are readable uncalled.
+    """Declare a function that builds a :class:`Role`.
 
-    :param model: fingerprinted with any effort into each step; the bare model is probed up front
-    :param accepts: classes with distinct names; the prompt names each `{{TypeName}}` and no other
-    :return: a decorator binding the model and the accepted types onto each `Role` it returns
+    :param model: The model the role runs on.
+    :param accepts: Classes the role takes as inputs. Its prompt must name each as `{{TypeName}}`.
+    :return: A decorator for the function.
     """
 
     def decorate[**P, R](declaration: Callable[P, Role[R]]) -> RoleFactory[P, R]:
@@ -174,11 +174,11 @@ def role(*, model: ModelChoice, accepts: Sequence[type[object]] = ()) -> _RoleDe
     return decorate
 
 def prompt_file(path: str | Path) -> str:
-    """Read a prompt now, at the declaration, so the text and not the filename is fingerprinted.
+    """Read a prompt file.
 
-    :param path: relative resolves against the calling module's directory, not the current one
-    :return: the text exactly as read, untrimmed, because its whitespace is inside the fingerprint
-    :raises InputError: no such file, a directory, unreadable, not UTF-8, or blank once stripped
+    :param path: Relative path to the file
+    :return: Prompt file contents as string
+    :raises InputError: no such file, a directory, unreadable, not UTF-8
     """
     asked = Path(path)
     # `sys._getframe(1)` is the caller of *this* function, so the lookup happens here and not in the
@@ -219,7 +219,7 @@ def prompt_file(path: str | Path) -> str:
     return text
 
 class RoleIncompleteError(UpstreamUnexpected):
-    """The agent produced no result: nothing was recorded, so the next attempt runs the step."""
+    """The agent stopped without reporting a result."""
 
 def _check_accepted_types(factory: str, accepts: tuple[type[object], ...]) -> None:
     # A parameterised generic and a union are not instances of `type` in CPython, so `list[str]`

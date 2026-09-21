@@ -6,7 +6,7 @@ and place - and this file drives it through `main`, the way an operator reaches 
 `FakeFetcher` that counts every question asked of it and every download. The real fetcher runs
 twice, against `instruments.github_api`'s and `instruments.codeload`'s stand-ins on 127.0.0.1.
 
-**The common case is one line.** Every downloaded workflow current says `already up to date` on
+**The common case is one line.** Every downloaded workflow current says `Already up to date` on
 stderr and nothing else anywhere - no prompt, no line per workflow, exit 0 - however many there
 are. A workspace where `agl get` placed nothing is current too: nothing it could check has moved,
 and a workflow written by hand or by `agl new` is not this command's business, so it is not
@@ -84,7 +84,7 @@ _TOOLS: Final = RepositoryAtRef("octo", "tools", "v2")
 _CHECKS: Final = RepositoryAtRef("jashioq", "checks", None)
 _NOWHERE: Final = RepositoryAtRef("octo", "nope", None)
 
-_CURRENT: Final = "already up to date\n"
+_CURRENT: Final = "Already up to date\n"
 
 _MODULE: Final = b"from agl.sdk import Run, workflow\n"
 _MODULE_NOW: Final = b"from agl.sdk import Run, workflow\n\n# as upstream has it now\n"
@@ -97,7 +97,7 @@ _UV_MISSING: Final = "uv is not installed, or 'uv' is not on PATH"
 # refusal, the third as the warning `api._unchanged` writes.
 _SAID_MISSING: Final = f"agl: {_UV_MISSING}"
 _SAID_REFUSED: Final = "agl: the sync was refused: uv exited 2 rather than 0"
-_WARNED: Final = "warning: the sync was refused - uv exited 2 rather than 0"
+_WARNED: Final = "WARNING: uv exited 2 while installing workflow dependencies"
 
 # The reasons `_gone`, `_hollow` and `_unanswered` refuse with: 3, 2 and 6.
 _GONE: Final = "gone: the fake fetcher serves no repository octo/nope"
@@ -468,7 +468,7 @@ def test_a_workflow_gaining_a_dependency_is_asked_and_declined_says_so_and_never
     assert _main(home, "update", fetcher=fetcher, confirm=None) == 0
 
     captured = capsys.readouterr()
-    assert "declares third-party dependencies" in captured.err
+    assert "installs new third-party packages" in captured.err
     assert "(new third-party dependencies)" in captured.err
     assert "\x1b" not in captured.err
     assert "\x1b" not in captured.out
@@ -497,8 +497,8 @@ def test_with_stdin_at_its_end_a_changed_copy_is_kept_and_the_command_exits_zero
     captured = capsys.readouterr()
     assert status == 0
     assert captured.out == ""
-    assert "has changed since it was placed from 0b496e9" in captured.err
-    assert captured.err.count("stdin was closed, and that is taken as no") == 1
+    assert "has local changes. Updating it from 0b496e9" in captured.err
+    assert captured.err.count("stdin is closed, so the answer is no") == 1
     assert {path.name: path.read_bytes() for path in entry.iterdir()} == kept
 
 def test_one_refusal_exits_with_its_own_code_and_says_why_once_naming_each_workflow(

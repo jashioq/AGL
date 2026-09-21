@@ -4,7 +4,7 @@ from collections.abc import Iterable, Sequence
 from importlib.metadata import EntryPoint
 from typing import Final
 from agl import api
-from agl.cli.commands import Registered, _print_replays, _said
+from agl.cli.commands import Registered, _print_finished, _print_replays, _said
 from agl.ports.home_layout import AglHome
 from agl.ports.ids import RunLabel
 from agl.ports.sync import Syncer
@@ -29,19 +29,14 @@ type _Commands = argparse._SubParsersAction[RefusingParser]
 def declare(commands: _Commands) -> RefusingParser:
     parser = commands.add_parser(
         NAME,
-        help="start a run",
-        description=(
-            "Start a run of a workflow. Flags this parser does not recognise belong to the "
-            "workflow and are passed to it, so this help lists AGL's own and no workflow's: "
-            "`agl workflows` lists what your workspace declares, and `agl workflows <workflow>` "
-            "prints the flags one of them takes."
-        ),
+        help="Start a run of a workflow.",
+        description="Start a run of a workflow, passing it every flag not listed below.",
         allow_abbrev=False,
     )
     parser.add_argument(
         _WORKFLOW,
         metavar="<workflow>",
-        help="the workflow to run, named as its own pyproject.toml declares it, not as a directory",
+        help="Name of the workflow to run, as `agl workflows` lists it.",
     )
     # Both spellings come from `agl.sdk.params`, where `arg()` refuses a workflow field that
     # declares one of them: a flag this parser owns is taken off the line before the workflow's own
@@ -51,13 +46,16 @@ def declare(commands: _Commands) -> RefusingParser:
         dest=_LABEL,
         metavar="<label>",
         required=True,
-        help="this run's name: its record under AGL_HOME and the branch agl/<label>",
+        help="Name for the run. Its changes are left on branch agl/<label>.",
     )
     parser.add_argument(
         *RUN_BASE_REF_FLAGS,
         dest=_BASE_REF,
         metavar="<ref>",
-        help="the ref this run's work starts from (default: the repository's own default branch)",
+        help=(
+            "Branch, tag or commit to start from. If omitted, starts from the repository's "
+            "default branch."
+        ),
     )
     return parser
 
@@ -73,7 +71,7 @@ def execute(
     name = _said(parsed, _WORKFLOW, command=NAME)
     label = RunLabel(_said(parsed, _LABEL, command=NAME))
     project, services = registered()
-    replayed = asyncio.run(
+    finished = asyncio.run(
         api.run(
             services,
             project,
@@ -89,8 +87,8 @@ def execute(
     # Nought on every reachable path today, `api.run` refusing a label that has a record - so what
     # decides is the count and not the verb, and a `run` that could ever replay would say so with
     # no edit here. `tests/cli/test_resume_command.py` pins the silence from this side.
-    _print_replays(label, replayed)
-    print(f"run {str(label)!r} finished")
+    _print_replays(label, finished)
+    _print_finished(label, finished)
     return _NOTHING_TO_REPORT
 
 def _perhaps(parsed: argparse.Namespace, dest: str) -> str | None:

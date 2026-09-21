@@ -982,7 +982,7 @@ async def _notes_for(installed: Installation, declared_by: Callable[..., object]
     """Every note one preflight wrote, over a namespace and a backend reporting this installation.
 
     `preflight.check` rather than `api.run`, because a note is what this half is about and a run
-    writes one of its own on the way out - `sdk/_engine/teardown.py`'s, about the branch it left.
+    can write more of its own on the way out - `sdk/_engine/teardown.py`'s, about what it kept.
     """
     notes: list[str] = []
     await preflight.check(_Stub(installed=installed), _Repository(), declared_by, notes.append)
@@ -1018,7 +1018,7 @@ async def test_only_a_tool_outside_its_tested_range_warns_and_each_way_warns_dif
         f"a provider asked twice would double them and a branch that fell through would drop one"
     )
     lines = [one[0] for one in said]
-    assert all(line.startswith("warning: ") for line in lines), lines
+    assert all(line.startswith("WARNING: ") for line in lines), lines
     assert all("a stand-in harness" in line for line in lines), (
         "a line left out the name of the tool it is about, which is the one thing no layer above "
         "`ports/agent.py` may spell for itself - `Installation.tool` carries it as data"
@@ -1130,7 +1130,7 @@ async def test_a_role_naming_a_level_the_catalogue_lacks_is_warned_about_and_nev
 
     Driven through `api.run` because "never refuses" is the other half: the run reaches its
     workflow, the step is dispatched at the level the role asked for, and the warning is a line on
-    stderr beside the one the release writes.
+    stderr.
     """
     entered.clear()
     harness = _fakes(tmp_path)
@@ -1150,9 +1150,9 @@ async def test_a_role_naming_a_level_the_catalogue_lacks_is_warned_about_and_nev
     await _start(harness, "broad", agents=stub)
 
     printed = capsys.readouterr().err
-    warned = [line for line in printed.splitlines() if line.startswith("warning: ")]
+    warned = [line for line in printed.splitlines() if line.startswith("WARNING: ")]
     assert len(warned) == 1, printed
-    for part in ("`editor`", "'openai:luna'", "'ultra'", "low, medium, high, xhigh, max", "'max'"):
+    for part in ('"editor"', '"openai:luna"', '"ultra"', "low, medium, high, xhigh, max", '"max"'):
         assert part in warned[0], (
             f"the line left out {part!r}: {warned[0]}. It is one sentence and each of those is a "
             f"different half of the disagreement - the line to edit, the model, the level asked "
@@ -1189,7 +1189,7 @@ async def test_two_levels_one_model_lacks_are_two_warnings_where_readiness_is_on
 
     assert stub.asked_ready == [Claude.OPUS], "readiness stopped being one question per model"
     assert len(notes) == 2, notes
-    assert ["`deliberate`" in notes[0], "`hurried`" in notes[1]] == [True, True], (
+    assert ['"deliberate"' in notes[0], '"hurried"' in notes[1]] == [True, True], (
         f"the two lines named {notes}. Each is about one factory's own declaration, so a pair "
         f"de-duplicated on the model names one line to edit and leaves the other unfindable"
     )
@@ -1214,7 +1214,7 @@ async def test_a_version_warning_reaches_stderr_and_the_run_it_warns_about_still
     await _start(harness, "late", agents=_Stub(installed=_installed("1.2.0")))
 
     printed = capsys.readouterr()
-    warned = [line for line in printed.err.splitlines() if line.startswith("warning: ")]
+    warned = [line for line in printed.err.splitlines() if line.startswith("WARNING: ")]
     assert len(warned) == 1 and "1.2.0" in warned[0], printed.err
     assert printed.out == "", "a note about a run went to the stream a machine reads"
     assert entered == ["late"], "a version outside the tested range stopped the workflow"

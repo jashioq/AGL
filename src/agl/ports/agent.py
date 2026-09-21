@@ -36,19 +36,19 @@ __all__ = [
 ]
 
 class Provider(StrEnum):
-    """Which backend serves a model: never chosen directly, but read off a `ModelId`'s prefix."""
+    """The vendor whose tool runs a :class:`ModelId`."""
 
     CLAUDE = "claude"
     OPENAI = "openai"
 
 class ModelId(StrEnum):
-    """Every model AGL can be asked for, as one type: `Claude` and `OpenAI` hold the members."""
+    """A model a role can run on."""
 
     @property
     def provider(self) -> Provider:
-        """Which backend serves this model, read off the prefix before the colon.
+        """The vendor whose tool runs this model.
 
-        :return: the provider `adapters/routing.py` dispatches on; derived, never stored
+        :return: This model's :class:`Provider`.
         """
         prefix = self.value.partition(":")[0]
         try:
@@ -62,7 +62,7 @@ class ModelId(StrEnum):
             ) from error
 
 class ClaudeEffort(StrEnum):
-    """How long a Claude model reasons before it answers: the levels its vendor's CLI accepts."""
+    """How long a Claude model reasons before answering."""
 
     # The choices `claude --help` lists for `--effort` in Claude CLI 2.1.277, and the `EffortLevel`
     # literal in `claude_agent_sdk/types.py` 0.2.157.
@@ -73,7 +73,7 @@ class ClaudeEffort(StrEnum):
     MAX = "max"
 
 class OpenAIEffort(StrEnum):
-    """How long an OpenAI model reasons before it answers: the levels its vendor's CLI accepts."""
+    """How long an OpenAI model reasons before answering."""
 
     # The union of the reasoning levels the vendor CLI 0.155.1's model listing reports for the
     # three models `OpenAI` names: `gpt-5.6-luna` lists every one of these but `ultra`, and none of
@@ -86,32 +86,32 @@ class OpenAIEffort(StrEnum):
     ULTRA = "ultra"
 
 class Claude(ModelId):
-    """Every model the Claude provider serves: nothing is substituted for one it cannot run."""
+    """A Claude model a role can run on."""
 
     OPUS = "claude:opus"
     SONNET = "claude:sonnet"
     HAIKU = "claude:haiku"
 
     def __call__(self, *, effort: ClaudeEffort) -> ChosenClaude:
-        """Choose how long this model reasons, as a value `@role(model=...)` takes in its place.
+        """Choose how long this model reasons.
 
-        :param effort: sent unchecked; a level this model lacks is clamped by the tool, not refused
-        :return: this model at that effort, and both are fingerprinted into every step it runs
+        :param effort: The reasoning level
+        :return: This model at that effort, to pass as `@role(model=...)`.
         """
         return ChosenClaude(self, effort)
 
 class OpenAI(ModelId):
-    """Every model the OpenAI provider serves: nothing is substituted for one it cannot run."""
+    """An OpenAI model a role can run on."""
 
     SOL = "openai:sol"
     TERRA = "openai:terra"
     LUNA = "openai:luna"
 
     def __call__(self, *, effort: OpenAIEffort) -> ChosenOpenAI:
-        """Choose how long this model reasons, as a value `@role(model=...)` takes in its place.
+        """Choose how long this model reasons.
 
-        :param effort: sent unchecked; a level this model lacks is clamped by the tool, not refused
-        :return: this model at that effort, and both are fingerprinted into every step it runs
+        :param effort: The reasoning level
+        :return: This model at that effort, to pass as `@role(model=...)`.
         """
         return ChosenOpenAI(self, effort)
 
@@ -120,7 +120,7 @@ class OpenAI(ModelId):
 # `test_a_composite_whose_str_is_the_model_id_is_not_that_members_fingerprint`.
 @dataclass(frozen=True, slots=True)
 class ChosenClaude:
-    """A Claude model with its effort chosen: the model, and the level it reasons at."""
+    """A Claude model with its effort chosen."""
 
     model: Claude
 
@@ -134,7 +134,7 @@ class ChosenClaude:
 
 @dataclass(frozen=True, slots=True)
 class ChosenOpenAI:
-    """An OpenAI model with its effort chosen: the model, and the level it reasons at."""
+    """An OpenAI model with its effort chosen."""
 
     model: OpenAI
 
@@ -170,7 +170,7 @@ def _not_a_choice(model: object, effort: object, example: str) -> str:
     )
 
 class Restriction(StrEnum):
-    """What an agent may not do: a backend enforces each its own way, and tells the model so."""
+    """What an agent cannot do."""
 
     NO_VCS_WRITES = "no_vcs_writes"
     NO_FILE_WRITES = "no_file_writes"
@@ -178,7 +178,7 @@ class Restriction(StrEnum):
     NO_NETWORK = "no_network"
 
 class Capability(StrEnum):
-    """What a backend can do at all: a role wanting one the backend lacks is refused, not run."""
+    """Something a role needs its agent to be able to do."""
 
     FILE_EDIT = "file_edit"
     SHELL = "shell"
@@ -186,7 +186,7 @@ class Capability(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class ToolResult:
-    """What a tool handler answers with: the text the model reads, and whether it was refused."""
+    """What a tool's handler returns to the agent."""
 
     text: str
 
@@ -194,7 +194,7 @@ class ToolResult:
 
 @dataclass(frozen=True, slots=True)
 class Tool:
-    """What an agent may call: a name unique to its role, a description, a schema and a handler."""
+    """A tool an agent can call."""
 
     name: str
 

@@ -285,8 +285,7 @@ async def test_the_local_changes_question_names_the_copy_both_commits_and_the_lo
     await _update(home, _serving(FakeFetcher(), _FLOWS, "triage"), operator)
 
     assert operator.asked == [
-        f"{entry} has changed since it was placed from 0b496e9, and updating it to f548e57 "
-        f"replaces it whole, discarding those changes. Update it?"
+        f"{entry} has local changes. Updating it from 0b496e9 to f548e57 discards them. Update it?"
     ]
 
 @pytest.mark.asyncio
@@ -330,7 +329,7 @@ async def test_a_dependency_the_copy_does_not_declare_as_written_is_named_and_no
     assert "'httpx>=0.28', 'pydantic>=2,<3'. Continue?" in asked
     assert "'rich'" not in asked
     assert "click" not in asked
-    assert asked.startswith("octo/flows/workflows/triage at f548e57 declares third-party")
+    assert "to octo/flows/workflows/triage at f548e57 installs new third-party" in asked
 
 @pytest.mark.asyncio
 async def test_dependencies_the_copy_already_declares_are_asked_nothing_at_all(
@@ -362,7 +361,7 @@ async def test_a_changed_copy_declined_is_never_asked_about_the_dependencies_it_
     await _update(home, fetcher, operator)
 
     (asked,) = operator.asked
-    assert "has changed since it was placed" in asked
+    assert "has local changes" in asked
 
 # --- a decline, and a refusal, touch one workflow each -------------------------------------------
 
@@ -636,7 +635,7 @@ async def test_a_changed_dot_led_file_that_finder_did_not_write_is_still_asked_a
     await _update(home, _serving(FakeFetcher(), _FLOWS, "triage"), operator)
 
     (asked,) = operator.asked
-    assert asked.startswith(f"{entry} has changed since it was placed")
+    assert asked.startswith(f"{entry} has local changes")
 
 @pytest.mark.parametrize("made", [_REPOSITORY, _GITLINK], ids=["repository", "gitlink"])
 @pytest.mark.asyncio
@@ -659,7 +658,7 @@ async def test_a_copy_whose_only_change_is_a_git_directory_or_file_is_asked_abou
     await _update(home, _serving(FakeFetcher(), _FLOWS, "triage"), operator)
 
     (asked,) = operator.asked
-    assert asked.startswith(f"{entry} has changed since it was placed")
+    assert asked.startswith(f"{entry} has local changes")
     assert all((entry / path).read_bytes() == content for path, content in made.items())
 
 @pytest.mark.asyncio

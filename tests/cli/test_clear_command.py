@@ -245,13 +245,12 @@ def test_the_command_calls_exactly_one_api_function() -> None:
 def test_a_clear_takes_the_run_away_and_names_it_the_way_the_others_do(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The finished line, on stdout, quoting the label the way every other `agl` line quotes it.
+    """The finished line, on stdout, quoting the label the way the run's other lines quote it.
 
-    The refusal for a taken label reads `run 'auth' already exists`, `agl run` says `run 'auth'
-    finished` and `agl resume` says `resume 'auth' finished`; this is that shape with the verb the
-    operator typed. The run is arranged as merged, so that what the listing under it holds is the
-    same two lines a merged run and an unmerged one both produce - which is the point of the test
-    below.
+    `agl run` and `agl resume` both open `Run "auth" finished`; this is that shape with what the
+    operator asked for in place of the verb. The run is arranged as merged, so that what the
+    listing under it holds is the same two lines a merged run and an unmerged one both produce -
+    which is the point of the test below.
     """
     harness = _fakes(tmp_path)
     assert _main(harness, "run", "working", "-n", "auth") == 0
@@ -262,9 +261,9 @@ def test_a_clear_takes_the_run_away_and_names_it_the_way_the_others_do(
 
     captured = capsys.readouterr()
     assert captured.out == (
-        "clear 'auth' finished\n"
-        "branches gone: agl/auth\n"
-        "worktrees gone: _base\n"
+        'Run "auth" cleared\n'
+        "Deleted branches: agl/auth\n"
+        "Deleted worktrees: _base\n"
     )
     assert captured.err == ""
     assert asyncio.run(harness.services.store.read_record(SCOPE)) is None
@@ -292,9 +291,9 @@ def test_a_clear_lists_the_worktrees_and_branches_it_took_away_on_stdout(
 
     captured = capsys.readouterr()
     assert captured.out == (
-        "clear 'auth' finished\n"
-        "branches gone: agl/auth\n"
-        "worktrees gone: _base\n"
+        'Run "auth" cleared\n'
+        "Deleted branches: agl/auth\n"
+        "Deleted worktrees: _base\n"
     )
     assert BRANCH in captured.out
     assert captured.err == ""

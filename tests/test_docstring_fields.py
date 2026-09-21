@@ -638,13 +638,13 @@ def test_an_overload_stub_docstring_never_reaches_the_function_at_run_time() -> 
 
 _WORKED: Final = '''
 def tool(name: str, description: str, payload: type, handler: object) -> Tool:
-    """Build a tool an agent can call, validating its payload before the handler sees it.
+    """Build a tool an agent can call.
 
-    :param name: what the agent calls it; must be unique within a role
-    :param description: what the agent is told the tool is for
-    :param payload: dataclass the arguments are built into; edit a field and no entry replays
-    :param handler: awaited with the built payload; no fingerprint term, so an edit re-runs nothing
-    :return: a tool ready to go on a role
+    :param name: What the agent calls it, unique within a :class:`Role`.
+    :param description: What the agent is told the tool is for.
+    :param payload: Dataclass the agent's arguments are checked against and built into.
+    :param handler: Awaited with the built payload; its result goes back to the agent.
+    :return: A tool to put on a :class:`Role`.
     """
 '''
 
@@ -769,23 +769,23 @@ def test_the_scan_reports_a_parameter_renamed_without_the_docstring_following_it
 def test_the_scan_reports_a_parameter_the_block_never_names_at_all() -> None:
     """A parameter added to the signature and not to the block: the line is simply missing."""
     assert "missing ['handler']" in _one_problem(
-        _WORKED.replace("    :param handler: awaited with the built payload; no fingerprint "
-                        "term, so an edit re-runs nothing\n", "")
+        _WORKED.replace("    :param handler: Awaited with the built payload; its result goes "
+                        "back to the agent.\n", "")
     )
 
 def test_the_scan_reports_a_param_line_naming_something_that_is_not_a_parameter() -> None:
     """The other direction: a line left behind after the parameter it described was deleted."""
     assert "named but not a parameter ['timeout']" in _one_problem(
-        _WORKED.replace(":return: a tool", ":param timeout: how long to wait\n    :return: a tool")
+        _WORKED.replace(":return: A tool", ":param timeout: How long to wait.\n    :return: A tool")
     )
 
 def test_the_scan_reports_two_param_lines_written_in_the_wrong_order() -> None:
     """Both names real, both present, and every description against the wrong one."""
     swapped = _WORKED.replace(
-        "    :param name: what the agent calls it; must be unique within a role\n"
-        "    :param description: what the agent is told the tool is for\n",
-        "    :param description: what the agent is told the tool is for\n"
-        "    :param name: what the agent calls it; must be unique within a role\n",
+        "    :param name: What the agent calls it, unique within a :class:`Role`.\n"
+        "    :param description: What the agent is told the tool is for.\n",
+        "    :param description: What the agent is told the tool is for.\n"
+        "    :param name: What the agent calls it, unique within a :class:`Role`.\n",
     )
     assert "in a different order" in _one_problem(swapped)
 
@@ -808,7 +808,7 @@ def test_the_scan_reports_a_starred_spelling_of_a_parameter_it_would_otherwise_a
 def test_the_scan_reports_a_return_line_missing_where_the_signature_hands_something_back() -> None:
     """A block that stops at the parameters leaves the value the caller is after undescribed."""
     assert "no `:return:` line" in _one_problem(
-        _WORKED.replace("    :return: a tool ready to go on a role\n", "")
+        _WORKED.replace("    :return: A tool to put on a :class:`Role`.\n", "")
     )
 
 def test_the_scan_reports_a_return_line_on_a_callable_annotated_to_return_none() -> None:
@@ -887,8 +887,9 @@ def test_the_scan_permits_a_raises_line_and_reports_one_that_names_no_exception(
 
 def test_the_scan_reports_a_field_line_carrying_an_anchor_and_no_description() -> None:
     """An empty description is structural rather than editorial, which is why it is read here."""
-    assert "no description" in _one_problem(_WORKED.replace(":return: a tool ready to go on a role",
-                                                            ":return:"))
+    assert "no description" in _one_problem(
+        _WORKED.replace(":return: A tool to put on a :class:`Role`.", ":return:")
+    )
 
 def test_the_scan_reports_a_docstring_written_above_the_def_instead_of_inside_it() -> None:
     """Python discards it, `__doc__` is None, and the tooltip the convention buys never renders.

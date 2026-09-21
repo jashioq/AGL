@@ -205,45 +205,34 @@ def _effort_note(
     return _unlisted(factory, model, level, installation, offered)
 
 def _above(installation: Installation) -> str:
-    return (
-        f"warning: {installation.tool} on this machine reports {installation.version!r}, and AGL "
-        f"was tested against {_tested_range(installation.tested)}. Nothing is refused over a "
-        f"version and this run carries on unchanged - a release nobody here has exercised is not a "
-        f"broken one. But AGL drives that tool across an interface it does not own, so an argument "
-        f"it sends or a line it reads back can have moved underneath it, and a run behaving in a "
-        f"way no workflow explains is the first place to suspect that"
-    )
+    return f"{_compared(installation)} {installation.tool} may not behave as expected."
 
 def _below(installation: Installation) -> str:
+    return f"{_compared(installation)} Update {installation.tool} to dismiss this warning."
+
+def _compared(installation: Installation) -> str:
     return (
-        f"warning: {installation.tool} on this machine reports {installation.version!r}, and AGL "
-        f"was tested against {_tested_range(installation.tested)}, which is newer. Nothing is "
-        f"refused over a version and this run carries on unchanged, but this is the direction with "
-        f"something to be done about it: AGL may send that tool an argument it does not have yet, "
-        f"or read for a line it does not print yet. Updating it is the whole of the fix - there is "
-        f"nothing here to silence, so the line stands on every run until the tool moves"
+        f"WARNING: The installed {installation.tool} version on this machine is "
+        f"{installation.version}, and AGL was tested against {_tested_range(installation.tested)}."
     )
 
+# Kept escaped rather than bare: a version nothing could order is whatever the tool printed.
 def _unreadable(installation: Installation) -> str:
     return (
-        f"warning: {installation.tool} on this machine reports {installation.version!r}, which is "
-        f"not something AGL can place against the {_tested_range(installation.tested)} it was "
-        f"tested against - what it orders is dotted digits and nothing else. So whether this tool "
-        f"is older or newer than the range AGL knows is unknown to this run, which carries on "
-        f"either way: this line names both, and the comparison is yours to make"
+        f"WARNING: The installed {installation.tool} version on this machine is "
+        f"{installation.version!r}, which AGL cannot compare with the "
+        f"{_tested_range(installation.tested)} it was tested against. Compare the two yourself."
     )
 
 def _unreported(installation: Installation) -> str:
     asked = (
-        "AGL found no binary to ask what version it is"
+        f"AGL found no {installation.tool} to ask for its version"
         if installation.where is None
-        else f"{installation.where!r} did not say what version it is when AGL asked"
+        else f"{installation.tool} at {installation.where} did not report its version"
     )
     return (
-        f"warning: {asked}, so this run cannot place {installation.tool} against the "
-        f"{_tested_range(installation.tested)} it was tested against. Nothing is refused over a "
-        f"version: a backend that is genuinely not there is refused by the readiness question this "
-        f"run puts next, in the tool's own words, and a version nobody could read is not that"
+        f"WARNING: {asked}, so AGL cannot compare it with the "
+        f"{_tested_range(installation.tested)} it was tested against."
     )
 
 # The levels are named in the tool's own order, `ports/agent.py`'s `ModelEfforts.levels` carrying
@@ -257,13 +246,9 @@ def _unlisted(
     offered: ModelEfforts,
 ) -> str:
     return (
-        f"warning: the role factory `{factory.name}`, declared in {factory.__module__!r}, asks for "
-        f"{str(model)!r} at effort {level!r}, and {installation.tool} on this machine lists no "
-        f"such level for that model. What it does list, in the order it listed them, is "
-        f"{', '.join(offered.levels)} - so {offered.levels[-1]!r} is the most that model reasons "
-        f"at on this machine. Nothing is refused over an effort: the tool lowers a level it does "
-        f"not offer rather than turning the run away, so every step on this role runs, at a level "
-        f"the tool does list and not at the one the role named"
+        f'WARNING: Role "{factory.name}" in "{factory.__module__}" asks for "{model}" at effort '
+        f'"{level}", and {installation.tool} offers only {", ".join(offered.levels)} for that '
+        f'model. Its steps run at one of those instead, "{offered.levels[-1]}" at most.'
     )
 
 def _tested_range(tested: VersionRange) -> str:

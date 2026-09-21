@@ -231,11 +231,10 @@ def test_a_resume_runs_the_workflow_the_record_names_with_the_params_it_stored(
 def test_a_finished_resume_is_named_the_way_the_run_command_names_one(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """One line, on stdout, quoting the label the way every other `agl` line quotes it.
+    """One line, on stdout, and the same sentence `agl run` ends with.
 
-    The refusal for a taken label reads `run 'auth' already exists` and `agl run` says `run 'auth'
-    finished`; this is that shape with the verb the operator typed, so a terminal full of `agl`
-    output reads as one vocabulary and still says which command produced which line.
+    It is the run that finished, whichever command walked it, so the line names the run and the
+    branch its changes can be taken from rather than the verb the operator typed.
     """
     harness = _fakes(tmp_path)
     assert _main(harness, "run", "flagged", "-n", "auth", "-r", "x") == 0
@@ -243,7 +242,9 @@ def test_a_finished_resume_is_named_the_way_the_run_command_names_one(
 
     assert _main(harness, "resume", "auth") == 0
 
-    assert capsys.readouterr().out == "resume 'auth' finished\n"
+    assert capsys.readouterr().out == (
+        'Run "auth" finished and left its changes on branch: agl/auth\n'
+    )
 
 def test_resuming_a_label_with_no_record_exits_three(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -347,16 +348,15 @@ def test_a_resume_that_replayed_two_steps_says_so_on_stderr_and_names_the_clear(
 
     **On stderr, and the stream is the claim.** `cli/commands/workflows.py` writes the rule down
     at the line that obeys it: stdout carries what a machine consumes, which is why a name goes
-    there and a broken directory does not. `resume 'auth' finished` is the line a script reads;
+    there and a broken directory does not. `Run "auth" finished` is the line a script reads;
     this one is a note to whoever is watching, so it goes beside the refusals rather than into it.
 
     **`agl clear auth` is quoted in the form that command actually takes**, a required positional,
     because it is the answer to the question the count raises: the ledger is why this cost nothing,
     and taking it away is how the operator gets the work done again.
 
-    It is the last line rather than the whole stream: a resume that finished released its checkouts
-    on the way out, so `sdk/_engine/teardown.py`'s line is already on stderr by the time `api`
-    hands the count back for the command to print.
+    It is the last line rather than the whole stream: whatever `sdk/_engine/teardown.py` could not
+    give back is already on stderr by the time `api` hands the count back for the command to print.
     """
     halt.clear()
     harness = _fakes(tmp_path)
@@ -367,9 +367,9 @@ def test_a_resume_that_replayed_two_steps_says_so_on_stderr_and_names_the_clear(
 
     captured = capsys.readouterr()
     assert captured.err.splitlines()[-1] == (
-        "replayed 2 steps from cache - `agl clear auth` removes it."
+        "Replayed 2 steps from cache. Run `agl clear auth` to remove it."
     )
-    assert captured.out == "resume 'auth' finished\n"
+    assert captured.out == 'Run "auth" finished and left its changes on branch: agl/auth\n'
 
 def test_a_resume_that_replayed_one_step_counts_it_in_the_singular(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -391,7 +391,7 @@ def test_a_resume_that_replayed_one_step_counts_it_in_the_singular(
     assert _main(harness, "resume", "auth") == 0
 
     assert capsys.readouterr().err.splitlines()[-1] == (
-        "replayed 1 step from cache - `agl clear auth` removes it."
+        "Replayed 1 step from cache. Run `agl clear auth` to remove it."
     )
 
 def test_a_run_says_nothing_because_a_label_with_a_ledger_is_refused_not_replayed(
@@ -405,8 +405,8 @@ def test_a_run_says_nothing_because_a_label_with_a_ledger_is_refused_not_replaye
     has no entry any digest could hit. So a run walks a ledger it wrote itself and replays none of
     it, and the line does not appear - which is what makes its appearance mean something.
 
-    Its absence is read as the word rather than as an empty stream, because a run that finished
-    gave its checkouts back and `sdk/_engine/teardown.py` says so on stderr whatever the count was.
+    Its absence is read as the word rather than as an empty stream, because what
+    `sdk/_engine/teardown.py` could not give back goes to stderr whatever the count was.
     """
     halt.clear()
     harness = _fakes(tmp_path)
@@ -414,14 +414,14 @@ def test_a_run_says_nothing_because_a_label_with_a_ledger_is_refused_not_replaye
     assert _main(harness, "run", "stepping", "-n", "auth", "-r", "x") == 0
 
     first = capsys.readouterr()
-    assert "replayed" not in first.err
-    assert first.out == "run 'auth' finished\n"
+    assert "Replayed" not in first.err
+    assert first.out == 'Run "auth" finished and left its changes on branch: agl/auth\n'
 
     assert _main(harness, "resume", "auth") == 0
     capsys.readouterr()
 
     assert _main(harness, "run", "stepping", "-n", "auth", "-r", "x") == 4
-    assert "replayed" not in capsys.readouterr().err
+    assert "Replayed" not in capsys.readouterr().err
 
 # --- the install this command folded in ----------------------------------------------------------
 

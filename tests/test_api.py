@@ -1308,10 +1308,6 @@ async def test_an_install_that_finished_adds_no_line_of_its_own_to_either_stream
     would be noise on the ordinary path and would train an operator to skip the one place a real
     line appears. There is no skip condition either - the install is asked for every time and says
     nothing every time it worked.
-
-    The one line stderr does carry is the release's, which every run that finished writes and
-    `tests/test_release.py` holds to its wording. Counted rather than matched, because that wording
-    is the other test's to hold and a count is the whole of what this one claims.
     """
     home = _home(tmp_path)
     _directory(home, "triage", _declaring("triage", "stepping"))
@@ -1319,10 +1315,7 @@ async def test_an_install_that_finished_adds_no_line_of_its_own_to_either_stream
 
     await api.run(harness.services, PROJECT, "triage", LABEL, (), syncer=_Installer(), home=home)
 
-    printed = capsys.readouterr()
-    assert printed.out == ""
-    said = printed.err.splitlines()
-    assert len(said) == 1 and run_branch(LABEL) in said[0], said
+    assert capsys.readouterr() == ("", "")
 
 # Two more names spent once each, for `_NEEDS_INSTALLING`'s reason: the workflow that imports what
 # it never declared, and the package no install anywhere in this suite provides.
@@ -1379,7 +1372,7 @@ def test_every_operation_the_module_declares_is_built() -> None:
     it is the operation behind `agl workflows <name>`, which extends that grammar, and
     `cli/commands/workflows.py` is where the deviation is argued. `new_workflow` is a verb and is
     spelled unlike the command it serves, `agl new`, because `new` is an adjective and every other
-    name here is what the operation does. `Cleared`, `Listing` and `Replayed` are the
+    name here is what the operation does. `Cleared`, `Finished` and `Listing` are the
     three entries that are not operations at all - the values `clear`, `list_workflows` and the
     two walking verbs answer with - and they are here because a caller annotating any of
     them has to be able to name it. `get`, `remove` and
@@ -1388,9 +1381,10 @@ def test_every_operation_the_module_declares_is_built() -> None:
     three ask through `config/questions.py`'s `Confirm`, so a caller names each from there and
     none of the four is listed here.
 
-    `Replayed` is one value answering for two verbs, which is what keeps the report `run` and
+    `Finished` is one value answering for two verbs, which is what keeps the report `run` and
     `resume` share count-based rather than command-based: both walk a ledger through `_walk`, so
-    neither is the one that replays and the number is what says whether anything did.
+    neither is the one that replays and the number is what says whether anything did - and the
+    branch it carries is the run's, whichever verb walked it.
 
     `sync_workspace` was on this list and is not an operation any more. It was public because
     `agl sync` was a command and this was the operation behind it; the command is gone, a sync
@@ -1408,8 +1402,8 @@ def test_every_operation_the_module_declares_is_built() -> None:
     """
     assert set(api.__all__) == {
         "Cleared",
+        "Finished",
         "Listing",
-        "Replayed",
         "clear",
         "get",
         "list_workflows",

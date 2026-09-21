@@ -158,8 +158,8 @@ def test_the_dependency_question_names_every_package_exactly_as_it_was_declared(
     (question,) = needed(_placeable("triage", dependencies=declared))
 
     assert str(question) == (
-        "jashioq/myrepo/workflows/mine/triage depends on third-party packages uv will install "
-        "into the workspace: 'httpx>=0.27', 'pydantic>=2,<3', 'rich; python_version < \"3.13\"', "
+        "jashioq/myrepo/workflows/mine/triage installs third-party packages: 'httpx>=0.27', "
+        "'pydantic>=2,<3', 'rich; python_version < \"3.13\"', "
         "'probe @ https://example.invalid/probe-1.0.tar.gz'. Continue?"
     )
 
@@ -186,8 +186,8 @@ def test_a_control_character_in_a_dependency_is_shown_escaped_and_never_raw() ->
         (
             ("triage",),
             True,
-            "/nowhere/workspace/workflows/triage is a link, and declares 'triage'. Remove the "
-            "link, leaving what it names as it is?",
+            "/nowhere/workspace/workflows/triage is a link and declares 'triage'. Remove the "
+            "link, keeping what it points to?",
         ),
     ],
 )
@@ -211,8 +211,8 @@ def test_the_local_changes_question_names_the_copy_both_short_commits_and_what_i
     question = LocalChanges(_WORKFLOWS / "triage", _SHA, _NOW)
 
     assert str(question) == (
-        "/nowhere/workspace/workflows/triage has changed since it was placed from 7fd1a60, and "
-        "updating it to f548e57 replaces it whole, discarding those changes. Update it?"
+        "/nowhere/workspace/workflows/triage has local changes. Updating it from 7fd1a60 to "
+        "f548e57 discards them. Update it?"
     )
 
 def test_the_gained_dependencies_question_names_the_update_the_copy_and_each_as_a_literal() -> None:
@@ -220,9 +220,8 @@ def test_the_gained_dependencies_question_names_the_update_the_copy_and_each_as_
     question = GainedDependencies(_requested("triage"), _NOW, _WORKFLOWS / "triage", declared)
 
     assert str(question) == (
-        "jashioq/myrepo/workflows/mine/triage at f548e57 declares third-party dependencies "
-        "/nowhere/workspace/workflows/triage does not, which uv will install into the workspace: "
-        "'httpx>=0.28', 'pydantic>=2,<3'. Continue?"
+        "Updating /nowhere/workspace/workflows/triage to jashioq/myrepo/workflows/mine/triage at "
+        "f548e57 installs new third-party packages: 'httpx>=0.28', 'pydantic>=2,<3'. Continue?"
     )
 
 def test_a_control_character_in_a_gained_dependency_is_shown_escaped_and_never_raw() -> None:

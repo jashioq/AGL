@@ -104,13 +104,13 @@ def tool[P](
     payload: type[P],
     handler: Callable[[P], Awaitable[ToolResult]],
 ) -> Tool:
-    """Build a tool an agent can call, validating its payload before the handler sees it.
+    """Build a tool an agent can call.
 
-    :param name: what the agent calls it; must be unique within a role
-    :param description: what the agent is told the tool is for
-    :param payload: dataclass the arguments are built into; edit a field and no entry replays
-    :param handler: awaited with the built payload; no fingerprint term, so an edit re-runs nothing
-    :return: a tool ready to go on a role
+    :param name: What the agent calls it, unique within a :class:`Role`.
+    :param description: What the agent is told the tool is for.
+    :param payload: Dataclass the agent's arguments are checked against and built into.
+    :param handler: Awaited with the built payload; its result goes back to the agent.
+    :return: A tool to put on a :class:`Role`.
     """
 ```
 
@@ -135,9 +135,45 @@ def tool[P](
 - **D7. Everywhere else in `src/`, C4's one line and no field block.** `adapters/`, `config/`,
   `cli/`, `api.py` and `testing.py` take a one-line summary only where the signature does not
   already say it. `sdk/_engine/` takes nothing at all: nobody hovers it from outside.
-- **D8. The description earns its place** — a constraint, a lifetime, a unit, a consequence — and
-  is never a restatement of the name. This is C1's spirit surviving the inversion, and it is the
-  half no gate reads.
+- **D8. The description is written in the voice below**, V1 to V5. It is the half no gate reads.
+
+## The voice
+
+How AGL speaks to a workflow author in a hover and to a person at a terminal. Every rule is a
+reviewer's; every example is a rewrite the maintainer wrote or accepted. On a docstring an author
+reaches through `agl.sdk`, V1 replaces C3's "what this is: its parts".
+
+**Docstrings.** The field list stays whole; only what it says changes.
+
+- **V1. The summary is what the call does, in the author's words** — role, agent, worktree,
+  workflow — in one short clause: no colon and second half, no "so that".
+  `Run one step against this run's checkout, or replay its entry and pay for nothing.` →
+  ``Run a :class:`Role` in the worktree this :class:`Run` owns.``
+- **V2. AGL's machinery stays out** — fingerprints, replays, the ledger, entries, canonicalising.
+  `Read a prompt now, at the declaration, so the text and not the filename is fingerprinted.` →
+  `Read a prompt file.`
+- **V3. A consequence stays only where it destroys the author's work.** `given, commits whatever
+  is dirty; omitted, resets and cleans it all away` → `Commit changes with this message after the
+  step finishes. If omitted, unstaged changes are wiped.` A merely surprising behaviour goes.
+- **V4. A field is short, capitalised, and says what the value is; `:raises:` says when.**
+  `nothing accepts an input, two share a type, or one will not canonicalise` → `An input the role
+  doesn't accept, two inputs of one type, or one that can't be saved as JSON.`
+- **V5. A type is a cross-reference,** ``:class:`Role` ``. No field's continuation line may open
+  with one: `tests/test_docstring_fields.py` would read it as a field.
+
+**Terminal output.**
+
+- **V6. One sentence stating the fact, capitalised; a warning opens `WARNING:`.** The reasoning
+  goes. An 84-word Codex warning → `WARNING: The installed Codex CLI version on this machine is
+  0.160.0, and AGL was tested against 0.155.1.`
+- **V7. At most one more sentence: the next move where siblings differ, or what is lost.**
+  The older-tool warning adds `Update Claude Code CLI to dismiss this warning.`
+- **V8. Names in double quotes; versions and commits bare.** `run 'third' finished` →
+  `Run "third" finished and left its changes on branch: agl/third`
+- **V9. Help is one sentence per description.** An argument says what it is, `If omitted, …`, and
+  one sentence per form a user can type. 278 words of `agl update -h` → `Update workflows
+  downloaded with `agl get`.`
+- **V10. A pinned message keeps what its test protects.** Shorten the string, never the claim.
 
 ## The blank-line convention
 

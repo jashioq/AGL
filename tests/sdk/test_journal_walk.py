@@ -74,7 +74,7 @@ same asymmetry that test turns on.
 
 **One last pair is here because a number leaves this loop and is read by a person.** The walk's
 hit branch tallies on `Fingerprints`, `api._walk` hands the total back and the CLI prints
-`replayed <n> steps from cache`, so what the branch counts is the whole meaning of that line. Both
+`Replayed <n> steps from cache`, so what the branch counts is the whole meaning of that line. Both
 of the ways it could lie are asserted rather than argued: `claim` runs on both branches, so a tally
 sitting there would count misses too, and an entry no walk asked about would inflate the count if
 the number came from the ledger instead of from the calls.
@@ -361,7 +361,7 @@ async def test_a_step_recorded_at_one_effort_runs_again_at_another_effort_or_non
 # --- the tally, at the one line that tells a hit from a miss -------------------------------------
 #
 # `Fingerprints.replays` is what `api._walk` hands back and `cli/commands/__init__.py` turns into
-# `replayed <n> steps from cache`. It is asserted here because this is the only place a replay is
+# `Replayed <n> steps from cache`. It is asserted here because this is the only place a replay is
 # discriminated: `claim` is called on both branches, so a tally taken there would count every step
 # and the line would be an operator-facing number that is never zero.
 

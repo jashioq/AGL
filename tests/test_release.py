@@ -7,9 +7,9 @@ wanted; and a machine that ran a hundred runs held a hundred dead trees. So a ru
 - returned, or ended on a `Stop` - hands every checkout back and deletes the child branches whose
 work reached `agl/<label>`, and a run that **failed or was cancelled** keeps all of it, because that
 is precisely the run somebody is about to resume or go and look at. Having given the checkout back,
-it says so: the last section here is the one line that names `agl/<label>` on stderr, and the two
-endings that keep the checkout are asserted not to write it, because the branch is not takeable
-then and a line saying otherwise sends an operator at git's refusal.
+it says so: the last section here is the `agl/<label>` a returned run hands back for its finished
+line to name, and the two endings that keep the checkout are asserted to hand back none, because
+the branch is not takeable then and a line naming it sends an operator at git's refusal.
 
 ## Why the question asked about a child branch is not `git branch -d`
 
@@ -84,12 +84,6 @@ LABEL: Final = RunLabel("auth")
 SCOPE: Final = RunScope(PROJECT, LABEL)
 
 CHILD: Final = Namespace("T-01")
-
-# The sentence the release must not write while anything still holds `agl/auth`. It is what an
-# operator types next, and git answers `fatal: 'agl/auth' is already used by worktree at ...` for as
-# long as one worktree holds that branch - so a run that offered it anyway would be sending somebody
-# at that refusal with a line that reads like an invitation.
-OFFERED: Final = f"git checkout {run_branch(LABEL)}"
 
 SEEDED: Final = "src/a.txt"
 
@@ -337,7 +331,7 @@ def _over(repository: Path, tmp_path: Path) -> container.FakeServices:
 
 async def _run(
     harness: container.FakeServices, name: str, *, points: Sequence[EntryPoint] = POINTS
-) -> api.Replayed:
+) -> api.Finished:
     """One invocation: `agl run <name> -n auth`, with this module's entry points."""
     return await api.run(harness.services, PROJECT, name, LABEL, (), points=points)
 
@@ -611,8 +605,8 @@ async def test_a_checkout_that_will_not_go_is_named_and_the_run_still_succeeds(
     """A teardown is not a result, and it may not change one.
 
     The run's work is committed and on its branch by the time any of this happens, so a checkout
-    that will not go is a note and not an outcome: `api.run` returns its `Replayed` exactly as it
-    would have, which is what makes `cli/commands/run.py` exit 0. A release that raised instead
+    that will not go is a note and not an outcome: `api.run` still returns its `Finished`, with no
+    branch in it, which is what makes `cli/commands/run.py` exit 0. A release that raised instead
     would turn a run that produced everything it was asked for into exit 5, and an operator would
     go looking for work that is already there.
 
@@ -622,9 +616,9 @@ async def test_a_checkout_that_will_not_go_is_named_and_the_run_still_succeeds(
     harness = _fakes(tmp_path)
     services = replace(harness.services, workspaces=_Immovable(harness.services.workspaces))
 
-    replayed = await api.run(services, PROJECT, "landing", LABEL, (), points=POINTS)
+    finished = await api.run(services, PROJECT, "landing", LABEL, (), points=POINTS)
 
-    assert replayed == api.Replayed(steps=0)
+    assert finished == api.Finished(steps=0, branch=None)
     printed = capsys.readouterr()
     assert str(CHILD) in printed.err and "_base" in printed.err, (
         f"the release met a refusal at both addresses and named neither of them: {printed.err!r}"
@@ -665,87 +659,91 @@ async def test_a_run_ending_with_a_landing_nobody_settled_keeps_every_checkout_i
 # --- what the operator is told about the branch ---------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_a_finished_run_names_on_stderr_the_branch_its_work_can_be_taken_from(
+async def test_a_finished_run_hands_back_the_branch_its_work_can_be_taken_from(
     repository: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The deliverable's other half: the branch is there, and somebody is told which one it is.
 
-    On stderr, for `cli/commands/__init__.py`'s reason. `run_branch` is a pure function of the
-    label, and `agl run -h` spells the rule out where the label is typed - so a script that started
-    this run already holds the answer and nothing here is a name a machine reads. It is a note to
-    whoever does not know AGL's naming rule, and it goes beside the rest of what the release has to
-    say rather than onto the stream `run 'auth' finished` is written to.
+    Handed back on `api.Finished` rather than written here, and `cli/commands/__init__.py`'s
+    `_print_finished` names it on stdout in the line `Run "auth" finished` already was;
+    `tests/cli/test_run_command.py` holds that sentence. Nothing about it reaches either stream
+    from `api.run` itself.
 
     The promise and the fact are asserted together, because the failure worth catching is not a
-    missing line: it is a line saying `git checkout agl/auth` in a world where git would answer
+    missing branch: it is one named in a world where git would answer
     `fatal: 'agl/auth' is already used by worktree at ...`.
     """
     harness = _over(repository, tmp_path)
 
-    await _run(harness, "landing")
+    finished = await _run(harness, "landing")
 
-    printed = capsys.readouterr()
-    assert OFFERED in printed.err, (
-        f"the run finished and said nothing about where its work went: {printed.err!r}. The label "
+    assert finished.branch == run_branch(LABEL), (
+        f"the run finished and handed back {finished.branch!r} as where its work went. The label "
         f"is what an operator typed and the branch is what they are left to work out"
     )
-    assert printed.out == "", "a note about a teardown went to the stream a machine reads"
+    printed = capsys.readouterr()
+    assert printed.out == printed.err == "", (
+        f"the release wrote {printed!r} of its own, and the branch is the finished line's to name"
+    )
     assert _asked(repository, "checkout", "--quiet", run_branch(LABEL)), (
-        f"the release printed {OFFERED!r} and git refuses it, so the one line telling an operator "
-        f"where their work is sends them at a `fatal:` instead"
+        f"the run handed back {finished.branch!r} and git refuses it, so the one line telling an "
+        f"operator where their work is sends them at a `fatal:` instead"
     )
 
 @pytest.mark.asyncio
-async def test_a_stop_says_where_the_work_landed_exactly_as_a_return_does(
+async def test_a_stop_writes_the_same_release_notes_as_a_return_does(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The half no return value can carry, which is why this line is written where it is decided.
+    """A run ending on a `Stop` hands nothing back, so the notes are the whole of what it says.
 
-    A run ending on a `Stop` hands nothing back - the workflow's own exception is what leaves
-    `api.run` - so a field on `api.Replayed` would say where the work landed for a run that
-    returned and say nothing for the one somebody ended on purpose, which is the run they are most
-    likely to go and look at. Both are driven here and their stderr compared rather than matched
-    against a sentence: two tests each asserting one line would go on passing in a world where the
-    two had drifted into saying it differently.
+    Both are driven over `_Immovable`, so the release has something to say either way, and their
+    stderr compared rather than matched against a sentence: two tests each asserting one line would
+    go on passing in a world where the two had drifted into saying it differently. A stopped run
+    names no branch - the finished line that carries it is never printed - which is the price of the
+    branch living on `api.Finished` rather than in a note.
     """
     stopped = _fakes(tmp_path / "stopped")
+    stopped_services = replace(stopped.services, workspaces=_Immovable(stopped.services.workspaces))
     with pytest.raises(Stop):
-        await _run(stopped, "halting")
+        await api.run(stopped_services, PROJECT, "halting", LABEL, (), points=POINTS)
     after_stopping = capsys.readouterr()
 
-    await _run(_fakes(tmp_path / "returned"), "landing")
+    returned = _fakes(tmp_path / "returned")
+    returned_services = replace(
+        returned.services, workspaces=_Immovable(returned.services.workspaces)
+    )
+    await api.run(returned_services, PROJECT, "landing", LABEL, (), points=POINTS)
 
     after_returning = capsys.readouterr()
     assert after_stopping.err == after_returning.err != "", (
-        f"a run that stopped and a run that returned do not say the same thing about where the "
-        f"work is: {after_stopping.err!r} against {after_returning.err!r}"
+        f"a run that stopped and a run that returned do not say the same thing about what the "
+        f"release kept: {after_stopping.err!r} against {after_returning.err!r}"
     )
-    assert OFFERED in after_stopping.err
 
 @pytest.mark.asyncio
 async def test_a_run_that_could_not_give_its_own_checkout_back_offers_no_branch(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The trap this line is written around: `agl/auth` is the deliverable either way, and it is
-    only takeable once the checkout that held it has gone.
+    """The trap the branch is handed back around: `agl/auth` is the deliverable either way, and it
+    is only takeable once the checkout that held it has gone.
 
     `_Immovable` refuses every address, the run's own among them, so git would answer
-    `fatal: 'agl/auth' is already used by worktree at ...` to anybody who typed what a released run
-    is told to type. The line's presence is the whole of the report - it is absent here, and the
-    warning naming what still stands is what an operator gets instead - so what is asserted is that
-    no offer is made rather than that some other wording was chosen for it.
+    `fatal: 'agl/auth' is already used by worktree at ...` to anybody who checked out the branch a
+    released run names. So none is handed back - and the finished line names none - and the warning
+    naming what still stands is what an operator gets instead.
     """
     harness = _fakes(tmp_path)
     services = replace(harness.services, workspaces=_Immovable(harness.services.workspaces))
 
-    await api.run(services, PROJECT, "landing", LABEL, (), points=POINTS)
+    finished = await api.run(services, PROJECT, "landing", LABEL, (), points=POINTS)
 
-    printed = capsys.readouterr()
-    assert OFFERED not in printed.err, (
-        f"the run could not take its own checkout back and invited an operator to check the branch "
-        f"out anyway: {printed.err!r}. git refuses that outright while a worktree holds it"
+    assert finished.branch is None, (
+        f"the run could not take its own checkout back and offered {finished.branch!r} anyway. git "
+        f"refuses to check that out outright while a worktree holds it"
     )
-    assert str(LABEL) in printed.err, "the run said nothing at all about what it left standing"
+    assert str(LABEL) in capsys.readouterr().err, (
+        "the run said nothing at all about what it left standing"
+    )
 
 @pytest.mark.asyncio
 async def test_a_run_holding_an_unsettled_landing_is_offered_no_branch_it_cannot_take(
@@ -755,20 +753,18 @@ async def test_a_run_holding_an_unsettled_landing_is_offered_no_branch_it_cannot
 
     A live lease keeps every checkout the run cut, its own among them, so `agl/auth` is held
     exactly as it is in the test above and for a different reason. What an operator gets here is
-    the warning naming the landing nobody settled and the two commands that address it, and no
-    invitation to check out a branch git would refuse them.
+    the warning naming the landing nobody settled and the command that addresses it, and no
+    branch handed back for the finished line to name.
     """
     harness = _fakes(tmp_path)
 
-    await _run(harness, "holding")
+    finished = await _run(harness, "holding")
 
-    printed = capsys.readouterr()
-    assert OFFERED not in printed.err, (
-        f"the run kept every checkout it cut and invited an operator to check the branch out: "
-        f"{printed.err!r}"
+    assert finished.branch is None, (
+        f"the run kept every checkout it cut and offered {finished.branch!r} to be checked out"
     )
-    assert f"agl resume {LABEL}" in printed.err, (
-        "the run that kept everything named neither of the two commands that address it"
+    assert f"agl resume {LABEL}" in capsys.readouterr().err, (
+        "the run that kept everything did not name the command that addresses it"
     )
 
 @pytest.mark.asyncio
@@ -780,16 +776,20 @@ async def test_a_child_branch_kept_behind_does_not_withhold_the_run_branch_from_
     `worktree_branch` spells a child's name with an infix, so no child checkout can ever hold
     `agl/auth` and no child's refusal says anything about whether it can be taken. `stranded` keeps
     a child branch and gives every checkout back, which is the run where a release reading one kept
-    list for both questions would withhold the offer for a reason that is not about the deliverable
-    at all - so both lines are asserted here, and the checkout that proves the offer beside them.
+    list for both questions would withhold the branch for a reason that is not about the
+    deliverable at all - so both answers are asserted here, and the checkout that proves the offer
+    beside them.
     """
     harness = _over(repository, tmp_path)
 
-    await _run(harness, "stranded")
+    finished = await _run(harness, "stranded")
 
     printed = capsys.readouterr()
-    assert OFFERED in printed.err and worktree_branch(LABEL, CHILD) in printed.err, (
-        f"a child branch nobody landed cost the operator the line saying where the run's own work "
-        f"is: {printed.err!r}. The two answers are about two different branches"
+    assert finished.branch == run_branch(LABEL), (
+        f"a child branch nobody landed cost the operator the run's own branch: "
+        f"{finished.branch!r}. The two answers are about two different branches"
+    )
+    assert worktree_branch(LABEL, CHILD) in printed.err, (
+        f"the kept child branch went unnamed: {printed.err!r}"
     )
     assert _asked(repository, "checkout", "--quiet", run_branch(LABEL))

@@ -363,19 +363,21 @@ def test_a_workflow_declaring_a_flag_agl_run_owns_refuses_the_run_that_named_it(
 
 # --- what the command says when it worked --------------------------------------------------------
 
-def test_a_finished_run_is_named_the_way_the_refusal_names_it(
+def test_a_finished_run_is_named_on_stdout_with_the_branch_it_left(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The refusal reads `run 'auth' already exists`; a run that finished says so alike.
+    """One line, on stdout, naming the run and the branch its changes can be taken from.
 
-    One line, on stdout, quoting the label the same way - so an operator reading a terminal full of
-    `agl` output sees one vocabulary rather than two.
+    The branch is `api.Finished`'s, handed back only once no checkout holds it;
+    `tests/test_release.py` holds the endings that hand back none.
     """
     harness = _fakes(tmp_path)
 
     assert _main(harness, "run", "flagged", "-n", "auth", "-r", "x") == 0
 
-    assert capsys.readouterr().out == "run 'auth' finished\n"
+    assert capsys.readouterr().out == (
+        'Run "auth" finished and left its changes on branch: agl/auth\n'
+    )
 
 # --- the install this command folded in ----------------------------------------------------------
 

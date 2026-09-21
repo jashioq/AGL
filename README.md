@@ -218,7 +218,7 @@ however many workflows share it, and none at all for a ref that is a commit's fu
 cannot move. Those requests sign in to nothing either, so they count against the 60 an hour GitHub
 allows an address that is not signed in, and once those are spent each workflow whose ref is asked
 about is refused, naming the time GitHub says the limit lifts. When every ref still names the
-commit its workflows were placed from, `agl update` says `already up to date` and nothing else, and
+commit its workflows were placed from, `agl update` says `Already up to date` and nothing else, and
 downloads nothing.
 
 Whatever moved goes through `agl get`'s three phases: each workflow is downloaded again at the ref
@@ -279,7 +279,7 @@ inside `workflows/`, and one a crash left behind can hold the only copy of a wor
 yours to look inside and delete by hand. A name nothing in `workflows/` answers to exits 3, naming
 what does.
 
-What is removed leaves `workflows/` in one rename before any of it is deleted, and `removed <name>`
+What is removed leaves `workflows/` in one rename before any of it is deleted, and `Removed "<name>"`
 on stdout says it went; a delete that stops part-way says on stderr where what is left now stands,
 somewhere neither uv nor `agl workflows` reads. Nothing is installed or uninstalled: `agl workflows`
 stops listing it at once, and the next install uninstalls whatever only it needed. A run it started

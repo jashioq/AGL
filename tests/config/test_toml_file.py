@@ -628,7 +628,9 @@ def test_the_note_names_the_suffix_it_chose_and_the_name_that_was_already_taken(
     """
     note = registered_as(ProjectName("myapp"), ProjectName("myapp-1"))
 
-    assert note == "Registered as 'myapp-1': another repository is already registered as 'myapp'."
+    assert note == (
+        'Registered this repository as "myapp-1", because another is already registered as "myapp".'
+    )
     assert "\n" not in note
 
 def test_the_writer_makes_the_projects_directory_when_there_is_none(tmp_path: Path) -> None:

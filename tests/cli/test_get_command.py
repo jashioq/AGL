@@ -96,7 +96,7 @@ _UV_MISSING: Final = "uv is not installed, or 'uv' is not on PATH"
 # refusal, the third as the warning `api._unchanged` writes.
 _SAID_MISSING: Final = f"agl: {_UV_MISSING}"
 _SAID_REFUSED: Final = "agl: the sync was refused: uv exited 2 rather than 0"
-_WARNED: Final = "warning: the sync was refused - uv exited 2 rather than 0"
+_WARNED: Final = "WARNING: uv exited 2 while installing workflow dependencies"
 
 # The reasons `_universe` refuses with: 3, 2 and 6.
 _STRAY: Final = "stray: codeload has no public repository octo/nope"
@@ -437,7 +437,7 @@ def test_with_stdin_closed_every_question_is_declined_and_the_command_still_exit
     captured = capsys.readouterr()
     assert status == 0
     assert captured.out == ""
-    assert captured.err.count("stdin was closed, and that is taken as no") == 2
+    assert captured.err.count("stdin is closed, so the answer is no") == 2
     assert (standing / "__init__.py").read_bytes() == kept
     assert not workflow_dir(home, WorkflowName("lint")).exists()
 
@@ -598,7 +598,7 @@ def test_a_refused_sync_over_an_environment_that_stood_warns_and_exits_zero(
     captured = capsys.readouterr()
     assert status == 0
     assert _words(captured.out) == [["placed", "triage", "jashioq/myrepo/workflows/triage"]]
-    assert "warning: the sync was refused" in captured.err
+    assert "WARNING: uv exited 2 while installing" in captured.err
     assert _UV_SAID.strip() in captured.err
 
 @pytest.mark.parametrize(

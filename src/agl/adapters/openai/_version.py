@@ -12,7 +12,7 @@ from agl.ports.agent import Installation, ModelEfforts, ModelId, OpenAI, Version
 
 __all__ = ["TESTED", "TOOL", "probed"]
 
-TOOL: Final = "the Codex CLI"
+TOOL: Final = "Codex CLI"
 
 # The release this adapter's command line and its event reading were exercised against, and the one
 # `ports/agent.py`'s `OpenAIEffort` names as the source of its members.

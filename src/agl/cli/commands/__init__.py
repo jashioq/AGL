@@ -73,14 +73,18 @@ def _said(parsed: argparse.Namespace, dest: str, *, command: str) -> str:
 # Never on stdout, for `cli/commands/workflows.py`'s reason: what a machine consumes goes there and
 # this is a note to whoever is reading the terminal. Silent at zero, so the line's presence is the
 # signal - every first run replays nothing, and a run that says so every time says nothing.
-def _print_replays(label: RunLabel, replayed: api.Replayed) -> None:
-    if not replayed.steps:
+def _print_replays(label: RunLabel, finished: api.Finished) -> None:
+    if not finished.steps:
         return
-    counted = "step" if replayed.steps == 1 else "steps"
+    counted = "step" if finished.steps == 1 else "steps"
     print(
-        f"replayed {replayed.steps} {counted} from cache - `agl clear {label}` removes it.",
+        f"Replayed {finished.steps} {counted} from cache. Run `agl clear {label}` to remove it.",
         file=sys.stderr,
     )
+
+def _print_finished(label: RunLabel, finished: api.Finished) -> None:
+    left = "" if finished.branch is None else f" and left its changes on branch: {finished.branch}"
+    print(f'Run "{label}" finished{left}')
 
 # `joint_status` is the rule a run's concurrent failures are answered by too, so the two cannot
 # drift apart. The 0 is this module's: nothing refused is a command's answer, not a table row.

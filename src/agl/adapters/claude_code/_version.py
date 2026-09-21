@@ -8,7 +8,7 @@ from agl.ports.agent import Installation, VersionRange
 
 __all__ = ["TESTED", "TOOL", "probed"]
 
-TOOL: Final = "the Claude Code CLI"
+TOOL: Final = "Claude Code CLI"
 
 # What the binary `claude_agent_sdk` 0.2.157 bundles reports for itself, and the release this
 # adapter's sessions were exercised against. `ports/agent.py`'s `ClaudeEffort` names the same one

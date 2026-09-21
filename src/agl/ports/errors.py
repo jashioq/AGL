@@ -19,37 +19,37 @@ __all__ = [
 ]
 
 class AglError(Exception):
-    """The base of AGL's own errors: an adapter translates whatever it caught into one of these."""
+    """The base of every error AGL raises."""
 
 class InputError(AglError):
-    """What AGL was given cannot be used: the value has to change before the call can succeed."""
+    """A value given to AGL can't be used; change it and try again."""
 
 class NotFoundError(AglError):
-    """What was named is not there: name something that exists, or make it before asking for it."""
+    """What was named doesn't exist; create it or name another."""
 
 class ConflictError(AglError):
-    """What is there already disagrees with the call: AGL refuses rather than write over it."""
+    """Something already there conflicts with the call; AGL won't overwrite it."""
 
 class DeniedError(AglError):
-    """A refusal that stands until something changes, so a retry alone is refused the same way."""
+    """AGL refuses the call; retrying won't work until something changes."""
 
 class UpstreamError(AglError):
-    """Whatever failed beyond a port: a subclass says whether the far side may answer later."""
+    """A tool or service AGL calls failed."""
 
 class UpstreamUnavailable(UpstreamError):
-    """A state of the world and not a fault in the call: the same call may get past it later."""
+    """A tool or service AGL calls is unavailable; retrying later may work."""
 
 class UpstreamUnexpected(UpstreamError):
-    """The far side answered in terms the adapter cannot read, which no retry of the call fixes."""
+    """A tool or service AGL calls answered in a way AGL can't read; retrying won't help."""
 
 class Stop(AglError):
-    """A workflow ending its own run: subclass it freely, the exit code resolves up the tree."""
+    """Raise this, or a subclass of it, to end the run."""
 
 class DisagreeingRefusals(AglError):
     """Named outcomes whose codes differ, so no one code is the answer: read the reason for each."""
 
 class InternalError(AglError):
-    """An invariant of AGL's own broke, so the fault is here and not in anything a caller wrote."""
+    """A bug in AGL itself, not in the workflow."""
 
 EXIT_CODES: Final[Mapping[type[AglError], int]] = MappingProxyType(
     {

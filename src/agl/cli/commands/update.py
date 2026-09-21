@@ -27,7 +27,7 @@ NAME: Final = "update"
 
 _WORKFLOW: Final = "workflow"
 
-_CURRENT: Final = "already up to date"
+_CURRENT: Final = "Already up to date"
 
 _NOT_CHECKED: Final = "not checked"
 _NOT_REPLACEABLE: Final = "not replaceable"
@@ -39,35 +39,15 @@ type _Commands = argparse._SubParsersAction[RefusingParser]
 def declare(commands: _Commands) -> RefusingParser:
     parser = commands.add_parser(
         NAME,
-        help="download again the workflows `agl get` placed whose refs have moved",
-        description=(
-            "Check the workflows `agl get` placed in your AGL workspace against the public GitHub "
-            "repositories they came from, and download again each one whose ref has moved. GitHub "
-            "is asked which commit each ref names now - once for every repository and ref they "
-            "share, and never for a ref that is a commit's full sha, which cannot move - and a "
-            "workflow placed from any other commit is downloaded at that same ref, checked as `agl "
-            "get` checks one, and put in place of the copy in your workspace. Every question is "
-            "asked before anything is replaced - whether to discard a copy that changed since it "
-            "was placed, and whether to install third-party packages the new version declares and "
-            "the copy does not - and one stdin cannot answer, at its end or closed, is answered "
-            "no. Each copy is measured again just before it is replaced, and one that changed "
-            "after it was first measured - while the questions were on screen, say - is refused "
-            "and left as it stands. A copy that is a link, or stands under another name than it "
-            "was placed as, is left as it is, and a workflow written by hand or by `agl new` "
-            "records no repository and is passed over. With nothing moved it says `already up to "
-            "date` and nothing else; what is replaced is then installed, the way `agl get` "
-            "installs what it places."
-        ),
+        help="Update workflows downloaded with `agl get`.",
+        description="Update workflows downloaded with `agl get`.",
         allow_abbrev=False,
     )
     parser.add_argument(
         _WORKFLOW,
         metavar="<workflow>",
         nargs="?",
-        help=(
-            "one workflow to update, by the name of its own entry in workflows/ - every one `agl "
-            "get` placed where none is named"
-        ),
+        help="Name of the workflow to update. If omitted, updates all workflows.",
     )
     return parser
 

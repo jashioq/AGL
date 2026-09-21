@@ -272,7 +272,7 @@ async def _start(
     argv: Sequence[str] = ("-r", "add oauth"),
     *,
     points: Sequence[EntryPoint] = POINTS,
-) -> api.Replayed:
+) -> api.Finished:
     """The first invocation: `agl run <name> -n auth`, with this module's entry points."""
     return await api.run(harness.services, PROJECT, name, LABEL, argv, points=points)
 
@@ -281,7 +281,7 @@ async def _resume(
     *,
     label: RunLabel = LABEL,
     points: Sequence[EntryPoint] = POINTS,
-) -> api.Replayed:
+) -> api.Finished:
     """The second invocation: `agl resume auth`, and the label is the whole of what it takes."""
     return await api.resume(harness.services, PROJECT, label, points=points)
 
@@ -389,8 +389,8 @@ async def test_the_workflow_is_handed_its_params_as_the_dataclass_the_record_sto
 
 # --- what the walk replayed, counted --------------------------------------------------------------
 #
-# `Replayed.steps` is one per `run.step` invocation served off the ledger and is what
-# `cli/commands/__init__.py` turns into `replayed <n> steps from cache`. It is asserted here against
+# `Finished.steps` is one per `run.step` invocation served off the ledger and is what
+# `cli/commands/__init__.py` turns into `Replayed <n> steps from cache`. It is asserted here against
 # `dispatched`, which is the same instrument the section above uses: a step that was replayed did
 # not reach an agent, so the two numbers have to add up to the calls the workflow made. Counting
 # entries instead would say nothing, since a resume reads entries a divergent fingerprint never
@@ -418,7 +418,7 @@ async def test_a_resume_counts_the_step_it_replayed_and_the_run_before_it_counte
     _clear()
     replayed = await _resume(harness)
 
-    assert replayed == api.Replayed(steps=1)
+    assert replayed.steps == 1
     assert dispatched == ["do the first thing", "do the second thing"], (
         "one step was replayed and one was paid for, so exactly one agent ran in each invocation"
     )
@@ -438,7 +438,7 @@ async def test_a_run_that_took_two_steps_of_its_own_replayed_neither_of_them(
 
     replayed = await _start(harness)
 
-    assert replayed == api.Replayed(steps=0)
+    assert replayed.steps == 0
     assert dispatched == ["do the first thing", "do the second thing"]
 
 @pytest.mark.asyncio
@@ -459,7 +459,7 @@ async def test_resuming_a_finished_run_counts_every_step_the_ledger_already_held
     _clear()
     replayed = await _resume(harness)
 
-    assert replayed == api.Replayed(steps=2)
+    assert replayed.steps == 2
     assert dispatched == ["do the first thing", "do the second thing"], (
         "a resume with nothing left to do paid an agent anyway"
     )
@@ -488,7 +488,7 @@ async def test_the_count_spans_namespaces_and_holds_a_child_worktrees_replayed_s
     _clear()
     replayed = await _resume(harness)
 
-    assert replayed == api.Replayed(steps=2)
+    assert replayed.steps == 2
     assert dispatched == ["do the first thing", "do the second thing"]
 
 # --- the record is read and never written --------------------------------------------------------

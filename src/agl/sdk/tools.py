@@ -38,7 +38,7 @@ _METADATA_KEY: Final = "agl.sdk.tools"
 
 @dataclass(frozen=True, slots=True)
 class ReportingTool[P]:
-    """What `reporting_tool` returns: a name, a description, a payload class and its schema."""
+    """The tool an agent reports a step's result through."""
 
     name: str
 
@@ -56,20 +56,20 @@ class ReportingTool[P]:
         )
 
     def rejection(self, payload: Mapping[str, JsonValue]) -> str | None:
-        """Say what is wrong with a payload the agent sent, so it can send another one this turn.
+        """Say what is wrong with a payload the agent sent.
 
-        :param payload: the arguments as the model filled them in; nothing is recorded either way
-        :return: every problem at once, each with its path inside the payload, or `None` if it fits
+        :param payload: The arguments the agent sent.
+        :return: Every problem found, or `None` if the payload fits.
         """
         _, problems = self._read(payload)
         return None if not problems else _refusal(self.name, problems)
 
     def read(self, value: object) -> P:
-        """Build the payload dataclass out of a value AGL itself recorded, fresh run or replay.
+        """Build the payload dataclass from a value AGL saved.
 
-        :param value: `object` because on a replay this came off the ledger as parsed JSON
-        :return: the instance `Run.step` hands back, at the type the role declared
-        :raises InternalError: the ledger and this payload type have come apart; nobody typed this
+        :param value: The saved value, as parsed JSON.
+        :return: An instance of the payload dataclass.
+        :raises InternalError: The value doesn't fit the payload, which is a bug in AGL.
         """
         instance, problems = self._read(value)
         if instance is None:
@@ -91,13 +91,13 @@ class ReportingTool[P]:
         return built, ()
 
 def reporting_tool[P](name: str, description: str, payload: type[P]) -> ReportingTool[P]:
-    """Declare the tool a step reports its result through; without one a step's result is `None`.
+    """Declare the tool an agent reports a step's result through.
 
-    :param name: what the agent calls it; a fingerprint term, and unique among the role's tools
-    :param description: what the agent reads to decide to call it; edit one and no entry replays
-    :param payload: dataclass the result is read back as; its derived schema is a term as well
-    :return: a declaration to put on a role, which may carry one reporting tool at most
-    :raises InputError: at declaration time - an empty string, or a payload shape JSON refuses
+    :param name: What the agent calls it, unique among the role's tools.
+    :param description: What the agent is told the tool is for.
+    :param payload: Dataclass the step's result is returned as.
+    :return: A tool to put on a :class:`Role`, which takes one at most.
+    :raises InputError: An empty name or description, or a payload that can't be saved as JSON.
     """
     return ReportingTool(name=name, description=description, payload=payload)
 
@@ -107,13 +107,13 @@ def tool[P](
     payload: type[P],
     handler: Callable[[P], Awaitable[ToolResult]],
 ) -> Tool:
-    """Build a tool an agent can call, validating its payload before the handler sees it.
+    """Build a tool an agent can call.
 
-    :param name: what the agent calls it; must be unique within a role
-    :param description: what the agent is told the tool is for
-    :param payload: dataclass the arguments are built into; edit a field and no entry replays
-    :param handler: awaited with the built payload; no fingerprint term, so an edit re-runs nothing
-    :return: a tool ready to go on a role
+    :param name: What the agent calls it, unique within a :class:`Role`.
+    :param description: What the agent is told the tool is for.
+    :param payload: Dataclass the agent's arguments are checked against and built into.
+    :param handler: Awaited with the built payload; its result goes back to the agent.
+    :return: A tool to put on a :class:`Role`.
     """
     _check_payload(payload, name)
     schema = _object_schema(payload, name, ())
@@ -132,12 +132,12 @@ def describe[T](text: str, *, default: T) -> T: ...
 @overload
 def describe(text: str) -> Any: ...
 def describe(text: str, *, default: Any = MISSING) -> Any:
-    """Say what one payload field is for, in the schema the agent reads beside the field name.
+    """Describe a payload field to the agent.
 
-    :param text: a fingerprint term - editing it re-runs every step reporting through this payload
-    :param default: omitted makes the field required, exactly as `dataclasses.field` does
-    :return: a `dataclasses.field` carrying the description, assigned to the annotated field
-    :raises InputError: `text` is empty or only whitespace, refused where the field is declared
+    :param text: What the field is for, shown to the agent beside its name.
+    :param default: The field's default. If omitted, the field is required.
+    :return: A `dataclasses.field` to assign to the annotated field.
+    :raises InputError: `text` is empty or only whitespace.
     """
     if not text.strip():
         raise InputError(

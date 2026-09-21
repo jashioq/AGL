@@ -7,7 +7,7 @@ __all__ = ["Conflict", "IntegrationOutcome", "Integrator"]
 
 @dataclass(frozen=True, slots=True)
 class Conflict:
-    """Why nothing landed: the colliding paths and a summary, outliving the hold it explains."""
+    """The files that collided in a merge, with a summary."""
 
     paths: tuple[str, ...]
 

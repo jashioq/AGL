@@ -200,8 +200,8 @@ def free_project_name(home: AglHome, project: ProjectName, repo: Path) -> Projec
 def registered_as(wanted: ProjectName, chosen: ProjectName) -> str:
     """The note a suffixed registration owes its operator: one sentence, and no refusal in it."""
     return (
-        f"Registered as {str(chosen)!r}: another repository is already registered as "
-        f"{str(wanted)!r}."
+        f'Registered this repository as "{chosen}", because another is already registered as '
+        f'"{wanted}".'
     )
 
 # No `build_timeout`: `config/sources.py` resolves it from `DEFAULT_BUILD_TIMEOUT` when the file is

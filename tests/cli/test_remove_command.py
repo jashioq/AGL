@@ -16,7 +16,7 @@ is refused with the entry that declares it.
 a name nothing holds exits 3 naming what is there, a dot-led name or a path exits 2, and an entry
 another workflow depends on exits 4 naming each dependent.
 
-**The streams.** The question is on stderr, and the one line on stdout is `removed <workflow>`, so
+**The streams.** The question is on stderr, and the one line on stdout is `Removed "<workflow>"`, so
 a script reads what went off stdout and a decline - `n`, stdin at its end, or stdin closed outright
 - leaves it empty and exits 0, the operator's answer and not a failure.
 
@@ -50,9 +50,9 @@ ELSEWHERE: Final = Path("/nowhere")
 
 _MODULE: Final = b"from agl.sdk import Run, workflow\n"
 
-_CLOSED: Final = "n - stdin was closed, and that is taken as no\n"
+_CLOSED: Final = "n (stdin is closed, so the answer is no)\n"
 
-_LOST: Final = "n - a standard stream is closed, so nothing can be read, and that is taken as no\n"
+_LOST: Final = "n (a standard stream is closed, so the answer is no)\n"
 
 def _never() -> tuple[ProjectName, Services]:
     raise AssertionError("`agl remove` composed a repository")
@@ -132,7 +132,7 @@ def test_a_workflow_answered_yes_is_gone_and_the_one_line_on_stdout_names_it(
     assert _main(home, "remove", "triage") == 0
 
     captured = capsys.readouterr()
-    assert captured.out == "removed triage\n"
+    assert captured.out == 'Removed "triage"\n'
     assert captured.err == f"{workflows_dir(home) / 'triage'} declares 'triage'. Remove it? [y/n] "
     assert sorted(entry.name for entry in workflows_dir(home).iterdir()) == ["lint"]
     assert _main(home, "workflows") == 0
@@ -180,7 +180,7 @@ def test_an_answer_that_is_neither_yes_nor_no_puts_the_whole_question_again(
 
     captured = capsys.readouterr()
     assert captured.err == f"{standing} declares 'triage'. Remove it? [y/n] " * 2
-    assert captured.out == "removed triage\n"
+    assert captured.out == 'Removed "triage"\n'
 
 def test_the_entry_stands_untouched_for_as_long_as_the_question_is_being_asked(
     tmp_path: Path,
@@ -228,7 +228,7 @@ def test_a_name_differing_only_in_case_removes_the_entry_as_it_is_spelled_on_dis
 
     captured = capsys.readouterr()
     assert captured.err.startswith(f"{workflows_dir(home) / 'Triage'} declares 'triage'.")
-    assert captured.out == "removed Triage\n"
+    assert captured.out == 'Removed "Triage"\n'
     assert list(workflows_dir(home).iterdir()) == []
 
 def test_a_link_goes_as_the_link_and_the_directory_it_names_is_left_as_it_was(
@@ -253,8 +253,8 @@ def test_a_link_goes_as_the_link_and_the_directory_it_names_is_left_as_it_was(
     assert _main(home, "remove", "triage") == 0
 
     captured = capsys.readouterr()
-    assert captured.err.startswith(f"{link} is a link, and declares 'triage'. Remove the link,")
-    assert captured.out == "removed triage\n"
+    assert captured.err.startswith(f"{link} is a link and declares 'triage'. Remove the link,")
+    assert captured.out == 'Removed "triage"\n'
     assert not link.exists(follow_symlinks=False)
     assert _tree(elsewhere) == before
 
@@ -278,7 +278,7 @@ def test_a_delete_that_cannot_finish_says_where_what_is_left_now_stands(
     (left,) = list(workflows_dir(home).iterdir())
     assert left.name.startswith(".")
     assert not (left / "pyproject.toml").exists()
-    assert captured.out == "removed triage\n"
+    assert captured.out == 'Removed "triage"\n'
     assert f"what is left is in {left}" in captured.err
 
 # --- the refusals, each before the question -----------------------------------------------------

@@ -45,9 +45,9 @@ _QUESTION: Final = "Override it?"
 
 _PROMPT: Final = "Override it? [y/n] "
 
-_CLOSED: Final = "n - stdin was closed, and that is taken as no\n"
+_CLOSED: Final = "n (stdin is closed, so the answer is no)\n"
 
-_LOST: Final = "n - a standard stream is closed, so nothing can be read, and that is taken as no\n"
+_LOST: Final = "n (a standard stream is closed, so the answer is no)\n"
 
 _SHA: Final = "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d"
 

@@ -51,10 +51,7 @@ class ThirdPartyDependencies:
     # no terminal acts on: a download cannot redraw the line that names what it installs.
     def __str__(self) -> str:
         listed = ", ".join(repr(dependency) for dependency in self.dependencies)
-        return (
-            f"{self.workflow} depends on third-party packages uv will install into the "
-            f"workspace: {listed}. Continue?"
-        )
+        return f"{self.workflow} installs third-party packages: {listed}. Continue?"
 
 @dataclass(frozen=True, slots=True)
 class LocalChanges:
@@ -70,9 +67,8 @@ class LocalChanges:
 
     def __str__(self) -> str:
         return (
-            f"{self.entry} has changed since it was placed from {abbreviated(self.recorded)}, and "
-            f"updating it to {abbreviated(self.fetched)} replaces it whole, discarding those "
-            f"changes. Update it?"
+            f"{self.entry} has local changes. Updating it from {abbreviated(self.recorded)} to "
+            f"{abbreviated(self.fetched)} discards them. Update it?"
         )
 
 @dataclass(frozen=True, slots=True)
@@ -93,8 +89,8 @@ class GainedDependencies:
     def __str__(self) -> str:
         listed = ", ".join(repr(dependency) for dependency in self.dependencies)
         return (
-            f"{self.workflow} at {abbreviated(self.fetched)} declares third-party dependencies "
-            f"{self.entry} does not, which uv will install into the workspace: {listed}. Continue?"
+            f"Updating {self.entry} to {self.workflow} at {abbreviated(self.fetched)} installs "
+            f"new third-party packages: {listed}. Continue?"
         )
 
 type Question = Collision | ThirdPartyDependencies | LocalChanges | GainedDependencies
@@ -115,8 +111,8 @@ class Removal:
         declares = f"declares {named}" if named else "declares no workflow"
         if entry.linked:
             return (
-                f"{entry.path} is a link, and {declares}. Remove the link, leaving what it names "
-                f"as it is?"
+                f"{entry.path} is a link and {declares}. Remove the link, keeping what it points "
+                f"to?"
             )
         return f"{entry.path} {declares}. Remove it?"
 

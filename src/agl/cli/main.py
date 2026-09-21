@@ -38,6 +38,8 @@ _VERSION: Final = "--version"
 
 _DESCRIPTION: Final = "Run AI agent workflows against a code repository."
 
+_COMMANDS: Final = "Commands"
+
 # The import package, which is what a frame's `__name__` says it belongs to. Spelled again rather
 # than shared with `_PROGRAM`: an import statement says `agl`, a person types `agl` and PyPI holds
 # `agents-gl` - three names for three things, and `config/distribution.py` argues the third.
@@ -56,9 +58,9 @@ _NO: Final = frozenset({"n", "N"})
 
 _CHOICES: Final = "[y/n]"
 
-_CLOSED: Final = "n - stdin was closed, and that is taken as no"
+_CLOSED: Final = "n (stdin is closed, so the answer is no)"
 
-_LOST: Final = "n - a standard stream is closed, so nothing can be read, and that is taken as no"
+_LOST: Final = "n (a standard stream is closed, so the answer is no)"
 
 def _confirmed(question: str) -> bool:
     while True:
@@ -113,7 +115,7 @@ def main(argv: Sequence[str] | None = None, *, compose: Compose | None = None) -
         invocation = _compose() if compose is None else compose()
         return _dispatch(invocation, parsed, tail)
     except Stop as stop:
-        print(f"stopped: {stop}")
+        print(f"Stopped: {stop}")
         return exit_status(stop)
     except AglError as refusal:
         _print_refusal(refusal)
@@ -137,8 +139,10 @@ def parser() -> RefusingParser:
         _VERSION,
         action="version",
         version=f"{_PROGRAM} {distribution.installed_version()}",
-        help=f"print the installed {distribution.DISTRIBUTION} version and exit",
+        help="Print the installed version and exit.",
     )
+    
+    root._positionals.title = _COMMANDS
     declared = root.add_subparsers(
         dest=_COMMAND, metavar="<command>", required=True, parser_class=RefusingParser
     )
@@ -261,7 +265,7 @@ def _concurrent(group: ExceptionGroup[Exception]) -> int:
     deliberate, failed = group.split(Stop)
     if deliberate is not None:
         for stop in leaves(deliberate):
-            print(f"stopped: {stop}")
+            print(f"Stopped: {stop}")
     if failed is not None:
         _, untranslated = failed.split(AglError)
         if untranslated is not None:

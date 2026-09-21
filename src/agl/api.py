@@ -29,8 +29,8 @@ from agl.sdk.workflow import Run, Workflow
 
 __all__ = [
     "Cleared",
+    "Finished",
     "Listing",
-    "Replayed",
     "clear",
     "get",
     "list_workflows",
@@ -65,10 +65,13 @@ class Listing:
     broken: tuple[registry.BrokenWorkflow, ...]
 
 @dataclass(frozen=True, slots=True)
-class Replayed:
-    """What a walk did not pay for: the steps it served off the ledger, over every namespace."""
+class Finished:
+    """A walk that returned: the steps served off the ledger, and the branch left free to take."""
 
     steps: int
+
+    branch: str | None
+    """`None` where a checkout still holds it, which git would refuse to check out."""
 
 async def run(
     services: Services,
@@ -81,7 +84,7 @@ async def run(
     syncer: Syncer | None = None,
     home: AglHome | None = None,
     points: Iterable[EntryPoint] | None = None,
-) -> Replayed:
+) -> Finished:
     # Above the discovery chain, because `config/registry.py`'s `discovered` is what puts the
     # workspace venv on `sys.path` and its `load` is what imports the workflow's own module. A
     # dependency added to a workflow and not yet installed fails that import, and an install
@@ -139,7 +142,7 @@ async def resume(
     syncer: Syncer | None = None,
     home: AglHome | None = None,
     points: Iterable[EntryPoint] | None = None,
-) -> Replayed:
+) -> Finished:
     scope = RunScope(project, label)
     record = await services.store.read_record(scope)
     if record is None:
@@ -291,13 +294,13 @@ def workflow_help(
 # `sdk/_engine/teardown.py` reads it to tell an unsettled landing from a settled one.
 async def _walk(
     services: Services, wf: Workflow[object], scope: RunScope, spec: RunSpec, given: object
-) -> Replayed:
+) -> Finished:
     await services.workspaces.open(scope.label, None, spec.base_sha)
     leases = Leases()
     fingerprints = Fingerprints()
     worktrees: Worktrees[Run[object]] = Worktrees()
     try:
-        async with teardown.releasing(services, scope, worktrees, leases, _warn):
+        async with teardown.releasing(services, scope, worktrees, leases, _warn) as released:
             async with services.terminal:
                 await wf.fn(
                     Run(
@@ -312,7 +315,7 @@ async def _walk(
                 )
     finally:
         leases.release_all()
-    return Replayed(steps=fingerprints.replays)
+    return Finished(steps=fingerprints.replays, branch=released.branch)
 
 # Two sources, because neither alone is the set a clear has to take. The ledger holds every
 # namespace that recorded a step, one whose checkout and branch have already gone included; the
@@ -380,14 +383,9 @@ def _warn(note: str) -> None:
 
 def _unchanged(outcome: SyncOutcome) -> str:
     return (
-        f"warning: the sync was refused - uv exited {outcome.status} rather than 0 - and this "
-        f"workspace already had an environment, so it stands exactly as the last sync that "
-        f"succeeded left it and AGL carries on against that. What a workflow imports may therefore "
-        f"be older than what it now declares, and anything added since is not installed at all. "
-        f"Nothing above uv decided this and nothing above it can explain it - a resolution that "
-        f"cannot be satisfied, an index that could not be reached and a package that will not "
-        f"build all arrive here as the same non-zero exit - so what uv said is printed whole below "
-        f"rather than summarised:\n\n{outcome.output.rstrip()}"
+        f"WARNING: uv exited {outcome.status} while installing workflow dependencies, so AGL is "
+        f"using the environment from the last successful install. Anything added since is not "
+        f"installed.\n\n{outcome.output.rstrip()}"
     )
 
 def _refused(outcome: SyncOutcome) -> str:

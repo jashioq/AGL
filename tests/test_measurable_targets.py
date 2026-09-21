@@ -1112,10 +1112,9 @@ def test_every_declared_command_runs_on_fakes_with_no_way_out(
     )
     # `update` went the whole way - a download and a question - rather than finding nothing moved.
     assert [fetch.repository for fetch in fetcher.fetched] == [_EIGHT_REPOSITORY] * 2
-    assert [one for one in asked if "declares third-party dependencies" in one] == [
-        f"octo/flows/workflows/scaffold at {_EIGHT_MOVED[:7]} declares third-party dependencies "
-        f"{workflows_dir(AglHome(home)) / 'scaffold'} does not, which uv will install into the "
-        f"workspace: 'httpx'. Continue?"
+    assert [one for one in asked if "installs new third-party packages" in one] == [
+        f"Updating {workflows_dir(AglHome(home)) / 'scaffold'} to octo/flows/workflows/scaffold at "
+        f"{_EIGHT_MOVED[:7]} installs new third-party packages: 'httpx'. Continue?"
     ]
 
 # ================================================================================================

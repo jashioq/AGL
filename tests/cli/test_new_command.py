@@ -271,7 +271,7 @@ def test_the_scaffold_lands_when_the_installer_cannot_start_and_what_landed_runs
     assert (
         main.main(("run", SCAFFOLDED, "-n", "first"), compose=composing(container.fake_syncer)) == 0
     )
-    assert "run 'first' finished" in capsys.readouterr().out
+    assert 'Run "first" finished' in capsys.readouterr().out
 
 def test_the_name_agl_run_takes_is_the_key_the_written_declaration_puts_on_the_left(
     tmp_path: Path,
@@ -422,12 +422,13 @@ def test_a_scaffold_says_to_open_the_workspace_and_not_the_workflow_directory(
 ) -> None:
     """The one line that came out of a debugging session rather than out of a gate.
 
-    An operator who reads `New wrote <path>` opens that path, and both PyCharm and VS Code then
-    look for an interpreter at the root of what is open, find no workspace venv a level above it,
-    and mark the scaffold's `from agl.sdk import ...` unresolved with nothing actually broken -
-    `config/workspace_path.py`'s `write_editor_pth` has already put AGL within that venv's reach.
-    So the workspace is named, and the directory not to open is named beside it, the second half
-    being the one that survives the instinct to open the path on the line above.
+    An operator who reads `Created workflow "<name>" at <path>` opens that path, and both PyCharm
+    and VS Code then look for an interpreter at the root of what is open, find no workspace venv a
+    level above it, and mark the scaffold's `from agl.sdk import ...` unresolved with nothing
+    actually broken - `config/workspace_path.py`'s `write_editor_pth` has already put AGL within
+    that venv's reach. So the workspace is named, and the directory not to open is named beside
+    it, the second half being the one that survives the instinct to open the path on the line
+    above.
 
     The workspace path is asserted with the words that follow it rather than on its own, because
     it is a *prefix* of the workflow path: a command that printed the workflow directory twice
@@ -440,7 +441,7 @@ def test_a_scaffold_says_to_open_the_workspace_and_not_the_workflow_directory(
     captured = capsys.readouterr()
     assert f"Open {workspace_dir(home)} in your IDE" in captured.err
     assert "not the workflow directory" in captured.err
-    assert captured.out == f"New wrote {workflow_dir(home, TRIAGE)}\n"
+    assert captured.out == f'Created workflow "{TRIAGE}" at {workflow_dir(home, TRIAGE)}\n'
 
 # --- the install that follows the scaffold ------------------------------------------------------
 

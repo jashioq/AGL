@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from importlib.metadata import EntryPoint
 from typing import Final
 from agl import api
-from agl.cli.commands import Registered, _print_replays, _said
+from agl.cli.commands import Registered, _print_finished, _print_replays, _said
 from agl.ports.home_layout import AglHome
 from agl.ports.ids import RunLabel
 from agl.ports.sync import Syncer
@@ -25,18 +25,14 @@ type _Commands = argparse._SubParsersAction[RefusingParser]
 def declare(commands: _Commands) -> RefusingParser:
     parser = commands.add_parser(
         NAME,
-        help="continue a run from its record",
-        description=(
-            "Continue a run that already exists. It takes the label and nothing else: the "
-            "workflow, the base ref and the parameters are read back from the run's own record, "
-            "which is what `agl run` wrote them there for."
-        ),
+        help="Continue a run.",
+        description="Continue a run with the workflow, ref and params it was started with.",
         allow_abbrev=False,
     )
     parser.add_argument(
         _LABEL,
         metavar="<label>",
-        help="the run to continue: the name `agl run -n <label>` gave it",
+        help="Name of the run to continue, as given to `agl run -n`.",
     )
     return parser
 
@@ -50,9 +46,9 @@ def execute(
 ) -> int:
     label = RunLabel(_said(parsed, _LABEL, command=NAME))
     project, services = registered()
-    replayed = asyncio.run(
+    finished = asyncio.run(
         api.resume(services, project, label, syncer=syncer, home=home, points=points)
     )
-    _print_replays(label, replayed)
-    print(f"resume {str(label)!r} finished")
+    _print_replays(label, finished)
+    _print_finished(label, finished)
     return _NOTHING_TO_REPORT
