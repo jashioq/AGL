@@ -71,7 +71,7 @@ were, which is the only property `Role[P]` binds through.
 a name and a description is not learning what a payload class is - and
 `test_a_role_promising_one_payload_refuses_a_tool_that_reports_another` still spends the check.
 
-`ARCHITECTURE.md`'s "No single `Tool` class" carries the argument; what is here is the measurement.
+What is here is the measurement.
 `test_a_role_promising_one_payload_refuses_a_tool_that_reports_another` spends the check, so a merge
 that lost it fails a line instead of passing a review.
 """
@@ -908,9 +908,8 @@ def test_a_handled_tools_payload_is_refused_by_the_same_rules_a_declarations_is(
 
 # --- one tool class or two, and the check that rests on there being two ---------------------------
 #
-# The module docstring holds the argument and `ARCHITECTURE.md`'s "No single `Tool` class" holds it
-# at length. These two are the mechanical half: the check the disjointness buys, and the hole it
-# cannot have.
+# The module docstring holds the argument. These two are the mechanical half: the check the
+# disjointness buys, and the hole it cannot have.
 
 def test_a_role_promising_one_payload_refuses_a_tool_that_reports_another() -> None:
     """`Role[Findings]` declared with a `ReportingTool[Described]`, refused at the declaration.

@@ -16,7 +16,7 @@ _INITIAL: Final = "the state this repository starts at"
 
 # `_patches.py` and `_runner.py` spell this pair with `replace`, which maps distinct unencodable
 # paths onto one byte string; `_identity` hashes these into a commit digest, where that would give
-# two paths one identity. ARCHITECTURE.md's "Deliberately not built" refuses folding the three.
+# two paths one identity, so the three are deliberately not folded into one.
 _ENCODING: Final = "utf-8"
 _SURROGATES: Final = "surrogatepass"
 

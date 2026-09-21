@@ -189,11 +189,11 @@ async def unrecorded(run: Run[NoParams]) -> None:
 async def resuming(run: Run[NoParams]) -> None:
     """One step, a `Stop` the first walk takes, and a second step only the resume reaches.
 
-    Branching on a module-level flag is the one thing `ARCHITECTURE.md` tells a workflow author
-    never to do, and it is deliberate here: what has to be arranged is a walk that ends - releasing
-    its checkout - with work still to come, and a workflow cannot ask for that any other way. The
-    first step is recorded on the first walk and replayed on the second, which is what makes "the
-    second walk ran in a checkout that had been handed back" the thing being measured.
+    Branching on a module-level flag is what `AGENTS.md`'s "Invariants where a mistake is silent"
+    rules out for a workflow, and it is deliberate here: what has to be arranged is a walk that ends
+    - releasing its checkout - with work still to come, and a workflow cannot ask for that any other
+    way. The first step is recorded on the first walk and replayed on the second, which is what
+    makes "the second walk ran in a checkout that had been handed back" the thing being measured.
     """
     await run.step(parent_work(), commit="the parent's own work")
     if stopping and stopping[-1]:
@@ -638,8 +638,8 @@ async def test_a_run_ending_with_a_landing_nobody_settled_keeps_every_checkout_i
 
     What makes it readable from outside is the lease: `Integration` releases one on every path that
     settles, so a lease still live where `api._walk` ends *is* a landing nobody settled. The
-    workflow below takes the hold and returns without either verb, which is the mistake
-    `ARCHITECTURE.md` writes down rather than the case the framework expects.
+    workflow below takes the hold and returns without either verb, which is a mistake rather
+    than the case the framework expects.
     """
     harness = _fakes(tmp_path)
 

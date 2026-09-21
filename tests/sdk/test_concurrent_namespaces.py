@@ -592,7 +592,7 @@ async def test_a_head_advanced_behind_the_frameworks_back_does_not_move_the_chai
     here can discharge - "`IntegrationOutcome.head` carries the value; the engine must write it into
     the parent's chain" - because `integrate()` is not a step, and a parent whose chain still points
     before its landed children would `restore()` past all of them on its next fingerprint miss -
-    one of the paths `ARCHITECTURE.md`'s "Invariants where a mistake is silent" names as destroying
+    one of the paths `AGENTS.md`'s "Invariants where a mistake is silent" names as destroying
     work rather than costing a re-run. The commit made below with `_git` is that state, arranged by
     hand where there is no `integrate()` to make it for real.
 
@@ -639,6 +639,6 @@ async def test_a_head_advanced_behind_the_frameworks_back_does_not_move_the_chai
     )
     assert _git(checkout, "rev-parse", "HEAD").strip() == advanced, (
         "the landed commit is gone: a step missed its fingerprint and restored the checkout to a "
-        "head from before the landing - one of the paths ARCHITECTURE.md's \"Invariants where a "
+        "head from before the landing - one of the paths AGENTS.md's \"Invariants where a "
         "mistake is silent\" names as destroying work rather than costing a re-run"
     )

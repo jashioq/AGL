@@ -291,7 +291,7 @@ def test_the_registry_preflight_reads_is_the_module_the_function_was_written_in(
     `preflight.check` is handed `wf.fn` and reads the `RoleFactory` values in
     `vars(sys.modules[fn.__module__])` - so the *import line above a workflow is its declaration*,
     and this test fails if the two factories declared beside `staffed` ever stop being visible to
-    it. `ARCHITECTURE.md`'s "Deliberately not built": one declaration, not two.
+    it. One declaration, not two.
 
     It over-approximates by construction and that is the accepted cost: `staffed` steps with
     neither factory and both models are demanded all the same. `tests/sdk/test_preflight.py`

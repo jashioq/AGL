@@ -59,7 +59,7 @@ on both sides and never `path`, and nothing below asks it for anything else.
 ## Where the revert-on-gate-failure test lives, and why there is no `Verifier` fixture
 
 The framework undoes a landing whose build gate then failed, and that is the property this suite
-would be most missed for. It is **not** a fourth method on this port: `ARCHITECTURE.md`'s
+would be most missed for. It is **not** a fourth method on this port: `AGENTS.md`'s
 "Deliberately not built" records `Integrator.revert()` as one of the things there is no reason to
 have, because undoing a landing that *succeeded* is `Workspace.restore(head)` - the same primitive
 the framework already uses before re-running a step and on the way out of a read-only one. This is
@@ -394,7 +394,7 @@ class IntegratorContract(IntegrationProtocolContract):
 
         The framework reads the target's head before it calls `land`, runs the build gate on what
         landed, and on failure hands that same value back to `Workspace.restore`. There is no
-        `Integrator.revert()`, and `ARCHITECTURE.md`'s "Deliberately not built" says why:
+        `Integrator.revert()`, and `AGENTS.md`'s "Deliberately not built" says why:
         undoing a landing that succeeded leaves no
         pending state to consult, so it is not this port's knowledge that is needed - the target
         simply has to be put back where it was, which `Workspace.restore` already does at two other

@@ -159,8 +159,8 @@ def _reporting_of[P](role: Role[P]) -> ReportingTool[P] | None:
     """The scan `Run.step` makes to decide which of the two step kinds this is.
 
     `Role` deliberately offers no accessor for it: the at-most-one rule is enforced at declaration,
-    so this scan is total, and `run.step` is its only caller - which is not `ARCHITECTURE.md`'s
-    "two workflows would otherwise write it themselves". Asserted here at the type level,
+    so this scan is total, and `run.step` is its only caller - so no two workflows would
+    otherwise write it themselves. Asserted here at the type level,
     because leaving it out is only safe if the `isinstance` narrows to `ReportingTool[P]`.
     """
     for declared in role.tools:
@@ -1146,8 +1146,8 @@ def test_nothing_here_is_checked_against_a_provider() -> None:
 # any more - a question is an ordinary tool, so *giving a role somewhere to ask changes that step's
 # fingerprint*, and every entry recorded before it was added misses. `test_folding_tool_calling_in
 # _moves_no_digest_although_its_trigger_is_a_term` below is where the two halves are separated: the
-# fold rides for free, the tool it rides behind does not. What follows from it is
-# `ARCHITECTURE.md`'s "A resume finishes against the files the run was recorded by" - giving a role
+# fold rides for free, the tool it rides behind does not. What follows from it is that a resume
+# finishes against the files the run was recorded by - giving a role
 # a tool it did not have before is an edit to a file in the workflow's own directory, so a run in
 # flight when it lands is refused rather than replayed past it.
 
@@ -1204,8 +1204,8 @@ def test_folding_tool_calling_in_moves_no_digest_although_its_trigger_is_a_term(
     what the fold writes is a member of `requires`, and `requires` is not a term. So no role's
     digest is different today from what it was before this implication existed.
 
-    **The second assertion is the one an author meets**, and it is the reason this test is quoted
-    from `ARCHITECTURE.md`'s "A resume finishes against the files the run was recorded by".
+    **The second assertion is the one an author meets**, because a resume finishes against the
+    files the run was recorded by.
     Declaring a tool *does* move the digest, and a question is now an ordinary tool - so a workflow
     that gives a role somewhere to ask has changed that step's fingerprint, and every entry
     recorded under the toolless role misses. A run already in flight never reaches that: the edit

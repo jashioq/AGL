@@ -30,7 +30,7 @@ classifiers = [
     "Topic :: Software Development :: Code Generators",
     "Topic :: Software Development :: Version Control :: Git",
 ]
-# Both SDKs unconditional, and that is not `ARCHITECTURE.md`'s "Vendor containment" being walked
+# Both SDKs unconditional, and that is not vendor containment being walked
 # back: what contains a vendor is `.importlinter`'s contract 3 and `config/container.py` importing
 # each one inside the function that constructs it, and neither of those reads package metadata.
 # `rich` could not be optional in any case - `container.py`'s real composition root refuses a run
@@ -89,7 +89,7 @@ dev = [
 # allowlist, a directory added to the repo tomorrow does not ship until it is named here; as
 # exclusions, it ships until somebody notices.
 #
-# `ARCHITECTURE.md` is in the list rather than left behind with `CLAUDE.md` because `src/`'s
+# `AGENTS.md` is in the list rather than left behind with `CLAUDE.md` because `src/`'s
 # comments cite its headings by name, so it is the one document the shipped source refers to.
 #
 # Every pattern is anchored with a leading `/`, and that slash is load-bearing rather than tidy.
@@ -97,7 +97,7 @@ dev = [
 # pulled `reference/README.md` into the archive - one file out of the directory the allowlist was
 # written to keep out. Anchored, each name means the repository root and nothing else.
 [tool.hatch.build.targets.sdist]
-include = ["/src", "/pyproject.toml", "/README.md", "/LICENSE", "/ARCHITECTURE.md"]
+include = ["/src", "/pyproject.toml", "/README.md", "/LICENSE", "/AGENTS.md"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agl"]
@@ -117,7 +117,7 @@ src = ["src", "tests"]
 extend-exclude = ["reference", "scratchpad"]
 
 [tool.ruff.lint]
-# `N` is pep8-naming, and it is what makes the naming convention in `CLAUDE.md` mechanical rather
+# `N` is pep8-naming, and it is what makes the naming convention mechanical rather
 # than a thing reviewers remember: N801 for classes, N806 for locals, N803 for arguments, N815 for
 # class attributes. The rules `N` cannot see - a past participle on a `-> None` function, `_check_x`
 # against `_checked_x`, a `ports/` type redefined elsewhere, a test name that is not a sentence -
@@ -125,7 +125,7 @@ extend-exclude = ["reference", "scratchpad"]
 select = ["E", "F", "I", "UP", "B", "N"]
 
 # N818 wants every exception named `...Error`, and AGL's are named for what happened. `Stop` is the
-# case that settles it: it is on the SDK front door, listed in `ARCHITECTURE.md`'s `sdk/` layer
+# case that settles it: it is on the SDK front door, exported from `agl.sdk`
 # alongside `@workflow` and `Run`, and a workflow author raises it to end a run - `StopError` would
 # be a worse name for the thing an author writes. `ports/errors.py`'s `UpstreamUnavailable` and
 # `UpstreamUnexpected` read the same way, and thirteen test exceptions under nine names are
@@ -141,14 +141,14 @@ ignore = ["N818"]
 [tool.ruff.lint.per-file-ignores]
 # `do_HEAD`, `do_GET`, `do_POST` and their four siblings are `http.server`'s dispatch table:
 # `BaseHTTPRequestHandler.handle_one_request` looks up `"do_" + command` by exact spelling, so the
-# capitals are the standard library's and not ours to rename. That is the naming convention's
-# "mirror the vendor exactly and never translate" applied to the stdlib. Scoped to the one file
+# capitals are the standard library's and not ours to rename. That is `AGENTS.md`'s "Prose in
+# `src/`" rule to mirror vendor spellings, applied to the stdlib. Scoped to the one file
 # rather than ignored globally, so the exemption says where it applies - a `do_GET` written
 # anywhere else is a mistake and still fails.
 "tests/instruments/loopback.py" = ["N815"]
 
 [tool.ruff.lint.isort]
-# The blank-line convention in `CLAUDE.md` asks for one contiguous import block. `no-lines-before`
+# `tests/test_blank_line_convention.py` asks for one contiguous import block. `no-lines-before`
 # governs the separators *inside* that block - it is what stops `I001` splitting the five sections
 # - and `lines-after-imports` governs the gap *after* it: isort's default of `-1` writes two blank
 # lines before a following `def` or `class`, where the convention wants one, and set against each

@@ -1170,10 +1170,9 @@ def test_every_declared_command_runs_on_fakes_with_no_way_out(
 # the source branch is `agl/_work/<label>/<namespace>`. So the namespace is written into the
 # repository's history; the commit id depends on it (in the fake, which hashes tree, parents and
 # message; and in real git, whose commit object contains the message); and `head` **is** a
-# fingerprint term, deliberately, and `ARCHITECTURE.md`'s "Invariants where a mistake is silent" is
-# where that is stated - a `review` step takes no inputs, so without `head` a re-run of `implement`
-# would leave review's fingerprint unchanged. Chain those and a namespace rename moves every
-# fingerprint taken after a landing.
+# fingerprint term, deliberately - a `review` step takes no inputs, so without `head` a re-run of
+# `implement` would leave review's fingerprint unchanged. Chain those and a namespace rename moves
+# every fingerprint taken after a landing.
 #
 # This is reported rather than accommodated. The second test below asserts the mechanism directly -
 # that the namespace really is inside the run branch's tip message - so the boundary is a measured

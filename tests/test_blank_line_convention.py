@@ -1,6 +1,6 @@
-"""Structural test: the blank-line convention in `CLAUDE.md`, over `src/` and `tests/`.
+"""Structural test: the blank-line convention, over `src/` and `tests/`.
 
-`CLAUDE.md`'s "The blank-line convention" is four clauses and this file is all four of them. The
+The blank-line convention is four clauses and this file is all four of them. The
 half that is deliberately *not* here is the sorting: `I001`, configured under `pyproject.toml`'s
 `[tool.ruff.lint.isort]`, orders the import block and decides where a separator goes inside it. The
 two settings written there - `no-lines-before` and `lines-after-imports` - are there so that the

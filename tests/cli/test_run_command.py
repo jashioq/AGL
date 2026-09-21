@@ -203,8 +203,8 @@ def test_a_workflows_flags_are_left_in_the_tail_and_never_in_the_namespace() -> 
     assert tail == ["-r", "add oauth", "-c", "4"]
 
 def test_the_command_calls_exactly_one_api_function() -> None:
-    """`ARCHITECTURE.md`'s "Commands stay dumb", made mechanical: this module reaches `api` once,
-    for `run`.
+    """`AGENTS.md`'s "Layers" rule for commands, made mechanical: this module reaches `api`
+    once, for `run`.
 
     `_cmd_clean` iterated worktrees, deleted branches and called `shutil.rmtree` past the `Store`
     port; `_cmd_init` did build-tool detection and TOML rendering in ~150 lines. The repair is not

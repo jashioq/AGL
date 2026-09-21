@@ -829,7 +829,7 @@ def test_the_get_parser_takes_one_or_more_positionals_and_no_option_of_its_own()
     assert positionals == [("specs", "+")]
 
 def test_the_command_calls_exactly_one_api_function() -> None:
-    """"Commands stay dumb" made mechanical - the same scan the other command suites make."""
+    """`AGENTS.md`'s "Layers" rule for commands, made mechanical as in the other suites."""
     called = {
         node.attr
         for node in ast.walk(ast.parse(inspect.getsource(get_command)))

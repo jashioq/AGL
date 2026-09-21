@@ -402,12 +402,12 @@ async def test_a_cancelled_call_raises_cancellation_and_not_an_agl_error(
 # sequence `src/agl/adapters/shell/verifier.py` and `src/agl/adapters/openai/_session.py` already
 # share, and it differs from them in exactly one line: those two escalate against the child's
 # process *group* and this one against the process, because `_spawned` gives its child no session
-# of its own. `ARCHITECTURE.md`'s "No general subprocess helper" says why that one line may differ
-# and why nothing else may - and the two properties below are what "nothing else" meant. This
+# of its own. That one line may differ
+# and nothing else may - and the two properties below are what "nothing else" meant. This
 # module had neither of them. `tests/adapters/test_shell_verifier.py` argues both at length for the
 # pair; what is repeated here is only what is different about git.
 #
-# They are deliberately not folded into a shared helper: `ARCHITECTURE.md`'s "Deliberately not
+# They are deliberately not folded into a shared helper: `AGENTS.md`'s "Deliberately not
 # built" refuses one, and `.importlinter`'s adapter-independence contract forbids one adapter
 # importing another. Three implementations that have to agree is what these tests are for.
 
@@ -522,7 +522,7 @@ async def test_a_signal_the_os_refuses_leaves_the_timeout_saying_what_it_always_
 
     The two siblings answer a denied signal by falling back from the group to the child itself.
     This module has no group to be denied - it signals the process, which is the one line
-    `ARCHITECTURE.md` allows to differ - so there is nothing left to fall back *to*, and what it
+    allowed to differ - so there is nothing left to fall back *to*, and what it
     owes is the other half of what they promise: the escalation carries on and the caller gets this
     adapter's own answer. `_stop` still waits the child out, which is why the alias here sleeps
     for a second rather than three.

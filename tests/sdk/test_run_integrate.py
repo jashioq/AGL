@@ -435,7 +435,7 @@ async def test_the_parents_last_good_advances_to_the_landing_head(tmp_path: Path
     assert run._steps.last_good == outcome.head, (
         f"the parent's chain is at {run._steps.last_good!r} and the landing produced "
         f"{outcome.head!r}. `integrate()` is not a step, so nothing journals it and nothing else "
-        f"will ever move this value - forgetting it is one of the paths ARCHITECTURE.md's "
+        f"will ever move this value - forgetting it is one of the paths AGENTS.md's "
         f"\"Invariants where a mistake is silent\" names as destroying work rather than costing a "
         f"re-run"
     )
@@ -468,7 +468,7 @@ async def test_the_parents_next_step_does_not_delete_the_child_that_landed(tmp_p
     assert (_target_dir(tmp_path) / FIRST).is_file(), (
         "the landed child's file is gone from the target's checkout after a read-only step in the "
         "parent. That step restored to `last_good`, which means the landing never reached the "
-        "parent's chain - one of the paths ARCHITECTURE.md's \"Invariants where a mistake is "
+        "parent's chain - one of the paths AGENTS.md's \"Invariants where a mistake is "
         "silent\" names as destroying work rather than costing a re-run"
     )
     assert (_target_dir(tmp_path) / CONTESTED).read_bytes() == PARENT_BODY, (
@@ -1714,15 +1714,15 @@ async def test_a_workflow_that_catches_the_raise_and_loops_again_is_not_refused_
 
     **So `conflicted` is now the live question and not the record.** It reads "there is a conflict
     here and this integration has not settled", which makes it the one predicate a loop can be
-    written against: every path out of a hold settles it - `ARCHITECTURE.md` states that as an
-    invariant - so every path out of a hold now ends the loop. The alternative fix, clearing
+    written against: every path out of a hold settles it, so every path out of a hold now ends
+    the loop. The alternative fix, clearing
     `_conflict` inside `_settle`, was rejected rather than overlooked: two tests require that field
     to outlive the settling, in this file and in `tests/sdk/test_terminal_priorities.py`, and both
     argue the same thing - giving up on a landing is not the collision not having happened.
 
     **`refused_by_the_gate` follows `conflicted` rather than the record**, which is the one
-    judgement call here. It is the discriminator over a shape - `ARCHITECTURE.md` calls
-    `conflicted` "one shape over two causes" and this predicate "what tells the two apart" - so a
+    judgement call here. It is the discriminator over a shape - `conflicted` is one shape over
+    two causes and this predicate is what tells the two apart - so a
     true answer from it asserts the shape is present. A settled outcome answering "not conflicted"
     and "refused by the gate" at once is the same class of contradiction this test exists to
     remove. The record itself is still readable: `conflict` and `verdict` are both still there,

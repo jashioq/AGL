@@ -2795,8 +2795,8 @@ HAZARDS: Final[tuple[tuple[str, str, str], ...]] = (
     ("ANTHROPIC_DEFAULT_HAIKU_MODEL", "claude-opus-5", "haiku resolved to opus"),
     ("ANTHROPIC_DEFAULT_MODEL", "claude-haiku-4-5-20251001", "the default resolved to haiku"),
     ("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001", "the model resolved to haiku"),
-    # The level that outranks `--effort`, which "Invariants where a mistake is silent" argues at
-    # length and the two tests above hold at the call sites.
+    # The level that outranks `--effort`, under AGENTS.md's "Invariants where a mistake is
+    # silent", and the two tests above hold it at the call sites.
     ("CLAUDE_CODE_EFFORT_LEVEL", "low", "a session opened `--effort xhigh` applied `low`"),
     # Where the CLI writes, regardless of what `enable_file_checkpointing` says: the SDK sets this
     # when the option is on and never unsets it when the option is off.

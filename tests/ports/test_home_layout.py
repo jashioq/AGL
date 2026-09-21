@@ -379,8 +379,8 @@ def test_only_the_posix_venv_layout_is_composed_because_no_run_reaches_windows()
     The comment on `workspace_site_packages` rests on AGL never running on Windows, and this is
     the check under that sentence: `adapters/git/_trees.py` imports `fcntl`, which no Windows
     build of Python ships, so `agl run` cannot reach a workspace there to want the other shape.
-    A `ports/` test reads an adapter for the one reason C10 gives - the sentence is load-bearing,
-    so it belongs where it fails when it stops being true.
+    A `ports/` test reads an adapter because the sentence is load-bearing, so it belongs where it
+    fails when it stops being true.
     """
     assert "fcntl" in imported_modules(_trees)
     assert "Lib" not in workspace_site_packages(_HOME, "python3.14").parts

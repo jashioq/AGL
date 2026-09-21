@@ -658,7 +658,7 @@ def test_the_new_parser_takes_one_positional_and_no_option_of_its_own() -> None:
     assert positionals == ["workflow"]
 
 def test_the_command_calls_exactly_one_api_function() -> None:
-    """"Commands stay dumb" made mechanical - the same scan the other command suites make.
+    """`AGENTS.md`'s "Layers" rule for commands, made mechanical as in the other suites.
 
     A `toml_file.` or a `Path(` here would be the scaffold's own text coming back into the CLI,
     which is the one place this command has to grow to stop being a command.

@@ -2,7 +2,7 @@
 
 A workflow's roles are the `@role(model=…)` factories bound in the module its `def` was executed
 in, and also those bound in any module bound there. That is one declaration and not two, which is
-why `@workflow` carries no `roles=` list - see `ARCHITECTURE.md`'s "Deliberately not built" - and
+why `@workflow` carries no `roles=` list - and
 it makes a claim about *which* roles preflight demands a provider for a claim about a module
 namespace. Six of that suite's claims therefore cannot be made inside it:
 `tests/sdk/test_preflight.py` is one namespace and holds six factories bound directly over two

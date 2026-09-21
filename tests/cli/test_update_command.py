@@ -964,7 +964,7 @@ def test_the_update_parser_takes_one_optional_positional_and_no_option_of_its_ow
     assert positionals == [("workflow", "?")]
 
 def test_the_command_calls_exactly_one_api_function() -> None:
-    """"Commands stay dumb" made mechanical - the same scan the other command suites make."""
+    """`AGENTS.md`'s "Layers" rule for commands, made mechanical as in the other suites."""
     called = {
         node.attr
         for node in ast.walk(ast.parse(inspect.getsource(update_command)))

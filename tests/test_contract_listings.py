@@ -85,7 +85,7 @@ and is where a third one arrives. What would not be seen here is a vendor spelle
 built distribution carries and no `pip install` resolves; nothing does that today, and doing it
 would be a design change big enough to bring somebody back to this file.
 
-**Unconditional is not `ARCHITECTURE.md`'s "Vendor containment" walked back, and it is why this
+**Unconditional is not vendor containment walked back, and it is why this
 comparison matters more rather than less.** What contains a vendor is contract 3 and
 `config/container.py` importing each one inside the function that constructs it, and neither of
 those reads package metadata at all. A base dependency is present in *every* install, so a module
@@ -184,8 +184,8 @@ PORT_EXEMPT: Final[Mapping[str, str]] = {
 # `openai/` hold in common, and `Caller` with its two message constants, 24 byte-identical lines in
 # both `_tools.py`. Both stay duplicated. An entry here is the only shape either could have taken -
 # a directory cannot be exempted, and a listed peer package is forbidden to the very adapters that
-# would import it - which is why the refusal is recorded here. ARCHITECTURE.md's "No shared module
-# under `adapters/`" carries the argument in full. The list has been confirmed against the tree and
+# would import it - which is why the refusal is recorded here. The list has been confirmed
+# against the tree and
 # both entries below are still the whole of it.
 ADAPTER_EXEMPT: Final[Mapping[str, str]] = {
     "__init__.py": "the adapters package root; no adapter lives in it",
@@ -326,7 +326,7 @@ def _unclassified_port(shown: str, dotted: str) -> str:
         f"[{PURE_TYPES_SECTION}]:\n"
         f"    {dotted}\n"
         f"\n"
-        f"Which list is a question for ARCHITECTURE.md's \"The layers\" and not for this test: "
+        f"Which list is a design question and not one for this test: "
         f"`source_modules` if the module holds types an ABC speaks, `forbidden_modules` if it "
         f"holds an ABC. There is no exemption route here - __init__.py is out of the comparison "
         f"because import-linter would skip it in both lists, which is a fact about the tool and "
@@ -367,8 +367,8 @@ def _uncontained_vendor(distribution: str, imported: str) -> str:
         f".importlinter does not contain it.\n"
         f"\n"
         f"That contract is what keeps a vendor SDK visible to exactly one adapter package, so that "
-        f"no module outside that package can reach the SDK at all (ARCHITECTURE.md's \"Vendor "
-        f"containment\"). Its `forbidden_modules` is a hand-maintained list of two, and a third "
+        f"no module outside that package can reach the SDK at all. Its `forbidden_modules` is a "
+        f"hand-maintained list of two, and a third "
         f"SDK missing from it is contained by nothing at all: contract 5 governs who may import "
         f"agl.adapters and has no opinion about what an adapter imports from outside, so any "
         f"module in the tree could import this one with every contract still reported kept. "
@@ -416,7 +416,7 @@ def _unlisted_package(name: str) -> str:
         f"\n"
         f"A package has no exemption route - ADAPTER_EXEMPT in this test is keyed by filename and "
         f"holds only single-file members. An adapter package that genuinely must import another "
-        f"adapter is an architecture change: ARCHITECTURE.md changes first, .importlinter second."
+        f"adapter is an architecture change, made in .importlinter rather than exempted here."
     )
 
 def _unlisted_module(filename: str) -> str:
@@ -511,7 +511,7 @@ def _declared_vendors() -> dict[str, str]:
     dependencies = project.get("dependencies")
     assert isinstance(dependencies, list) and dependencies, (
         f"{PYPROJECT_FILE} declares no [project] dependencies, which is where a vendor SDK is "
-        f"added (ARCHITECTURE.md's \"Vendor containment\"). Either the list moved and this test is "
+        f"added. Either the list moved and this test is "
         f"now comparing contract 3 against nothing, or AGL has stopped depending on a vendor SDK "
         f"at all, in which case contract 3 and this comparison both need revisiting."
     )

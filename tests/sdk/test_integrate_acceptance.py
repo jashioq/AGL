@@ -27,7 +27,7 @@ The five criteria, and what discharges each:
      `test_a_landed_child_survives_the_parents_next_fingerprint_miss` lands a child, then makes the
      parent miss, and asserts the landed *contents* and the landed *ancestry* are both still there
      after the pre-run `reset --hard` + `clean -fd`. Real git, because that is the primitive whose
-     effect is being survived. Forgetting the advance is one of the paths `ARCHITECTURE.md`'s
+     effect is being survived. Forgetting the advance is one of the paths `AGENTS.md`'s
      "Invariants where a mistake is silent" names as destroying work rather than costing a re-run.
   4. **A resumed run finds a hold it did not take, and does not exit 70.**
      `test_a_second_process_meets_the_hold_the_first_one_died_holding` and its `abort` twin, through
@@ -1901,8 +1901,7 @@ async def test_a_gate_that_raises_inside_retry_settles_the_outcome_and_gives_the
     port has three of them and one is "give up"; if giving up can fail, and failing means keep
     holding, then a failed give-up is unrecoverable by construction - there is no fourth verb to
     reach for. So the rule is the one `integrate()` already followed and `api.run` already spells in
-    its `finally`, and `ARCHITECTURE.md` now carries it beside the other invariants where a mistake
-    is silent: every path out of a hold settles it.
+    its `finally`: every path out of a hold settles it.
 
     **Releasing does not abandon what the target is holding.** A hold is durable and `land` answers
     a pre-existing one with a `Conflict` - which is exactly the state a resumed run is required to

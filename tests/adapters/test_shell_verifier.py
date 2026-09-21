@@ -495,7 +495,7 @@ def _alive(pid: int) -> bool:
 #
 # `src/agl/adapters/openai/_session.py` runs the identical sequence against the Codex CLI and had
 # both of these; this adapter had neither, and the two are deliberately *not* folded into a shared
-# helper - `ARCHITECTURE.md`'s "Deliberately not built" refuses a general subprocess helper, and
+# helper - `AGENTS.md`'s "Deliberately not built" refuses a general subprocess helper, and
 # `.importlinter`'s adapter-independence contract forbids one adapter importing another. They are
 # two implementations that have to agree, which is what these tests are for.
 

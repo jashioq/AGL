@@ -1,14 +1,14 @@
-"""Structural test: C8 - nothing in `src/` or `tests/` cites a number that can be deleted quietly.
+"""Structural test: nothing in `src/` or `tests/` cites a number that can be deleted quietly.
 
-CLAUDE.md's comment convention states the rule: **cite nothing that can be deleted without breaking
-a build.** Refer to a module, a symbol, a test or an `ARCHITECTURE.md` heading, so a stale reference
-breaks loudly rather than quietly pointing at nothing.
+This file is the rule: **cite nothing that can be deleted without breaking a build.** Refer to a
+module, a symbol, a test or an `AGENTS.md` heading, so a stale reference breaks loudly rather than
+quietly pointing at nothing.
 
 ## Why this rule earns a mechanism when the other nine do not
 
-It is the one rule in the convention with a measured survival rate. `ARCHITECTURE.md`'s
-"Deliberately not built" moved more than two hundred lines down that file over five commits, and
-every citation of it *by name* survived all six moves without anybody touching one. Numbered
+It is the one rule in the convention with a measured survival rate. A document's "Deliberately not
+built" moved more than two hundred lines down its file over five commits, and every citation of
+it *by name* survived all six moves without anybody touching one. Numbered
 cross-references in the same tree have now been repaired twice and came back both times, because
 nothing notices them: a heading renumbered, a list item deleted, a section moved, and every gate in
 this repository stays green while the citation points somewhere else or nowhere.
@@ -33,7 +33,7 @@ Three shapes found in this tree are **not** on the list, and each is left off fo
     and the repair has to come first or the build goes red on work nobody has done yet.
   * **`clause`.** `tests/test_measurable_targets.py`'s `_counted` numbers three clauses and then
     refers to them three lines later, inside one docstring. The referent moves with the citation and
-    a reader sees both at once, which is not the failure C8 is about.
+    a reader sees both at once, which is not the failure this rule is about.
   * **A bare `#N`.** Overwhelmingly data here rather than citation - a step label, an attempt
     counter - so the word in front of the number is what makes it a citation, and the word is what
     this reads.
@@ -56,18 +56,18 @@ target number, and
 `range(1, 13)`. Deleting the eighth target's entry was tried: that assertion fails and names the gap
 in the run.
 
-**Both are repo-wide rather than file-scoped, and that is the reading C8's own words force.** The
-test is "can this be deleted without breaking a build", not "is the citation next to its
+**Both are repo-wide rather than file-scoped, and that is the reading the rule's own words force.**
+The test is "can this be deleted without breaking a build", not "is the citation next to its
 definition". A target number cited from `tests/test_api.py` resolves to a key that cannot be deleted
 quietly, so it is a live citation there exactly as it is in the file that pins it. Reading it the
-other way would forbid the 26 target citations in seventeen other modules, every one of them
-already anchored, and would forbid them for being far away rather than for being fragile.
+other way would forbid the 26 target citations in seventeen other modules, every one of them already
+anchored, and would forbid them for being far away rather than for being fragile.
 
 **The exemption is by anchor and not by word.** `_live_numbers` reads the section ids out of the
 real `.importlinter` and the keys out of the real `SETTLED`, so a contract number nothing declares
 and a target number nothing settles are both reported like any other. That makes the exemption
 self-correcting: delete a contract and every citation of it turns into a finding here, which is the
-loud break C8 asks for and the reason this file is worth having.
+loud break the rule asks for and the reason this file is worth having.
 
 ## Why a text scan and not an AST one
 
@@ -273,11 +273,11 @@ def _points_at_something_deletable(shown: str, citation: Citation) -> str:
     return (
         f"{shown}:{citation.line} cites {citation.kind} {citation.number} by number.\n"
         f"\n"
-        f"CLAUDE.md's C8: cite nothing that can be deleted without breaking a build. A number in a "
+        f"Cite nothing that can be deleted without breaking a build. A number in a "
         f"comment, a docstring or an assertion message points at a heading, a list item or a "
         f"paragraph, and all three can be deleted, renumbered or moved with every gate in this "
         f"repository still green - so the citation quietly means something else, or nothing. "
-        f"ARCHITECTURE.md's \"Deliberately not built\" moved more than two hundred lines down that "
+        f"A document's \"Deliberately not built\" moved more than two hundred lines down its "
         f"file over five commits and every citation of it by name survived; the numbered ones have "
         f"been repaired twice.\n"
         f"\n"
@@ -288,14 +288,14 @@ def _points_at_something_deletable(shown: str, citation: Citation) -> str:
         f"Two kinds of number are exempt, and both are exempt by anchor rather than by word: a "
         f"contract number that is a section id in .importlinter, and a target number that is a key "
         f"of SETTLED in tests/test_measurable_targets.py. Deleting either breaks a build, which is "
-        f"the whole of what C8 asks. {citation.number} is not one of those today, so if it is "
+        f"all this rule asks. {citation.number} is not one of those today, so if it is "
         f"meant to be an identifier, the file that pins it is what changes first."
     )
 
 # --- The real comparison -------------------------------------------------------------------------
 
 def test_no_module_in_src_or_tests_cites_a_number_that_can_be_deleted_quietly() -> None:
-    """`src/` and `tests/`, line by line, against C8 and the two anchored exemptions.
+    """`src/` and `tests/`, line by line, against the rule and the two anchored exemptions.
 
     Two assertions, and the second is what keeps the first honest. No line cites a numbered thing
     outside the exemptions, and the scan is asserted to have walked both trees - so a version of
@@ -364,7 +364,7 @@ def test_every_name_the_journal_suite_is_cited_by_is_still_a_heading_inside_it()
     ]
     assert not missing, (
         f"{JOURNAL_FILE} has no heading starting {missing}. Those names are how this repository "
-        f"cites that file - they replaced numbered headings under C8 - so a rename here is a "
+        f"cites that file - they replaced numbered headings - so a rename here is a "
         f"rename in every module that cites one, and in JOURNAL_HEADINGS above"
     )
 

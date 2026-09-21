@@ -405,8 +405,8 @@ def test_a_workflow_that_returns_exits_zero(tmp_path: Path) -> None:
     assert asyncio.run(harness.services.store.read_record(SCOPE)) is not None
 
 def test_the_workflow_is_handed_the_bundle_that_was_composed(tmp_path: Path) -> None:
-    """`ARCHITECTURE.md`'s "Commands stay dumb", from the far end: one composition, and the ports
-    reach the workflow.
+    """`AGENTS.md`'s "Layers" rule for commands, from the far end: one composition, and the
+    ports reach the workflow.
 
     `Git(Path.cwd())` was constructed four times and the whole `RunContext` twice. Identity is what
     makes this a test of that - an equal-looking second bundle would pass anything weaker. Port by
@@ -956,8 +956,8 @@ def test_an_adapter_raising_with_nothing_under_it_is_still_agls_own_bug(
 # --- the composition, and the number this module may not write -----------------------------------
 
 def test_the_composition_happens_once_and_only_after_argv_is_understood(tmp_path: Path) -> None:
-    """`ARCHITECTURE.md`'s "Commands stay dumb", measured: one resolution per invocation, and none
-    for a wrong line.
+    """`AGENTS.md`'s "Layers" rule for commands, measured: one resolution per invocation, and
+    none for a wrong line.
 
     Four `Git(Path.cwd())` and two `RunContext`s is what this counts against. The second half is the
     ordering `main` is written in: a person who typed the command wrong is told what they typed
@@ -1138,8 +1138,8 @@ def test_the_note_about_a_suffixed_name_reaches_stderr_and_leaves_stdout_alone(
     `config/toml_file.py::registered_as` owns the words and this owns the stream, which is what
     lets either move without the other. stderr because what a machine consumes goes on stdout and
     a note about which name AGL settled on is not that - `cli/commands/__init__.py` argues the
-    rule - and it is printed from `cli/` rather than through `api.py`'s `_warn`, which
-    `ARCHITECTURE.md` keeps as the one place that module writes to a stream.
+    rule - and it is printed from `cli/` rather than through `api.py`'s `_warn`, which is the
+    one place that module writes to a stream.
     """
     home, first = _unregistered_repository(tmp_path)
     second = tmp_path / "elsewhere" / str(PROJECT)
@@ -1179,8 +1179,8 @@ def test_main_writes_no_exit_code_of_its_own(tmp_path: Path) -> None:
     )
 
 def test_the_working_directory_is_read_exactly_once_in_the_whole_of_agl() -> None:
-    """`ARCHITECTURE.md`'s "Commands stay dumb", counted: `Git(Path.cwd())` was constructed **four
-    times**, once per command.
+    """`AGENTS.md`'s "Layers" rule for commands, counted: `Git(Path.cwd())` was constructed
+    **four times**, once per command.
 
     This stopped being free once a second reader arrived. `Path.cwd()` used to sit inside the thunk
     that resolves a project, which was the whole of what needed it; registration is the second

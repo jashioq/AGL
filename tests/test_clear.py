@@ -46,8 +46,8 @@ the containment question is gone rather than merely answering "yes" more often. 
 ## Two locks, and the two tests that are about them
 
 **AGL's own, which the fakes can answer.** "`clear` refuses while a run holds a lock" had nothing
-behind it for a long time: no durable "this run is live" record, `ARCHITECTURE.md`'s "Deliberately
-not built" refusing stored status by name, and leases in-process. `WorkspaceProvider.hold` is the
+behind it for a long time: no durable "this run is live" record, `tests/ports/test_run.py`
+refusing stored status by name, and leases in-process. `WorkspaceProvider.hold` is the
 mechanism now - `api.run` and `api.resume` take it across everything durable they do and
 `api.clear` takes it around its removals - and the two tests that drive it issue the `clear` **from
 inside the workflow**, which is the only way one process can be two invocations. The fakes can
@@ -692,8 +692,8 @@ async def test_a_clear_aimed_at_a_live_run_refuses_and_takes_nothing(tmp_path: P
     """The last sentence, which had no mechanism behind it for a long time.
 
     "It refuses while a run holds a lock" - and there was nothing to refuse with: no durable "this
-    run is live" record, `ARCHITECTURE.md`'s "Deliberately not built" refusing stored status by
-    name, and leases in-process. So a `clear` aimed at a run live in another `agl` took its
+    run is live" record, `tests/ports/test_run.py` refusing stored status by name, and leases
+    in-process. So a `clear` aimed at a run live in another `agl` took its
     checkouts away underneath it and said nothing. What closes it is `WorkspaceProvider.hold`,
     taken by `api.run` across everything durable it does and by `api.clear` around its removals.
 
@@ -996,8 +996,8 @@ async def test_a_locked_worktree_refuses_a_clear_before_it_has_taken_anything_aw
 ) -> None:
     """The last sentence - "It refuses while a run holds a lock" - and *where* that refusal lands.
 
-    There is no durable "this run is live" record in AGL: `ARCHITECTURE.md`'s "Deliberately not
-    built" refuses stored status by name, and leases are in-process, so a second `agl` invocation
+    There is no durable "this run is live" record in AGL: `tests/ports/test_run.py` refuses
+    stored status by name, and leases are in-process, so a second `agl` invocation
     cannot see one. The registry mutex is cross-process but is held for milliseconds around
     `worktree prune` and refuses only on a deadline. What is left is git's own `worktree lock`, and
     it really does refuse: `prune` skips a locked entry even after its directory has gone, so the

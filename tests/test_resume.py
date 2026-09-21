@@ -7,8 +7,8 @@ through `api` at all. What this module owes is the other half of that sentence: 
 genuinely replays**, that the operation a person types is the one wired to the ledger, and that the
 refusals asked of it are the ones it makes.
 
-The headline property is therefore stated the way `ARCHITECTURE.md`'s "Invariants where a mistake
-is silent" states it - "the worker was not called" is the whole of what a replay hit *is* - so
+The headline property is therefore stated the way `AGENTS.md`'s "Invariants where a mistake
+is silent" states it - replay skips the worker, the whole of what a replay hit *is* - so
 every test that cares counts **agent dispatches**, not entries. A run is interrupted between two
 steps, resumed, and the first step's agent must have run exactly once across both invocations while
 still handing back the value it produced the first time. An implementation that re-ran it would

@@ -5,7 +5,7 @@ make and unmake isolated places; this one makes no place and unmakes none - it s
 process is walking this run, for as long as the context is open, so that a `clear` aimed at a run
 live in another `agl` refuses instead of taking its checkouts away underneath it. That sentence
 came before any mechanism behind it: there is no durable "this run is live" record, and
-`ARCHITECTURE.md`'s "Deliberately not built" refuses stored status by name. The mechanism is a
+`tests/ports/test_run.py` refuses stored status by name. The mechanism is a
 `flock` on the run directory held for the life of the process - an OS lock that releases on death,
 and not stored status.
 

@@ -12,7 +12,7 @@ a person to retry a command that will refuse them again for as long as the permi
 
 `_translated` used to be written twice, byte for byte, in `git/_trees.py` and `git/_working.py`.
 Now `_trees.py` holds it and `_working.py` spends it - a sibling module inside one adapter, which
-`ARCHITECTURE.md`'s "No general subprocess helper" names as the one place a helper can be shared
+is the one place a helper can be shared
 for free. **The fold is what makes this test cheap enough to write**: one assertion now covers
 both modules, where before it would have covered one definition and left an identical twin
 unasserted next to it. Banking that is the point of having folded them.

@@ -46,7 +46,7 @@ that notices:
     which is where the resume below it then looks.
 
 **A sixth is here for the opposite reason: its failure is the loudest thing in this design.**
-`advance` is the landing handed back to the parent's chain - one of `ARCHITECTURE.md`'s
+`advance` is the landing handed back to the parent's chain - one of `AGENTS.md`'s
 "Invariants where a mistake is silent" - and a chain that did not follow a landing means the
 parent's next fingerprint miss restores past every child that has landed and cleans the tree of it.
 That is not a re-run and not an exception - it is work gone, and that section names it among the
@@ -536,7 +536,7 @@ async def test_advance_moves_the_chain_to_a_landed_head_and_the_next_restore_kee
     assert calls[0] == ("restore", landed), (
         f"the pre-run restore targeted {calls[0][1]!r}, a commit from before the landing: that is "
         f"`reset --hard` and `clean -fd` over every child that had landed - one of the paths "
-        f"ARCHITECTURE.md's \"Invariants where a mistake is silent\" names as destroying work "
+        f"AGENTS.md's \"Invariants where a mistake is silent\" names as destroying work "
         f"rather than costing a re-run"
     )
     assert (raw.path / "src" / "landed.txt").read_bytes() == b"from T-01\n"

@@ -11,7 +11,7 @@ A module-level `asyncio.Lock` taken around every write leaves all sixty store te
 in `tests/` so much as says the word: the clause is stated everywhere and checked nowhere.
 `ports/store.py` states it - "An implementation that would have to put every write behind one
 mutex, because everything it holds is one document, is not satisfying this port" - and
-`ARCHITECTURE.md`'s "Deliberately not built" states the decision under it: every document has its
+the decision under it is that every document has its
 own address, so a write is one `os.replace`, atomic and needing no coordination. Both store
 implementations restate it in their own docstrings.
 

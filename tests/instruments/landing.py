@@ -15,7 +15,7 @@ outright that a `FakeRepository` dies with its process, so the hold a resumed ru
 never there to find.
 
 **An integration that replays.** The one rule replay places on authors - branch only on step
-results, under `ARCHITECTURE.md`'s "Invariants where a mistake is silent" - is enforced by a
+results, under `AGENTS.md`'s "Invariants where a mistake is silent" - is enforced by a
 contract test: run to completion, kill at every step boundary, resume, assert identical final
 state. `tests/instruments/replay.py` is that test's driver for *steps*. Nothing journals an
 integration, so
@@ -424,7 +424,7 @@ async def _clean(driver: _Driver, run: Run[None]) -> None:
     already in the target. What that must not do is land it twice, and what the step after it must
     not do is re-run - its fingerprint is taken over the parent's chain, which the landing advanced,
     and a resume that rebuilt the chain differently would miss and restore past the landing. That
-    is the landing-handed-back-to-the-parent's-chain invariant, under `ARCHITECTURE.md`'s
+    is the landing-handed-back-to-the-parent's-chain invariant, under `AGENTS.md`'s
     "Invariants where a mistake is silent".
     """
     child = run.worktree(CHILD)

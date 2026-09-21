@@ -180,7 +180,7 @@ async def resume(
 # first and keeps a child branch whose work reached nothing. The two are answering different
 # questions rather than disagreeing: a release is automatic and nobody asked for it, so a branch it
 # took would be work destroyed as a side effect, while a clear is a label somebody typed. What a
-# containment gate would buy here is argued under ARCHITECTURE.md's "Deliberately not built" - a
+# containment gate would buy here is argued under AGENTS.md's "Deliberately not built" - a
 # kept branch is a label the `Store` reads as free and the repository does not, the warning naming
 # it arrives after the record any second `agl clear` would need is gone, and a `--force` to get past
 # it is a confirmation everybody learns to type. `Cleared` says what went, afterwards, instead.

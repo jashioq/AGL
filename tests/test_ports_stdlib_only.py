@@ -1,7 +1,7 @@
 """Structural test: `ports/` imports nothing but the standard library and its own ring.
 
-`ARCHITECTURE.md`'s "The layers" says it from both ends in one bullet: `ports` "imports nothing but
-stdlib", and a `ports/` module is an ABC or a plain type an ABC speaks, neither of which has any
+`AGENTS.md`'s "Layers" says it in one line: `ports` imports only the standard library and itself.
+A `ports/` module is an ABC or a plain type an ABC speaks, neither of which has any
 business knowing what is installed. It is the load-bearing half of the dependency rule - everything
 else in AGL is allowed to import `ports`, so whatever `ports` drags in is dragged into every ring at
 once, and a `pydantic` model in a port signature is one every adapter, every workflow and every test
@@ -11,8 +11,8 @@ of either has to have installed to type-check.
 `import pydantic` written into `src/agl/ports/clock.py`, `lint-imports` reports every contract kept.
 Contract 1 orders the `agl` layers and has no opinion about anything outside `agl`. Contract 3
 forbids `claude_agent_sdk` and `rich` *by name*, which is the only thing a `forbidden` contract can
-do. Contract 2 governs the ring's inside. So the stdlib-only rule was the one rule in
-`ARCHITECTURE.md` with no mechanism behind it at all.
+do. Contract 2 governs the ring's inside. So the stdlib-only rule had no mechanism behind it at
+all.
 
 ## Why `.importlinter` cannot express it, rather than nobody having written it down
 
@@ -161,7 +161,7 @@ def _reaches_outside_the_ring(shown: str, finding: Foreign) -> str:
         f"{shown}:{finding.line} imports {finding.imported}, which is neither the standard library "
         f"nor part of agl.ports.\n"
         f"\n"
-        f"ARCHITECTURE.md's \"The layers\" says `ports` imports nothing but stdlib, and this is "
+        f"AGENTS.md's \"Layers\" says `ports` imports nothing but stdlib, and this is "
         f"the only thing in the repository that says it: no contract in .importlinter can, because "
         f"every contract type there names what is forbidden or how modules are ordered, and the "
         f"rule here is an allow list whose complement is every distribution there is.\n"
@@ -174,13 +174,12 @@ def _reaches_outside_the_ring(shown: str, finding: Foreign) -> str:
         f"\n"
         f"Two ways to resolve it, and they are not interchangeable:\n"
         f" 1. move the code that needs {finding.imported} into the adapter that stands behind "
-        f"this port - ARCHITECTURE.md's \"The layers\" is explicit that a module belongs in "
+        f"this port - a module belongs in "
         f"adapters/ if it imports a vendor SDK, and the port keeps speaking in types it can "
         f"define itself;\n"
-        f" 2. change ARCHITECTURE.md first and this file second, which is the order the "
-        f".importlinter header sets for a rule that has genuinely moved. Two places there state "
-        f"it: the `ports` bullet under \"The layers\", and \"One clause cannot be a contract\", "
-        f"which quotes it and names this file as the thing that enforces it.\n"
+        f" 2. change AGENTS.md's \"Layers\" first and this file second, which is the order the "
+        f".importlinter header sets for a rule that has genuinely moved. The `ports` line there "
+        f"states it and names this file as the thing that enforces it.\n"
         f"\n"
         f"A `TYPE_CHECKING` guard is not a third way. It is still an import, it is still in the "
         f"signature, and this scan reads the whole module."
@@ -193,7 +192,7 @@ def _package_of(path: Path) -> str:
 # --- The real comparison -------------------------------------------------------------------------
 
 def test_every_module_under_ports_imports_nothing_but_stdlib_and_its_own_ring() -> None:
-    """`src/agl/ports/`, module by module, against `ARCHITECTURE.md`'s "The layers"."""
+    """`src/agl/ports/`, module by module, against `AGENTS.md`'s "Layers"."""
     sources = sorted(PORTS_DIR.rglob("*.py"))
     assert sources, (
         f"{PORTS_DIR} holds no modules at all. This test walked the wrong directory and is "

@@ -2,7 +2,7 @@
 
 The *one rule* fingerprinting places on workflow authors is that a workflow branches only on step
 results - `if findings.high()` is fine; `if datetime.now().hour < 18` breaks replay - and
-`ARCHITECTURE.md`'s "Invariants where a mistake is silent" is where the rule and its silence are
+`AGENTS.md`'s "Invariants where a mistake is silent" is where the rule and its silence are
 written down. What enforces it is an SDK contract test: run to completion, kill at every step
 boundary, resume, assert identical final state. This file is that test.
 
@@ -684,7 +684,7 @@ def test_a_base_that_advanced_behind_the_journals_back_does_not_invalidate_earli
 
     The second half is the expensive one and is asserted separately: because every step hits, no
     step restores, and the advanced commit is still the run branch's tip afterwards. A parent
-    restoring past its landed children is one of the paths `ARCHITECTURE.md`'s "Invariants where a
+    restoring past its landed children is one of the paths `AGENTS.md`'s "Invariants where a
     mistake is silent" names as destroying work.
     """
     _spawn(world, programme="core", tag="first", seed=KILLED_SEED)
@@ -708,7 +708,7 @@ def test_a_base_that_advanced_behind_the_journals_back_does_not_invalidate_earli
     assert after.entries == before.entries, "a resume that hit everything wrote something anyway"
     assert after.branches[run_branch(RunLabel(LABEL))] == advanced, (
         "the landed commit is gone: a step missed its fingerprint and restored the worktree to a "
-        "head from before the landing - one of the paths ARCHITECTURE.md's \"Invariants where a "
+        "head from before the landing - one of the paths AGENTS.md's \"Invariants where a "
         "mistake is silent\" names as destroying work rather than costing a re-run"
     )
 

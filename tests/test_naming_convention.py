@@ -1,6 +1,6 @@
-"""Structural test: the naming convention in `CLAUDE.md`, over `src/` and `tests/`.
+"""Structural test: the naming convention, over `src/` and `tests/`.
 
-`CLAUDE.md`'s "The naming convention" is nine rules, and it says which mechanism holds each. Casing
+The naming convention is nine rules, N1 to N9, each held by a mechanism or a reviewer. Casing
 is ruff's, and selecting `pep8-naming` as `N` in `pyproject.toml` is what put it there - N801 for
 classes, N802 for functions, N803 for arguments, N806 for locals, N815 for class attributes.
 Mirroring a vendor's spelling, letting parallel siblings share names, spelling words out and the
@@ -77,17 +77,17 @@ along shortly. Relative imports are resolved rather than skipped, on
 every dotted import because of that would be a hole shaped exactly like the one it exists to close.
 
 **Why this is a test and not another `.importlinter` contract.** import-linter could express it -
-`protected` is the contract type - and the cost is not in writing it. `CLAUDE.md`, and
+`protected` is the contract type - and the cost is not in writing it. `AGENTS.md`, and
 `tests/test_contract_listings.py` and `tests/test_contract_firing.py` in their docstrings and in
 their data, all argue about the contracts there are, one by one. Another means editing every one of
-those, and `CLAUDE.md`'s own instruction to refer to gates by name and never by number is the
+those, and `AGENTS.md`'s own instruction to refer to gates by name and never by number is the
 warning that a count is the thing that goes stale. The strength is identical either way. So it
 lands here, next to the five other rules about what the source says.
 
 **The other half of N3 is not here and cannot be.** `sdk/_engine/`'s nine modules are imported
 freely by `api`, by `config` and by `sdk`'s own modules: the underscore there names the *workflow
 author's* surface, not the framework's, so there is no import that would be a violation and nothing
-for a scan to find. It is stated in prose instead, in `ARCHITECTURE.md`'s `sdk/` paragraph. The two
+for a scan to find. It is stated in prose instead, in `AGENTS.md`'s "Layers". The two
 halves of the rule mean different things, which is why one is mechanical and the other is not.
 
 ## N5 - a type defined in `ports/` is not redefined
@@ -514,9 +514,8 @@ def test_no_module_outside_an_adapter_package_imports_that_packages_private_modu
         f"package breaks a module that never named it.\n"
         f"\n"
         f"Import what the package exports, or - if the thing being reached for genuinely belongs "
-        f"to more than one caller - move it onto the package's own surface first. "
-        f"ARCHITECTURE.md's \"No shared module under adapters/\" is what a fold across two "
-        f"adapters costs, and it is not a route around this."
+        f"to more than one caller - move it onto the package's own surface first. A module "
+        f"shared across two adapters is not a route around this."
         for source in _sources(SOURCE_ROOT)
         for finding in private_module_leaks(
             source.read_text(encoding="utf-8"),

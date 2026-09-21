@@ -9,7 +9,6 @@ def exit_status(error: Exception) -> int:
 
 # `InternalError`'s code is not one answer among the others: it says AGL had no name for what one
 # of them raised, which `DisagreeingRefusals`' would hide by saying every one of them was named.
-# ARCHITECTURE.md's "Errors at the boundary" argues why no other code is preferred to another.
 def joint_status(codes: Set[int]) -> int:
     unnamed = exit_code_for(InternalError)
     if unnamed in codes:

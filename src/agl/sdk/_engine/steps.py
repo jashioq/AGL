@@ -44,7 +44,7 @@ class Steps:
     # No entry, no step lock and no restore. A tool handler calling this from inside a step would
     # wait on the lock that step holds, and a restore would move the branch under a replayed step.
     # So a verdict measures the checkout as it stands, which on a resume can be past the replayed
-    # head - "Invariants where a mistake is silent" carries that price.
+    # head - AGENTS.md's "Invariants where a mistake is silent" carries that price.
     async def verify(self, command: str) -> VerifierOutcome:
         if not isinstance(command, str):
             raise InputError(_not_a_command(command))

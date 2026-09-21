@@ -173,8 +173,8 @@ PROBES: Final[tuple[Probe, ...]] = (
         rule="the CLI importing the harness - independent siblings, which `|` is what says",
         breaks=frozenset({"1"}),
     ),
-    # The independence half, second pair - `agl.sdk | agl.adapters`, which is `ARCHITECTURE.md`'s
-    # "The dependency rule": "siblings and may not import each other". Contract 1 once had three
+    # The independence half, second pair - `agl.sdk | agl.adapters`, siblings that may not import
+    # each other. Contract 1 once had three
     # probes and this was not one of them: the row above was the only independence probe there was,
     # so this pair was enforced by nothing that anything checked. Respelling it `:` left
     # `lint-imports` reporting every contract kept, and the whole suite green - which is this file's

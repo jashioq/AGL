@@ -1,31 +1,32 @@
 """Structural test: a reST field block agrees with the signature it sits on, over `src` and `tests`.
 
-`CLAUDE.md`'s docstring convention is one format and one place it is mandatory: a one-line summary,
+The docstring convention is one format and one place it is mandatory: a one-line summary,
 a blank line, then `:param name:` per parameter in signature order and `:return:` where something
 comes back - written on every public callable under `sdk/` and `ports/`, because those are the two
 packages a workflow author hovers from their own file. This is the mechanism behind it.
 
 ## Why this convention gets a mechanism when the comment convention mostly does not
 
-**It inverts C1, deliberately, and the mechanism is what makes the inversion safe.** C1 says a
-comment earns its place by carrying a fact from outside the file, and a `:param name:` line
-necessarily restates the parameter name, which is the most inside-the-file fact there is. Every
-other kind of prose in this repository would be refused for that. A field line is exempt because it
-is *structural*: the restatement is not the content, it is the anchor the description hangs on, and
-because it is structural it can be checked mechanically - which is what this file does. Restating
-something a machine compares is cheap. Restating something nobody compares is how a docstring comes
-to describe a signature that has moved, and that is the failure C1 exists to prevent.
+**It inverts the comment rule, deliberately, and the mechanism is what makes the inversion safe.**
+`AGENTS.md`'s "Prose in `src/`" says a comment earns its place by carrying a fact from outside the
+file, and a `:param name:` line necessarily restates the parameter name, which is the most
+inside-the-file fact there is. Every other kind of prose in this repository would be refused for
+that. A field line is exempt because it is *structural*: the restatement is not the content, it is
+the anchor the description hangs on, and because it is structural it can be checked mechanically -
+which is what this file does. Restating something a machine compares is cheap. Restating something
+nobody compares is how a docstring comes to describe a signature that has moved, and that is the
+failure the comment rule exists to prevent.
 
 So the trade is explicit. The convention buys a tooltip at the call site, which no inline `#` can
 give; it pays for it with prose that would otherwise be forbidden; and this file is the payment.
-Delete it and the convention becomes exactly the thing C1 refuses.
+Delete it and the convention becomes exactly the thing the comment rule refuses.
 
 ## What is checked, and what is deliberately left to a reviewer
 
 Everything here is a comparison between two artefacts in the same file - the field list and the
 signature - and nothing here reads a description. Whether `:param payload: dataclass the arguments
 are built into; its schema is a fingerprint term` earns its line, and whether the summary says
-anything the name does not, is a reviewer's and is stated as such in `CLAUDE.md`. The one thing
+anything the name does not, is a reviewer's. The one thing
 about a description this file does say is that there is one: an empty `:param name:` is a line with
 an anchor and no content, which is structural rather than editorial.
 
@@ -55,12 +56,12 @@ evaluates it and throws it away: `__doc__` is `None` and no tooltip renders, whi
 right. Since the whole convention exists for that tooltip, the misplacement is silent in exactly the
 place it costs everything. Two positions are excluded and each is a real construct rather than a
 concession - the first statement of a module, a class or a function, which is the docstring, and a
-string directly after an assignment, which is C5's attribute docstring and is legal.
+string directly after an assignment, which is an attribute docstring and is legal.
 
 **A field list on a class or a module docstring is reported too.** `:param:` describes a callable's
 parameters; on a class it is documenting `__init__` from outside it, which is a second reST style
-this repository does not have, and nothing here would compare it against anything. C2 and C3 govern
-those two docstrings and this file does not.
+this repository does not have, and nothing here would compare it against anything. A reviewer
+governs those two docstrings and this file does not.
 
 **`-> NoReturn` takes no `:return:`.** `RefusingParser.error` in `src/agl/sdk/params.py` raises for
 a living; it does not return a value, and `:return:` there would describe something no caller can
@@ -72,11 +73,11 @@ before the question reaches here.
 **The implementation carries the block, and an `@overload` stub is not required to.** The checkable
 half of this is asserted below: `typing.overload` returns a dummy that the final `def` rebinds over,
 so a docstring written on a stub is not the function's `__doc__` at run time and `help()` never
-shows it. What an IDE does with it is a vendor behaviour this repository cannot check, so under C10
-this file neither demands nor refuses one - what it does is check any block a stub *does* carry
-against that stub's own signature, which is a real signature and differs from the implementation's
-by construction. `arg` in `src/agl/sdk/params.py` and `describe` in `src/agl/sdk/tools.py` are the
-two overloaded callables here, three definitions each.
+shows it. What an IDE does with it is a vendor behaviour this repository cannot check, so this file
+neither demands nor refuses one - what it does is check any block a stub *does* carry against that
+stub's own signature, which is a real signature and differs from the implementation's by
+construction. `arg` in `src/agl/sdk/params.py` and `describe` in `src/agl/sdk/tools.py` are the two
+overloaded callables here, three definitions each.
 
 **`self` and `cls` are dropped, and a `staticmethod` keeps its first parameter.** Neither is passed
 by a caller, so neither belongs in a list describing what a caller supplies, and `:param self:`
@@ -86,10 +87,10 @@ makes the rule wrong for a `staticmethod`, which is checked for by decorator.
 
 **`*args` and `**kwargs` are parameters and are named without their stars.** A caller does supply
 them, so they are in the list; `:param flags:` and not `:param *flags:`, because the star is
-signature syntax and the field names the parameter. Two spellings for one thing is what N5 refuses,
-and this is the cheap end of that rule. Positional-only and keyword-only parameters need no clause
-of their own: they are read in the order they are written, which is `posonlyargs`, then `args`, then
-`*args`, then keyword-only, then `**kwargs`.
+signature syntax and the field names the parameter. Two spellings for one thing is what one name per
+concept refuses, and this is the cheap end of that rule. Positional-only and keyword-only parameters
+need no clause of their own: they are read in the order they are written, which is `posonlyargs`,
+then `args`, then `*args`, then keyword-only, then `**kwargs`.
 
 **A property with no parameters gets a summary and a `:return:`, and no clause makes that so.** Its
 getter takes `self`, `self` is dropped, and the expected list is empty; it returns a value, so the
@@ -104,12 +105,12 @@ parse to the same first statement, so nothing here has an opinion about which is
 **No type in the line.** `:param str name:` restates the annotation `mypy --strict` already checks,
 in a place nothing checks, so the two are free to disagree and one of them is not read by a machine.
 The last word is taken as the parameter name and the rest is reported, so a line written that way
-produces one complaint about the type rather than a second about a name nothing recognises.
-`:type name:` and `:rtype:` are the same defect spelled as their own fields and are refused with
-the rest of the fields this format does not have; `:returns:` is refused as a second spelling of
-`:return:`, on N5 again. `:raises X:` is the one other field permitted, because which exception a
-call raises is a fact no annotation carries and `mypy --strict` does not check - the opposite of a
-type restatement, and the reason the closed list is three fields rather than two.
+produces one complaint about the type rather than a second about a name nothing recognises. `:type
+name:` and `:rtype:` are the same defect spelled as their own fields and are refused with the rest
+of the fields this format does not have; `:returns:` is refused as a second spelling of `:return:`,
+on one name per concept again. `:raises X:` is the one other field permitted, because which
+exception a call raises is a fact no annotation carries and `mypy --strict` does not check - the
+opposite of a type restatement, and the reason the closed list is three fields rather than two.
 
 ## The stronger half: a block is mandatory, and nothing is exempt
 
@@ -119,7 +120,8 @@ was written is one that decays by addition rather than by edit. So a public call
 or `agl.ports` must carry a docstring, and where its signature has parameters or hands something
 back, the format rules run over that docstring whether or not it uses the format - which is what
 stops a bare one-line summary from being a way out of the block. Off that surface a one-line summary
-is what C4 asks for and is left alone; a block written there anyway is checked like any other.
+is what the convention asks for and is left alone; a block written there anyway is checked like any
+other.
 
 **There is no exemption list, and the absence is the point.** A name is what somebody reaches for
 when a callable is inconvenient to document, and a list holding one name holds the next one for
@@ -140,20 +142,20 @@ stated as a floor and not as a measurement so that adding a documented callable 
 **Dunder methods are out of the mandatory half.** `Row.__init__` and `Screen.__init__` in
 `src/agl/ports/terminal.py` are public in every sense that matters, and they are excluded because a
 dunder is invoked by syntax and never named at a call site: nobody writes `Row.__init__(...)`, so no
-hover ever lands on it, and what renders for `Row(` is the class docstring, which C3 governs and
-this file does not. That is a reason and not a proof, and it is the widest gap here.
+hover ever lands on it, and what renders for `Row(` is the class docstring, which a reviewer
+governs and this file does not. That is a reason and not a proof, and it is the widest gap here.
 
-**Classes, modules and attributes are out entirely.** C2, C3 and C5 hold those, and none of the
+**Classes, modules and attributes are out entirely.** A reviewer holds those, and none of the
 three is mechanical. A class on the documented surface with no docstring at all is not reported.
 
 **Nothing here reads `api.py` or `testing.py`.** `src/agl/testing.py` is the workflow author's
-harness by `ARCHITECTURE.md`'s own description, so it has as good a claim to the surface as
-`sdk/` does; it is left out because `CLAUDE.md` names two packages and widening the rule is a
-decision for whoever writes that sentence, not a thing to slip in through a constant here.
+harness, so it has as good a claim to the surface as `sdk/` does; it is left out because `AGENTS.md`
+names two packages and widening the rule is a decision for whoever writes that sentence, not a thing
+to slip in through a constant here.
 
-**`sdk/_engine/` gets nothing and is not policed.** N3 makes that underscore mean off the workflow
-author's surface, and nobody hovers those modules from outside; a block written there is still
-checked for format, because a wrong one is wrong wherever it is.
+**`sdk/_engine/` gets nothing and is not policed.** `AGENTS.md`'s "Layers" makes that underscore
+mean off the workflow author's surface, and nobody hovers those modules from outside; a block
+written there is still checked for format, because a wrong one is wrong wherever it is.
 
 **The scan is a fence around the format, not a theory of documentation.** A description that lies, a
 summary that restates the name, a `:raises:` naming an exception the function cannot raise - all
@@ -176,7 +178,7 @@ SOURCE_ROOT: Final = REPO_ROOT / "src"
 TREES: Final = ("src", "tests")
 
 # The packages a workflow author hovers from their own file, where a block is mandatory. A module
-# with an underscore anywhere in its dotted name is off the surface by N3 and is not on this list.
+# with an underscore anywhere in its dotted name is off the surface and is not on this list.
 DOCUMENTED_PACKAGES: Final = ("agl.sdk", "agl.ports")
 
 # The three fields this format has. `:raises:` earns its place where `:type:` and `:rtype:` do not:
@@ -364,7 +366,7 @@ def _named_wrongly(one: DocField) -> Iterator[str]:
     if name.startswith("*"):
         yield (
             f"`:param {name}:` keeps the stars. They are signature syntax and the field names the "
-            f"parameter, so it is `:param {name.lstrip('*')}:` - one spelling per thing, under N5"
+            f"parameter, so it is `:param {name.lstrip('*')}:` - one spelling per thing"
         )
 
 def _return_line_problems(promised: str, returns: int) -> Iterator[str]:
@@ -389,7 +391,7 @@ def _not_a_field_of_this_format(one: DocField) -> str:
     return (
         f"`:{written}:` is not a field of this format, which has three: `:param name:`, `:return:` "
         f"and `:raises Error:`. `:type:` and `:rtype:` restate an annotation nothing here would "
-        f"compare them against, and `:returns:` is a second spelling of `:return:` - N5 takes one "
+        f"compare them against, and `:returns:` is a second spelling of `:return:` - one "
         f"name per thing. Anything else is prose and belongs in the summary"
     )
 
@@ -451,7 +453,7 @@ def _strings_in_the_wrong_place(body: Sequence[ast.stmt], prefix: str) -> Iterat
     """Every bare string standing above a `def` or a `class`, which Python evaluates and discards.
 
     Two positions are excluded and neither is a concession: the first statement of any body, which
-    is the docstring, and a string directly after an assignment, which is C5's attribute docstring.
+    is the docstring, and a string directly after an assignment, which is an attribute docstring.
     """
     for index, statement in enumerate(body):
         if isinstance(statement, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
@@ -483,7 +485,7 @@ def _fields_outside_a_callable(docstring: str | None, symbol: str, line: int) ->
             symbol,
             "its docstring carries a field block, and it is not a callable. `:param:` describes "
             "the parameters of the `def` it sits inside; here there is no signature to compare it "
-            "against. C2 and C3 hold a module and a class docstring, and both are one line",
+            "against. A module and a class docstring are each one line",
         )
     ]
 
@@ -518,13 +520,14 @@ def _describes_a_signature_that_moved(shown: str, finding: Finding) -> str:
     return (
         f"{shown}:{finding.line} {finding.symbol}: {finding.problem}.\n"
         f"\n"
-        f"CLAUDE.md's docstring convention: a one-line summary, a blank line, then one "
+        f"The docstring convention: a one-line summary, a blank line, then one "
         f"`:param name:` per parameter in the order the signature writes them, and `:return:` "
         f"exactly where something comes back. No type in the line - the annotation is the type and "
         f"mypy --strict is what checks it.\n"
         f"\n"
-        f"This is the one place the comment convention's C1 is inverted on purpose. A `:param:` "
-        f"line restates a name from inside the file, which C1 refuses everywhere else, and it is "
+        f"This is the one place the comment rule is inverted on purpose. A `:param:` "
+        f"line restates a name from inside the file, which a comment may not do anywhere else, "
+        f"and it is "
         f"allowed here because the restatement is structural: this test compares it against the "
         f"signature on every run. That is the whole trade - the convention buys a tooltip at the "
         f"call site and pays for it with prose that only stays honest while something checks it.\n"
@@ -539,7 +542,7 @@ def _went_undocumented(missing: Sequence[str]) -> str:
         f"{len(missing)} public callable(s) under {DOCUMENTED_PACKAGES} carry no docstring:\n"
         + "".join(f"    {name}\n" for name in missing)
         + "\n"
-        "CLAUDE.md's docstring convention makes a block mandatory on those two packages, because "
+        "The docstring convention makes a block mandatory on those two packages, because "
         "they are what a workflow author hovers from their own file. There is no exemption list "
         "and nothing to add a name to: a public callable here is one an author reads at their own "
         "call site, and the block is what renders when they do.\n"
@@ -631,8 +634,8 @@ def test_an_overload_stub_docstring_never_reaches_the_function_at_run_time() -> 
 # ---------------------------------------------------------------------------------------------
 # Non-vacuity: the scans on fabricated source, one case per rule and one per decision, so that a
 # rewrite which broke them into always answering "nothing here" fails below instead of passing
-# over the whole tree. `_WORKED` is the block from CLAUDE.md's own convention - held to that by
-# `test_claude_md_the_source_and_this_file_hold_one_worked_example_between_them` and not by this
+# over the whole tree. `_WORKED` is the block `src/agl/sdk/tools.py::tool` writes - held to that by
+# `test_the_worked_example_here_and_the_tool_docstring_in_the_sdk_agree` and not by this
 # sentence - and every violating case below is that same block with one thing changed.
 # ---------------------------------------------------------------------------------------------
 
@@ -648,14 +651,10 @@ def tool(name: str, description: str, payload: type, handler: object) -> Tool:
     """
 '''
 
-# The two files `_WORKED` is a copy of, by their path below `REPO_ROOT`, and the callable all three
-# of them write. `CLAUDE.md` is where the convention is stated; `src/` is what an author hovers.
-_WORKED_EXAMPLE_LAW: Final = "CLAUDE.md"
+# The file `_WORKED` is a copy of, by its path below `REPO_ROOT`, and the callable both of them
+# write. `src/` is what an author hovers.
 _WORKED_EXAMPLE_SOURCE: Final = "src/agl/sdk/tools.py"
 _WORKED_EXAMPLE_SYMBOL: Final = "tool"
-
-# A fenced Python block: ```python alone on a line, source, then ``` at the start of a line.
-_PYTHON_FENCE: Final = re.compile(r"^```python\n(.*?)^```", re.MULTILINE | re.DOTALL)
 
 def _worked_example(source: str, shown: str) -> tuple[str, list[str]]:
     """One copy of the worked example: the docstring it writes and the parameters it names.
@@ -676,8 +675,8 @@ def _worked_example(source: str, shown: str) -> tuple[str, list[str]]:
     ]
     assert len(written) == 1, (
         f"{shown} writes {len(written)} module-level `def {_WORKED_EXAMPLE_SYMBOL}`, and the "
-        f"worked example is exactly one of them. Nothing below can compare three copies of a "
-        f"block while one of the three is missing or doubled"
+        f"worked example is exactly one of them. Nothing below can compare two copies of a "
+        f"block while one of the two is missing or doubled"
     )
     docstring = ast.get_docstring(written[0])
     assert docstring is not None, (
@@ -685,20 +684,6 @@ def _worked_example(source: str, shown: str) -> tuple[str, list[str]]:
         f"is the whole of what the worked example is"
     )
     return docstring, _expected(written[0], method=False)
-
-def _fenced_worked_example(markdown: str) -> str:
-    """The one fenced Python block in `CLAUDE.md` writing the worked example, as source text."""
-    fenced: list[str] = [
-        match.group(1)
-        for match in _PYTHON_FENCE.finditer(markdown)
-        if f"def {_WORKED_EXAMPLE_SYMBOL}" in match.group(1)
-    ]
-    assert len(fenced) == 1, (
-        f"{_WORKED_EXAMPLE_LAW} holds {len(fenced)} fenced Python block(s) writing "
-        f"`def {_WORKED_EXAMPLE_SYMBOL}`, and the docstring convention is written around one. If a "
-        f"second one belongs there, this extraction has to be told which is the worked example"
-    )
-    return fenced[0]
 
 def _a_copy_of_the_worked_example_moved(shown: str, part: str, written: str, copied: str) -> str:
     diff = "".join(
@@ -713,43 +698,36 @@ def _a_copy_of_the_worked_example_moved(shown: str, part: str, written: str, cop
         f"{shown} and {_WORKED_EXAMPLE_SOURCE} no longer write one {part}:\n"
         f"\n"
         f"{diff}\n"
-        f"The worked example is written out three times and the three are one text. "
-        f"{_WORKED_EXAMPLE_LAW} states the convention and has to show it, "
+        f"The worked example is written out twice and the two are one text. "
         f"{_WORKED_EXAMPLE_SOURCE} is the callable an author hovers, and `_WORKED` in this file is "
-        f"what every fabricated case below mutates. Edit one and the other two are stale in the "
-        f"same instant: the law illustrates a block the code does not write, and the cases below "
-        f"mutate a block that exists nowhere. The edit goes in all three."
+        f"what every fabricated case below mutates. Edit one and the other is stale in the "
+        f"same instant: the cases below mutate a block that exists nowhere. The edit goes in "
+        f"both."
     )
 
-def test_claude_md_the_source_and_this_file_hold_one_worked_example_between_them() -> None:
-    """`_WORKED` above, `CLAUDE.md`'s fenced block and `tool`'s own docstring, compared.
+def test_the_worked_example_here_and_the_tool_docstring_in_the_sdk_agree() -> None:
+    """`_WORKED` above and `tool`'s own docstring, compared.
 
-    Three copies exist because each is load-bearing where it sits and none can be a reference to
-    another. `CLAUDE.md` states the convention and has to show it, and a document cannot import a
-    docstring. Every fabricated case below is `_WORKED` with one thing changed, and a fixture that
+    Two copies exist because each is load-bearing where it sits and neither can be a reference to
+    the other. Every fabricated case below is `_WORKED` with one thing changed, and a fixture that
     read its own text off disk at run time would mutate whatever the source happened to say rather
-    than the block the cases were written against - which is the same reason `_WORKED` is a literal
-    here. And the source is the only one of the three an author ever hovers, which is what makes
-    the other two worth keeping honest at all.
+    than the block the cases were written against - which is why `_WORKED` is a literal here. And
+    the source is the one an author hovers, which is what makes the copy worth keeping honest.
 
     So there is no single source to collapse them into, and what is left is to compare them. The
-    comparison is over the two things all three genuinely share, the cleaned docstring and the
-    parameter names in signature order, and a failure names the copy that moved and diffs it.
+    comparison is over the two things both genuinely share, the cleaned docstring and the
+    parameter names in signature order, and a failure diffs the copy that moved.
     """
-    law = (REPO_ROOT / _WORKED_EXAMPLE_LAW).read_text(encoding="utf-8")
     source = (REPO_ROOT / _WORKED_EXAMPLE_SOURCE).read_text(encoding="utf-8")
     docstring, parameters = _worked_example(source, _WORKED_EXAMPLE_SOURCE)
-    for shown, copied in (
-        (f"{_WORKED_EXAMPLE_LAW}'s fenced example", _fenced_worked_example(law)),
-        (f"`_WORKED` in tests/{Path(__file__).name}", _WORKED),
-    ):
-        held, named = _worked_example(copied, shown)
-        assert held == docstring, _a_copy_of_the_worked_example_moved(
-            shown, "docstring", docstring, held
-        )
-        assert named == parameters, _a_copy_of_the_worked_example_moved(
-            shown, "parameter list", "\n".join(parameters), "\n".join(named)
-        )
+    shown = f"`_WORKED` in tests/{Path(__file__).name}"
+    held, named = _worked_example(_WORKED, shown)
+    assert held == docstring, _a_copy_of_the_worked_example_moved(
+        shown, "docstring", docstring, held
+    )
+    assert named == parameters, _a_copy_of_the_worked_example_moved(
+        shown, "parameter list", "\n".join(parameters), "\n".join(named)
+    )
 
 def _one_problem(source: str, *, documented: bool = False) -> str:
     """The single problem a fabricated snippet is written to produce, asserted to be single."""
@@ -758,7 +736,7 @@ def _one_problem(source: str, *, documented: bool = False) -> str:
     return found[0].problem
 
 def test_the_scan_is_silent_on_the_block_the_convention_is_written_around() -> None:
-    """The agreeing case, and it is not a token one: the worked example out of `CLAUDE.md`."""
+    """The agreeing case, and it is not a token one: the worked example `tool` itself writes."""
     assert not field_block_problems(_WORKED, documented=True)
 
 def test_the_scan_reports_a_parameter_renamed_without_the_docstring_following_it() -> None:
@@ -795,7 +773,7 @@ def test_the_scan_reports_a_type_written_into_a_param_line_beside_the_name() -> 
     assert "writes a type into the line" in problem and "`:param name:`" in problem
 
 def test_the_scan_reports_a_starred_spelling_of_a_parameter_it_would_otherwise_accept() -> None:
-    """`*flags` is the signature's syntax; the field names the parameter, and N5 takes one."""
+    """`*flags` is the signature's syntax; the field names the parameter without them."""
     source = (
         'def arg(*flags: str) -> None:\n'
         '    """Declare a flag.\n'
@@ -914,7 +892,7 @@ def test_the_scan_reports_a_docstring_written_above_the_def_instead_of_inside_it
     )
 
 def test_the_scan_is_silent_on_an_attribute_docstring_that_precedes_a_method() -> None:
-    """C5's shape, which is the one string above a `def` that is exactly where it should be."""
+    """An attribute docstring, the one string above a `def` that is exactly where it should be."""
     assert not field_block_problems(
         'class Held:\n'
         '    """What this is."""\n'
@@ -1040,7 +1018,7 @@ def test_the_scan_is_silent_on_an_abstract_method_whose_body_is_an_ellipsis() ->
     )
 
 def test_the_scan_leaves_a_one_line_summary_alone_off_the_documented_surface() -> None:
-    """C4's shape everywhere but `sdk/` and `ports/`, where a block is not asked for."""
+    """A one-line summary everywhere but `sdk/` and `ports/`, where a block is not asked for."""
     source = 'def build(value: int) -> int:\n    """Build one from a value."""\n    return value\n'
     assert not field_block_problems(source, documented=False)
     problems = [finding.problem for finding in field_block_problems(source, documented=True)]
@@ -1078,7 +1056,7 @@ def test_the_surface_scan_skips_private_names_dunders_stubs_and_nested_definitio
     )
 
 def test_the_surface_predicate_admits_the_two_packages_and_refuses_a_private_module() -> None:
-    """`sdk/_engine/` is off the workflow author's surface by N3, and so is `_declarations`."""
+    """`sdk/_engine/` is off the workflow author's surface, and so is `_declarations`."""
     assert _is_documented_surface("agl.sdk.tools")
     assert _is_documented_surface("agl.ports.store")
     assert not _is_documented_surface("agl.sdk._engine.journal")

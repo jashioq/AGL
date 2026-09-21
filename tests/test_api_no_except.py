@@ -64,8 +64,8 @@ line is added - `test_claude_code_runner.py`'s argument about its own clause. Th
 sixth application: `test_shell_verifier.py` established it, `test_claude_code_runner.py` and
 `test_openai_runner.py` carry the two hermeticity siblings, `test_git_end_of_options.py` is the
 fourth and `test_filesystem_no_lock.py` the fifth. Like all five, this file parses source and runs
-nothing. `ARCHITECTURE.md` states the criterion the fifth one shares with this one, of the lock it
-guards: it "leaves every store test green". An `except` here does exactly that.
+nothing. The fifth one shares this one's criterion: what it guards against leaves every test of
+its port green. An `except` here does exactly that.
 
 Named for the invariant and kept out of `tests/test_api.py`, which drives `api` over the all-fakes
 bundle and is a file of awaited behaviour. This one imports the module to find its file on disk and

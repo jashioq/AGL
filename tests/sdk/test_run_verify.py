@@ -12,7 +12,7 @@ own outcome, a failing one included, rather than raising; and it writes no entry
 a price on a resume, which the real-git test at the bottom pins rather than leaves to be
 rediscovered: a step replayed from the ledger does not touch the checkout, so a verdict taken
 between replayed steps is taken on the checkout as it stands, which can be past the head the
-ledger replayed. "Invariants where a mistake is silent" in `ARCHITECTURE.md` says what that costs.
+ledger replayed. "Invariants where a mistake is silent" in `AGENTS.md` says what that costs.
 """
 
 import subprocess

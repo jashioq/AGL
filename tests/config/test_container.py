@@ -427,8 +427,7 @@ def test_a_disabled_claude_connector_never_imports_the_adapter_that_needs_the_ve
 def test_a_missing_terminal_package_refuses_rather_than_falling_back_to_headless(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`ARCHITECTURE.md`'s "Deliberately not built" refuses a `Display` port, so there is no
-    second surface here to fall back to.
+    """There is no `Display` port, so there is no second surface here to fall back to.
 
     The fallback is the plausible bug and this is what forbids it: `HeadlessTerminal` would build
     happily and then raise `UpstreamUnavailable` at the first screen carrying a question, turning
@@ -535,7 +534,7 @@ def test_with_verifier_moves_both_views_of_the_bundle_at_once(tmp_path: Path) ->
     The merge gate is the only hook a workflow's own test has *inside* a landing - the lease and the
     target's step lock are held from `integrate()` to settlement, and `Verifier.verify` is the one
     framework call in that window - so a test that wants to see two landings serialised, or to
-    drive the conflict loop off a red gate that `ARCHITECTURE.md`'s "Invariants where a mistake is
+    drive the conflict loop off a red gate that `AGENTS.md`'s "Invariants where a mistake is
     silent" names as work-destroying, substitutes a verifier. Until this verb existed the only way
     was `replace(fakes, services=replace(fakes.services, verifier=...))`, which is exactly the
     two-views defect the two tests above are about, written out by hand at every call site that

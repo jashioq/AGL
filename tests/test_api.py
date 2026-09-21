@@ -1362,7 +1362,7 @@ async def test_one_refusal_answers_the_command_that_installs_first_and_the_one_t
 def test_every_operation_the_module_declares_is_built() -> None:
     """One list, and nothing on it refuses for being unfinished.
 
-    `api.py`'s operations are named in its own bullet under `ARCHITECTURE.md`'s "The layers", and
+    `api.py` declares its operations, and
     the CLI's dispatch has been written against the whole surface from the start, one clause at a
     time as each was built. `resume` left the unbuilt list first and `clear` next, each into a
     suite of its own - `tests/test_resume.py` and `tests/test_clear.py` - and the list has been

@@ -281,8 +281,8 @@ def test_stop_reaches_the_door_through_the_workflow_module_and_not_through_the_f
     assert "Stop" not in _exported(sdk_errors)
 
 def test_the_sentence_the_repository_writes_about_the_terminal_is_true() -> None:
-    """`ARCHITECTURE.md`'s "The layers" spells it: a workflow author writes `from agl.sdk import
-    Screen` and never reaches into `agl.ports` for a view's vocabulary.
+    """A workflow author writes `from agl.sdk import Screen` and never reaches into `agl.ports` for
+    a view's vocabulary.
 
     Asserted as identity against `ports/` rather than as "the attribute exists", because what that
     sentence promises is that an author never reaches into `ports` - which is only worth anything if

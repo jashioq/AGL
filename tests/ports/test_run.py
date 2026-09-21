@@ -441,10 +441,9 @@ def test_a_record_is_frozen() -> None:
 # --- What this module is not allowed to be ------------------------------------------------------
 
 def test_there_is_no_run_status() -> None:
-    """`ARCHITECTURE.md`'s "Deliberately not built" refuses one by name, and the module docstring
-    argues the absence out. Pinned as a test rather than left to prose because an empty enum is the
-    easy thing to add here, and adding it is one field away from storing it in `run.json` - a
-    second source of truth that nothing updates.
+    """The module docstring argues the absence out. Pinned as a test rather than left to prose
+    because an empty enum is the easy thing to add here, and adding it is one field away from
+    storing it in `run.json` - a second source of truth that nothing updates.
 
     **`checked_text` is on that list and is not a type.** It is the surrogate rule this module
     already applies to `base_ref`, made callable so that `api.run` can apply it to the *same value*

@@ -682,7 +682,7 @@ async def test_a_run_that_ends_in_a_stop_still_leaves_its_last_board_on_screen(
     """The same frame on the path that needs it most, which is the one an edit would guard away.
 
     A workflow that stops itself has said something on its way out. "The run that ends badly is the
-    run whose display most needs handing back" is `ARCHITECTURE.md`'s argument for `__aexit__`
+    run whose display most needs handing back" is the argument for `__aexit__`
     running on every path at all, and it reaches the final frame unchanged.
 
     The edit this exists to catch is a plausible one: drawing only when `exc_type` is `None`, on the

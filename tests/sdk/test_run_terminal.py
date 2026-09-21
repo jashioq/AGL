@@ -17,10 +17,9 @@ four children five slots and five sets of queues, four of them drawing over each
 in the adapter suite passes on such a build, because each of the five works perfectly alone.
 
 **The context is genuinely open around `wf.fn`, and around nothing else.** All three terminal
-implementations make `show` outside the context an `InternalError` - it is `ARCHITECTURE.md`'s "The
-terminal" that states the rule - so until the context was opened here every screen in a real run
-raised. Three assertions, because each of the other two is satisfied by a
-build that gets the third wrong: it is open while the workflow runs, it is shut when `api.run`
+implementations make `show` outside the context an `InternalError`, so until the context was opened
+here every screen in a real run raised. Three assertions, because each of the other two is satisfied
+by a build that gets the third wrong: it is open while the workflow runs, it is shut when `api.run`
 returns, and it was never entered at all by a run that died before the workflow - which is where
 the `async with`'s placement after the record and after `_base` becomes observable.
 

@@ -861,9 +861,8 @@ async def test_a_role_a_module_binds_already_built_is_no_declaration_preflight_c
     `RoleFactory.model` exists and the reason `Role.model` is not a field an author writes. A `Role`
     is what a declaration produces, and reading values rather than declarations has no stopping
     point - `ROLES = [implementer()]` is the next complaint, and a dataclass holding one is the one
-    after. `ARCHITECTURE.md`'s "Preflight's registry scan is best-effort; containment at every step
-    is the guarantee" is the sentence this sits under, and its enumerated silent half already names
-    a factory "built at run time by a call".
+    after. Preflight's registry scan is best-effort, and containment at every step is the
+    guarantee.
 
     **The other half of the shape cannot be probed at all**, which is what makes skipping it correct
     rather than merely tolerated: a `Role(...)` built by hand carries no model, and
