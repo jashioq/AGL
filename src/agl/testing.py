@@ -17,8 +17,8 @@ from agl.ports.store import Store
 from agl.ports.terminal import Terminal
 from agl.ports.tree_layout import TreesRoot
 from agl.sdk._engine.journal import Entry
+from agl.sdk._workflow import Run, Workflow
 from agl.sdk.testing import Agent, Call, Reply
-from agl.sdk.workflow import Run, Workflow
 
 __all__ = [
     "Agent",

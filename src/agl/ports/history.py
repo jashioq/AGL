@@ -52,7 +52,8 @@ class History(ABC):
     async def default_ref(self) -> str:
         """Where a run starts from when the user names none. Only the repository knows this.
 
-        :return: a ref expression, which may carry a `/` and so is none of `ids.py`'s names
+        Returns:
+            a ref expression, which may carry a `/` and so is none of `ids.py`'s names
         """
         ...
 
@@ -60,9 +61,14 @@ class History(ABC):
     async def resolve(self, ref: str) -> str:
         """What a ref expression names right now. This is what pins a run's base.
 
-        :param ref: a ref expression, resolved however this implementation resolves one
-        :return: the full unabbreviated commit id, which is what `RunSpec.base_sha` is pinned to
-        :raises NotFoundError: the ref is well-formed and this repository holds nothing under it
+        Args:
+            ref: a ref expression, resolved however this implementation resolves one
+
+        Returns:
+            the full unabbreviated commit id, which is what `RunSpec.base_sha` is pinned to
+
+        Raises:
+            NotFoundError: the ref is well-formed and this repository holds nothing under it
         """
         ...
 
@@ -70,8 +76,11 @@ class History(ABC):
     async def exists(self, ref: str) -> bool:
         """Does this repository hold anything under this name? `resolve` with the answer dropped.
 
-        :param ref: a ref expression the caller already composed; nothing new can be learnt of it
-        :return: `True` for exactly the refs `resolve` answers for, `False` for the ones it refuses
+        Args:
+            ref: a ref expression the caller already composed; nothing new can be learnt of it
+
+        Returns:
+            `True` for exactly the refs `resolve` answers for, `False` for the ones it refuses
         """
         ...
 
@@ -79,9 +88,12 @@ class History(ABC):
     async def contains(self, ancestor: str, descendant: str) -> bool:
         """The one ancestry question AGL asks, before it settles a landing: is X already in Y.
 
-        :param ancestor: the state that must already be accounted for
-        :param descendant: the state that must already account for it
-        :return: whether `ancestor` is reachable from `descendant`, and nothing about how far
+        Args:
+            ancestor: the state that must already be accounted for
+            descendant: the state that must already account for it
+
+        Returns:
+            whether `ancestor` is reachable from `descendant`, and nothing about how far
         """
         ...
 
@@ -89,9 +101,12 @@ class History(ABC):
     async def changed_files(self, base: str, head: str) -> tuple[FileChange, ...]:
         """Which files differ between two states, and how - the half a workflow decides on.
 
-        :param base: the state changes are measured from; swapping the pair inverts the answer
-        :param head: the state they are measured to
-        :return: one change per differing file, in an order this port declines to promise
+        Args:
+            base: the state changes are measured from; swapping the pair inverts the answer
+            head: the state they are measured to
+
+        Returns:
+            one change per differing file, in an order this port declines to promise
         """
         ...
 
@@ -99,9 +114,12 @@ class History(ABC):
     async def diff(self, base: str, head: str) -> str:
         """The same change as text - the half a person or a model reads.
 
-        :param base: the state the patch is against
-        :param head: the state the patch arrives at
-        :return: a unified patch, handed over untouched rather than structured into a taxonomy
+        Args:
+            base: the state the patch is against
+            head: the state the patch arrives at
+
+        Returns:
+            a unified patch, handed over untouched rather than structured into a taxonomy
         """
         ...
 
@@ -109,9 +127,14 @@ class History(ABC):
     async def message(self, commit: str) -> str:
         """What one commit is called. The other half of `Workspace.commit_all(message)`.
 
-        :param commit: a ref expression or a commit id, exactly as `resolve` takes one
-        :return: the message with no trailing whitespace, so two implementations answer alike
-        :raises NotFoundError: it names no state here, and "no message" would be a lie about one
+        Args:
+            commit: a ref expression or a commit id, exactly as `resolve` takes one
+
+        Returns:
+            the message with no trailing whitespace, so two implementations answer alike
+
+        Raises:
+            NotFoundError: it names no state here, and "no message" would be a lie about one
         """
         ...
 
@@ -119,6 +142,7 @@ class History(ABC):
     async def check_committer_identity(self) -> None:
         """Whether a commit made here could be attributed. Answers with nothing, or refuses.
 
-        :raises UpstreamUnavailable: no committer can be derived here, so `commit_all` would refuse
+        Raises:
+            UpstreamUnavailable: no committer can be derived here, so `commit_all` would refuse
         """
         ...

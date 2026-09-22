@@ -133,9 +133,9 @@ from agl.ports.sync import Syncer, SyncOutcome
 from agl.ports.tree_layout import TreesRoot
 from agl.ports.workspace import Workspace, WorkspaceProvider
 from agl.sdk._engine import preflight
+from agl.sdk._workflow import Run, workflow
 from agl.sdk.roles import Role, role
 from agl.sdk.tools import reporting_tool, tool
-from agl.sdk.workflow import Run, workflow
 from instruments.preflight import NoParams, entered
 from instruments.preflight.efforts import efforts as two_levels
 from instruments.preflight.late import late
@@ -1120,9 +1120,10 @@ async def test_a_role_naming_a_level_the_catalogue_lacks_is_warned_about_and_nev
     `ModelEfforts.levels` is a tuple and not a set for exactly this sentence.
 
     **The ceiling is named as the top of the listing and never as what this step will run at.** The
-    tool lowers a level it does not offer rather than refusing - `Claude.__call__` and
-    `OpenAI.__call__` both say so on `:param effort:` - and which level it lowers to is not
-    something measured here, so the line says what the catalogue says and stops.
+    tool lowers a level it does not offer rather than refusing - `adapters/claude_code/translate.py`
+    and `adapters/openai/translate.py` each say so above the constant they translate an effort
+    through - and which level it lowers to is not something measured here, so the line says what
+    the catalogue says and stops.
 
     Two other roles in that namespace name no level at all and one of them shares this one's
     provider, so the single line is also the claim that a bare model is not warned about.
@@ -1480,7 +1481,7 @@ async def test_check_takes_two_ports_a_workflow_function_and_a_reporter_and_no_b
     repository. The bundle would hand it eight, and six more readers would then be one field access
     away in the module whose whole job is to refuse before anything has happened. The third argument
     is the workflow's own `async def` and not a `Workflow` - which this module could not import
-    without a cycle, `sdk/workflow.py` importing `Capabilities` from here - and it is the smallest
+    without a cycle, `sdk/_workflow.py` importing `Capabilities` from here - and it is the smallest
     thing that names the registry, since a function knows the module its `def` ran in.
 
     **The fourth is where a warning goes, and it is a callback rather than a return** for

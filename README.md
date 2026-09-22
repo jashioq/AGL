@@ -40,7 +40,7 @@ not own, so nothing ever goes off to an index looking for that version.
 
 Everything a run commits is on a branch of its own, `agl/<label>`, where `<label>` is the name you
 gave `agl run -n <label>`. Nothing lands on the branch you had checked out, and nothing is ever
-pushed anywhere. A run that finishes says on stderr which branch that is, so `git checkout
+pushed anywhere. A run that finishes says on stdout which branch that is, so `git checkout
 agl/<label>` in that repository is the work.
 
 The agents never work in your checkout. AGL cuts git worktrees of its own — one for the run and one

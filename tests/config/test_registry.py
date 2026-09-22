@@ -66,10 +66,12 @@ while a broken directory sharing a declared name is one workflow beside a direct
 nothing at all - so the workflow runs, and the directory is still reported by the listing.
 """
 
+import sysconfig
 from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Final
 import pytest
+import agl
 from agl.config.distribution import DISTRIBUTION, installed_version
 from agl.config.registry import (
     GROUP,
@@ -77,6 +79,7 @@ from agl.config.registry import (
     check_configured,
     check_satisfied,
     check_unbroken,
+    check_unshadowed,
     declarations,
     discovered,
     load,
@@ -84,7 +87,7 @@ from agl.config.registry import (
 )
 from agl.config.toml_file import RESERVED_KEYS, read_document, resolve_project
 from agl.ports.errors import ConflictError, InputError, NotFoundError, exit_code_for
-from agl.ports.home_layout import AglHome, project_config, workflows_dir
+from agl.ports.home_layout import AglHome, project_config, workflows_dir, workspace_site_packages
 from agl.ports.ids import ProjectName
 
 # What a registered workflow looks like from here: a name, a `module:attr` value, and the group.
@@ -682,6 +685,7 @@ def test_the_workflows_own_missing_module_is_refused_about_the_declaration_and_n
         _needing(f">={_BEYOND_REACH}", f"triage = {_UNIMPORTABLE!r}"),
         _configuring('["build", "lint"]', _pointing_here("triage")),
         _configuring('["build", 3]', _pointing_here("triage")),
+        _declaring(_pointing_here("triage")) + '\n[tool.agl]\nrequire = "agents-gl>=0.1"\n',
     ],
 )
 def test_a_document_parsed_elsewhere_reads_exactly_as_the_walk_reads_it_off_disk(
@@ -690,9 +694,9 @@ def test_a_document_parsed_elsewhere_reads_exactly_as_the_walk_reads_it_off_disk
     """`agl get` hands over a project file still in memory, and it is read as the walk reads it.
 
     The shapes the walk meets - declaring, declaring nothing, declaring a non-string, declaring
-    past this AGL, and a `config` line both readable and not - and the whole `Discovery` compared,
-    so a second reading drifting on any field of it fails here rather than as a download refused in
-    other words than a listing.
+    past this AGL, a `config` line both readable and not, and a key the table does not hold - and
+    the whole `Discovery` compared, so a second reading drifting on any field of it fails here
+    rather than as a download refused in other words than a listing.
     """
     home = _home(tmp_path)
     directory = _directory(home, "triage", document)
@@ -865,3 +869,203 @@ def test_lines_pasted_from_the_refusal_as_they_stand_leave_the_project_unresolva
     with pytest.raises(InputError) as unresolvable:
         resolve_project(home, repo)
     assert "is not valid TOML" in str(unresolvable.value)
+
+# --- the [tool.agl] table holds `requires` and `config`, and any other key is refused by name -----
+
+def test_a_misspelt_requires_is_refused_by_name_rather_than_leaving_no_floor_at_all(
+    tmp_path: Path,
+) -> None:
+    """A floor no AGL reads is no floor, so the directory is broken and the key is named.
+
+    Spelt right, the bound below is one no AGL meets; spelt `require`, nothing reads it and the
+    workflow would load on any AGL at all. Exit 2, the class `config.toml` refuses a key with.
+    """
+    home = _home(tmp_path)
+    _directory(
+        home,
+        "triage",
+        _declaring(f"triage = {_UNIMPORTABLE!r}")
+        + f'\n[tool.agl]\nrequire = "{DISTRIBUTION}>={_BEYOND_REACH}"\nconfig = []\n',
+    )
+
+    found = discovered(home)
+
+    assert found.points == ()
+    (entry,) = found.broken
+    assert entry.directory == "triage"
+    assert entry.reason == (
+        f"{workflows_dir(home) / 'triage' / 'pyproject.toml'}: \"require\" is not a [tool.agl] "
+        f'key. The keys are "requires" and "config".'
+    )
+    with pytest.raises(InputError) as refused:
+        check_unbroken(found, "triage")
+    assert exit_code_for(refused.value) == 2
+
+def test_a_table_nested_under_tool_agl_is_an_unknown_key_named_in_the_refusal(
+    tmp_path: Path,
+) -> None:
+    home = _home(tmp_path)
+    _directory(
+        home, "triage", _declaring(_pointing_here("triage")) + "\n[tool.agl.extras]\nlint = true\n"
+    )
+
+    (entry,) = discovered(home).broken
+
+    assert '"extras" is not a [tool.agl] key' in entry.reason
+
+def test_an_unknown_key_holding_a_control_character_is_named_escaped_in_the_refusal(
+    tmp_path: Path,
+) -> None:
+    """A TOML key may hold any character, and the reason is printed on the operator's terminal."""
+    home = _home(tmp_path)
+    _directory(
+        home, "triage", _declaring(_pointing_here("triage")) + '\n[tool.agl]\n"\\u001b[2J" = 1\n'
+    )
+
+    (entry,) = discovered(home).broken
+
+    assert '"\\u001b[2J" is not a [tool.agl] key' in entry.reason
+    assert "\x1b" not in entry.reason
+
+def test_an_unknown_key_under_an_unmet_bound_goes_unread_so_the_version_is_the_refusal(
+    tmp_path: Path,
+) -> None:
+    """A newer AGL may read the key, and the version is what explains a workflow written for it."""
+    home = _home(tmp_path)
+    _directory(
+        home,
+        "triage",
+        _needing(f">={_BEYOND_REACH}", f"triage = {_UNIMPORTABLE!r}") + "retries = 3\n",
+    )
+
+    found = discovered(home)
+
+    assert found.broken == ()
+    assert names(found.points) == ("triage",)
+    assert _BEYOND_REACH in found.unsatisfied["triage"]
+
+def test_requires_and_config_together_are_the_whole_table_and_refuse_nothing(
+    tmp_path: Path,
+) -> None:
+    home = _home(tmp_path)
+    _directory(
+        home,
+        "triage",
+        _configuring('["build"]', _pointing_here("triage"), bound=f">={installed_version()}"),
+    )
+
+    found = discovered(home)
+
+    assert found.broken == ()
+    assert found.config_keys == {"triage": ("build",)}
+
+# --- a workflow's package named after a module Python finds before the workspace's workflows -----
+
+_PLANTED_AHEAD: Final = "probe_module_the_workspace_venv_holds_first"
+
+def _segment() -> str:
+    """The `lib/` subdirectory this interpreter installs into, read off its own real `purelib`."""
+    return Path(sysconfig.get_path("purelib")).parent.name
+
+def _its_own(named: str) -> str:
+    """A project file declaring one workflow that imports the directory it is written in."""
+    return _declaring(f'{named} = "{named}:{named}"')
+
+def test_a_directory_named_after_a_standard_library_module_is_broken_saying_why(
+    tmp_path: Path,
+) -> None:
+    """`workflows/` goes last on `sys.path`, so `import calendar` reaches the standard library."""
+    home = _home(tmp_path)
+    _directory(home, "calendar", _its_own("calendar"))
+
+    found = discovered(home)
+
+    assert found.points == ()
+    assert [(entry.directory, entry.reason) for entry in found.broken] == [
+        (
+            "calendar",
+            'The standard library has a module named "calendar", so Python would import that '
+            "instead of the workflow.",
+        )
+    ]
+
+def test_running_a_workflow_the_standard_library_shadows_is_refused_with_exit_two(
+    tmp_path: Path,
+) -> None:
+    home = _home(tmp_path)
+    _directory(home, "calendar", _its_own("calendar"))
+
+    with pytest.raises(InputError) as refused:
+        check_unbroken(discovered(home), "calendar")
+
+    assert exit_code_for(refused.value) == 2
+    assert 'module named "calendar"' in str(refused.value)
+
+def test_a_module_in_the_workspace_venv_shadows_the_workflow_directory_of_its_name(
+    tmp_path: Path,
+) -> None:
+    """What a dependency the workspace installs can do to a workflow named the same."""
+    home = _home(tmp_path)
+    site = workspace_site_packages(home, _segment())
+    site.mkdir(parents=True)
+    (site / f"{_PLANTED_AHEAD}.py").write_text("", encoding="utf-8")
+    _directory(home, _PLANTED_AHEAD, _its_own(_PLANTED_AHEAD))
+
+    (entry,) = discovered(home).broken
+
+    assert entry.reason == (
+        f'A module named "{_PLANTED_AHEAD}" already exists at {site / f"{_PLANTED_AHEAD}.py"}, '
+        f"so Python would import that instead of the workflow."
+    )
+
+def test_a_package_in_agls_own_environment_shadows_a_workflow_directory_named_after_it(
+    tmp_path: Path,
+) -> None:
+    """AGL's own packages and its dependencies come before the workspace on `sys.path` as well."""
+    home = _home(tmp_path)
+    _directory(home, "agl", _its_own("agl"))
+    assert agl.__file__ is not None, "`agl` was imported from something that is not a file"
+
+    (entry,) = discovered(home).broken
+
+    assert entry.reason == (
+        f'A module named "agl" already exists at {agl.__file__}, so Python would import that '
+        f"instead of the workflow."
+    )
+
+def test_a_directory_whose_declarations_import_another_module_is_never_checked_by_name(
+    tmp_path: Path,
+) -> None:
+    """Only a declaration importing its own directory makes that directory a workflow's package."""
+    home = _home(tmp_path)
+    _directory(home, "calendar", _declaring(_pointing_here("triage")))
+
+    found = discovered(home)
+
+    assert found.broken == ()
+    assert names(found.points) == ("triage",)
+
+def test_an_unmet_bound_is_the_refusal_even_where_the_standard_library_shadows_the_name(
+    tmp_path: Path,
+) -> None:
+    """The order `agl get` refuses a download in, so the walk and a download never disagree."""
+    home = _home(tmp_path)
+    _directory(home, "calendar", _needing(f">={_BEYOND_REACH}", 'calendar = "calendar:calendar"'))
+
+    found = discovered(home)
+
+    assert found.broken == ()
+    assert _BEYOND_REACH in found.unsatisfied["calendar"]
+
+@pytest.mark.parametrize("name", ["json", "__hello__"])
+def test_a_name_the_interpreter_itself_answers_to_is_refused_before_it_is_used(
+    tmp_path: Path, name: str
+) -> None:
+    """`json` is in `sys.stdlib_module_names`; `__hello__` is frozen into CPython and is not."""
+    with pytest.raises(InputError) as refused:
+        check_unshadowed(_home(tmp_path), name)
+
+    assert str(refused.value).startswith(f'The standard library has a module named "{name}"')
+
+def test_a_name_nothing_else_answers_to_passes_the_check_without_a_word(tmp_path: Path) -> None:
+    check_unshadowed(_home(tmp_path), "probe_name_no_environment_in_this_suite_holds")

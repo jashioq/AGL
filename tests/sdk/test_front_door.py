@@ -13,7 +13,7 @@ which is the thing the facades exist to prevent.
 
 **Nothing below carries a copy of what is on the door.** `_DOOR` maps each submodule to *how much*
 of it the door takes - all of it, or a named few - and every comparison is between `agl.sdk.__all__`
-and the submodules' own `__all__`. A test holding its own list of the door's forty-three names would
+and the submodules' own `__all__`. A test holding its own list of the door's forty-seven names would
 be a second hand-maintained list, free to drift from the first, and its agreement would mean only
 that one person updated both at once.
 
@@ -52,11 +52,12 @@ above cover it - but it is the first facade whose *port* module it takes only pa
 errors.py` holding the hierarchy and the exit-code table both. That cut is checked separately and
 in both directions, over `ports.errors.__all__` rather than over a list here, so a class added to
 the hierarchy fails on the commit that adds it. `Stop` is the interesting entry: it is in the
-hierarchy, it is on the door, and it gets there through `sdk/workflow.py` instead - which is a
+hierarchy, it is on the door, and it gets there through `sdk/_workflow.py` instead - which is a
 claim worth pinning rather than a gap, one name having one import path into one front door.
 """
 
 import ast
+import pkgutil
 from collections.abc import Mapping
 from importlib import import_module
 from pathlib import Path
@@ -65,6 +66,7 @@ from typing import Final
 import pytest
 import agl.sdk
 from agl.ports import errors as ports_errors
+from agl.ports import integration as ports_integration
 from agl.ports import terminal as ports_terminal
 from agl.sdk import errors as sdk_errors
 
@@ -75,7 +77,7 @@ SDK_DIR: Final = Path(agl.sdk.__file__).resolve().parent
 # module's `__all__`", which is the claim that makes a name added there and forgotten here a
 # failure. A `frozenset` means "these, and the rest are in `_ABSENT` with a reason".
 _DOOR: Final[Mapping[str, frozenset[str] | None]] = {
-    "agl.sdk.workflow": None,
+    "agl.sdk._workflow": None,
     "agl.sdk.roles": None,
     "agl.sdk.tools": None,
     "agl.sdk.terminal": None,
@@ -97,8 +99,8 @@ _NOT_ON_THE_ERROR_FACADE: Final[Mapping[str, str]] = {
     "DisagreeingRefusals": "the CLI's as well: the code a run's concurrent failures, or the "
     "refusals a command went on past, exit with where their codes disagree - read out of that "
     "table and never raised, so no run holds one to catch",
-    "Stop": "already on the door through `sdk/workflow.py`, beside the `Run` it is raised out of "
-    "- the surface is `Run`'s six members, plus `Stop` - one name does not get two import paths "
+    "Stop": "already on the door through `sdk/_workflow.py`, beside the `Run` it is raised out of "
+    "- the surface is `Run`'s eight members, plus `Stop` - one name does not get two import paths "
     "into one door",
 }
 
@@ -126,7 +128,7 @@ _ABSENT: Final[Mapping[str, str]] = {
 _OFF_THE_SURFACE: Final[Mapping[str, str]] = {
     "agl.sdk.testing": "the scripting vocabulary, re-exported by `agl/testing.py` beside the "
     "`harness` that is useless without it - one front door for a test, one for a workflow",
-    "agl.sdk._declarations": "internal: the two helpers `params.py`, `tools.py` and `workflow.py` "
+    "agl.sdk._declarations": "internal: the two helpers `params.py`, `tools.py` and `_workflow.py` "
     "read an author's declaration with - `annotations_of` resolves its annotations and `named` "
     "names a class in the refusal when they will not resolve. Both are public spellings, as every "
     "private module's members are: the underscore is on the module and is what says the surface, "
@@ -231,6 +233,27 @@ def test_nothing_off_the_authoring_surface_reaches_the_door(module: str, reason:
         f"authoring surface: {reason}."
     )
 
+def test_no_submodule_of_the_package_shares_a_name_with_anything_on_its_front_door() -> None:
+    """Griffe resolves a dotted path to a submodule first, so a clash leaves the export unlinkable.
+
+    Python binds the export over the submodule when the package's `__init__.py` runs, so every
+    import still works and nothing here fails at run time. Griffe resolves the same path to the
+    submodule instead and logs the clash at DEBUG, below what a docs build prints, so a link to the
+    export by its public name resolves to nothing. `sdk/_workflow.py` is named for this.
+    """
+    submodules = {found.name for found in pkgutil.iter_modules([str(SDK_DIR)])}
+    assert {"roles", "tools"} <= submodules, (
+        f"the walk over {SDK_DIR} found {sorted(submodules)}, which is not the package this file "
+        f"imports - so the comparison below would pass over nothing."
+    )
+    shadowed = sorted(submodules & _exported(agl.sdk))
+    assert not shadowed, (
+        f"{shadowed} are both submodules of `agl.sdk` and names on its front door. The import "
+        f"still works, and Griffe resolves the dotted path to the submodule, so the docs cannot "
+        f"link the export by its public name. Give the module a leading underscore, as "
+        f"`sdk/_workflow.py` has."
+    )
+
 def test_the_error_facade_takes_the_hierarchy_and_names_everything_it_leaves() -> None:
     """`sdk/errors.py` is the one facade over a port module that holds two vocabularies.
 
@@ -297,6 +320,14 @@ def test_the_sentence_the_repository_writes_about_the_terminal_is_true() -> None
     """
     assert agl.sdk.Screen is ports_terminal.Screen
     assert agl.sdk.Terminal is ports_terminal.Terminal
+
+def test_the_door_carries_the_ports_integration_and_not_the_engines_class() -> None:
+    """A workflow annotates a landing with `agl.sdk.Integration` and never reaches into `_engine`.
+
+    The engine's class implements the port and stays off the door, so the name an author imports is
+    the abstract one whose members carry the docstrings.
+    """
+    assert agl.sdk.Integration is ports_integration.Integration
 
 def test_no_module_under_the_package_imports_the_package() -> None:
     """The cycle guard, parsed rather than grepped.

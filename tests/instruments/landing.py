@@ -78,13 +78,14 @@ from agl.cli.exit_codes import exit_status
 from agl.ports.agent import AgentOutcome, Claude, Provider, Restriction, StopReason
 from agl.ports.home_layout import AglHome, RunScope
 from agl.ports.ids import ProjectName, RunLabel
+from agl.ports.integration import Integration
 from agl.ports.run import RunSpec
 from agl.ports.tree_layout import TreesRoot, base_worktree, run_branch
-from agl.sdk._engine.integration import Integration, Leases
+from agl.sdk._engine.integration import Leases
 from agl.sdk._engine.services import Services
+from agl.sdk._workflow import Run
 from agl.sdk.roles import Role, role
 from agl.sdk.tools import reporting_tool
-from agl.sdk.workflow import Run
 
 __all__ = [
     "CHILD",

@@ -1,6 +1,6 @@
 """What `run.step` promises: one agent run per step, and a checkout that ends where it was told to.
 
-The suite over `sdk/_engine/steps.py` and over the half of `sdk/workflow.py` that reaches it.
+The suite over `sdk/_engine/steps.py` and over the half of `sdk/_workflow.py` that reaches it.
 `test_journal_walk.py` holds the replay loop against a hand-written worker; this file holds the
 thing that *builds* that worker - a `Role` becoming an `AgentTask`, a reporting declaration becoming
 a `Tool` with a capture cell behind it, and `commit=` deciding what happens to the worktree.
@@ -101,9 +101,9 @@ from agl.ports.run import JsonValue
 from agl.ports.tree_layout import TreesRoot
 from agl.ports.workspace import Workspace
 from agl.sdk._engine.journal import base_of
+from agl.sdk._workflow import Run
 from agl.sdk.roles import Role, RoleIncompleteError, prompt_file, role
 from agl.sdk.tools import reporting_tool, tool
-from agl.sdk.workflow import Run
 
 # Every test below is async and marked one by one rather than through a module-level `pytestmark`,
 # matching the rest of `tests/sdk/`: `asyncio_mode = "strict"` turns a missing marker into a test

@@ -1,6 +1,8 @@
 import re
+import sys
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from importlib.machinery import BuiltinImporter, FrozenImporter
 from importlib.metadata import EntryPoint
 from pathlib import Path
 from types import MappingProxyType
@@ -17,6 +19,7 @@ __all__ = [
     "check_configured",
     "check_satisfied",
     "check_unbroken",
+    "check_unshadowed",
     "declarations",
     "discovered",
     "load",
@@ -32,6 +35,7 @@ _TOOL: Final = "tool"
 _AGL: Final = "agl"
 _REQUIRES: Final = "requires"
 _CONFIG: Final = "config"
+_OWN_KEYS: Final = (_REQUIRES, _CONFIG)
 
 # TOML's bare-key alphabet. A declared name outside it is still a key a project file can hold, but
 # only quoted, so the line a refusal offers for pasting quotes it.
@@ -93,7 +97,7 @@ def discovered(home: AglHome) -> Discovery:
     for entry in entries:
         if not entry.is_dir():
             continue
-        found = _declared(entry)
+        found = _declared(entry, home)
         points.extend(found.points)
         broken.extend(found.broken)
         directories.update(found.directories)
@@ -117,6 +121,12 @@ def check_unbroken(found: Discovery, name: str) -> None:
 # fails that import on whichever name moved. Answering first is what turns that into a sentence.
 def check_satisfied(found: Discovery, name: str) -> None:
     refusal = found.unsatisfied.get(name)
+    if refusal is not None:
+        raise InputError(refusal)
+
+# Asked before a package is written or placed; `_declared` asks it of each directory it walks.
+def check_unshadowed(home: AglHome, name: str) -> None:
+    refusal = _shadowed(home, name)
     if refusal is not None:
         raise InputError(refusal)
 
@@ -240,7 +250,7 @@ def _package(module: str) -> str:
 def _describe(kind: type[object]) -> str:
     return f"{kind.__module__}.{kind.__qualname__}"
 
-def _declared(directory: Path) -> Discovery:
+def _declared(directory: Path, home: AglHome) -> Discovery:
     path = directory / _PYPROJECT_FILE
     try:
         document = read_document(path)
@@ -250,7 +260,31 @@ def _declared(directory: Path) -> Discovery:
     # a scratch copy, a notes directory or a `.venv` is stray rather than a workflow that broke.
     if document is None:
         return Discovery((), ())
-    return declarations(directory, document)
+    found = declarations(directory, document)
+    # An unmet bound goes first here too, in the order `config/inspection.py` refuses a download.
+    if found.unsatisfied or not _imports_itself(directory, found):
+        return found
+    refusal = _shadowed(home, directory.name)
+    return found if refusal is None else _broken(directory, refusal)
+
+# A directory is a workflow's package only where one of its own declarations imports it.
+def _imports_itself(directory: Path, found: Discovery) -> bool:
+    for point in found.points:
+        parsed = EntryPoint.pattern.match(point.value)
+        if parsed is not None and _package(parsed.group("module")) == directory.name:
+            return True
+    return False
+
+# Every importer Python asks before the path, then every path entry ahead of the workflows.
+def _shadowed(home: AglHome, name: str) -> str | None:
+    if (
+        name in sys.stdlib_module_names
+        or BuiltinImporter.find_spec(name) is not None
+        or FrozenImporter.find_spec(name) is not None
+    ):
+        return _standard(name)
+    origin = workspace_path.found_ahead(home, name)
+    return None if origin is None else _elsewhere(name, origin)
 
 # The walk's own reading of a project file, and `config/inspection.py` asks it of one still in
 # memory too, naming where that file was downloaded from: nothing here opens `directory`, which is
@@ -273,10 +307,13 @@ def declarations(directory: Path, document: Mapping[str, object]) -> Discovery:
         EntryPoint(name=name, value=value, group=GROUP) for name, value in sorted(values.items())
     )
     directories = dict.fromkeys(values, directory)
-    # The rest of the table was written for an AGL this is not, so `config` goes unread: a line
+    # The rest of the table was written for an AGL this is not, so it goes unread: a key or a line
     # this AGL would refuse may be one that AGL reads, and the version is what explains it.
     if bound is not None:
         return Discovery(points, (), directories, dict.fromkeys(values, _unsatisfied(path, bound)))
+    unknown = next((key for key in owned if key not in _OWN_KEYS), None)
+    if unknown is not None:
+        return _broken(directory, _unknown_key(path, unknown))
     declared = owned.get(_CONFIG, [])
     refusal = _config_refusal(path, declared)
     if refusal is not None:
@@ -297,6 +334,22 @@ def _undeclared(path: Path) -> str:
         f'[project.entry-points."{GROUP}"] and one `<name> = "<module>:<attribute>"` line under '
         f'it, and the name on the left of that line is the one `agl run` takes'
     )
+
+def _standard(name: str) -> str:
+    return (
+        f'The standard library has a module named "{name}", so Python would import that instead '
+        f"of the workflow."
+    )
+
+def _elsewhere(name: str, origin: str) -> str:
+    return (
+        f'A module named "{name}" already exists at {origin}, so Python would import that '
+        f"instead of the workflow."
+    )
+
+def _unknown_key(path: Path, key: str) -> str:
+    known = " and ".join(quoted(name) for name in _OWN_KEYS)
+    return f"{path}: {quoted(key)} is not a [{_TOOL}.{_AGL}] key. The keys are {known}."
 
 def _unusable(path: Path, declarations: list[str]) -> str:
     return (

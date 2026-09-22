@@ -517,6 +517,7 @@ async def test_the_command_line_carries_every_setting_that_makes_a_session_agls(
     assert "sandbox_workspace_write.network_access=false" in argv, (
         f"NO_NETWORK reached the harness as nothing: {argv}"
     )
+    assert "web_search=disabled" in argv, f"NO_NETWORK left the harness its web tool: {argv}"
     assert argv[argv.index("-m") + 1] == "gpt-5.6-luna", "the model is the slug, not the tier"
     assert argv[-1] == "-", (
         f"the last argument is {argv[-1]!r}. It is what tells the harness to read the instructions "

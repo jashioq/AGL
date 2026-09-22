@@ -388,6 +388,49 @@ async def test_a_decline_skips_only_its_own_workflow_and_every_other_one_is_upda
     assert (unchanged / "__init__.py").read_bytes() == _MODULE_NOW
 
 @pytest.mark.asyncio
+async def test_an_update_whose_upstream_copy_holds_an_unknown_tool_agl_key_is_refused(
+    tmp_path: Path,
+) -> None:
+    """Checked as `agl get` checks a download, so the copy standing is left exactly as it was."""
+    home = _home(tmp_path)
+    standing = _placed(home, "triage")
+    before = _snapshot(standing)
+    fetcher = FakeFetcher()
+    fetcher.serves(
+        _FLOWS,
+        {
+            "workflows/triage/pyproject.toml": FetchedFile(
+                _pyproject("triage") + b'\n[tool.agl]\nrequire = "agents-gl>=0.1"\n'
+            ),
+            "workflows/triage/__init__.py": FetchedFile(_MODULE_NOW),
+        },
+        commit=_NOW,
+    )
+
+    updated = await _update(home, fetcher)
+
+    (refused,) = updated.got.unplaceable
+    assert isinstance(refused.refusal, InputError)
+    assert '"require" is not a [tool.agl] key' in str(refused.refusal)
+    assert _snapshot(standing) == before
+
+@pytest.mark.asyncio
+async def test_an_update_of_a_workflow_the_standard_library_shadows_is_refused_saying_why(
+    tmp_path: Path,
+) -> None:
+    """The name it would be placed under again is still one Python answers from elsewhere."""
+    home = _home(tmp_path)
+    standing = _placed(home, "calendar")
+    before = _snapshot(standing)
+
+    updated = await _update(home, _serving(FakeFetcher(), _FLOWS, "calendar"))
+
+    (refused,) = updated.got.unplaceable
+    assert isinstance(refused.refusal, InputError)
+    assert str(refused.refusal).startswith('The standard library has a module named "calendar"')
+    assert _snapshot(standing) == before
+
+@pytest.mark.asyncio
 async def test_a_copy_under_another_name_than_it_was_placed_as_is_refused_and_never_fetched(
     tmp_path: Path,
 ) -> None:

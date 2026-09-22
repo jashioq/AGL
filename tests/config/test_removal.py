@@ -75,6 +75,15 @@ def _both_spellings(
 
 # --- the entry a name reaches -------------------------------------------------------------------
 
+def test_a_workflow_named_after_a_standard_library_module_can_still_be_removed_by_name(
+    tmp_path: Path,
+) -> None:
+    """Every other command refuses it, so this is how AGL takes it away, naming what it declares."""
+    home = _home(tmp_path)
+    standing = _standing(home, "calendar", _pyproject("calendar"))
+
+    assert removable(home, "calendar") == RemovableEntry(standing, ("calendar",), linked=False)
+
 def test_a_removal_reaches_the_entry_by_its_own_name_and_every_name_it_declares(
     tmp_path: Path,
 ) -> None:

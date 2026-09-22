@@ -41,6 +41,7 @@ unedited. The provenance file sitting in that directory holds the hash, so the h
 it out, and with `config/provenance.py`'s exclusion deleted that test fails.
 """
 
+import sysconfig
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Final
@@ -52,7 +53,7 @@ from agl.config.registry import GROUP, discovered
 from agl.ports.errors import AglError, ConflictError, InputError, NotFoundError
 from agl.ports.fetch import FetchAnswer, FetchedFile, FetchedWorkflow, RefusedWorkflow
 from agl.ports.get_request import GetRequest, RequestedWorkflow
-from agl.ports.home_layout import PROVENANCE_FILE, AglHome, workflows_dir
+from agl.ports.home_layout import PROVENANCE_FILE, AglHome, workflows_dir, workspace_site_packages
 
 _SHA: Final = "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d"
 
@@ -282,7 +283,48 @@ def test_a_download_declaring_config_keys_is_placeable_with_no_project_to_check_
 
     _placeable(_one(_download("triage", declaring), _home(tmp_path)))
 
+def test_a_download_whose_tool_agl_table_holds_an_unknown_key_is_refused_naming_it(
+    tmp_path: Path,
+) -> None:
+    """Placed, a misspelt `require` would be a floor no AGL ever checks."""
+    misspelt = _pyproject("triage", tables='\n[tool.agl]\nrequire = "agents-gl>=0.1"\n')
+
+    said = _refused(_one(_download("triage", misspelt), _home(tmp_path)), InputError)
+
+    assert said == (
+        'jashioq/myrepo/workflows/mine/triage/pyproject.toml: "require" is not a [tool.agl] key. '
+        'The keys are "requires" and "config".'
+    )
+
 # --- what would stop it loading ------------------------------------------------------------------
+
+def test_a_download_named_after_a_standard_library_module_is_refused_saying_why(
+    tmp_path: Path,
+) -> None:
+    """The name it would be placed under is the module every one of its declarations imports."""
+    said = _refused(_one(_download("calendar"), _home(tmp_path)), InputError)
+
+    assert said == (
+        'The standard library has a module named "calendar", so Python would import that '
+        "instead of the workflow."
+    )
+
+def test_a_download_named_after_a_module_the_local_workspace_venv_holds_is_refused(
+    tmp_path: Path,
+) -> None:
+    """Measured against the workspace it would join, since that is where it would be imported."""
+    home = _home(tmp_path)
+    site = workspace_site_packages(home, Path(sysconfig.get_path("purelib")).parent.name)
+    site.mkdir(parents=True)
+    (site / "probe_download_the_venv_shadows.py").write_text("", encoding="utf-8")
+
+    said = _refused(_one(_download("probe_download_the_venv_shadows"), home), InputError)
+
+    assert said == (
+        f'A module named "probe_download_the_venv_shadows" already exists at '
+        f"{site / 'probe_download_the_venv_shadows.py'}, so Python would import that instead of "
+        f"the workflow."
+    )
 
 def test_a_download_without_an_init_module_is_refused_as_a_namespace_package(
     tmp_path: Path,

@@ -1,3 +1,13 @@
+from agl.sdk._workflow import (
+    Conflict,
+    Integration,
+    Namespace,
+    Run,
+    Stop,
+    VerifierOutcome,
+    Workflow,
+    workflow,
+)
 from agl.sdk.errors import (
     AglError,
     ConflictError,
@@ -45,15 +55,6 @@ from agl.sdk.tools import (
     reporting_tool,
     tool,
 )
-from agl.sdk.workflow import (
-    Conflict,
-    Namespace,
-    Run,
-    Stop,
-    VerifierOutcome,
-    Workflow,
-    workflow,
-)
 
 __all__ = [
     "ActivityReporter",
@@ -67,6 +68,7 @@ __all__ = [
     "ConflictError",
     "DeniedError",
     "InputError",
+    "Integration",
     "InternalError",
     "JsonValue",
     "ModelId",

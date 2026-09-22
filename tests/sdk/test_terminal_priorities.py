@@ -120,12 +120,12 @@ from agl.adapters.rich_terminal.terminal import RichTerminal
 from agl.config import container, registry
 from agl.ports.agent import AgentOutcome, Claude, StopReason, Tool, ToolResult
 from agl.ports.ids import Namespace, ProjectName, RunLabel
+from agl.ports.integration import Integration
 from agl.ports.tree_layout import TreesRoot
-from agl.sdk._engine.integration import Integration
+from agl.sdk._workflow import Run, workflow
 from agl.sdk.roles import Role, role
 from agl.sdk.terminal import Choice, Row, Rows, Screen, Text
 from agl.sdk.tools import describe, tool
-from agl.sdk.workflow import Run, workflow
 from instruments.keyboard import DEADLINE, TICK, Typing
 
 # Marked one by one rather than through a module-level `pytestmark`, matching the rest of
@@ -356,8 +356,8 @@ def conflict(outcome: Integration) -> Screen[bool]:
 
     **The outcome is passed whole, which is a defect in a workflow's view.** The
     sanctioned parameters are `conflict=outcome.conflict, build=outcome.verdict` - what a screen
-    renders - because a workflow author's view annotated against `Integration` carries
-    `sdk/_engine`'s private type in its signature and holds both verbs. `workflows/split/views/
+    renders - because a workflow author's view annotated against `Integration` holds both verbs
+    in its signature. `workflows/split/views/
     conflict.py` is that view, written the sanctioned way. **This one is a test's**, and it takes
     the outcome because it needs a *live* read: the view is re-invoked every frame, so a screen
     built from the object keeps saying what the outcome currently says rather than what it said
@@ -504,9 +504,9 @@ async def deciding(run: Run[NoParams]) -> None:
       * **`outcome` whole, rather than the two members.** This file's own `conflict` view takes an
         `Integration` so that the screen re-reads a *live* outcome every frame - its docstring
         argues that, and `test_pending...` and the board test both read what is drawn while the
-        outcome is still unsettled. The objection is about a **workflow author's** view carrying
-        `sdk/_engine`'s private type in its signature; this view is a test's, in a module that
-        already imports `Integration` to annotate `decided`.
+        outcome is still unsettled. The objection is about a **workflow author's** view holding
+        both verbs in its signature; this view is a test's, in a module that already imports
+        `Integration` to annotate `decided`.
       * **`if` rather than `while`.** Every scene here scripts exactly one keystroke, and a view
         that reads the live outcome would be drawn again on any second pass - with no key left to
         answer it, which is a hung scene rather than a failing assertion. The loop itself ends on

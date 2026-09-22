@@ -17,7 +17,7 @@ locks in play the step lock excludes nothing, so a second claim that waits is a 
 *lease* is holding, and a second claim that completes is a lease that is not there.
 
 **Its own module rather than a section of `test_run_integrate.py`**, for that file's own stated
-subject: it is "the suite over `sdk/_engine/integration.py` and over the half of `sdk/workflow.py`
+subject: it is "the suite over `sdk/_engine/integration.py` and over the half of `sdk/_workflow.py`
 that reaches it", and every arrangement in it is a workflow calling `run.integrate()`. Everything
 below constructs `Leases`, `Journal` and `RunScope` by hand and never opens a `Run` - except the
 last test, which needs a landing and says why. A section carrying two invented `Journal`s inside a
@@ -40,13 +40,14 @@ from agl.config import container
 from agl.ports.agent import AgentTask, Claude, Restriction
 from agl.ports.home_layout import RunScope
 from agl.ports.ids import Namespace, ProjectName, RunLabel
+from agl.ports.integration import Integration
 from agl.ports.tree_layout import TreesRoot
 from agl.ports.workspace import Workspace
-from agl.sdk._engine.integration import Integration, Leases
+from agl.sdk._engine.integration import Leases
 from agl.sdk._engine.journal import Fingerprints, Journal
+from agl.sdk._workflow import Run
 from agl.sdk.roles import Role, role
 from agl.sdk.testing import Agent, Reply
-from agl.sdk.workflow import Run
 
 # `asyncio_mode = "strict"`, so every async test below carries its own marker.
 

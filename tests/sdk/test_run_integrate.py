@@ -1,7 +1,7 @@
 """What `run.integrate()` promises: a landing into the parent, serialized per target, and a chain
 that advances.
 
-The suite over `sdk/_engine/integration.py` and over the half of `sdk/workflow.py` that reaches it.
+The suite over `sdk/_engine/integration.py` and over the half of `sdk/_workflow.py` that reaches it.
 `tests/contracts/integration.py` holds the *port* to `land`, `retry` and `abort`; nothing here
 repeats any of that. What this file is about is the six decisions the framework makes around those
 three calls, each of which fails silently or destructively rather than loudly:
@@ -40,6 +40,10 @@ three calls, each of which fails silently or destructively rather than loudly:
     `Leases.claim` for the life of the process with nothing raised, which is why the two tests at
     the bottom bound the second claim rather than awaiting it.
 
+**The first section is the type rather than a decision.** `Run.integrate` is annotated with the port
+`agl.ports.integration.Integration`, which `agl.sdk` exports and the engine's `GatedIntegration`
+implements, so no workflow's annotation names `sdk/_engine`.
+
 **Every test above the gate section runs with a green one**, because `FakeVerifier` passes a command
 nobody scripted - "a gate that failed by default would reject every landing of a run whose point was
 to show the shape of the work". So the landings asserted there are gated landings, and a test that
@@ -66,8 +70,9 @@ import asyncio
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from importlib.metadata import EntryPoint
+from inspect import isabstract
 from pathlib import Path
-from typing import Final
+from typing import Final, get_type_hints
 import pytest
 from agl import api
 from agl.config import container, registry
@@ -75,15 +80,15 @@ from agl.ports.agent import AgentTask, Claude, Restriction
 from agl.ports.errors import InputError, InternalError, UpstreamUnexpected
 from agl.ports.home_layout import AglHome, RunScope, workflows_dir
 from agl.ports.ids import Namespace, ProjectName, RunLabel
-from agl.ports.integration import IntegrationOutcome, Integrator
+from agl.ports.integration import Integration, IntegrationOutcome, Integrator
 from agl.ports.tree_layout import TreesRoot, run_branch
 from agl.ports.verifier import Verifier, VerifierOutcome
 from agl.ports.workspace import Workspace
-from agl.sdk._engine.integration import Integration
+from agl.sdk._engine.integration import GatedIntegration
+from agl.sdk._workflow import Run, workflow
 from agl.sdk.roles import Role, role
 from agl.sdk.testing import Agent, Call, Reply
 from agl.sdk.tools import reporting_tool
-from agl.sdk.workflow import Run, workflow
 
 # `asyncio_mode = "strict"`, so every async test below carries its own marker.
 
@@ -335,6 +340,26 @@ def _target_dir(tmp_path: Path) -> Path:
 def _child_dir(tmp_path: Path, namespace: str) -> Path:
     """`.trees/auth/<namespace>/` - a child's checkout, a flat sibling of `_base`."""
     return tmp_path / "trees" / "auth" / namespace
+
+# --- the type a workflow is handed, and the class behind it --------------------------------------
+
+def test_the_port_declares_every_member_a_workflow_reads_and_leaves_each_abstract() -> None:
+    """Seven members, all abstract: the port says what a landing answers and implements none."""
+    assert isabstract(Integration)
+    assert Integration.__abstractmethods__ == frozenset(
+        {"head", "conflict", "conflicted", "verdict", "refused_by_the_gate", "retry", "abort"}
+    )
+
+def test_the_engine_class_implements_the_port_and_adds_no_public_member_of_its_own() -> None:
+    """A public member only the engine had would be one no workflow's annotation could reach."""
+    assert issubclass(GatedIntegration, Integration)
+    assert not isabstract(GatedIntegration)
+    public = frozenset(name for name in vars(GatedIntegration) if not name.startswith("_"))
+    assert public == Integration.__abstractmethods__
+
+def test_run_integrate_is_annotated_with_the_port_rather_than_the_engine_class() -> None:
+    """The type `landing = await child.integrate()` is given, resolved from the annotation."""
+    assert get_type_hints(Run.integrate)["return"] is Integration
 
 # --- the root has no parent ----------------------------------------------------------------------
 

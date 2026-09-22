@@ -963,6 +963,18 @@ def test_the_update_parser_takes_one_optional_positional_and_no_option_of_its_ow
     assert options == {"-h", "--help"}
     assert positionals == [("workflow", "?")]
 
+def test_the_bare_command_says_in_its_help_that_it_reaches_what_agl_get_downloaded() -> None:
+    """The set the name may be left off for, named where somebody reads it before typing it.
+
+    A workflow written by hand or scaffolded by `agl new` carries no provenance file and this
+    command passes over it, which
+    `test_a_workspace_where_agl_get_placed_nothing_is_already_up_to_date_too` measures. A help
+    promising "all workflows" promised the whole workspace.
+    """
+    named = next(action for action in _update_parser()._actions if action.dest == "workflow")
+
+    assert "agl get" in (named.help or "")
+
 def test_the_command_calls_exactly_one_api_function() -> None:
     """`AGENTS.md`'s "Layers" rule for commands, made mechanical as in the other suites."""
     called = {

@@ -41,53 +41,71 @@ class TreesRoot:
 def run_trees_dir(trees: TreesRoot, label: RunLabel) -> Path:
     """Every working checkout belonging to one run, and nothing else.
 
-    :param trees: where working checkouts live, which is never where AGL keeps its own state
-    :param label: which run; it is the directory name as it stands, validated by `ids.py`
-    :return: `<trees>/<label>/`, holding the run's own checkout and its children as siblings
+    Args:
+        trees: where working checkouts live, which is never where AGL keeps its own state
+        label: which run; it is the directory name as it stands, validated by `ids.py`
+
+    Returns:
+        `<trees>/<label>/`, holding the run's own checkout and its children as siblings
     """
     return _root(trees) / str(label)
 
 def base_worktree(trees: TreesRoot, label: RunLabel) -> Path:
     """The run's own checkout, which is what a run's children are cut from.
 
-    :param trees: where working checkouts live, which is never where AGL keeps its own state
-    :param label: which run; it takes no namespace, and no `Namespace` can spell `_base`
-    :return: `<trees>/<label>/_base/`, on the branch `run_branch` composes
+    Args:
+        trees: where working checkouts live, which is never where AGL keeps its own state
+        label: which run; it takes no namespace, and no `Namespace` can spell `_base`
+
+    Returns:
+        `<trees>/<label>/_base/`, on the branch `run_branch` composes
     """
     return run_trees_dir(trees, label) / BASE_DIRNAME
 
 def worktree_dir(trees: TreesRoot, label: RunLabel, namespace: Namespace) -> Path:
     """One child checkout, a sibling of the run's own and of every other child.
 
-    :param trees: where working checkouts live, which is never where AGL keeps its own state
-    :param label: which run; every checkout of one run sits directly under its directory
-    :param namespace: names the directory outright; the trees layout is flat, so depth is dropped
-    :return: `<trees>/<label>/<namespace>/`
+    Args:
+        trees: where working checkouts live, which is never where AGL keeps its own state
+        label: which run; every checkout of one run sits directly under its directory
+        namespace: names the directory outright; the trees layout is flat, so depth is dropped
+
+    Returns:
+        `<trees>/<label>/<namespace>/`
     """
     return run_trees_dir(trees, label) / str(namespace)
 
 def run_branch(label: RunLabel) -> str:
     """The branch a run commits its own work to - the deliverable, and it outlives every checkout.
 
-    :param label: which run; no root, because a branch is not a path
-    :return: `agl/<label>`, which a finished run leaves standing when it gives its checkout back
+    Args:
+        label: which run; no root, because a branch is not a path
+
+    Returns:
+        `agl/<label>`, which a finished run leaves standing when it gives its checkout back
     """
     return f"{_BRANCH_PREFIX}{_BRANCH_SEPARATOR}{label}"
 
 def worktree_branch(label: RunLabel, namespace: Namespace) -> str:
     """A child checkout's branch, cut from the run's own and kept clear of its name.
 
-    :param label: which run; no root, because a branch is not a path
-    :param namespace: which child; one namespace per run, since depth does not appear here
-    :return: `agl/_work/<label>/<namespace>` - the infix is what lets git hold both refs at once
+    Args:
+        label: which run; no root, because a branch is not a path
+        namespace: which child; one namespace per run, since depth does not appear here
+
+    Returns:
+        `agl/_work/<label>/<namespace>` - the infix is what lets git hold both refs at once
     """
     return f"{worktree_branch_prefix(label)}{namespace}"
 
 def worktree_branch_prefix(label: RunLabel) -> str:
     """What every child branch of one run begins with, and the whole of what its name adds to.
 
-    :param label: which run; no root, because a branch is not a path
-    :return: `agl/_work/<label>/` - one namespace, with no separator in it, completes a branch
+    Args:
+        label: which run; no root, because a branch is not a path
+
+    Returns:
+        `agl/_work/<label>/` - one namespace, with no separator in it, completes a branch
     """
     parts = (_BRANCH_PREFIX, _WORK_INFIX, str(label))
     return _BRANCH_SEPARATOR.join(parts) + _BRANCH_SEPARATOR

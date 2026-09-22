@@ -75,7 +75,7 @@ class _Formatter(argparse.HelpFormatter):
             yield from action._choices_actions
 
 class RefusingParser(argparse.ArgumentParser):
-    """An `argparse` parser that raises :class:`InputError` instead of exiting."""
+    """An `argparse` parser that raises [`InputError`][agl.sdk.InputError] instead of exiting."""
 
     def __init__(self, *, add_help: bool = True, **kwargs: Any) -> None:
         kwargs.setdefault("formatter_class", _Formatter)
@@ -87,10 +87,13 @@ class RefusingParser(argparse.ArgumentParser):
         self.add_help = add_help
 
     def error(self, message: str) -> NoReturn:
-        """Raise :class:`InputError` instead of exiting.
+        """Raise [`InputError`][agl.sdk.InputError] instead of exiting.
 
-        :param message: The error message from `argparse`.
-        :raises InputError: Always.
+        Args:
+            message: The error message from `argparse`.
+
+        Raises:
+            InputError: Always.
         """
         raise InputError(f"{self.format_usage().strip()}\n{message}")
 
@@ -99,14 +102,19 @@ def arg[T](*flags: str, default: T, help: str = "") -> T: ...
 @overload
 def arg(*flags: str, help: str = "") -> Any: ...
 def arg(*flags: str, default: Any = MISSING, help: str = "") -> Any:
-    """Declare a field of a params dataclass as a command-line flag.
+    """Declares a field of a params dataclass as a command-line flag.
 
-    :param flags: The flag's spellings, such as `-n` and `--name`. At least one.
-    :param default: The value when the flag isn't given. If omitted, the flag is required. A `bool`
-        field must use `default=False`.
-    :param help: What `agl workflows <workflow>` shows beside the flag.
-    :return: A `dataclasses.field` to assign to the annotated field.
-    :raises InputError: No flags, a flag `agl run` uses or `argparse` refuses, or a bad default.
+    Args:
+        flags: The flag's spellings, such as `-n` and `--name`. At least one.
+        default: The value when the flag isn't given. If omitted, the flag is required. A `bool`
+            field must use `default=False`.
+        help: The text `agl workflows <workflow>` shows beside the flag.
+
+    Returns:
+        The `dataclasses.field` to assign to the annotated field.
+
+    Raises:
+        InputError: No flags, a flag `agl run` uses or `argparse` refuses, or a bad default.
     """
     if not flags:
         raise InputError(
@@ -131,10 +139,15 @@ def arg(*flags: str, default: Any = MISSING, help: str = "") -> Any:
 def parser_for(params: type[object], *, prog: str | None = None) -> RefusingParser:
     """Build the flag parser for a params dataclass.
 
-    :param params: The params dataclass. Every field must be declared with `arg()`.
-    :param prog: The name shown in the usage line. If omitted, uses `sys.argv[0]`.
-    :return: A parser that raises :class:`InputError` instead of exiting.
-    :raises InputError: Not a dataclass, a field without `arg()`, or two fields with the same flag.
+    Args:
+        params: The params dataclass. Every field must be declared with `arg()`.
+        prog: The name shown in the usage line. If omitted, uses `sys.argv[0]`.
+
+    Returns:
+        A parser that raises [`InputError`][agl.sdk.InputError] instead of exiting.
+
+    Raises:
+        InputError: Not a dataclass, a field without `arg()`, or two fields with the same flag.
     """
     if not is_dataclass(params):
         raise InputError(f"{named(params)} is not a dataclass of `arg()` fields")
@@ -165,11 +178,16 @@ def parser_for(params: type[object], *, prog: str | None = None) -> RefusingPars
 def parse[T](params: type[T], argv: Sequence[str], *, prog: str | None = None) -> T:
     """Read a workflow's flags into an instance of its params dataclass.
 
-    :param params: The params dataclass.
-    :param argv: The workflow's own flags, without the ones `agl run` takes.
-    :param prog: The name shown in the usage line. If omitted, uses `sys.argv[0]`.
-    :return: An instance of `params` holding the flags' values.
-    :raises InputError: A missing required flag, an unknown flag, or a value that won't convert.
+    Args:
+        params: The params dataclass.
+        argv: The workflow's own flags, without the ones `agl run` takes.
+        prog: The name shown in the usage line. If omitted, uses `sys.argv[0]`.
+
+    Returns:
+        An instance of `params` holding the flags' values.
+
+    Raises:
+        InputError: A missing required flag, an unknown flag, or a value that won't convert.
     """
     parsed = parser_for(params, prog=prog).parse_args(argv)
     factory: Callable[..., T] = params
@@ -178,9 +196,14 @@ def parse[T](params: type[T], argv: Sequence[str], *, prog: str | None = None) -
 def to_json(instance: object) -> Mapping[str, JsonValue]:
     """Convert a params instance to JSON values.
 
-    :param instance: The params instance, not its class.
-    :return: Each field's value by name, in declaration order.
-    :raises InputError: A value that can't be saved as JSON, such as an infinite float.
+    Args:
+        instance: The params instance, not its class.
+
+    Returns:
+        Each field's value by name, in declaration order.
+
+    Raises:
+        InputError: A value that can't be saved as JSON, such as an infinite float.
     """
     if isinstance(instance, type) or not is_dataclass(instance):
         raise InputError(
@@ -196,11 +219,16 @@ def to_json(instance: object) -> Mapping[str, JsonValue]:
 def from_json[T](params: type[T], data: Mapping[str, JsonValue]) -> T:
     """Rebuild a params instance from what `to_json` returned.
 
-    :param params: The params dataclass to rebuild.
-    :param data: What `to_json` returned.
-    :return: An instance of `params` holding the saved values.
-    :raises InputError: A field missing from `data`, a key the class doesn't declare, or a value
-        whose type no longer matches its field.
+    Args:
+        params: The params dataclass to rebuild.
+        data: What `to_json` returned.
+
+    Returns:
+        An instance of `params` holding the saved values.
+
+    Raises:
+        InputError: A field missing from `data`, a key the class doesn't declare, or a value
+            whose type no longer matches its field.
     """
     kind = named(params)
     declared = _field_names(params)

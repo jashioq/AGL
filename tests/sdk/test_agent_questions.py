@@ -112,9 +112,9 @@ from agl.ports.run import JsonValue
 from agl.ports.terminal import Choice, Response, Screen, Text, TextInput
 from agl.ports.tree_layout import TreesRoot
 from agl.sdk._engine.services import Services
+from agl.sdk._workflow import Run, workflow
 from agl.sdk.roles import Role, role
 from agl.sdk.tools import describe, reporting_tool, tool
-from agl.sdk.workflow import Run, workflow
 from instruments.keyboard import DEADLINE, Typing
 
 # Marked one by one rather than through a module-level `pytestmark`, matching the rest of

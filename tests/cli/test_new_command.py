@@ -610,6 +610,41 @@ def test_a_name_that_cannot_be_all_three_things_at_once_is_refused_before_anythi
     assert rule in capsys.readouterr().err
     assert not home.path.exists(), "a refused `agl new` created something anyway"
 
+@pytest.mark.parametrize(
+    ("spelled", "said"),
+    [
+        ("calendar", 'The standard library has a module named "calendar", so Python would'),
+        ("agl", 'A module named "agl" already exists at '),
+    ],
+)
+def test_a_name_python_would_import_from_elsewhere_is_refused_before_anything_is_written(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], spelled: str, said: str
+) -> None:
+    """A workflow is imported by its name, so a name something else answers to first never runs.
+
+    Refused before the workspace is made. A fresh home has no workspace venv yet, so the standard
+    library and AGL's own environment are all there is to ask.
+    """
+    home = _home(tmp_path)
+
+    assert _main(home, "new", spelled) == 2
+
+    assert said in capsys.readouterr().err
+    assert not home.path.exists(), "a refused `agl new` created something anyway"
+
+def test_a_name_a_module_in_the_workspace_venv_already_holds_is_refused_by_agl_new(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    home = _home(tmp_path)
+    _installed(home)
+    planted = workspace_site_packages(home, SEGMENT) / "probe_new_name_the_venv_holds.py"
+    planted.write_text("", encoding="utf-8")
+
+    assert _main(home, "new", "probe_new_name_the_venv_holds") == 2
+
+    assert f"already exists at {planted}, so Python would import" in capsys.readouterr().err
+    assert not workflows_dir(home).exists(), "a refused `agl new` wrote a workspace anyway"
+
 def test_a_second_new_under_a_name_the_workspace_already_holds_exits_four(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

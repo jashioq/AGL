@@ -41,7 +41,7 @@ A framework for running AI agent workflows against code repositories.
 
 ## Prose in `src/`
 
-- Inline `#` everywhere. reST docstrings only on public callables of `sdk/` and `ports/`.
+- Inline `#` everywhere. Google-style docstrings only on public callables of `sdk/` and `ports/`.
   Elsewhere, one line where the signature falls short, and none in `sdk/_engine/`.
 - A comment carries a fact from outside the file, like vendor behaviour or a measurement.
   What thirty seconds of reading shows gets none.
@@ -58,11 +58,7 @@ A framework for running AI agent workflows against code repositories.
 
 ## The voice
 
-- A docstring summary says what the call does, in the author's words.
-- Keep AGL's machinery out.
-- Keep a consequence only if it destroys the author's work.
-- A field says what the value is. `:raises:` says when.
-- A type is ``:class:`Role` `` and never opens a continuation line.
+- `DOCS_GUIDELINES.md` governs SDK docstrings and `docs/`, `overrides/` and `tests/docs/`.
 - Terminal output is one capitalised sentence of fact, then at most the next move or what is lost.
   Warnings open `WARNING:`.
 - Names in double quotes. Versions and commits bare.
@@ -72,7 +68,8 @@ A framework for running AI agent workflows against code repositories.
 ## Invariants where a mistake is silent
 
 - A step with no `commit=` wipes its worktree. Nothing checks the pairing.
-- `Integration._conclude` hands a landing to the parent's chain, or the next miss resets past it.
+- `GatedIntegration._conclude` hands a landing to the parent's chain, or the next miss resets
+  past it.
 - A red build gate discards a hand-resolved conflict.
 - Resume re-runs every line, so a workflow branches only on step results.
 - Replay skips the worker, so a step's effects must land in its workspace.

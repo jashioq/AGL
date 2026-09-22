@@ -36,6 +36,9 @@ APPROVAL: Final[tuple[str, ...]] = ("-c", 'approval_policy="never"')
 # network with it unasked, and an override there is accepted and changes nothing at all.
 _NETWORK: Final = "sandbox_workspace_write.network_access"
 
+# Measured on 0.155.1: its default offers a `web.run` tool in both modes, past the network switch.
+_WEB_SEARCH_OFF: Final = "web_search=disabled"
+
 # Both `stable` and both on by default. Two rather than one because a harness whose working model is
 # running commands plausibly has a second route - and nothing establishes that a feature switched
 # off in the registry removes the tool from what the model is offered, which is why words go.
@@ -115,6 +118,9 @@ def sandbox(restrictions: frozenset[Restriction]) -> Sandbox:
         mode = _WORKSPACE_WRITE
         allowed = Restriction.NO_NETWORK not in restrictions
         options += ["-c", f"{_NETWORK}={'true' if allowed else 'false'}"]
+
+    if Restriction.NO_NETWORK in restrictions:
+        options += ["-c", _WEB_SEARCH_OFF]
 
     if Restriction.NO_SHELL in restrictions:
         for feature in _SHELL_FEATURES:

@@ -17,7 +17,7 @@ from dataclasses import fields
 from typing import get_type_hints
 from agl.config import container
 from agl.sdk._engine.services import Services
-from agl.sdk.workflow import Run
+from agl.sdk._workflow import Run
 
 def test_the_composition_root_re_exports_the_bundle_rather_than_declaring_a_second_one() -> None:
     """The one assertion `tests/config/test_container.py` is structurally unable to make."""

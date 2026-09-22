@@ -25,7 +25,7 @@ from agl.sdk._engine.integration import Leases
 from agl.sdk._engine.journal import Fingerprints
 from agl.sdk._engine.services import Services
 from agl.sdk._engine.worktrees import Worktrees
-from agl.sdk.workflow import Run, Workflow
+from agl.sdk._workflow import Run, Workflow
 
 __all__ = [
     "Cleared",
@@ -93,7 +93,7 @@ async def run(
     found = _discovery(home, points)
     services = _configured(found, name, services, home, project)
     wf = _loaded(found, name)
-    given = params.parse(wf.params, argv, prog=f"agl run {name}")
+    given = params.parse(wf.params, argv, prog=_program(name))
 
     scope = RunScope(project, label)
     if await services.store.read_record(scope) is not None:
@@ -226,6 +226,7 @@ async def clear(services: Services, project: ProjectName, label: RunLabel) -> Cl
 # The scaffold is written before the install, so an installer that refuses leaves the two documents
 # on disk and a second `agl new` under the same name refuses them rather than writing them again.
 async def new_workflow(syncer: Syncer, home: AglHome, name: WorkflowName) -> Path:
+    registry.check_unshadowed(home, str(name))
     toml_file.make_workspace(home)
     written = toml_file.make_workflow(home, name, registry.GROUP, distribution.requirement())
     await _sync_workspace(syncer, home)
@@ -286,7 +287,13 @@ def workflow_help(
     name: str, *, home: AglHome | None = None, points: Iterable[EntryPoint] | None = None
 ) -> str:
     wf = _loaded(_discovery(home, points), name)
-    return params.parser_for(wf.params, prog=f"agl run {name}").format_help()
+    return params.parser_for(wf.params, prog=_program(name)).format_help()
+
+# The label flag rides in the program name, so the usage line is a command `agl run` accepts rather
+# than one it refuses for the flag it requires. `cli/commands/run.py` declares the flag from the
+# same constant, and `tests/cli/test_workflows_command.py` compares the line against that parser.
+def _program(name: str) -> str:
+    return f"agl run {name} {params.RUN_LABEL_FLAGS[0]} <label>"
 
 # The nesting of the three is load-bearing in both directions. `releasing` sits outside the
 # terminal, so the note it may write reaches a console `RichTerminal` has already handed back rather

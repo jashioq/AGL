@@ -1,6 +1,7 @@
 import sys
 import sysconfig
 from contextlib import suppress
+from importlib.machinery import PathFinder
 from pathlib import Path
 from typing import Final
 from agl.ports.home_layout import (
@@ -10,7 +11,7 @@ from agl.ports.home_layout import (
     workspace_site_packages,
 )
 
-__all__ = ["extend", "venv_exists", "write_editor_pth"]
+__all__ = ["extend", "found_ahead", "venv_exists", "write_editor_pth"]
 
 # The directory holding the `agl` package this process imported, which is `src/` in a checkout and
 # an environment's own site-packages everywhere else. Composed from this module's location because
@@ -34,6 +35,19 @@ def extend(home: AglHome) -> None:
     # The container and not each workflow inside it: a workflow is then a package named after its
     # own directory, so two of them may both hold a `roles.py` without either shadowing the other.
     _append(str(workflows_dir(home)))
+
+def found_ahead(home: AglHome, name: str) -> str | None:
+    """The file an import of `name` finds before the workspace's workflows, or `None`."""
+    entries = [*sys.path]
+    site = str(workspace_site_packages(home, _interpreter()))
+    # Only a directory: a path that is not one is cached as unimportable for the whole process.
+    if site not in entries and Path(site).is_dir():
+        entries.append(site)
+    workflows = str(workflows_dir(home))
+    ahead = entries[: entries.index(workflows)] if workflows in entries else entries
+    spec = PathFinder.find_spec(name, ahead)
+    # A namespace portion has no origin, and any regular package of the same name outranks it.
+    return None if spec is None else spec.origin
 
 # Asked before an installer is started and never after it has finished: `uv sync` builds the venv
 # before it resolves, so a sync that failed on the first ever attempt leaves one standing, and an

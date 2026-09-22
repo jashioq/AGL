@@ -74,8 +74,8 @@ from agl.ports.tree_layout import (
     worktree_dir,
 )
 from agl.ports.workspace import Workspace, WorkspaceProvider
+from agl.sdk._workflow import Run, workflow
 from agl.sdk.roles import Role, role
-from agl.sdk.workflow import Run, workflow
 
 # `asyncio_mode = "strict"`, so every async test below carries its own marker.
 

@@ -24,7 +24,7 @@ from agl.ports.errors import InputError, exit_code_for
 from agl.ports.home_layout import AglHome, workflows_dir
 from agl.ports.ids import ProjectName, RunLabel
 from agl.ports.tree_layout import TreesRoot
-from agl.sdk.workflow import Run, workflow
+from agl.sdk._workflow import Run, workflow
 
 PROJECT: Final = ProjectName("myapp")
 LABEL: Final = RunLabel("auth")

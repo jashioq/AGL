@@ -34,8 +34,10 @@ and no trees root, because a command that listed what the workspace declares and
 to do it would be a defect.
 """
 
+import argparse
 import ast
 import inspect
+from collections.abc import Callable
 from dataclasses import dataclass
 from importlib.metadata import EntryPoint
 from pathlib import Path
@@ -43,18 +45,21 @@ from typing import Final
 import pytest
 from agl.cli import main
 from agl.cli.commands import new as new_command
+from agl.cli.commands import run as run_command
 from agl.cli.commands import workflows as workflows_command
 from agl.config import registry, sources
 from agl.ports.home_layout import AglHome, workflows_dir
 from agl.ports.ids import ProjectName
+from agl.sdk._workflow import Run, workflow
 from agl.sdk.params import RefusingParser, arg
-from agl.sdk.workflow import Run, workflow
 
 # Nothing below reads these two off the `Invocation`, `cli/main.py`'s `_registering` being what
 # does; the fields
 # are not optional (`cli/main.py` argues why), so both carry a real value nothing here looks at.
 ELSEWHERE: Final = Path("/nowhere")
 SETTINGS: Final = sources.resolve_settings(sources.Overrides(), {"AGL_HOME": str(ELSEWHERE)})
+
+type _Commands = argparse._SubParsersAction[RefusingParser]
 
 @dataclass(frozen=True)
 class Flagged:
@@ -132,11 +137,16 @@ def _reading(home: AglHome, *argv: str) -> int:
         ),
     )
 
-def _workflows_parser() -> RefusingParser:
-    """The `workflows` subparser alone, built the way `main.parser()` builds it, for inspection."""
+def _declared(declare: Callable[[_Commands], RefusingParser]) -> RefusingParser:
+    """One subparser alone, built the way `main.parser()` builds it, for inspection.
+
+    Two commands are read through it: `workflows`, whose own grammar the last section reads off
+    the object, and `run`, whose label flag the usage line printed here has to carry in that
+    parser's spelling rather than in a second one written out below.
+    """
     root = RefusingParser(prog="agl", allow_abbrev=False)
     commands = root.add_subparsers(dest="command", required=True, parser_class=RefusingParser)
-    return workflows_command.declare(commands)
+    return declare(commands)
 
 # --- the listing, which imports nothing ----------------------------------------------------------
 
@@ -231,6 +241,91 @@ def test_naming_a_directory_that_declares_no_workflow_refuses_with_its_own_reaso
 
     assert "pyproject.toml" in capsys.readouterr().err
 
+def test_an_unknown_tool_agl_key_is_listed_under_its_directory_and_refused_by_name(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Exit 0 for the listing, which names the key on stderr, and exit 2 for the workflow itself."""
+    home = _workspace(tmp_path)
+    _directory(
+        home,
+        "triage",
+        _declaring("triage", "tickets") + '\n[tool.agl]\nrequire = "agents-gl>=99999.0.0"\n',
+    )
+
+    assert _reading(home, "workflows") == 0
+    listed = capsys.readouterr()
+    assert listed.out == ""
+    assert '"require" is not a [tool.agl] key' in listed.err
+
+    assert _reading(home, "workflows", "triage") == 2
+    assert '"require" is not a [tool.agl] key' in capsys.readouterr().err
+
+def test_a_workflow_named_after_a_standard_library_module_is_listed_as_refused_saying_why(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The listing names it beside the reason, and naming it refuses with exit 2 and that reason."""
+    home = _workspace(tmp_path)
+    _directory(
+        home,
+        "calendar",
+        f'[project]\nname = "calendar"\nversion = "0.1.0"\n\n'
+        f'[project.entry-points."{registry.GROUP}"]\ncalendar = "calendar:calendar"\n',
+    )
+    said = (
+        'The standard library has a module named "calendar", so Python would import that instead '
+        "of the workflow."
+    )
+
+    assert _reading(home, "workflows") == 0
+    listed = capsys.readouterr()
+    assert listed.out == ""
+    assert f"  calendar: {said}\n" in listed.err
+
+    assert _reading(home, "workflows", "calendar") == 2
+    assert capsys.readouterr().err == f"agl: {said}\n"
+
+def test_one_heading_is_true_of_every_kind_of_directory_listed_under_it(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Four reasons under one sentence, so the sentence says no more than is true of all four.
+
+    The first directory's project file does not parse, so it declares nothing. The other three
+    each declare a workflow AGL refuses to run - an unknown `[tool.agl]` key, a `config` line it
+    cannot read, and a name Python would answer with the standard library's module instead - and
+    a heading reading "declares no workflow" was true of the first and wrong about the rest.
+    """
+    home = _workspace(tmp_path)
+    _directory(home, "half-written", "[project\n")
+    _directory(
+        home,
+        "unkeyed",
+        _declaring("unkeyed", "tickets") + '\n[tool.agl]\nrequire = "agents-gl>=0.0.1"\n',
+    )
+    _directory(
+        home,
+        "misconfigured",
+        _declaring("misconfigured", "tickets") + '\n[tool.agl]\nconfig = [""]\n',
+    )
+    _directory(
+        home,
+        "calendar",
+        f'[project]\nname = "calendar"\nversion = "0.1.0"\n\n'
+        f'[project.entry-points."{registry.GROUP}"]\ncalendar = "calendar:calendar"\n',
+    )
+
+    assert _reading(home, "workflows") == 0
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    listed = captured.err.splitlines()
+    assert listed[0] == "These directories declare no workflow AGL can run:"
+    assert sorted(line.split(":")[0].strip() for line in listed[1:]) == [
+        "calendar",
+        "half-written",
+        "misconfigured",
+        "unkeyed",
+    ]
+
 # --- the name, which imports exactly one ---------------------------------------------------------
 
 def test_naming_a_workflow_prints_the_flags_it_declares(
@@ -293,7 +388,27 @@ def test_a_workflow_with_no_flags_prints_a_usage_line_rather_than_nothing(
     """
     assert _main("workflows", "probe") == 0
 
-    assert capsys.readouterr().out.strip() == "usage: agl run probe"
+    assert capsys.readouterr().out.strip() == "usage: agl run probe -n <label>"
+
+def test_the_usage_line_carries_the_label_flag_agl_run_requires_of_every_workflow(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A line without `-n <label>` is one `agl run` refuses, so the flag is read off that parser.
+
+    The usage line is what somebody copies, and `agl run tickets --request x` is refused for the
+    argument this command never showed them. The spelling and the placeholder come from the `run`
+    parser itself rather than from a second literal here, so renaming either fails this test.
+    """
+    label = next(
+        action for action in _declared(run_command.declare)._actions if action.dest == "label"
+    )
+    assert label.required, "the label flag is optional, so a usage line may omit it"
+
+    assert _main("workflows", "tickets") == 0
+
+    assert capsys.readouterr().out.startswith(
+        f"usage: agl run tickets {label.option_strings[0]} {label.metavar} "
+    )
 
 # --- what the command is, read off the module ----------------------------------------------------
 
@@ -303,7 +418,7 @@ def test_the_workflows_parser_holds_one_optional_positional_and_no_flags() -> No
     Optional, so that the original spelling - the bare `agl workflows` - stays the listing it
     always was, and the argument added later cannot make anybody type one.
     """
-    parser = _workflows_parser()
+    parser = _declared(workflows_command.declare)
 
     options = {flag for action in parser._actions for flag in action.option_strings}
     positionals = [action for action in parser._actions if not action.option_strings]

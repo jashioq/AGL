@@ -13,7 +13,7 @@ recorded in the module docstring with what it covered and what it could not. So 
 assert two things it *can* settle - that every restriction renders something in both forms, and
 that every rule obeys the permission language's own grammar as this repo understands it - and the
 grammar half is deliberately written as rules rather than as a golden copy of the tuple: a test
-holding an expected list of forty-five strings is a second copy of the data, and it agrees with
+holding an expected list of forty-six strings is a second copy of the data, and it agrees with
 the first only because one person edited both.
 
 Named `test_claude_code_translate.py`: `tests/` carries no `__init__.py` (see `tests/conftest.py`

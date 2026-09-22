@@ -59,9 +59,9 @@ from agl.ports.agent import AgentOutcome, Claude, StopReason
 from agl.ports.home_layout import RunScope
 from agl.ports.ids import ProjectName, RunLabel
 from agl.ports.tree_layout import TreesRoot, run_branch
+from agl.sdk._workflow import Run, workflow
 from agl.sdk.params import RefusingParser
 from agl.sdk.roles import Role, role
-from agl.sdk.workflow import Run, workflow
 
 # No command reads `settings` or `cwd` off the `Invocation` - `cli/main.py`'s `_registering` does -
 # but neither field is optional (`cli/main.py` argues why), so both carry a real value nothing here

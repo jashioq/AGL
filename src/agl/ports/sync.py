@@ -25,10 +25,15 @@ class Syncer(ABC):
     async def sync(self, workspace: Path) -> SyncOutcome:
         """Install what the workspace's workflows declare, and report what the installer said.
 
-        :param workspace: the directory holding the workspace's project file, never a workflow's own
-        :return: the verdict and the text reaching it; a refused sync is this rather than a raise
-        :raises NotFoundError: this is no workspace - there is no project file here to install from
-        :raises UpstreamUnavailable: where the installer could not be started, so nothing was tried
-        :raises UpstreamUnexpected: the installer was started and answered in terms it cannot read
+        Args:
+            workspace: the directory holding the workspace's project file, never a workflow's own
+
+        Returns:
+            the verdict and the text reaching it; a refused sync is this rather than a raise
+
+        Raises:
+            NotFoundError: this is no workspace - there is no project file here to install from
+            UpstreamUnavailable: where the installer could not be started, so nothing was tried
+            UpstreamUnexpected: the installer was started and answered in terms it cannot read
         """
         ...

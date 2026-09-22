@@ -51,9 +51,9 @@ from agl.ports.home_layout import RunScope, workspace_dir
 from agl.ports.ids import ProjectName, RunLabel
 from agl.ports.sync import Syncer, SyncOutcome
 from agl.ports.tree_layout import TreesRoot
+from agl.sdk._workflow import Run, Stop, workflow
 from agl.sdk.params import RefusingParser, arg
 from agl.sdk.roles import Role, role
-from agl.sdk.workflow import Run, Stop, workflow
 
 # No command reads `settings` or `cwd` off the `Invocation` - `cli/main.py`'s `_registering` does -
 # but neither field is optional (`cli/main.py` argues why), so both carry a real value nothing here
@@ -367,7 +367,7 @@ def test_a_resume_that_replayed_two_steps_says_so_on_stderr_and_names_the_clear(
 
     captured = capsys.readouterr()
     assert captured.err.splitlines()[-1] == (
-        "Replayed 2 steps from cache. Run `agl clear auth` to remove it."
+        "Replayed 2 steps from the record. Run `agl clear auth` to remove it."
     )
     assert captured.out == 'Run "auth" finished and left its changes on branch: agl/auth\n'
 
@@ -391,7 +391,7 @@ def test_a_resume_that_replayed_one_step_counts_it_in_the_singular(
     assert _main(harness, "resume", "auth") == 0
 
     assert capsys.readouterr().err.splitlines()[-1] == (
-        "Replayed 1 step from cache. Run `agl clear auth` to remove it."
+        "Replayed 1 step from the record. Run `agl clear auth` to remove it."
     )
 
 def test_a_run_says_nothing_because_a_label_with_a_ledger_is_refused_not_replayed(

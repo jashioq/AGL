@@ -53,8 +53,8 @@ def declare(commands: _Commands) -> RefusingParser:
         dest=_BASE_REF,
         metavar="<ref>",
         help=(
-            "Branch, tag or commit to start from. If omitted, starts from the repository's "
-            "default branch."
+            "Branch, tag or commit to start from. If omitted, starts from the branch you have "
+            "checked out."
         ),
     )
     return parser

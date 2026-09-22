@@ -70,8 +70,8 @@ not entitle anybody to believe.
    path `changed_files` named, and that identical states leave nothing to read. A patch in a format
    no reviewer has seen passes all four.
 
-3. **The actual question `contains` is asked.** `Integration._conclude` asks it of a landing - is
-   the source's head in what `land` reported - which in life means *merged*. Landing work is
+3. **The actual question `contains` is asked.** `GatedIntegration._conclude` asks it of a landing
+   - is the source's head in what `land` reported - which in life means *merged*. Landing work is
    `integration.py`'s, this suite has no way to land anything, and so the ancestry asserted here is
    the kind that comes from committing in one place - a true case, a false case, a reflexive one
    and a divergence. The shape the engine meets after a successful merge is not built here, and
@@ -379,9 +379,9 @@ class HistoryContract(HistoryChangeContract):
     ) -> None:
         """Is X already in Y - a true case, a false case, a reflexive one, and a divergence.
 
-        Asked in one place: `Integration._conclude` puts it to a landing the `Integrator` has just
-        reported clean - is the source's head in the head that came back - and lands once more if
-        the answer is no, then raises `InternalError`. So all four answers below decide between
+        Asked in one place: `GatedIntegration._conclude` puts it to a landing the `Integrator` has
+        just reported clean - is the source's head in the head that came back - and lands once more
+        if the answer is no, then raises `InternalError`. So all four answers below decide between
         "settled" and "that merge did not happen", and an implementation answering a constant either
         never settles a landing or settles one that moved nothing.
 

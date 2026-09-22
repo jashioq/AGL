@@ -444,7 +444,7 @@ def test_a_payload_that_is_not_a_dataclass_is_refused() -> None:
 
 def test_a_payload_instance_where_the_class_belonged_is_refused() -> None:
     """`read` builds an instance of `payload`, so an instance is one the tool cannot build and
-    whose fields already hold what the agent was going to be asked for. `sdk/workflow.py` refused
+    whose fields already hold what the agent was going to be asked for. `sdk/_workflow.py` refused
     this in the same words about a params class until that class was read off an annotation,
     where a type is all it can be - a payload is an argument, so this is the layer it survives."""
     with pytest.raises(InputError) as refusal:

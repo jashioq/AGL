@@ -45,6 +45,13 @@ same directory with `sys.path.append`, which processes nothing - so
 the two apart, and every claim about an editor resolving `agl.sdk` through the file is outside what
 this suite can measure.
 
+## The fourth function says where an import of a name stops before the workflows
+
+`found_ahead` is what `agl new`, `agl get` and the walk ask before a directory is a workflow's
+package. It searches without importing, and never a directory that is not there yet: a search of
+one caches it as unimportable, which
+`test_asking_before_the_venv_exists_leaves_it_importable_once_an_install_builds_it` holds.
+
 ## What this file cannot assert, said plainly
 
 Nothing here builds a venv - no `uv`, no `subprocess`, and nothing that runs an interpreter. What
@@ -66,7 +73,7 @@ from typing import Final
 import pytest
 import agl
 from agl.config.registry import GROUP, discovered
-from agl.config.workspace_path import extend, venv_exists, write_editor_pth
+from agl.config.workspace_path import extend, found_ahead, venv_exists, write_editor_pth
 from agl.ports.home_layout import (
     AglHome,
     workflows_dir,
@@ -84,7 +91,12 @@ _GAMMA: Final = "probe_workflow_gamma"
 _DELTA: Final = "probe_workflow_delta"
 _EPSILON: Final = "probe_workflow_epsilon"
 _ZETA: Final = "probe_workflow_zeta"
+_ETA: Final = "probe_workflow_eta"
 _VENV_DEPENDENCY: Final = "probe_venv_dependency"
+_AHEAD: Final = "probe_venv_module_found_ahead"
+_BEHIND: Final = "probe_module_behind_the_workflows"
+_NAMESPACE: Final = "probe_namespace_portion"
+_LATER: Final = "probe_venv_module_built_after_the_question"
 
 def _home(tmp_path: Path) -> AglHome:
     """An AGL_HOME nothing else can reach, built rather than resolved so no variable is read."""
@@ -478,6 +490,59 @@ def test_a_path_file_that_cannot_be_written_is_passed_over_without_a_raise(tmp_p
     write_editor_pth(home)
 
     assert _pth(home).is_dir()
+
+# --- where an import of a name lands before it reaches the workflows directory -------------------
+
+def test_a_module_in_the_workspace_venv_is_found_before_the_path_is_ever_extended(
+    tmp_path: Path,
+) -> None:
+    """Asked before any walk, as `agl new` asks it, and asking puts nothing on the path."""
+    home = _home(tmp_path)
+    site = _venv(home)
+    (site / f"{_AHEAD}.py").write_text("", encoding="utf-8")
+
+    assert found_ahead(home, _AHEAD) == str(site / f"{_AHEAD}.py")
+    assert str(site) not in sys.path
+
+def test_the_workflows_directory_is_never_searched_for_the_name_it_holds(
+    tmp_path: Path,
+) -> None:
+    home = _home(tmp_path)
+    _workflow(home, _ETA, "eta")
+    extend(home)
+
+    assert found_ahead(home, _ETA) is None
+
+def test_an_entry_behind_the_workflows_directory_is_not_ahead_of_it(tmp_path: Path) -> None:
+    """Only what the import path consults first can stand in for a workflow."""
+    home = _home(tmp_path)
+    extend(home)
+    behind = tmp_path / "behind"
+    behind.mkdir()
+    (behind / f"{_BEHIND}.py").write_text("", encoding="utf-8")
+    sys.path.append(str(behind))
+
+    assert found_ahead(home, _BEHIND) is None
+
+def test_a_namespace_directory_ahead_of_the_workflows_is_not_a_module_of_that_name(
+    tmp_path: Path,
+) -> None:
+    """A workflow's `__init__.py` makes it a regular package, which outranks a portion."""
+    home = _home(tmp_path)
+    (_venv(home) / _NAMESPACE).mkdir()
+
+    assert found_ahead(home, _NAMESPACE) is None
+
+def test_asking_before_the_venv_exists_leaves_it_importable_once_an_install_builds_it(
+    tmp_path: Path,
+) -> None:
+    """A directory searched before it exists is cached as unimportable for the whole process."""
+    home = _home(tmp_path)
+    assert found_ahead(home, _LATER) is None
+    (_venv(home) / f"{_LATER}.py").write_text('MARKER = "built later"\n', encoding="utf-8")
+    extend(home)
+
+    assert import_module(_LATER).MARKER == "built later"
 
 # --- the guard that keeps all of the above from contaminating the rest of the suite --------------
 

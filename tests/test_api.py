@@ -81,9 +81,9 @@ from agl.ports.sync import Syncer, SyncOutcome
 from agl.ports.tree_layout import TreesRoot, base_worktree, run_branch
 from agl.ports.workspace import Workspace, WorkspaceProvider
 from agl.sdk._engine.services import Services
+from agl.sdk._workflow import Run, Stop, workflow
 from agl.sdk.params import arg
 from agl.sdk.roles import Role, role
-from agl.sdk.workflow import Run, Stop, workflow
 
 # `asyncio_mode = "strict"`, so every async test below carries its own marker.
 
@@ -913,6 +913,28 @@ async def test_a_run_of_a_workflow_needing_a_newer_agl_refuses_before_it_imports
     assert "99999.0.0" in str(refused.value)
     assert "loading it failed" not in str(refused.value)
 
+@pytest.mark.asyncio
+async def test_a_run_whose_tool_agl_table_misspells_requires_is_refused_naming_the_key(
+    tmp_path: Path,
+) -> None:
+    """The misspelt floor through the real call path: exit 2 naming it, and nothing imported."""
+    home = _home(tmp_path)
+    _directory(
+        home,
+        "triage",
+        f'[project]\nname = "triage"\nversion = "0.1.0"\n\n'
+        f'[project.entry-points."{registry.GROUP}"]\ntriage = "no_such_module:anything"\n\n'
+        f'[tool.agl]\nrequire = "{distribution.DISTRIBUTION}>=99999.0.0"\n',
+    )
+    harness = _fakes(tmp_path)
+
+    with pytest.raises(InputError) as refused:
+        await api.run(harness.services, PROJECT, "triage", LABEL, (), home=home)
+
+    assert exit_code_for(refused.value) == 2
+    assert '"require" is not a [tool.agl] key' in str(refused.value)
+    assert "loading it failed" not in str(refused.value)
+
 def test_a_declared_workflow_keeps_the_name_a_broken_directory_happens_to_share(
     tmp_path: Path,
 ) -> None:
@@ -1076,11 +1098,12 @@ async def test_a_resume_refuses_a_declared_key_the_project_file_has_lost_since_t
 # before it resolves - so a first-ever sync that failed leaves one behind, and asking afterwards
 # would answer "an environment stood" over one nothing has ever installed into.
 
-# One workflow package name and one distribution's, each spent once in this file and never again: a
-# module imported in one test stays in `sys.modules` for the rest of the session, and restoring
+# Two workflow package names and one distribution's, each spent once in this file and never again:
+# a module imported in one test stays in `sys.modules` for the rest of the session, and restoring
 # `sys.path` does not take it back out.
 _NEEDS_INSTALLING: Final = "probe_workflow_needing_an_install"
 _PLANTED: Final = "probe_venv_module_planted_by_the_install"
+_SHADOWED_LATER: Final = "probe_workflow_a_later_install_shadows"
 
 # What the installers below hand back as uv's own words, asserted verbatim wherever one is refused.
 _UV_SAID: Final = "error: no solution found for probe-workflow\n"
@@ -1197,6 +1220,48 @@ async def test_a_resume_reaches_the_venv_its_own_install_just_built(tmp_path: Pa
 
     assert installer.asked == [workspace_dir(home)]
     assert str(_site(home)) in sys.path
+
+@pytest.mark.asyncio
+async def test_a_resume_refuses_a_workflow_that_a_module_installed_since_now_shadows(
+    tmp_path: Path,
+) -> None:
+    """The resume's own install plants a module of the workflow's name ahead of `workflows/`."""
+    home = _home(tmp_path)
+    _directory(
+        home,
+        _SHADOWED_LATER,
+        f'[project]\nname = "{_SHADOWED_LATER}"\nversion = "0.1.0"\n\n'
+        f'[project.entry-points."{registry.GROUP}"]\n'
+        f'{_SHADOWED_LATER} = "{_SHADOWED_LATER}:{_SHADOWED_LATER}"\n',
+    )
+    (workflows_dir(home) / _SHADOWED_LATER / "__init__.py").write_text(
+        f"from agl.sdk import Run, workflow\n\n"
+        f"@workflow\n"
+        f"async def {_SHADOWED_LATER}(run: Run) -> None:\n"
+        f"    return None\n",
+        encoding="utf-8",
+    )
+    harness = _fakes(tmp_path)
+    await api.run(
+        harness.services,
+        PROJECT,
+        _SHADOWED_LATER,
+        LABEL,
+        (),
+        syncer=_Installer(_site(home)),
+        home=home,
+    )
+    installer = _Installer(_site(home), plants=_SHADOWED_LATER)
+
+    with pytest.raises(InputError) as refused:
+        await api.resume(harness.services, PROJECT, LABEL, syncer=installer, home=home)
+
+    assert exit_code_for(refused.value) == 2
+    assert str(refused.value) == (
+        f'A module named "{_SHADOWED_LATER}" already exists at '
+        f'{_site(home) / f"{_SHADOWED_LATER}.py"}, so Python would import that instead of the '
+        f"workflow."
+    )
 
 @pytest.mark.asyncio
 async def test_a_refused_install_with_no_environment_behind_it_stops_the_run_at_exit_six(

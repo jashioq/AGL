@@ -35,8 +35,8 @@ from agl.ports.ids import ProjectName, RunLabel
 from agl.ports.tree_layout import TreesRoot
 from agl.ports.verifier import Verifier, VerifierOutcome
 from agl.sdk._engine.services import Services
+from agl.sdk._workflow import Run, workflow
 from agl.sdk.roles import Role, role
-from agl.sdk.workflow import Run, workflow
 
 PROJECT: Final = ProjectName("myapp")
 LABEL: Final = RunLabel("auth")

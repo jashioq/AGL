@@ -78,7 +78,8 @@ def _print_replays(label: RunLabel, finished: api.Finished) -> None:
         return
     counted = "step" if finished.steps == 1 else "steps"
     print(
-        f"Replayed {finished.steps} {counted} from cache. Run `agl clear {label}` to remove it.",
+        f"Replayed {finished.steps} {counted} from the record. "
+        f"Run `agl clear {label}` to remove it.",
         file=sys.stderr,
     )
 

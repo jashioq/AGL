@@ -1,6 +1,6 @@
 """What `run.worktree` promises: nesting in `AGL_HOME`, flat siblings in `.trees/`, one name each.
 
-The suite over `sdk/_engine/worktrees.py` and over the half of `sdk/workflow.py` that reaches it.
+The suite over `sdk/_engine/worktrees.py` and over the half of `sdk/_workflow.py` that reaches it.
 `test_run_step.py` holds one namespace against real git; this file holds what happens when there is
 more than one, which is the only real concurrency AGL has - steps serialize within a namespace
 on purpose, so an author who wants two agents running at once opens two worktrees.
@@ -63,9 +63,9 @@ from agl.ports.home_layout import AglHome, RunScope
 from agl.ports.ids import Namespace, ProjectName, RunLabel
 from agl.ports.run import JsonValue
 from agl.ports.tree_layout import TreesRoot
+from agl.sdk._workflow import Run
 from agl.sdk.roles import Role, role
 from agl.sdk.tools import reporting_tool
-from agl.sdk.workflow import Run
 
 # Every test that awaits is marked one by one rather than through a module-level `pytestmark`,
 # matching the rest of `tests/sdk/`. Several tests here are deliberately **not** async, because

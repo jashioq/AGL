@@ -93,8 +93,8 @@ forbidden_modules =
 #    Fail-closed on its source side - that is the whole `agl` tree, so any package added in a
 #    later stage is covered the moment it exists; only the two expressions below escape. The
 #    forbidden side is the hand-maintained half and fails open: a third vendor SDK is contained by
-#    nothing at all. tests/test_contract_listings.py is what notices - it reads the extras in
-#    pyproject.toml, which is where a vendor SDK actually gets added, and compares.
+#    nothing at all. tests/test_contract_listings.py is what notices - it reads [project]
+#    dependencies in pyproject.toml, which is where a vendor SDK actually gets added, and compares.
 #    `allow_indirect_imports = True` makes this a rule about import statements, which is what
 #    "imported only inside X" means: the container legitimately reaches claude_agent_sdk
 #    *through* agl.adapters.claude_code, and that path is not a violation.

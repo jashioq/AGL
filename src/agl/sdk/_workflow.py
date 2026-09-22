@@ -5,11 +5,11 @@ from typing import cast, get_args, get_origin, get_type_hints
 from agl.ports.errors import InputError, Stop
 from agl.ports.home_layout import RunScope
 from agl.ports.ids import Namespace
-from agl.ports.integration import Conflict
+from agl.ports.integration import Conflict, Integration
 from agl.ports.terminal import Terminal
 from agl.ports.verifier import VerifierOutcome
 from agl.sdk._declarations import named
-from agl.sdk._engine.integration import Integration, Leases
+from agl.sdk._engine.integration import Leases
 from agl.sdk._engine.integration import integrate as _integrate
 from agl.sdk._engine.journal import Fingerprints
 from agl.sdk._engine.preflight import Capabilities
@@ -18,13 +18,23 @@ from agl.sdk._engine.steps import Steps
 from agl.sdk._engine.worktrees import Worktrees, _where
 from agl.sdk.roles import Role
 
-__all__ = ["Conflict", "Namespace", "Run", "Stop", "VerifierOutcome", "Workflow", "workflow"]
+__all__ = [
+    "Conflict",
+    "Integration",
+    "Namespace",
+    "Run",
+    "Stop",
+    "VerifierOutcome",
+    "Workflow",
+    "workflow",
+]
 
 @dataclass(frozen=True, slots=True)
 class Run[P = object]:
     """The run a workflow is handed, with its params, steps and worktrees."""
 
     params: P
+    """The workflow's own parameters, as the flags on `agl run` filled them in."""
 
     services: Services
 
@@ -55,7 +65,8 @@ class Run[P = object]:
     def terminal(self) -> Terminal:
         """The terminal this run shows things on.
 
-        :return: The :class:`Terminal`, shared with every child :class:`Run`.
+        Returns:
+            The [`Terminal`][agl.sdk.Terminal], shared with every child [`Run`][agl.sdk.Run].
         """
         return self.services.terminal
 
@@ -63,43 +74,96 @@ class Run[P = object]:
     def config(self) -> Mapping[str, str]:
         """The project settings this workflow declares.
 
-        :return: Each declared setting by key, exactly as the project file wrote it.
-        :raises InputError: Reading a key the workflow's `config` line doesn't declare.
+        Returns:
+            The declared settings by key, exactly as the project file wrote them.
+
+        Raises:
+            InputError: Reading a key the workflow's `config` line doesn't declare, through
+                `get` and `in` as well as `[]`.
         """
         return self.services.config
 
-    async def step[R](self, role: Role[R], *inputs: object, commit: str | None = None) -> R:
-        """Run a :class:`Role` in the worktree this :class:`Run` owns.
+    @property
+    def label(self) -> str:
+        """The run's label, as given with `-n`.
 
-        :param role: The agent to run
-        :param inputs: Parameters the role accepts
-        :param commit: Commit changes with this message after the step finishes. If omitted,
-            unstaged changes are wiped.
-        :return: Role's reporting_tool tool payload type.
-        :raises InputError: An input the role doesn't accept, two inputs of one type, or one that
-            can't be saved as JSON.
+        Returns:
+            The label, the same in every child [`Run`][agl.sdk.Run].
+        """
+        return str(self.scope.label)
+
+    @property
+    def namespaces(self) -> tuple[Namespace, ...]:
+        """The worktree names from the top-level run down to this one.
+
+        Returns:
+            The namespaces this run was opened under, outermost first. Empty for the top-level run.
+        """
+        return self.scope.namespaces
+
+    async def step[R](self, role: Role[R], *inputs: object, commit: str | None = None) -> R:
+        """Runs a [`Role`][agl.sdk.Role] in the worktree this [`Run`][agl.sdk.Run] owns.
+
+        Args:
+            role: The role to run, built by a `@role` function.
+            inputs: The values the role accepts, at most one per type it declares.
+            commit: The message to commit the agent's work under. If omitted, the work is
+                thrown away: tracked edits are reverted, untracked files are deleted, and the
+                agent's own commits are dropped.
+
+        Returns:
+            The payload the role's reporting tool was called with, or `None` where the role
+                declares no reporting tool.
+
+        Raises:
+            InputError: An input the role doesn't accept, two inputs of one type, or one that
+                can't be written down as JSON.
+            agl.sdk.NotFoundError: The ref this worktree was cut from names nothing.
+            agl.sdk.ConflictError: Another line of work is holding this worktree's place.
+            agl.sdk.DeniedError: The backend behind the role's model doesn't offer something
+                the role requires.
+            agl.sdk.RoleIncompleteError: The agent stopped without reporting a result.
+            agl.sdk.UpstreamUnavailable: The agent's backend couldn't be started, or stopped
+                without answering.
+            agl.sdk.UpstreamUnexpected: The agent's backend answered in a way AGL can't read.
         """
         return await self._steps.step(role, inputs, commit=commit)
 
     async def verify(self, command: str) -> VerifierOutcome:
-        """Run a command in this run's worktree.
+        """Runs a command in this run's worktree.
 
-        :param command: The shell command to run.
-        :return: Whether the command passed, with its exit status and output.
-        :raises InputError: `command` isn't a string.
-        :raises UpstreamUnavailable: The command couldn't be started.
-        :raises UpstreamUnexpected: The command's output couldn't be read.
+        Args:
+            command: The shell command line to run. An empty one passes.
+
+        Returns:
+            The [`VerifierOutcome`][agl.sdk.VerifierOutcome], whether the command passed or not.
+                A command that failed comes back as a value rather than a refusal.
+
+        Raises:
+            InputError: `command` isn't a string.
+            agl.sdk.NotFoundError: The ref this worktree was cut from names nothing.
+            agl.sdk.ConflictError: Another line of work is holding this worktree's place.
+            agl.sdk.UpstreamUnavailable: The command couldn't be started.
+            agl.sdk.UpstreamUnexpected: The command's output couldn't be read.
         """
         return await self._steps.verify(command)
 
     def worktree(self, namespace: str, base: Run[object] | str | None = None) -> Run[P]:
-        """Create a child :class:`Run` with a worktree of its own.
+        """Creates a child [`Run`][agl.sdk.Run] with a worktree of its own.
 
-        :param namespace: Name of the worktree, unique across the whole run, ignoring case.
-        :param base: The :class:`Run` or ref to start from. If omitted, starts from this run's last
-            recorded commit.
-        :return: The child :class:`Run`.
-        :raises ConflictError: Another worktree in the run already has this name.
+        Args:
+            namespace: The worktree's name, unique across the whole run, ignoring case. Asking
+                again for a name this run opened hands back that same child.
+            base: The `Run` or git ref to start from. If omitted, starts from where this run's
+                own line of work has reached. Ignored where the name is already open.
+
+        Returns:
+            The child `Run`, which has its own checkout and shares this run's terminal.
+
+        Raises:
+            InputError: The name is not one path segment and one git ref component, or it is
+                the reserved `_base`.
+            agl.sdk.ConflictError: Another worktree in the run already has this name.
         """
         return cast(
             "Run[P]",
@@ -109,10 +173,18 @@ class Run[P = object]:
         )
 
     async def integrate(self) -> Integration:
-        """Merge this run's changes into the worktree of the :class:`Run` it came from.
+        """Merges this run's work into the worktree of the [`Run`][agl.sdk.Run] it came from.
 
-        :return: The result of the merge. On a conflict, finish it with its `retry` or `abort`.
-        :raises InputError: This is the top-level run, or the workflow declares no `build` setting.
+        Returns:
+            The [`Integration`][agl.sdk.Integration]. On a conflict, finish it with its `retry`
+                or `abort`.
+
+        Raises:
+            InputError: This is the top-level run, or the workflow declares no `build` setting.
+            agl.sdk.NotFoundError: A ref one of the two worktrees was cut from names nothing.
+            agl.sdk.ConflictError: Another line of work is holding one of the two places.
+            agl.sdk.UpstreamUnavailable: Git or the build command couldn't be run.
+            agl.sdk.UpstreamUnexpected: Git refused the landing, or answered unreadably.
         """
         if self._parent is None:
             raise InputError(_unaddressable(self.scope))
@@ -170,17 +242,26 @@ class Workflow[P = object]:
     def params(self) -> type[P]:
         """The params class this workflow takes.
 
-        :return: The class in the `Run[...]` annotation; an empty one for a bare :class:`Run`.
-        :raises InputError: The first parameter isn't annotated as a :class:`Run`.
+        Returns:
+            The class in the `Run[...]` annotation; an empty one for a bare [`Run`][agl.sdk.Run].
+
+        Raises:
+            InputError: The first parameter isn't annotated as a `Run`.
         """
         return cast("type[P]", _declared(self.fn))
 
 def workflow[P](fn: _Function[P] | None = None) -> Workflow[P]:
-    """Declare an async function as a workflow `agl run` can start.
+    """Declares an async function as a workflow `agl run` can start.
 
-    :param fn: The `async def` below a bare `@workflow`.
-    :return: A :class:`Workflow` for an entry point to name.
-    :raises InputError: `@workflow` was written with parentheses, or `fn` isn't an `async def`.
+    Args:
+        fn: The `async def` below a bare `@workflow`. Nothing there means `@workflow()` was
+            written with parentheses, which is refused.
+
+    Returns:
+        The [`Workflow`][agl.sdk.Workflow] for an entry point to name.
+
+    Raises:
+        InputError: `@workflow` was written with parentheses, or `fn` isn't an `async def`.
     """
     if fn is None:
         raise InputError(

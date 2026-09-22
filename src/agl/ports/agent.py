@@ -36,7 +36,7 @@ __all__ = [
 ]
 
 class Provider(StrEnum):
-    """The vendor whose tool runs a :class:`ModelId`."""
+    """The vendor whose tool runs a [`ModelId`][agl.sdk.ModelId]."""
 
     CLAUDE = "claude"
     OPENAI = "openai"
@@ -48,7 +48,8 @@ class ModelId(StrEnum):
     def provider(self) -> Provider:
         """The vendor whose tool runs this model.
 
-        :return: This model's :class:`Provider`.
+        Returns:
+            The vendor, which is what routes a step on this model to a backend.
         """
         prefix = self.value.partition(":")[0]
         try:
@@ -67,10 +68,19 @@ class ClaudeEffort(StrEnum):
     # The choices `claude --help` lists for `--effort` in Claude CLI 2.1.277, and the `EffortLevel`
     # literal in `claude_agent_sdk/types.py` 0.2.157.
     LOW = "low"
+    """The least reasoning of the five."""
+
     MEDIUM = "medium"
+    """More reasoning than `LOW`."""
+
     HIGH = "high"
+    """More reasoning than `MEDIUM`."""
+
     XHIGH = "xhigh"
+    """More reasoning than `HIGH`."""
+
     MAX = "max"
+    """The most reasoning of the five."""
 
 class OpenAIEffort(StrEnum):
     """How long an OpenAI model reasons before answering."""
@@ -79,24 +89,46 @@ class OpenAIEffort(StrEnum):
     # three models `OpenAI` names: `gpt-5.6-luna` lists every one of these but `ultra`, and none of
     # the three lists `minimal` or `none`.
     LOW = "low"
+    """The least reasoning of the six."""
+
     MEDIUM = "medium"
+    """More reasoning than `LOW`."""
+
     HIGH = "high"
+    """More reasoning than `MEDIUM`."""
+
     XHIGH = "xhigh"
+    """More reasoning than `HIGH`."""
+
     MAX = "max"
+    """More reasoning than `XHIGH`."""
+
     ULTRA = "ultra"
+    """The most reasoning of the six, and offered for some models only."""
 
 class Claude(ModelId):
     """A Claude model a role can run on."""
 
     OPUS = "claude:opus"
+    """The model its backend runs as `opus`."""
+
     SONNET = "claude:sonnet"
+    """The model its backend runs as `sonnet`."""
+
     HAIKU = "claude:haiku"
+    """The model its backend runs as `haiku`."""
 
     def __call__(self, *, effort: ClaudeEffort) -> ChosenClaude:
-        """Choose how long this model reasons.
+        """Chooses how long this model reasons.
 
-        :param effort: The reasoning level
-        :return: This model at that effort, to pass as `@role(model=...)`.
+        Args:
+            effort: The reasoning level, one of Claude's own.
+
+        Returns:
+            The model at that effort, to pass as `@role(model=...)`.
+
+        Raises:
+            InputError: `effort` is not a [`ClaudeEffort`][agl.sdk.ClaudeEffort].
         """
         return ChosenClaude(self, effort)
 
@@ -104,14 +136,25 @@ class OpenAI(ModelId):
     """An OpenAI model a role can run on."""
 
     SOL = "openai:sol"
+    """The model its backend runs as `gpt-5.6-sol`."""
+
     TERRA = "openai:terra"
+    """The model its backend runs as `gpt-5.6-terra`."""
+
     LUNA = "openai:luna"
+    """The model its backend runs as `gpt-5.6-luna`."""
 
     def __call__(self, *, effort: OpenAIEffort) -> ChosenOpenAI:
-        """Choose how long this model reasons.
+        """Chooses how long this model reasons.
 
-        :param effort: The reasoning level
-        :return: This model at that effort, to pass as `@role(model=...)`.
+        Args:
+            effort: The reasoning level, one of OpenAI's own.
+
+        Returns:
+            The model at that effort, to pass as `@role(model=...)`.
+
+        Raises:
+            InputError: `effort` is not an [`OpenAIEffort`][agl.sdk.OpenAIEffort].
         """
         return ChosenOpenAI(self, effort)
 
@@ -151,8 +194,11 @@ type ModelChoice = ModelId | ChosenClaude | ChosenOpenAI
 def model_of(choice: ModelChoice) -> ModelId:
     """The bare model a choice names, which is what readiness, capabilities and routing ask about.
 
-    :param choice: a bare member, or one called with an effort; the effort is not carried over
-    :return: the member itself, which every table keyed by model is looked up with
+    Args:
+        choice: a bare member, or one called with an effort; the effort is not carried over
+
+    Returns:
+        the member itself, which every table keyed by model is looked up with
     """
     match choice:
         case ChosenClaude() | ChosenOpenAI():
@@ -173,36 +219,54 @@ class Restriction(StrEnum):
     """What an agent cannot do."""
 
     NO_VCS_WRITES = "no_vcs_writes"
+    """Takes away the agent's commits, branches, merges, fetches and pushes."""
+
     NO_FILE_WRITES = "no_file_writes"
+    """Takes away the agent's writes to disk."""
+
     NO_SHELL = "no_shell"
+    """Takes away the agent's shell, and the other tools a backend runs commands through."""
+
     NO_NETWORK = "no_network"
+    """Takes away the agent's network tools. On Claude Code, its shell still reaches the network."""
 
 class Capability(StrEnum):
     """Something a role needs its agent to be able to do."""
 
     FILE_EDIT = "file_edit"
+    """Changing files in the checkout the step runs in."""
+
     SHELL = "shell"
+    """Running shell commands."""
+
     TOOL_CALLING = "tool_calling"
+    """Calling the tools a role declares. A role with tools requires it without saying so."""
 
 @dataclass(frozen=True, slots=True)
 class ToolResult:
     """What a tool's handler returns to the agent."""
 
     text: str
+    """What the agent reads back from the call."""
 
     rejected: bool = False
+    """`True` tells the agent the call failed, `False` that it succeeded."""
 
 @dataclass(frozen=True, slots=True)
 class Tool:
     """A tool an agent can call."""
 
     name: str
+    """What the agent calls the tool by, unique among a [`Role`][agl.sdk.Role]'s tools."""
 
     description: str
+    """The whole of what the agent reads to decide this is the tool it wants."""
 
     payload_schema: Mapping[str, JsonValue]
+    """The JSON schema of the arguments the agent is asked to fill in."""
 
     handler: Callable[[Mapping[str, JsonValue]], Awaitable[ToolResult]]
+    """Awaited with the arguments. Its result goes to the agent; what it raises ends the step."""
 
     def __post_init__(self) -> None:
         check_tool_declaration(self.name, self.description)
@@ -211,9 +275,12 @@ class Tool:
 def check_tool_declaration(name: str, description: str) -> None:
     """Refuse a tool declaration no model could act on, wherever one is being assembled.
 
-    :param name: what a model calls the tool by, and so what it must be able to name
-    :param description: the whole of what a model reads to decide this is the tool it wants
-    :raises InputError: either is empty, and nothing has been attempted
+    Args:
+        name: what a model calls the tool by, and so what it must be able to name
+        description: the whole of what a model reads to decide this is the tool it wants
+
+    Raises:
+        InputError: either is empty, and nothing has been attempted
     """
     if not name:
         raise InputError("a tool with an empty name cannot be named by anything calling it")
@@ -274,6 +341,7 @@ class AgentOutcome:
     text: str
 
 type ActivityReporter = Callable[[str], None]
+"""Called with one line for each thing the agent does, as it does it."""
 
 class Standing(StrEnum):
     """Where an installed version sits against a tested range: inside it, outside, or unjudged."""
@@ -330,7 +398,8 @@ class Installation:
     def standing(self) -> Standing:
         """Where the version that answered sits against the range, derived rather than stored.
 
-        :return: `WITHIN` where nothing needs saying, and four separate reasons to say something
+        Returns:
+            `WITHIN` where nothing needs saying, and four separate reasons to say something
         """
         if self.version is None:
             return Standing.UNREPORTED
@@ -360,8 +429,11 @@ class AgentRunner(ABC):
     async def capabilities(self, model: ModelId) -> frozenset[Capability]:
         """What this backend can do when serving a model, compared against a role at preflight.
 
-        :param model: asked for, because a routing runner cannot answer for every provider at once
-        :return: what it can be asked for at all, which is no promise the next call succeeds
+        Args:
+            model: asked for, because a routing runner cannot answer for every provider at once
+
+        Returns:
+            what it can be asked for at all, which is no promise the next call succeeds
         """
         ...
 
@@ -369,8 +441,11 @@ class AgentRunner(ABC):
     async def check_ready(self, model: ModelId) -> None:
         """Whether this backend can serve this model right now. Answers with nothing, or refuses.
 
-        :param model: preflight asks once per distinct model a workflow declares, before step one
-        :raises UpstreamUnavailable: carrying a reason a person can act on and then start again
+        Args:
+            model: preflight asks once per distinct model a workflow declares, before step one
+
+        Raises:
+            UpstreamUnavailable: carrying a reason a person can act on and then start again
         """
         ...
 
@@ -378,8 +453,11 @@ class AgentRunner(ABC):
     async def installation(self, model: ModelId) -> Installation:
         """What this backend is running on, against what it was tested. Warns; never refuses.
 
-        :param model: asked for, because a routing runner stands over one tool per provider
-        :return: the whole of what a version warning is built from, tool's name included
+        Args:
+            model: asked for, because a routing runner stands over one tool per provider
+
+        Returns:
+            the whole of what a version warning is built from, tool's name included
         """
         ...
 
@@ -392,8 +470,11 @@ class AgentRunner(ABC):
     ) -> AgentOutcome:
         """Run the task to its end and report what the agent did.
 
-        :param task: the whole of what is asked, as one value; it carries no callbacks itself
-        :param on_activity: sync, must not block, may never fire; what it raises ends the run
-        :return: the agent's closing message, and why it stopped where the backend said
+        Args:
+            task: the whole of what is asked, as one value; it carries no callbacks itself
+            on_activity: sync, must not block, may never fire; what it raises ends the run
+
+        Returns:
+            the agent's closing message, and why it stopped where the backend said
         """
         ...

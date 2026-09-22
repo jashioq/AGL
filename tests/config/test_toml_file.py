@@ -169,6 +169,22 @@ def test_agl_home_is_refused_as_a_key_in_the_file_that_lives_inside_it(tmp_path:
     assert str(path) in str(raised.value)
     assert "AGL_HOME" in str(raised.value)
 
+def test_the_home_refusal_offers_the_environment_variable_and_no_flag_to_pass(
+    tmp_path: Path,
+) -> None:
+    """There is no such flag: `agl` has one option apiece and none of them sets home.
+
+    Each command's own suite pins the options it answers to - the root's are `-h` and
+    `--version`, `run`'s add `-n/--name` and `--from`, and every other command has `-h` alone -
+    so a refusal offering the command line as a second place to set AGL_HOME sent whoever read it
+    looking for an option to type.
+    """
+    home = _home(tmp_path)
+    _settings_file(home, 'home = "/somewhere/else"\n')
+    with pytest.raises(InputError) as raised:
+        read_settings(home)
+    assert str(raised.value).endswith("Set the AGL_HOME environment variable instead")
+
 # --- Strictness -------------------------------------------------------------------------------
 
 def test_an_unknown_top_level_key_is_refused_and_the_expected_keys_are_named(

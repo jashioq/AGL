@@ -216,6 +216,36 @@ class TestTheSetCollapsesOntoOneScalar:
         options = sandbox(restrictions).options
         assert f"sandbox_workspace_write.network_access={expected}" in options
 
+    @pytest.mark.parametrize(
+        "restrictions", [one for one in _ALL_SUBSETS if Restriction.NO_NETWORK in one], ids=_ids
+    )
+    def test_no_network_turns_web_search_off_under_either_sandbox_mode(
+        self, restrictions: frozenset[Restriction]
+    ) -> None:
+        """0.155.1 offers a `web.run` tool under both modes by default, the network switch aside.
+
+        Measured by capturing the request `codex exec` sent to a loopback endpoint with this
+        module's own argv: the tool was there under `read-only` and under `workspace-write` with
+        the network off, and `web_search=disabled` took it out of both.
+        """
+        options = sandbox(restrictions).options
+        assert "web_search=disabled" in options
+        assert options[options.index("web_search=disabled") - 1] == "-c"
+
+    @pytest.mark.parametrize(
+        "restrictions", [one for one in _ALL_SUBSETS if Restriction.NO_NETWORK not in one], ids=_ids
+    )
+    def test_without_no_network_the_web_search_setting_is_left_to_the_harness(
+        self, restrictions: frozenset[Restriction]
+    ) -> None:
+        assert not any("web_search" in token for token in sandbox(restrictions).options)
+
+    def test_no_network_keeps_the_network_switch_beside_turning_web_search_off(self) -> None:
+        """Both halves at once: the web tool goes, and the sandbox still keeps commands offline."""
+        options = sandbox(frozenset({Restriction.NO_NETWORK})).options
+        assert "sandbox_workspace_write.network_access=false" in options
+        assert "web_search=disabled" in options
+
     def test_no_vcs_writes_is_enforced_by_adding_nothing(self) -> None:
         """The mechanism is the harness's own default, so the rendering carries no extra override.
 

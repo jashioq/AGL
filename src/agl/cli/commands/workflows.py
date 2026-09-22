@@ -22,7 +22,7 @@ _NOTHING_DECLARED: Final = (
     "workflow's pyproject.toml."
 )
 
-_BROKEN_PREAMBLE: Final = "These directories hold a pyproject.toml that declares no workflow:"
+_BROKEN_PREAMBLE: Final = "These directories declare no workflow AGL can run:"
 
 # `argparse` has no public spelling for what `add_subparsers` returns, and the alternative is
 # `Any`, which is the one thing `mypy --strict` is here to keep out of the seam.

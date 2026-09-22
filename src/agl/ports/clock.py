@@ -10,6 +10,7 @@ class Clock(ABC):
     def now(self) -> datetime:
         """The current moment, as an aware datetime - never naive, whatever the offset.
 
-        :return: one instant; two readings may be equal and are not promised to increase
+        Returns:
+            one instant; two readings may be equal and are not promised to increase
         """
         ...

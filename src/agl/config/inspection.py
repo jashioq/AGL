@@ -97,7 +97,8 @@ def inspected(answers: Sequence[FetchAnswer], home: AglHome) -> tuple[Inspection
     """One inspection per answer, in the answers' own order: placeable as it stands, or refused."""
     entries = listed(home)
     checked = [
-        _checked(answer) if isinstance(answer, FetchedWorkflow) else answer for answer in answers
+        _checked(answer, home) if isinstance(answer, FetchedWorkflow) else answer
+        for answer in answers
     ]
     candidates = [one for one in checked if isinstance(one, _Candidate)]
     return tuple(
@@ -105,16 +106,16 @@ def inspected(answers: Sequence[FetchAnswer], home: AglHome) -> tuple[Inspection
         for one in checked
     )
 
-def _checked(fetched: FetchedWorkflow) -> _Candidate | RefusedWorkflow:
+def _checked(fetched: FetchedWorkflow, home: AglHome) -> _Candidate | RefusedWorkflow:
     try:
-        return _candidate(fetched)
+        return _candidate(fetched, home)
     except InputError as refused:
         return RefusedWorkflow(fetched.workflow, refused)
 
 # Ordered for whoever reads the refusal: whether this is a workflow at all, then whether this AGL is
 # one it was written for - which would explain any later check it failed - then what would stop it
 # loading, and last what would stop uv syncing the workspace it joins.
-def _candidate(fetched: FetchedWorkflow) -> _Candidate:
+def _candidate(fetched: FetchedWorkflow, home: AglHome) -> _Candidate:
     workflow = fetched.workflow
     # Refused in the words discovery uses about a file, and nothing of this one is on disk yet, so
     # they name where it was downloaded from - by repository and directory, since the argument's
@@ -134,6 +135,7 @@ def _candidate(fetched: FetchedWorkflow) -> _Candidate:
         raise InputError(_unpackaged(workflow))
     for point in found.points:
         _check_own(path, workflow, point)
+    registry.check_unshadowed(home, str(workflow.name))
     workspace_member.check_member(path, document)
     dependencies = workspace_member.dependencies(document)
     member = Member(

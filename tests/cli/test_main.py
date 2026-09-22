@@ -83,10 +83,10 @@ from agl.ports.ids import ProjectName, RunLabel
 from agl.ports.sync import Syncer
 from agl.ports.tree_layout import TreesRoot
 from agl.sdk._engine.services import Services
+from agl.sdk._workflow import Run, Stop, workflow
 from agl.sdk.roles import Claude, Role, role
 from agl.sdk.terminal import Screen
 from agl.sdk.tools import ToolResult, tool
-from agl.sdk.workflow import Run, Stop, workflow
 
 # Only `cli/main.py`'s `_registering` reads `settings` and `cwd` off an `Invocation`, and the
 # invocations below never refuse a lookup, so it never reaches either - but neither field is

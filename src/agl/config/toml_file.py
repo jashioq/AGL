@@ -158,7 +158,7 @@ def read_settings(home: AglHome) -> FileSettings:
         raise InputError(
             f"{path}: {intruders[0]} cannot be set here. This file lives inside AGL_HOME, so a "
             f"home written in it could only be read once home had already been resolved. Set the "
-            f"AGL_HOME environment variable instead, or pass it on the command line"
+            f"AGL_HOME environment variable instead"
         )
     _only(document, (_AGENT,), path, "")
     agents = _sub_table(document, _AGENT, path, "")

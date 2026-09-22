@@ -102,7 +102,7 @@ class Fingerprints:
         self._counts: dict[tuple[RunScope, str, str], int] = {}
         self._replays = 0
 
-    # One of these serves a whole run tree - `sdk/workflow.py`'s `Run._child` hands its own down
+    # One of these serves a whole run tree - `sdk/_workflow.py`'s `Run._child` hands its own down
     # and `api._walk` builds the one the root is given - so this tally spans every namespace, which
     # is what makes it the walk's answer rather than one journal's.
     @property

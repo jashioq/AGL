@@ -18,7 +18,7 @@ three assumptions; these are the ones a real repository can close:
     of the suite's assertions. Here it is a unified diff, and a `diff.external` in the repository's
     own configuration - an ordinary thing for a person to have - does not replace it with the output
     of some other program.
-  * **The question `contains` is actually asked** (gap 3). `Integration._conclude` puts it to a
+  * **The question `contains` is actually asked** (gap 3). `GatedIntegration._conclude` puts it to a
     landing, which in life means *merged*; the suite has no way to land anything, so the ancestry
     it asserts is the kind that comes from committing in one place. Landing it takes one raw git
     command from out here.
@@ -371,9 +371,9 @@ async def test_contains_is_true_once_a_line_of_work_has_been_merged_into_the_bas
 ) -> None:
     """Gap 3: the shape the one consumer actually meets, which the suite has no way to build.
 
-    `Integration._conclude` asks whether a landing the `Integrator` reported clean really did put
-    the source's head into the target, and in life that means merged. The suite can only commit in
-    one place, so the ancestry it asserts is the kind that comes from committing - a true case, a
+    `GatedIntegration._conclude` asks whether a landing the `Integrator` reported clean really did
+    put the source's head into the target, and in life that means merged. The suite can only commit
+    in one place, so the ancestry it asserts is the kind that comes from committing - a true case, a
     false case, a reflexive one and a divergence - and it says plainly that the merged shape is not
     built there. Landing it takes one raw git command, and what sits on either side of the answer is
     why it is worth the command: a wrong `False` re-lands and then raises, and a wrong `True`

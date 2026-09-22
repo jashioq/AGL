@@ -4,7 +4,7 @@ from typing import Final
 from agl.ports.errors import InternalError
 from agl.ports.history import History
 from agl.ports.home_layout import RunScope
-from agl.ports.integration import Conflict, IntegrationOutcome, Integrator
+from agl.ports.integration import Conflict, Integration, IntegrationOutcome, Integrator
 from agl.ports.verifier import Verifier, VerifierOutcome
 from agl.ports.workspace import Workspace
 from agl.sdk._engine.config import required_setting
@@ -12,7 +12,7 @@ from agl.sdk._engine.journal import Journal
 from agl.sdk._engine.services import Services
 from agl.sdk._engine.steps import Steps
 
-__all__ = ["BUILD", "Integration", "Leases", "integrate"]
+__all__ = ["BUILD", "GatedIntegration", "Leases", "integrate"]
 
 BUILD: Final = "build"
 
@@ -84,7 +84,7 @@ class Lease:
         self._lease.release()
         self._forget(self)
 
-class Integration:
+class GatedIntegration(Integration):
     def __init__(
         self,
         *,
@@ -208,13 +208,13 @@ async def integrate(
     address: RunScope,
     services: Services,
     leases: Leases,
-) -> Integration:
+) -> GatedIntegration:
     build = required_setting(services.config, BUILD, "`run.integrate()`", _UNGATED_LANDING)
     _, child = await source.landing()
     journal, parent = await target.landing()
     lease = await leases.claim(address, journal)
     try:
-        integration = Integration(
+        integration = GatedIntegration(
             source=child,
             target=parent,
             journal=journal,

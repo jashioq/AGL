@@ -43,19 +43,23 @@ class Role[P = None]:
     """An agent a step runs, with its instructions and tools."""
 
     name: str
-    """The role's name; two names that differ only in case are the same name."""
+    """The name this role's steps run under. Two roles' names should differ by more than case."""
 
     instructions: str
+    """What the agent is asked to do. Each `{{TypeName}}` in it is filled with that input."""
 
     _model: ModelChoice | None = None
 
     _accepts: tuple[type[object], ...] = ()
 
     restrictions: AbstractSet[Restriction] = frozenset()
+    """The [`Restriction`][agl.sdk.Restriction] members this role's agent works under."""
 
     tools: Sequence[Tool | ReportingTool[P]] = ()
+    """The tools the agent is offered, with unique names and at most one reporting tool."""
 
     requires: AbstractSet[Capability] = frozenset()
+    """The [`Capability`][agl.sdk.Capability] members the backend has to offer."""
 
     on_activity: ActivityReporter | None = None
     """Called with each line of progress the agent reports as it works."""
@@ -96,8 +100,11 @@ class Role[P = None]:
     def model(self) -> ModelChoice:
         """The model this role runs on.
 
-        :return: The model set with `@role(model=...)`.
-        :raises InputError: This role was built with `Role(...)`, not by a `@role` function.
+        Returns:
+            The model set with `@role(model=...)`.
+
+        Raises:
+            InputError: This role was built with `Role(...)`, not by a `@role` function.
         """
         if self._model is None:
             raise InputError(
@@ -114,21 +121,25 @@ class Role[P = None]:
     def accepts(self) -> tuple[type[object], ...]:
         """The input types a step can pass this role.
 
-        :return: The types set with `@role(accepts=...)`, or none.
+        Returns:
+            The types set with `@role(accepts=...)`, or none.
         """
         return self._accepts
 
 class RoleFactory[**P, R]:
-    """A `@role` function, which builds a :class:`Role` when called."""
+    """A `@role` function, which builds a [`Role`][agl.sdk.Role] when called."""
 
     __name__: str
     __qualname__: str
 
     name: str
+    """The decorated function's own name, which a refusal about this factory is reported under."""
 
     model: ModelChoice
+    """The model given to `@role`, readable without calling the factory."""
 
     accepts: tuple[type[object], ...]
+    """The classes given to `@role`, in the order they were written."""
 
     def __init__(
         self,
@@ -147,6 +158,19 @@ class RoleFactory[**P, R]:
         self.accepts = accepts
 
     def __call__(self, *args: P.args, **kwargs: P.kwargs) -> Role[R]:
+        """Builds the [`Role`][agl.sdk.Role], passing everything through to the function.
+
+        Args:
+            args: The positional arguments the decorated function takes.
+            kwargs: The keyword arguments the decorated function takes.
+
+        Returns:
+            The `Role` the function returned, carrying this factory's model and accepted types.
+
+        Raises:
+            InputError: The prompt and `accepts=` don't name the same set of types, or the
+                `Role` the function returned is refused.
+        """
         built = replace(
             self._declaration(*args, **kwargs), _model=self.model, _accepts=self.accepts
         )
@@ -161,11 +185,20 @@ class _RoleDecorator(Protocol):
     def __call__[**P, R](self, declaration: Callable[P, Role[R]], /) -> RoleFactory[P, R]: ...
 
 def role(*, model: ModelChoice, accepts: Sequence[type[object]] = ()) -> _RoleDecorator:
-    """Declare a function that builds a :class:`Role`.
+    """Declares a function that builds a [`Role`][agl.sdk.Role].
 
-    :param model: The model the role runs on.
-    :param accepts: Classes the role takes as inputs. Its prompt must name each as `{{TypeName}}`.
-    :return: A decorator for the function.
+    Args:
+        model: The model the role runs on, bare or called with an effort. A bare model reasons
+            at whatever its own tool does by default.
+        accepts: The classes the role takes as inputs, each named in its prompt as
+            `{{TypeName}}`. If omitted, the role takes no inputs.
+
+    Returns:
+        The decorator to write above the function, which turns it into a role factory.
+
+    Raises:
+        InputError: An `accepts=` entry that is not a class, one `isinstance` refuses, or two
+            that share a name.
     """
 
     def decorate[**P, R](declaration: Callable[P, Role[R]]) -> RoleFactory[P, R]:
@@ -174,11 +207,18 @@ def role(*, model: ModelChoice, accepts: Sequence[type[object]] = ()) -> _RoleDe
     return decorate
 
 def prompt_file(path: str | Path) -> str:
-    """Read a prompt file.
+    """Reads a role's prompt out of a file.
 
-    :param path: Relative path to the file
-    :return: Prompt file contents as string
-    :raises InputError: no such file, a directory, unreadable, not UTF-8
+    Args:
+        path: The file to read. A relative path is resolved against the directory of the module
+            that called this, never against the directory `agl` was started in.
+
+    Returns:
+        The file's text, decoded as UTF-8.
+
+    Raises:
+        InputError: There is no such file, it is a directory, it cannot be read, it is not
+            UTF-8, or it is empty.
     """
     asked = Path(path)
     # `sys._getframe(1)` is the caller of *this* function, so the lookup happens here and not in the

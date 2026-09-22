@@ -411,7 +411,7 @@ async def test_a_deadline_that_expires_is_a_failed_build_and_never_an_exception(
 
     *Whatever the implementation reports for it arrives here, the gate reads `passed`, and the work
     is rejected rather than retried.* So there is no `pytest.raises` in this test and that absence
-    is half the assertion: a `TimeoutError` escaping would reach `Integration._gated` in
+    is half the assertion: a `TimeoutError` escaping would reach `GatedIntegration._gated` in
     `src/agl/sdk/_engine/integration.py` as something other than the ordinary second answer to the
     only question it asks.
 

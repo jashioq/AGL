@@ -123,8 +123,11 @@ class Fetcher(ABC):
     async def fetch(self, fetch: Fetch) -> tuple[FetchAnswer, ...]:
         """Download one repository once, and take out of that copy every directory `fetch` asks for.
 
-        :param fetch: one repository at one ref, with every workflow wanted from it already grouped
-        :return: one answer per workflow in `fetch`, in order - a failure answered, never raised
+        Args:
+            fetch: one repository at one ref, with every workflow wanted from it already grouped
+
+        Returns:
+            one answer per workflow in `fetch`, in order - a failure answered, never raised
         """
         ...
 
@@ -132,8 +135,11 @@ class Fetcher(ABC):
     async def resolve(self, repository: RepositoryAtRef) -> Resolution:
         """Ask which commit one repository's ref names now, downloading nothing to learn it.
 
-        :param repository: its ref asked exactly as written, and `None` as the default branch
-        :return: the commit, or why none could be told - a failure answered, never raised
+        Args:
+            repository: its ref asked exactly as written, and `None` as the default branch
+
+        Returns:
+            the commit, or why none could be told - a failure answered, never raised
         """
         ...
 

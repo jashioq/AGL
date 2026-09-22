@@ -44,8 +44,8 @@ from agl.ports.ids import ProjectName, RunLabel
 from agl.ports.run import JsonValue
 from agl.ports.sync import Syncer
 from agl.ports.tree_layout import TreesRoot
+from agl.sdk._workflow import Run, workflow
 from agl.sdk.params import RESERVED_FLAGS, RefusingParser, arg
-from agl.sdk.workflow import Run, workflow
 
 # No command reads `settings` or `cwd` off the `Invocation` - `cli/main.py`'s `_registering` does -
 # but neither field is optional (`cli/main.py` argues why), so both carry a real value nothing here
@@ -259,6 +259,25 @@ def test_a_flag_the_workflow_refuses_exits_two_from_the_workflows_own_parser(
 
     assert asyncio.run(harness.services.store.read_record(SCOPE)) is None
 
+def test_a_refused_flag_shows_the_usage_line_agl_workflows_shows_label_and_all(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """One program name for both, so what a refusal shows is what the other command printed.
+
+    `api.run` parses the tail with the parser `agl workflows <workflow>` renders, and the name in
+    front of a usage line is the command to type: `-n <label>` is part of it, because a line
+    without the flag `agl run` requires is a line that gets whoever copies it a second refusal.
+    """
+    harness = _fakes(tmp_path)
+
+    assert _main(harness, "workflows", "flagged") == 0
+    shown = capsys.readouterr().out.splitlines()[0]
+
+    assert _main(harness, "run", "flagged", "-n", "auth", "-r", "x", "--nosuch") == 2
+
+    assert shown.startswith("usage: agl run flagged -n <label> ")
+    assert capsys.readouterr().err.startswith(f"agl: {shown}\n")
+
 # --- `--from`, which is the framework's and not any workflow's -----------------------------------
 
 def test_from_is_a_framework_flag_and_lands_in_the_record(tmp_path: Path) -> None:
@@ -288,6 +307,21 @@ def test_without_from_the_base_ref_is_the_repositorys_and_not_the_clis(tmp_path:
     assert _main(harness, "run", "flagged", "-n", "auth", "-r", "x") == 0
 
     assert _record(harness)["base_ref"] == asyncio.run(harness.services.history.default_ref())
+
+def test_the_base_ref_help_names_the_branch_the_repository_has_checked_out() -> None:
+    """The sentence beside that behaviour, read off the parser: no remote's default branch in it.
+
+    `History.default_ref` is `git symbolic-ref HEAD`, the branch of the checkout `agl run` was
+    typed in, and `refs/remotes/origin/HEAD` is read by nothing. A help that said "the
+    repository's default branch" sent a reader to a ref AGL never asks about, and to a branch
+    their run would not have started from.
+    """
+    base = next(
+        action for action in _declared(run_command.declare)._actions if action.dest == "base_ref"
+    )
+
+    assert "checked out" in (base.help or "")
+    assert "default branch" not in (base.help or "")
 
 # --- the flags this parser owns, which no workflow may declare -----------------------------------
 

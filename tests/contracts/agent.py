@@ -419,7 +419,7 @@ class AgentContract(AgentPreflightContract, AgentHermeticityContract):
         of author code an adapter invokes during a run, ending it with its own exception for its
         own reasons; terminal views are decoration by the same definition and what a view raises
         comes straight out; and the swallow's price is paid on every line for the length of a run,
-        by a reporter nothing ever mentions again. `ports/agent.py`'s `:param on_activity:` states
+        by a reporter nothing ever mentions again. `ports/agent.py`'s `on_activity` entry states
         the rule; this is the argument for it.
 
         The tool handler is cited here and `on_question` is not, although `on_question` raising

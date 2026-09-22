@@ -18,15 +18,17 @@ __all__ = [
 
 @dataclass(frozen=True, slots=True)
 class Text:
-    """Text shown on a :class:`Screen`."""
+    """Text shown on a [`Screen`][agl.sdk.Screen]."""
 
     value: str
+    """The text to show, as one string."""
 
 @dataclass(frozen=True, slots=True, init=False)
 class Row:
-    """One line of cells on a :class:`Screen`."""
+    """One line of cells on a [`Screen`][agl.sdk.Screen]."""
 
     cells: tuple[Text, ...]
+    """The cells, in the order given. A plain string becomes a [`Text`][agl.sdk.Text]."""
 
     def __init__(self, *cells: str | Text) -> None:
         object.__setattr__(self, "cells", tuple(_coerced(cell) for cell in cells))
@@ -36,37 +38,46 @@ class Rows:
     """Several rows shown together, in the order given."""
 
     rows: tuple[Row, ...]
+    """The rows to show, top to bottom."""
 
     def __init__(self, rows: Sequence[Row]) -> None:
         object.__setattr__(self, "rows", tuple(rows))
 
 type Component = Text | Row | Rows
+"""Anything that can stand as a [`Screen`][agl.sdk.Screen]'s body."""
 
 @dataclass(frozen=True, slots=True)
 class Choice[T]:
     """An answer a person can pick, with the value it returns."""
 
     label: str
+    """What the person reads beside this answer."""
 
     value: T
+    """What [`Terminal.show`][agl.sdk.Terminal.show] returns when the person picks it."""
 
 @dataclass(frozen=True, slots=True)
 class TextInput[T]:
     """An answer a person types, with the function that turns it into a value."""
 
     label: str
+    """What the person reads above the box they type in."""
 
     maps: Callable[[str], T] = field(compare=False, repr=False)
+    """Called with what the person typed; what it returns is the answer."""
 
 type Response[T] = Choice[T] | TextInput[T]
+"""One answer a person can give on a [`Screen`][agl.sdk.Screen]."""
 
 @dataclass(frozen=True, slots=True, init=False)
 class Screen[T = None]:
     """What a person is shown, and the answers they can give."""
 
     body: Component
+    """What the person is shown. A plain string becomes a [`Text`][agl.sdk.Text]."""
 
     responses: tuple[Response[T], ...]
+    """The answers on offer. With none, the screen is a board and nothing waits for a person."""
 
     def __init__(self, body: str | Component, responses: Sequence[Response[T]] = ()) -> None:
         object.__setattr__(self, "body", _coerced(body))
@@ -87,13 +98,21 @@ class Terminal(ABC):
         priority: int = 0,
         **params: object,
     ) -> T:
-        """Show a :class:`Screen` to a person and return their answer.
+        """Shows a [`Screen`][agl.sdk.Screen] to a person and returns their answer.
 
-        :param view: Function returning the :class:`Screen`. It runs every frame, so keep it fast
-            and free of side effects.
-        :param priority: A question's place in the queue; higher is shown first.
-        :param params: Arguments passed to `view` every frame.
-        :return: The value of the chosen answer, or `None` if the screen has no answers.
+        Args:
+            view: The function returning the `Screen`. It runs every frame, so keep it short
+                and free of side effects.
+            priority: The place a question takes in the queue. The highest waiting is shown
+                first, and questions at one priority in the order they were asked. If omitted, 0.
+            params: The arguments passed to `view` every frame.
+
+        Returns:
+            The value of the answer the person gave, or `None` where the screen offered none.
+
+        Raises:
+            agl.sdk.UpstreamUnavailable: A screen with answers reached a terminal that takes no
+                input, which has nobody to answer it.
         """
         ...
 
@@ -102,7 +121,8 @@ class Terminal(ABC):
     def pending(self) -> Mapping[int, int]:
         """How many screens are waiting at each priority.
 
-        :return: Waiting screens per priority, not counting the one on screen now.
+        Returns:
+            The count of waiting screens at each priority, without the one on screen now.
         """
         ...
 

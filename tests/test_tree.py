@@ -94,6 +94,13 @@ installed into a clean environment and worked from outside the repository - ever
 both shipped workflows' entry points resolved and loaded, their `prompts/` markdown shipped, and
 the `agl workflows` console script printed their names. Recorded so nobody buys that measurement
 twice: what refuses the deletion is the import graph, never the distribution.
+
+## One file that is not Python: `py.typed`
+
+PEP 561's marker. A type checker reads an installed package's own annotations only when the
+package carries it, so without it every name a workflow imports from `agl.sdk` is untyped to a
+type checker. It is empty, because the one word PEP 561 gives the file a meaning for, `partial`,
+is for stub packages and this is not one.
 """
 
 from pathlib import Path
@@ -128,3 +135,11 @@ def test_every_directory_holding_python_under_src_agl_is_a_package() -> None:
         f"treat as a regular package"
     )
 
+def test_the_package_root_carries_an_empty_py_typed_marker_for_type_checkers() -> None:
+    """`src/agl/py.typed`, present and empty: the PEP 561 marker of a package with its own types."""
+    marker = PACKAGE_ROOT / "py.typed"
+    assert marker.is_file(), (
+        f"{marker} is missing, so a type checker reading an installed `agl` treats every name it"
+        f" exports as untyped"
+    )
+    assert marker.read_bytes() == b"", f"{marker} is not empty: {marker.read_bytes()!r}"

@@ -71,10 +71,10 @@ from agl.ports.home_layout import AglHome, RunScope
 from agl.ports.ids import ProjectName, RunLabel
 from agl.ports.run import JsonValue
 from agl.ports.tree_layout import TreesRoot
+from agl.sdk._workflow import Run
 from agl.sdk.roles import Role, role
 from agl.sdk.testing import Agent, Call, Reply
 from agl.sdk.tools import reporting_tool
-from agl.sdk.workflow import Run
 
 PROJECT: Final = ProjectName("myapp")
 LABEL: Final = RunLabel("auth")

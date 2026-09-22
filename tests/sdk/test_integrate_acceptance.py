@@ -117,9 +117,9 @@ from agl.ports.tree_layout import TreesRoot, base_worktree, run_branch, worktree
 from agl.ports.verifier import Verifier, VerifierOutcome
 from agl.ports.workspace import Workspace
 from agl.sdk._engine.services import Services
+from agl.sdk._workflow import Run, workflow
 from agl.sdk.roles import Role, role
 from agl.sdk.tools import reporting_tool
-from agl.sdk.workflow import Run, workflow
 from instruments.landing import (
     CHILD,
     CHILD_TEXT,

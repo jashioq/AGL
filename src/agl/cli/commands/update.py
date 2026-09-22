@@ -47,7 +47,10 @@ def declare(commands: _Commands) -> RefusingParser:
         _WORKFLOW,
         metavar="<workflow>",
         nargs="?",
-        help="Name of the workflow to update. If omitted, updates all workflows.",
+        help=(
+            "Name of the workflow to update. If omitted, updates all workflows downloaded with "
+            "`agl get`."
+        ),
     )
     return parser
 

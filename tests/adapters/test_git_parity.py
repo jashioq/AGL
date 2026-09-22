@@ -554,7 +554,7 @@ async def test_a_move_is_a_rename_from_both_and_a_rewritten_move_is_a_pair_from_
 async def test_contains_agrees_including_the_reflexive_case(
     pair: Mapping[str, _Bundle],
 ) -> None:
-    """`Integration._conclude`'s one question, in the four shapes it meets.
+    """`GatedIntegration._conclude`'s one question, in the four shapes it meets.
 
     An implementation answering differently from the other decides differently about whether a merge
     happened, and the two failures are not symmetric: a wrong `False` re-lands and then raises, a

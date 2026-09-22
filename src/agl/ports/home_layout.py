@@ -99,8 +99,11 @@ class RunScope:
     def inside(self, namespace: Namespace) -> RunScope:
         """The same run one worktree deeper. The only way to gain depth.
 
-        :param namespace: appended to the sequence; nesting is arbitrary, so this composes freely
-        :return: a scope one namespace longer, addressing that worktree's own subtree
+        Args:
+            namespace: appended to the sequence; nesting is arbitrary, so this composes freely
+
+        Returns:
+            a scope one namespace longer, addressing that worktree's own subtree
         """
         return RunScope(self.project, self.label, (*self.namespaces, namespace))
 
@@ -108,50 +111,66 @@ class RunScope:
     def run(self) -> RunScope:
         """The same run at depth zero. The only way to lose depth.
 
-        :return: the scope a per-run file belongs to, whichever worktree happened to ask
+        Returns:
+            the scope a per-run file belongs to, whichever worktree happened to ask
         """
         return RunScope(self.project, self.label)
 
 def settings_file(home: AglHome) -> Path:
     """The operator's own settings, and the only file at the top of AGL's own root.
 
-    :param home: where AGL keeps its own state, which is never where code is checked out
-    :return: `<home>/config.toml`, read by `config/` before anything has been constructed
+    Args:
+        home: where AGL keeps its own state, which is never where code is checked out
+
+    Returns:
+        `<home>/config.toml`, read by `config/` before anything has been constructed
     """
     return _root(home) / _SETTINGS_FILE
 
 def projects_dir(home: AglHome) -> Path:
     """The registered projects, one settings file and one recorded subtree each.
 
-    :param home: where AGL keeps its own state, which is never where code is checked out
-    :return: `<home>/projects/`, the one container here whose contents are themselves an answer
+    Args:
+        home: where AGL keeps its own state, which is never where code is checked out
+
+    Returns:
+        `<home>/projects/`, the one container here whose contents are themselves an answer
     """
     return _root(home) / _PROJECTS
 
 def project_config(home: AglHome, project: ProjectName) -> Path:
     """One project's settings file - a repository, a trees root, and what its workflows declare.
 
-    :param home: where AGL keeps its own state, which is never where code is checked out
-    :param project: refused when `.toml` would push the filename past a path segment's 255 bytes
-    :return: `<home>/projects/<project>.toml`
+    Args:
+        home: where AGL keeps its own state, which is never where code is checked out
+        project: refused when `.toml` would push the filename past a path segment's 255 bytes
+
+    Returns:
+        `<home>/projects/<project>.toml`
     """
     return projects_dir(home) / f"{_checked_project(project)}{_PROJECT_SUFFIX}"
 
 def project_dir(home: AglHome, project: ProjectName) -> Path:
     """Everything AGL has recorded about one project, its runs included.
 
-    :param home: where AGL keeps its own state, which is never where code is checked out
-    :param project: held to the same length rule as its settings file, so one answer covers both
-    :return: `<home>/projects/<project>/`
+    Args:
+        home: where AGL keeps its own state, which is never where code is checked out
+        project: held to the same length rule as its settings file, so one answer covers both
+
+    Returns:
+        `<home>/projects/<project>/`
     """
     return projects_dir(home) / _checked_project(project)
 
 def scope_dir(home: AglHome, scope: RunScope) -> Path:
     """The directory a scope addresses. The one place the worktree nesting is written down.
 
-    :param home: where AGL keeps its own state, which is never where code is checked out
-    :param scope: each namespace adds a `worktrees/<namespace>` pair, so depth two is two pairs
-    :return: the run's directory at depth zero, a nested worktree's below it
+    Args:
+        home: where AGL keeps its own state, which is never where code is checked out
+        scope: each namespace adds a `worktrees/<namespace>` pair, so depth two is two pairs
+
+    Returns:
+        the run's directory at depth zero, a nested worktree's below it
     """
     path = project_dir(home, scope.project) / _RUNS / str(scope.label)
     for namespace in scope.namespaces:
@@ -161,81 +180,108 @@ def scope_dir(home: AglHome, scope: RunScope) -> Path:
 def run_record(home: AglHome, scope: RunScope) -> Path:
     """The run's own record, of which there is one per run and it sits at the top.
 
-    :param home: where AGL keeps its own state, which is never where code is checked out
-    :param scope: its namespaces are not consulted, so any depth inside a run answers the same
-    :return: `<run>/run.json`
+    Args:
+        home: where AGL keeps its own state, which is never where code is checked out
+        scope: its namespaces are not consulted, so any depth inside a run answers the same
+
+    Returns:
+        `<run>/run.json`
     """
     return scope_dir(home, scope.run) / _RUN_RECORD
 
 def step_dir(home: AglHome, scope: RunScope, step: StepName) -> Path:
     """One step's entries, in the scope that ran it - every recorded run of it, superseded ones too.
 
-    :param home: where AGL keeps its own state, which is never where code is checked out
-    :param scope: which line of work ran it; the same step under two namespaces is two directories
-    :param step: which step; the name becomes the segment as it stands, validated by `ids.py`
-    :return: `<scope>/steps/<step>/`, a sibling of `worktrees/` and so never colliding with one
+    Args:
+        home: where AGL keeps its own state, which is never where code is checked out
+        scope: which line of work ran it; the same step under two namespaces is two directories
+        step: which step; the name becomes the segment as it stands, validated by `ids.py`
+
+    Returns:
+        `<scope>/steps/<step>/`, a sibling of `worktrees/` and so never colliding with one
     """
     return scope_dir(home, scope) / _STEPS / str(step)
 
 def step_entry(home: AglHome, scope: RunScope, step: StepName, digest: str) -> Path:
     """One recorded run of one step - the file whose existence is the whole of a step's status.
 
-    :param home: where AGL keeps its own state, which is never where code is checked out
-    :param scope: which line of work ran it; the same step under two namespaces is two directories
-    :param step: which step; the name becomes the segment as it stands, validated by `ids.py`
-    :param digest: the journal's own sha256 hexdigest, refused unless 64 lowercase hex characters
-    :return: `<scope>/steps/<step>/<digest>.json`
+    Args:
+        home: where AGL keeps its own state, which is never where code is checked out
+        scope: which line of work ran it; the same step under two namespaces is two directories
+        step: which step; the name becomes the segment as it stands, validated by `ids.py`
+        digest: the journal's own sha256 hexdigest, refused unless 64 lowercase hex characters
+
+    Returns:
+        `<scope>/steps/<step>/<digest>.json`
     """
     return step_dir(home, scope, step) / f"{_checked_digest(digest)}{_ENTRY_SUFFIX}"
 
 def workspace_dir(home: AglHome) -> Path:
     """The operator's own workflows and the project file that declares them, in one subtree.
 
-    :param home: where AGL keeps its own state, which is never where code is checked out
-    :return: `<home>/workspace/`, a sibling of `projects/` holding what an operator wrote
+    Args:
+        home: where AGL keeps its own state, which is never where code is checked out
+
+    Returns:
+        `<home>/workspace/`, a sibling of `projects/` holding what an operator wrote
     """
     return _root(home) / _WORKSPACE
 
 def workspace_pyproject(home: AglHome) -> Path:
     """The workspace's own project file, which is where its entry points are written down.
 
-    :param home: where AGL keeps its own state, which is never where code is checked out
-    :return: `<home>/workspace/pyproject.toml`
+    Args:
+        home: where AGL keeps its own state, which is never where code is checked out
+
+    Returns:
+        `<home>/workspace/pyproject.toml`
     """
     return workspace_dir(home) / _PYPROJECT_FILE
 
 def workflows_dir(home: AglHome) -> Path:
     """The workflows an operator has written, one directory each and no table listing them.
 
-    :param home: where AGL keeps its own state, which is never where code is checked out
-    :return: `<home>/workspace/workflows/`, the other container whose contents are an answer
+    Args:
+        home: where AGL keeps its own state, which is never where code is checked out
+
+    Returns:
+        `<home>/workspace/workflows/`, the other container whose contents are an answer
     """
     return workspace_dir(home) / _WORKFLOWS
 
 def workflow_dir(home: AglHome, workflow: WorkflowName) -> Path:
     """One workflow the operator wrote: its code, its prompts and the file that declares it.
 
-    :param home: where AGL keeps its own state, which is never where code is checked out
-    :param workflow: the name becomes the segment as it stands, validated by `ids.py`
-    :return: `<home>/workspace/workflows/<workflow>/`, imported as a package named after itself
+    Args:
+        home: where AGL keeps its own state, which is never where code is checked out
+        workflow: the name becomes the segment as it stands, validated by `ids.py`
+
+    Returns:
+        `<home>/workspace/workflows/<workflow>/`, imported as a package named after itself
     """
     return workflows_dir(home) / str(workflow)
 
 def workflow_pyproject(home: AglHome, workflow: WorkflowName) -> Path:
     """The file a workflow declares itself in, which is the whole of registering one.
 
-    :param home: where AGL keeps its own state, which is never where code is checked out
-    :param workflow: the directory's name, which the declaration inside is free to disagree with
-    :return: `<workflow>/pyproject.toml`, the one file `config/registry.py` reads to find a name
+    Args:
+        home: where AGL keeps its own state, which is never where code is checked out
+        workflow: the directory's name, which the declaration inside is free to disagree with
+
+    Returns:
+        `<workflow>/pyproject.toml`, the one file `config/registry.py` reads to find a name
     """
     return workflow_dir(home, workflow) / _PYPROJECT_FILE
 
 def workflow_module(home: AglHome, workflow: WorkflowName) -> Path:
     """What `<name>:<name>` imports, and what makes the directory a package rather than a namespace.
 
-    :param home: where AGL keeps its own state, which is never where code is checked out
-    :param workflow: the directory's name, which is also the module name the import statement uses
-    :return: `<workflow>/__init__.py`
+    Args:
+        home: where AGL keeps its own state, which is never where code is checked out
+        workflow: the directory's name, which is also the module name the import statement uses
+
+    Returns:
+        `<workflow>/__init__.py`
     """
     return workflow_dir(home, workflow) / _PACKAGE_MODULE
 
@@ -246,9 +292,12 @@ def workflow_module(home: AglHome, workflow: WorkflowName) -> Path:
 def workspace_site_packages(home: AglHome, interpreter: str) -> Path:
     """What a workflow may import from the workspace venv, for one interpreter and no other.
 
-    :param home: where AGL keeps its own state, which is never where code is checked out
-    :param interpreter: the `lib/` subdirectory that interpreter installs into, `python3.14`
-    :return: `<home>/workspace/.venv/lib/<interpreter>/site-packages`
+    Args:
+        home: where AGL keeps its own state, which is never where code is checked out
+        interpreter: the `lib/` subdirectory that interpreter installs into, `python3.14`
+
+    Returns:
+        `<home>/workspace/.venv/lib/<interpreter>/site-packages`
     """
     library = workspace_dir(home) / _VENV / _VENV_LIBRARY
     return library / _checked_interpreter(interpreter) / _SITE_PACKAGES
@@ -256,9 +305,12 @@ def workspace_site_packages(home: AglHome, interpreter: str) -> Path:
 def workspace_editor_pth(home: AglHome, interpreter: str) -> Path:
     """The one file AGL writes inside the workspace venv, and no run of AGL reads it.
 
-    :param home: where AGL keeps its own state, which is never where code is checked out
-    :param interpreter: the `lib/` subdirectory that interpreter installs into, `python3.14`
-    :return: `<home>/workspace/.venv/lib/<interpreter>/site-packages/agl.pth`
+    Args:
+        home: where AGL keeps its own state, which is never where code is checked out
+        interpreter: the `lib/` subdirectory that interpreter installs into, `python3.14`
+
+    Returns:
+        `<home>/workspace/.venv/lib/<interpreter>/site-packages/agl.pth`
     """
     return workspace_site_packages(home, interpreter) / _EDITOR_PTH
 

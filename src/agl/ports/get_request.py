@@ -144,10 +144,15 @@ class GetRequest:
     def parsed(cls, specs: Sequence[str]) -> GetRequest:
         """Every workflow the arguments of one command ask for, read in the order they were written.
 
-        :param specs: one `owner/repo/path/to/workflow[,sibling...][@ref]` per argument
-        :return: the whole request, or none of it: one bad argument refuses every other one too
-        :raises InputError: naming the argument, what was expected of it and what is wrong with it
-        :raises InternalError: handed one `str`, which would read as one argument per character
+        Args:
+            specs: one `owner/repo/path/to/workflow[,sibling...][@ref]` per argument
+
+        Returns:
+            the whole request, or none of it: one bad argument refuses every other one too
+
+        Raises:
+            InputError: naming the argument, what was expected of it and what is wrong with it
+            InternalError: handed one `str`, which would read as one argument per character
         """
         if isinstance(specs, str):
             raise InternalError(
@@ -161,7 +166,8 @@ class GetRequest:
     def fetches(self) -> tuple[Fetch, ...]:
         """The downloads this request needs: one per repository at a ref, first asked first.
 
-        :return: each with every workflow wanted from it, owner and name matched in any case
+        Returns:
+            each with every workflow wanted from it, owner and name matched in any case
         """
         grouped: dict[tuple[str, str, str | None], list[RequestedWorkflow]] = {}
         for workflow in self.workflows:

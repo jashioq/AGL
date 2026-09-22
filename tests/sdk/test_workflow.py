@@ -15,7 +15,7 @@ start and die at its first step.
 **The narrowing `registry.load` performs is driven end to end**, through a hand-constructed
 `EntryPoint` pointing at this module - the registration line, resolved - because that is the
 whole reason this class exists. `config/registry.py` deferred nominal narrowing to "the object
-`@workflow` produces in `sdk/workflow.py`", so the pair is asserted together: a `Workflow` loads,
+`@workflow` produces in `sdk/_workflow.py`", so the pair is asserted together: a `Workflow` loads,
 and something that is not one is refused with the registry's `InputError` rather than reaching
 `api.py` as an `Any`.
 
@@ -52,14 +52,14 @@ from agl.ports import errors
 from agl.ports.agent import Claude, OpenAI
 from agl.ports.errors import AglError, InputError, exit_code_for
 from agl.ports.home_layout import RunScope
-from agl.ports.ids import ProjectName, RunLabel
+from agl.ports.ids import Namespace, ProjectName, RunLabel
 from agl.ports.tree_layout import TreesRoot
 from agl.sdk._engine.journal import Fingerprints
 from agl.sdk._engine.services import Services
+from agl.sdk._workflow import Run, Stop, Workflow, workflow
 from agl.sdk.params import arg, parse
 from agl.sdk.roles import Role, RoleFactory, role
 from agl.sdk.tools import reporting_tool
-from agl.sdk.workflow import Run, Stop, Workflow, workflow
 
 # Where a run's records go and the commit its chain starts at. Nothing in this file takes a step,
 # so neither is ever spent; `tests/sdk/test_run_step.py` is where they are.
@@ -316,7 +316,7 @@ def test_something_that_is_not_a_workflow_is_refused_with_the_registrys_input_er
     A `runtime_checkable` `Protocol` would have let anything carrying the right attribute names
     through, which is `config/registry.py`'s argument for wanting a real class to narrow to.
     """
-    with pytest.raises(InputError, match=r"agl\.sdk\.workflow\.Workflow"):
+    with pytest.raises(InputError, match=r"agl\.sdk\._workflow\.Workflow"):
         registry.load([_point("tickets", "_not_a_workflow")], "tickets", Workflow)
 
 @pytest.mark.asyncio
@@ -368,6 +368,28 @@ def test_the_run_carries_the_address_and_the_base_api_py_already_computed(tmp_pa
     run = _run(NoParams(), tmp_path)
     assert (run.scope, run.base) == (SCOPE, BASE)
 
+def test_a_run_gives_its_label_and_namespaces_so_a_workflow_never_names_the_scope(
+    tmp_path: Path,
+) -> None:
+    """`label` and `namespaces` are what `scope` holds, in types `agl.sdk` alone can name.
+
+    `scope` is a `RunScope`, which `agl.sdk` does not export. The root, a child and a grandchild,
+    because the label is shared down the tree and the namespaces grow by one at each level.
+    """
+    run = _run(NoParams(), tmp_path)
+    ticket = run.worktree("T-01")
+    nested = ticket.worktree("sub-b")
+    assert_type(run.label, str)
+    assert_type(run.namespaces, tuple[Namespace, ...])
+    assert [(one.label, one.namespaces) for one in (run, ticket, nested)] == [
+        ("auth", ()),
+        ("auth", (Namespace("T-01"),)),
+        ("auth", (Namespace("T-01"), Namespace("sub-b"))),
+    ]
+    assert [(one.label, one.namespaces) for one in (run, ticket, nested)] == [
+        (str(one.scope.label), one.scope.namespaces) for one in (run, ticket, nested)
+    ]
+
 def test_a_run_can_be_handed_the_counter_a_parent_is_already_using(tmp_path: Path) -> None:
     """The seam, still pinned here where it is cheapest to.
 
@@ -408,8 +430,8 @@ def test_a_run_holds_nothing_it_did_not_declare(tmp_path: Path) -> None:
 
     `_parent` is the link `integrate()` walks to reach the namespace a child's work lands into. A
     keyword like the three above, defaulted `None` - which is how a root says it is a root - and set
-    by `_child` alone. Private, because a `Run`'s surface is six members and a public one would hand
-    a workflow author a tree to walk.
+    by `_child` alone. Private, because a `Run`'s surface is eight members and a public one would
+    hand a workflow author a tree to walk.
 
     `_steps` is the engine `step` delegates to, derived in `__post_init__` from the public fields -
     `Entry` sets its own derived field the same way - and it is deliberately not a constructor

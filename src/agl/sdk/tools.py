@@ -41,10 +41,13 @@ class ReportingTool[P]:
     """The tool an agent reports a step's result through."""
 
     name: str
+    """What the agent calls the tool by, unique among a [`Role`][agl.sdk.Role]'s tools."""
 
     description: str
+    """The whole of what the agent reads to decide this is the tool it wants."""
 
     payload: type[P]
+    """The dataclass the agent's arguments are built into, and what a step returns."""
 
     payload_schema: Mapping[str, JsonValue] = field(init=False)
 
@@ -56,20 +59,28 @@ class ReportingTool[P]:
         )
 
     def rejection(self, payload: Mapping[str, JsonValue]) -> str | None:
-        """Say what is wrong with a payload the agent sent.
+        """Says what is wrong with a payload the agent sent.
 
-        :param payload: The arguments the agent sent.
-        :return: Every problem found, or `None` if the payload fits.
+        Args:
+            payload: The arguments the agent sent.
+
+        Returns:
+            The problems found, as one text, or `None` where the payload fits.
         """
         _, problems = self._read(payload)
         return None if not problems else _refusal(self.name, problems)
 
     def read(self, value: object) -> P:
-        """Build the payload dataclass from a value AGL saved.
+        """Builds the payload dataclass from a value AGL saved.
 
-        :param value: The saved value, as parsed JSON.
-        :return: An instance of the payload dataclass.
-        :raises InternalError: The value doesn't fit the payload, which is a bug in AGL.
+        Args:
+            value: The saved value, as parsed JSON.
+
+        Returns:
+            The payload dataclass, built from that value.
+
+        Raises:
+            InternalError: The value doesn't fit the payload, which is a bug in AGL.
         """
         instance, problems = self._read(value)
         if instance is None:
@@ -91,13 +102,18 @@ class ReportingTool[P]:
         return built, ()
 
 def reporting_tool[P](name: str, description: str, payload: type[P]) -> ReportingTool[P]:
-    """Declare the tool an agent reports a step's result through.
+    """Declares the tool an agent reports a step's result through.
 
-    :param name: What the agent calls it, unique among the role's tools.
-    :param description: What the agent is told the tool is for.
-    :param payload: Dataclass the step's result is returned as.
-    :return: A tool to put on a :class:`Role`, which takes one at most.
-    :raises InputError: An empty name or description, or a payload that can't be saved as JSON.
+    Args:
+        name: The name the agent calls it by, unique among the role's tools.
+        description: The whole of what the agent reads to decide this is the tool it wants.
+        payload: The dataclass the step's result is returned as.
+
+    Returns:
+        The tool to put on a [`Role`][agl.sdk.Role], which takes one at most.
+
+    Raises:
+        InputError: An empty name or description, or a payload that can't be saved as JSON.
     """
     return ReportingTool(name=name, description=description, payload=payload)
 
@@ -107,13 +123,19 @@ def tool[P](
     payload: type[P],
     handler: Callable[[P], Awaitable[ToolResult]],
 ) -> Tool:
-    """Build a tool an agent can call.
+    """Builds a tool an agent can call.
 
-    :param name: What the agent calls it, unique within a :class:`Role`.
-    :param description: What the agent is told the tool is for.
-    :param payload: Dataclass the agent's arguments are checked against and built into.
-    :param handler: Awaited with the built payload; its result goes back to the agent.
-    :return: A tool to put on a :class:`Role`.
+    Args:
+        name: The name the agent calls it by, unique within a [`Role`][agl.sdk.Role].
+        description: The whole of what the agent reads to decide this is the tool it wants.
+        payload: The dataclass the agent's arguments are checked against and built into.
+        handler: The coroutine awaited with the built payload; its result goes back to the agent.
+
+    Returns:
+        The tool to put on a `Role`.
+
+    Raises:
+        InputError: An empty name or description, or a payload that can't be saved as JSON.
     """
     _check_payload(payload, name)
     schema = _object_schema(payload, name, ())
@@ -132,12 +154,17 @@ def describe[T](text: str, *, default: T) -> T: ...
 @overload
 def describe(text: str) -> Any: ...
 def describe(text: str, *, default: Any = MISSING) -> Any:
-    """Describe a payload field to the agent.
+    """Describes a payload field to the agent.
 
-    :param text: What the field is for, shown to the agent beside its name.
-    :param default: The field's default. If omitted, the field is required.
-    :return: A `dataclasses.field` to assign to the annotated field.
-    :raises InputError: `text` is empty or only whitespace.
+    Args:
+        text: The description of the field, shown to the agent beside its name.
+        default: The field's default. If omitted, the field is required.
+
+    Returns:
+        The `dataclasses.field` to assign to the annotated field.
+
+    Raises:
+        InputError: `text` is empty or only whitespace.
     """
     if not text.strip():
         raise InputError(
