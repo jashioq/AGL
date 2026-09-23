@@ -1,0 +1,6 @@
+offline = true
+include_fragments = "anchor-only"
+index_files = ["index.html"]
+no_progress = true
+# The theme's own 404 page links to #__skip, which it never defines.
+exclude_path = ["(^|/)404\\.html$"]

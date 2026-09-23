@@ -858,7 +858,8 @@ async def test_a_file_edited_in_the_workflow_directory_refuses_the_resume_and_is
     assert "changed prompts/review.md" in message
     assert "roles.py" not in message, "a file nobody touched was named as though it had moved"
     assert "put the directory back" in message
-    assert "agl clear auth" in message
+    assert "`agl clear auth` deletes the run with its worktrees and branches" in message
+    assert "`agl run triage -n auth` then starts it again" in message
     assert await _record(harness) == before, "a refused resume changed the run it refused"
     assert len(handed) == 1, "the workflow ran against files the ledger was not written by"
 

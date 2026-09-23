@@ -152,6 +152,8 @@ PORTS_DIR: Final = PACKAGE_DIR / "ports"
 ADAPTERS_DIR: Final = PACKAGE_DIR / "adapters"
 CONTRACTS_DIR: Final = REPO_ROOT / "tests" / "contracts"
 PYPROJECT_FILE: Final = REPO_ROOT / "pyproject.toml"
+# Where the docs' example workflows live, relative to the root: the one place a declaration may be.
+DOCS_EXAMPLES: Final = Path("tests") / "docs"
 IMPORTLINTER_FILE: Final = REPO_ROOT / ".importlinter"
 CHECK_SCRIPT: Final = REPO_ROOT / "scripts" / "check"
 
@@ -207,7 +209,7 @@ SETTLED: Final[Mapping[int, tuple[str, ...]]] = {
     12: (
         f"{HERE}::test_target_twelve_is_unverifiable_because_tickets_does_not_exist",
         f"{HERE}::"
-        f"test_a_workflow_declaration_is_found_where_one_is_planted_and_nowhere_in_this_repository",
+        f"test_a_workflow_declaration_is_found_where_planted_and_nowhere_here_outside_tests_docs",
     ),
 }
 
@@ -1443,7 +1445,7 @@ def test_target_twelve_is_unverifiable_because_tickets_does_not_exist() -> None:
     written, run and finished without this test ever firing. That is stated rather than papered
     over: the premise it guards is "this *distribution* has not grown a workflow", which is worth
     holding on its own, and the second tripwire below -
-    `test_a_workflow_declaration_is_found_where_one_is_planted_and_nowhere_in_this_repository` - is
+    `test_a_workflow_declaration_is_found_where_planted_and_nowhere_here_outside_tests_docs` - is
     pointed at the shape a workflow has now rather than at this tree, and writes out the limit both
     of them share. Reading a green line here as "tickets does not exist anywhere" is the mistake
     this paragraph exists to stop.
@@ -1506,7 +1508,15 @@ def _declarations(root: Path) -> dict[str, tuple[str, ...]]:
         found[str(path.relative_to(root))] = tuple(sorted(groups.get(WORKFLOWS_PACKAGE, {})))
     return found
 
-def test_a_workflow_declaration_is_found_where_one_is_planted_and_nowhere_in_this_repository(
+def _outside_the_docs(found: Mapping[str, tuple[str, ...]]) -> dict[str, tuple[str, ...]]:
+    """The declarations in `found` made anywhere but under `tests/docs/`."""
+    return {
+        path: declared
+        for path, declared in found.items()
+        if declared and not Path(path).is_relative_to(DOCS_EXAMPLES)
+    }
+
+def test_a_workflow_declaration_is_found_where_planted_and_nowhere_here_outside_tests_docs(
     tmp_path: Path,
 ) -> None:
     """#12's second tripwire, pointed at the shape a workflow has now rather than at `src/`.
@@ -1516,43 +1526,54 @@ def test_a_workflow_declaration_is_found_where_one_is_planted_and_nowhere_in_thi
     wherever the directory sits - so this looks for the declaration, over the whole repository.
 
     **The scan is shown firing before it is believed.** A `tickets` workflow is built under
-    `tmp_path`, in the layout a workspace holds one in, and the same reader that answers about this
-    repository is run over it and must find it by name. Without that half this would be a tripwire
-    nobody has watched fire, which is the defect the test above records about itself and which a
-    second one repeating it would only double.
+    `tmp_path`, in the layout a workspace holds one in, beside an example under `tests/docs/`, and
+    the same reader that answers about this repository must find both and keep only `tickets`.
+    Without that half this would be a tripwire nobody has watched fire, which is the defect the test
+    above records about itself and which a second one repeating it would only double.
 
-    **What it catches.** Any workflow declared anywhere in this repository - a template, an
-    example, a fixture, a workspace checked in beside the source - and `tickets` among them. That
+    **What it catches.** Any workflow declared in this repository outside `tests/docs/` - a
+    template, a fixture, a workspace checked in beside the source - and `tickets` among them. That
     is strictly more than the package scan above, which a workflow arriving in any directory but
-    `src/agl/` walks straight past.
+    `src/agl/` walks straight past. `tests/docs/` holds the example workflows the docs pages
+    include, and the sdist ships none of `tests/`, so a declaration there is not one this
+    distribution grows.
 
     **What it does not catch, and this is the whole of the limit.** A `tickets` written in the
     operator's own workspace, which is where a workflow actually lives and where no test in this
     repository may look: `tests/conftest.py` pins `AGL_HOME` to a temporary directory precisely so
     that no test reads the machine it is running on. `config/registry.py` reads workflows from that
     workspace and from nowhere else, so the one place a workflow can arrive from is the one place
-    this cannot see. A green line here means "nothing in this repository declares a workflow", and
-    it means nothing whatever about the operator's workspace or about tickets existing in the
-    world.
+    this cannot see. A green line here means "nothing in this repository declares a workflow
+    outside the docs' examples", and it means nothing whatever about the operator's workspace or
+    about tickets existing in the world.
 
     It answers none of #12's own claim either. Whether tickets required a framework change is still
     settled by taking the diff, which is what the test above asks whoever adds it to do.
     """
     planted = tmp_path / "workspace" / "workflows" / "ticket-directory"
-    planted.mkdir(parents=True)
-    (planted / PYPROJECT_FILE.name).write_text(
-        f'[project]\nname = "planted"\nversion = "0.1.0"\n\n'
-        f'[project.entry-points."{WORKFLOWS_PACKAGE}"]\ntickets = "tickets:tickets"\n',
-        encoding="utf-8",
-    )
+    example = tmp_path / DOCS_EXAMPLES / "example-directory"
+    for directory, name in ((planted, "tickets"), (example, "example")):
+        directory.mkdir(parents=True)
+        (directory / PYPROJECT_FILE.name).write_text(
+            f'[project]\nname = "planted"\nversion = "0.1.0"\n\n'
+            f'[project.entry-points."{WORKFLOWS_PACKAGE}"]\n{name} = "{name}:{name}"\n',
+            encoding="utf-8",
+        )
+    tickets = str((planted / PYPROJECT_FILE.name).relative_to(tmp_path))
+    found = _declarations(tmp_path)
 
-    assert list(_declarations(tmp_path).values()) == [("tickets",)], (
-        f"the reader was shown a workspace holding one workflow called tickets and answered "
-        f"{_declarations(tmp_path)}. It is asserted to fire here so that the assertion below means "
-        f"something: a reader that found nothing in a tree with tickets in it would report this "
-        f"repository clean whatever this repository held. The directory is deliberately not called "
-        f"`tickets` either - a workflow's name is the key its declaration writes, not the name of "
-        f"the directory holding it, and that is what is being read."
+    assert sorted(found.values()) == [("example",), ("tickets",)], (
+        f"the reader was shown a tree holding two workflows, example and tickets, and answered "
+        f"{found}. It is asserted to fire here so that the assertion below means something: a "
+        f"reader that found nothing in a tree with tickets in it would report this repository "
+        f"clean whatever this repository held. Neither directory is named after its workflow - a "
+        f"workflow's name is the key its declaration writes, not the name of the directory "
+        f"holding it, and that is what is being read."
+    )
+    kept = _outside_the_docs(found)
+    assert kept == {tickets: ("tickets",)}, (
+        f"of the two planted declarations the filter kept {kept}, where it should keep tickets "
+        f"alone: the one under {DOCS_EXAMPLES} is exempt and the other is not."
     )
 
     here = _declarations(REPO_ROOT)
@@ -1560,17 +1581,16 @@ def test_a_workflow_declaration_is_found_where_one_is_planted_and_nowhere_in_thi
         f"the walk of {REPO_ROOT} read {sorted(here)} and AGL's own project file is not among "
         f"them, so the assertion below is about a tree this did not reach."
     )
-    declaring = {path: declared for path, declared in here.items() if declared}
+    declaring = _outside_the_docs(here)
     assert not declaring, (
-        f"project files in this repository declare workflows: {declaring}. Target #12's premise is "
-        f"that tickets does not exist and that this distribution ships no workflow at all, so a "
-        f"declaration here is that premise changing - and if `tickets` is among those names it is "
-        f"changing in the exact way #12 is about. Take the diff that added it and report whether "
-        f"anything under src/agl/sdk/, src/agl/config/, src/agl/cli/, src/agl/api.py or "
-        f"src/agl/ports/ had to move; if any of it did, the target's own answer applies. A "
-        f"template or an example workflow shipped deliberately is the other way this fires, and it "
-        f"is a real change to the premise rather than a false alarm: decide what #12 means then, "
-        f"and rewrite this rather than exempting the path."
+        f"project files in this repository declare workflows outside {DOCS_EXAMPLES}: "
+        f"{declaring}. Target #12's premise is that tickets does not exist and that this "
+        f"distribution ships no workflow at all, so a declaration here is that premise changing - "
+        f"and if `tickets` is among those names it is changing in the exact way #12 is about. Take "
+        f"the diff that added it and report whether anything under src/agl/sdk/, src/agl/config/, "
+        f"src/agl/cli/, src/agl/api.py or src/agl/ports/ had to move; if any of it did, the "
+        f"target's own answer applies. An example workflow for the docs belongs under "
+        f"{DOCS_EXAMPLES}, which the sdist does not ship."
     )
 
 # ================================================================================================

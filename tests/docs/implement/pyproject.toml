@@ -1,0 +1,9 @@
+[project]
+name = "implement"
+version = "0.1.0"
+
+[project.entry-points."agl.workflows"]
+implement = "implement:implement"
+
+[tool.agl]
+requires = "agents-gl>=0.0.8"

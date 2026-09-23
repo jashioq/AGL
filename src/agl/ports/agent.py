@@ -216,13 +216,13 @@ def _not_a_choice(model: object, effort: object, example: str) -> str:
     )
 
 class Restriction(StrEnum):
-    """What an agent cannot do."""
+    """What an agent may not do."""
 
     NO_VCS_WRITES = "no_vcs_writes"
     """Takes away the agent's commits, branches, merges, fetches and pushes."""
 
     NO_FILE_WRITES = "no_file_writes"
-    """Takes away the agent's writes to disk."""
+    """Takes away the agent's file-editing tools."""
 
     NO_SHELL = "no_shell"
     """Takes away the agent's shell, and the other tools a backend runs commands through."""

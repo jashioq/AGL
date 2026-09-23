@@ -69,26 +69,21 @@ class Role[P = None]:
         StepName(self.name)
         if not self.instructions.strip():
             raise InputError(
-                f"a role's instructions are the whole of what its agent is asked to do, and this "
-                f"one was declared with {self.instructions!r}. `AgentTask` refuses an empty prompt "
-                f"too, at the dispatch - refused here, the line that needs fixing is on screen"
+                f'Role "{self.name}" has no instructions. Write what its agent is asked to do.'
             )
         tools = tuple(self.tools)
         reporting = [declared.name for declared in tools if isinstance(declared, ReportingTool)]
         if len(reporting) > 1:
             raise InputError(
-                f"this role declares more than one reporting tool: {reporting}. A reporting step's "
-                f"result is that tool's payload, singular - with two, `run.step` would have "
-                f"to pick one, and whichever it picked would be a rule living in the framework "
-                f"about a decision the workflow made. A role reports through one tool or none"
+                f'Role "{self.name}" has more than one reporting tool: {_quoted(reporting)}. '
+                "Keep one."
             )
         names = [declared.name for declared in tools]
         duplicates = sorted({name for name in names if names.count(name) > 1})
         if duplicates:
             raise InputError(
-                f"this role declares these tools more than once: {duplicates}. A model names the "
-                f"tool it is calling, so a duplicate is a call no backend can resolve to one "
-                f"handler - `AgentTask` refuses it too, one layer down and one run later"
+                f'Role "{self.name}" has tools that share a name: {_quoted(duplicates)}. Give '
+                "each tool its own name."
             )
         requires = frozenset(self.requires)
         if tools:
@@ -109,12 +104,8 @@ class Role[P = None]:
         """
         if self._model is None:
             raise InputError(
-                f"the role named {self.name!r} has no model, so nothing can say which provider "
-                f"runs it, fingerprint it or check what its backend can do. A role's model is "
-                f"declared on its factory - `@role(model=Claude.OPUS)` above the function that "
-                f"returns this `Role` - and is deliberately not a field of `Role` "
-                f"itself, so that preflight can read it without calling the factory. This value "
-                f"came from a bare `Role(...)`, which builds one nothing has bound a model to"
+                f'Role "{self.name}" was built with `Role(...)`, so it has no model. Return it '
+                "from a function decorated with `@role(model=...)`, and call that function."
             )
         return self._model
 
@@ -305,6 +296,9 @@ def _check_accepted_types(factory: str, accepts: tuple[type[object], ...]) -> No
             f"no entry of its own - it is matched under the base already declared - and one "
             f"declared beside its base is a different name and is not this"
         )
+
+def _quoted(names: Sequence[str]) -> str:
+    return ", ".join(f'"{name}"' for name in names)
 
 def _matchable(entry: type[object]) -> bool:
     try:

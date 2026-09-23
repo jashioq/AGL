@@ -10,3 +10,5 @@ build/
 *.egg-info/
 .DS_Store
 .idea/
+site/
+.cache/

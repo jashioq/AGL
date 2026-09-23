@@ -1,0 +1,42 @@
+name: docs
+
+# Manual only: the site deploys on release, so it matches what `uv tool install agents-gl` installs.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # This job runs PyPI packages and never pushes, so the token stays out of .git/config.
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.0.1
+      # Docs tools only, as Griffe reads src/ statically; 3.14, as requires-python has no ceiling.
+      - run: uv sync --only-group docs --python 3.14
+      # The docs gate's four steps from ./scripts/check, which leave site/ ready to upload.
+      - run: scripts/docs
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    # deploy-pages proves with an OIDC token that the deployment comes from this workflow.
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

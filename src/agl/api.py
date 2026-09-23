@@ -166,7 +166,8 @@ async def resume(
             f"record was produced by those files as they stood. So this run finishes against them "
             f"and no others - put the directory back to what it was when the run started, out of "
             f"version control or from wherever the earlier copy is. Otherwise `agl clear {label}` "
-            f"drops the record and starts the run again on the {spec.workflow!r} you have now."
+            f"deletes the run with its worktrees and branches, and `agl run {spec.workflow} -n "
+            f"{label}` then starts it again on the directory you have now."
         )
 
     given = params.from_json(wf.params, spec.params)

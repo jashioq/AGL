@@ -11,7 +11,7 @@ A framework for running AI agent workflows against code repositories.
 
 ## The gates
 
-`./scripts/check` runs all eight gates every time. Name a gate, never number it.
+`./scripts/check` runs all nine gates every time. Name a gate, never number it.
 
 - Exit 0 is green, 1 a failure, 2 missing `.venv` tooling.
 - The module size ceiling only warns.

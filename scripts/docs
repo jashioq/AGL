@@ -1,0 +1,195 @@
+#!/usr/bin/env bash
+#
+# Builds the docs site into site/ and checks it. scripts/check's docs gate and a deploy run this.
+
+set -uo pipefail
+
+REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)" || exit 2
+# Snippet paths in zensical.toml resolve against the working directory.
+cd -- "$REPO_ROOT" || exit 2
+
+VENV_BIN="$REPO_ROOT/.venv/bin"
+STEPS=4
+
+if [ "$#" -gt 0 ]; then
+    printf 'scripts/docs takes no arguments, and was given "%s".\n' "$1" >&2
+    exit 2
+fi
+
+for tool in python zensical llmstxt-standalone lychee; do
+    if [ ! -x "$VENV_BIN/$tool" ]; then
+        printf '%s/%s is missing. Run "uv sync", then scripts/docs again.\n' "$VENV_BIN" "$tool" >&2
+        exit 2
+    fi
+done
+if ! "$VENV_BIN/python" -c 'import griffe' 2>/dev/null; then
+    printf 'Griffe is missing from %s/.venv. Run "uv sync", then scripts/docs again.\n' \
+        "$REPO_ROOT" >&2
+    exit 2
+fi
+
+failed_names=""
+failures=0
+
+step() { # name, what it runs
+    printf '%s-- %s\n$ %s\n\n' "${spacer:-}" "$1" "$2"
+    spacer=$'\n'
+}
+
+fail() { # name
+    failed_names="${failed_names:+$failed_names, }$1"
+    failures=$((failures + 1))
+}
+
+step "build" "rm -rf .cache && .venv/bin/zensical build --clean --strict"
+# A warm cache hides regressions.
+rm -rf .cache
+"$VENV_BIN/zensical" build --clean --strict
+build_status=$?
+if [ "$build_status" -ne 0 ]; then
+    printf '\nThe strict build failed.\n'
+    fail "build"
+fi
+
+# A strict build never fails on Griffe's records, and Griffe logs shadowing at DEBUG.
+step "Griffe" ".venv/bin/python - (loads \"agl\" as mkdocstrings does, then parses every docstring)"
+"$VENV_BIN/python" - <<'PY'
+import logging
+import os
+import sys
+import tomllib
+from pathlib import Path
+import griffe
+
+config = tomllib.loads(Path("zensical.toml").read_text(encoding="utf-8"))
+handler = config["project"]["plugins"]["mkdocstrings"]["handlers"]["python"]
+
+class Kept(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__(logging.DEBUG)
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record)
+
+kept = Kept()
+logging.getLogger().addHandler(kept)
+logging.getLogger().setLevel(logging.DEBUG)
+
+# mkdocstrings-python searches its `paths`, made absolute, and then `sys.path`.
+loader = griffe.GriffeLoader(
+    extensions=griffe.load_extensions(),
+    search_paths=[
+        *(os.path.abspath(path) for path in handler["paths"]),
+        *(path for path in sys.path if path),
+    ],
+    docstring_parser=griffe.Parser(handler["options"]["docstring_style"]),
+)
+package = loader.load("agl", try_relative_path=False)
+loader.resolve_aliases(implicit=False, external=None)
+
+def parse_every_docstring(item: griffe.Object | griffe.Alias) -> int:
+    count = 0
+    if item.docstring is not None:
+        # Griffe parses lazily, and parsing is what logs a docstring's warnings.
+        item.docstring.parse()
+        count += 1
+    for member in item.members.values():
+        if not isinstance(member, griffe.Alias):
+            count += parse_every_docstring(member)
+    return count
+
+count = parse_every_docstring(package)
+flagged = [
+    record
+    for record in kept.records
+    if record.levelno >= logging.WARNING or "shadow" in record.getMessage().lower()
+]
+for record in flagged:
+    print(f"{record.levelname} {record.name}: {record.getMessage()}")
+if flagged:
+    print(f'\nGriffe logged {len(flagged)} record(s) that fail the docs, loading "agl".')
+else:
+    print(f'Griffe parsed {count} docstrings in "agl" and logged nothing that fails the docs.')
+raise SystemExit(1 if flagged else 0)
+PY
+[ "$?" -eq 0 ] || fail "Griffe"
+
+if [ "$build_status" -ne 0 ]; then
+    printf '\nThe llms.txt and links steps did not run, because they read the build.\n'
+else
+    bridge="$(mktemp "${TMPDIR:-/tmp}/agl-llmstxt.XXXXXX")" || exit 2
+    trap 'rm -f "$bridge"' EXIT INT TERM
+
+    step "llms.txt" \
+        ".venv/bin/llmstxt-standalone build --config <zensical.toml as JSON> --site-dir site"
+    # llmstxt-standalone reads an mkdocs.yml, and JSON is YAML.
+    "$VENV_BIN/python" - >"$bridge" <<'PY'
+import json
+import tomllib
+
+with open("zensical.toml", "rb") as config:
+    print(json.dumps(tomllib.load(config)["project"]))
+PY
+    llms_status=$?
+    if [ "$llms_status" -eq 0 ]; then
+        "$VENV_BIN/llmstxt-standalone" build --config "$bridge" --site-dir site
+        llms_status=$?
+    fi
+    rm -f "$bridge"
+    trap - EXIT INT TERM
+
+    "$VENV_BIN/python" - <<'PY'
+import tomllib
+from collections.abc import Iterator
+from pathlib import Path, PurePosixPath
+
+nav = tomllib.loads(Path("zensical.toml").read_text(encoding="utf-8"))["project"]["nav"]
+
+def pages(entry: object) -> Iterator[str]:
+    if isinstance(entry, str) and entry.endswith(".md") and "://" not in entry:
+        yield entry
+    elif isinstance(entry, dict):
+        for value in entry.values():
+            yield from pages(value)
+    elif isinstance(entry, list):
+        for item in entry:
+            yield from pages(item)
+
+def copy_of(page: str) -> Path:
+    stem = PurePosixPath(page).with_suffix("")
+    return Path("site", stem.parent if stem.name == "index" else stem, "index.md")
+
+missing = 0
+for name in ("llms.txt", "llms-full.txt"):
+    if not Path("site", name).is_file():
+        print(f"site/{name} is missing.")
+        missing += 1
+for page in pages(nav):
+    if not copy_of(page).is_file():
+        # llmstxt-standalone copies only the pages its sections list.
+        print(
+            f'The nav page "{page}" has no Markdown copy at {copy_of(page)}. '
+            f"List it under [project.plugins.llmstxt.sections] in zensical.toml."
+        )
+        missing += 1
+raise SystemExit(1 if missing else 0)
+PY
+    copies_status=$?
+    if [ "$llms_status" -ne 0 ] || [ "$copies_status" -ne 0 ]; then
+        fail "llms.txt"
+    fi
+
+    # Zensical never checks a link written in raw HTML.
+    step "links" ".venv/bin/lychee --config lychee.toml --root-dir $REPO_ROOT/site 'site/**/*.html'"
+    "$VENV_BIN/lychee" --config lychee.toml --root-dir "$REPO_ROOT/site" 'site/**/*.html'
+    [ "$?" -eq 0 ] || fail "links"
+fi
+
+printf '\n'
+if [ "$failures" -eq 0 ]; then
+    printf 'All %s docs steps passed.\n' "$STEPS"
+    exit 0
+fi
+printf '%s of %s docs steps failed: %s.\n' "$failures" "$STEPS" "$failed_names"
+exit 1

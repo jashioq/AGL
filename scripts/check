@@ -21,7 +21,7 @@ REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)" || exit 2
 cd -- "$REPO_ROOT" || exit 2
 
 VENV_BIN="$REPO_ROOT/.venv/bin"
-TOTAL_GATES=8
+TOTAL_GATES=9
 
 # Gate 5: the Codex CLI binary name, and the one directory allowed to contain it. The OpenAI
 # adapter shells out to this binary instead of importing a Python SDK, so there is no import
@@ -114,7 +114,7 @@ record_status() { # name, exit-status, note
 # Environment
 # ---------------------------------------------------------------------------------------------
 
-for tool in pytest mypy ruff lint-imports; do
+for tool in pytest mypy ruff lint-imports zensical llmstxt-standalone lychee; do
     if [ ! -x "$VENV_BIN/$tool" ]; then
         printf '%sscripts/check: %s/%s is missing or not executable.%s\n' \
             "$RED" "$VENV_BIN" "$tool" "$RESET" >&2
@@ -675,6 +675,16 @@ else
     fi
     record "paid-endpoint guard" FAIL ""
 fi
+
+# ---------------------------------------------------------------------------------------------
+# 9. Docs site
+#
+# The steps live in scripts/docs, so a deploy runs the same steps this gate ran.
+# ---------------------------------------------------------------------------------------------
+
+gate_header 9 "docs site" "scripts/docs"
+"$REPO_ROOT/scripts/docs"
+record_status "docs site" $? ""
 
 # ---------------------------------------------------------------------------------------------
 # Summary

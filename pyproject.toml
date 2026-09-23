@@ -79,6 +79,22 @@ dev = [
     "import-linter>=2.13",
 ]
 
+# Exact pins: Zensical is 0.0.x and releases weekly, and `uv.lock` is gitignored.
+docs = [
+    "zensical==0.0.63",
+    "mkdocstrings==1.0.6",
+    "mkdocstrings-python==2.0.8",
+    # Griffe's library; the `griffe` distribution adds only its command line.
+    "griffelib==2.3.0",
+    "pymdown-extensions==12.0.1",
+    "llmstxt-standalone==0.2.0",
+    "lychee-bin==0.24.2",
+]
+
+# `docs` beside `dev`, so a plain `uv sync` installs every tool `scripts/check` runs.
+[tool.uv]
+default-groups = ["dev", "docs"]
+
 # An allowlist, because hatchling's default sdist is everything the root `.gitignore` does not
 # exclude, and this repository is not shaped like a package. Measured with this table deleted, that
 # default builds a 1.6 MB archive around a 270 KB wheel: the whole of `tests/`, `reference/`'s

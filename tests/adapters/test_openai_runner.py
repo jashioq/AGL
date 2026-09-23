@@ -547,8 +547,9 @@ async def test_no_network_composes_exactly_this_command_line_under_either_sandbo
     Every other test here asks whether a token is present. This one pins the list, so a token
     that goes missing, moves or arrives unannounced under either sandbox mode fails here. Only
     the port and the path token of AGL's own server change between runs, so only those are
-    masked. `web_search=disabled` and `features.apps=false` take network tools away from the
-    model rather than from its commands: the web tool, and a ChatGPT sign-in's connector tools.
+    masked. `web_search=disabled`, `features.apps=false` and `features.image_generation=false`
+    take network tools away from the model rather than from its commands: the web tool, and a
+    ChatGPT sign-in's connector tools and image generation.
     """
     stub = Stub(tmp_path, steps=[{"say": started()}])
     task = AgentTask(
@@ -584,6 +585,8 @@ async def test_no_network_composes_exactly_this_command_line_under_either_sandbo
         "web_search=disabled",
         "-c",
         "features.apps=false",
+        "-c",
+        "features.image_generation=false",
         "-m",
         "gpt-5.6-luna",
         "-c",

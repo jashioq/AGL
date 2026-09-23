@@ -272,6 +272,31 @@ class TestTheSetCollapsesOntoOneScalar:
     ) -> None:
         assert not any("features.apps" in token for token in sandbox(restrictions).options)
 
+    @pytest.mark.parametrize(
+        "restrictions", [one for one in _ALL_SUBSETS if Restriction.NO_NETWORK in one], ids=_ids
+    )
+    def test_no_network_turns_image_generation_off_under_either_sandbox_mode(
+        self, restrictions: frozenset[Restriction]
+    ) -> None:
+        """0.155.1 hands a ChatGPT sign-in's `image_gen__imagegen` to the model in both modes.
+
+        Measured with this module's own argv, a stand-in ChatGPT credential and a loopback stand-in
+        for OpenAI: the tool was among those the model could call under `read-only`, and under
+        `workspace-write` with the network off, and calling it made the harness itself post to
+        `/v1/images/generations`. With `features.image_generation=false` it was gone from both.
+        """
+        options = sandbox(restrictions).options
+        assert "features.image_generation=false" in options
+        assert options[options.index("features.image_generation=false") - 1] == "-c"
+
+    @pytest.mark.parametrize(
+        "restrictions", [one for one in _ALL_SUBSETS if Restriction.NO_NETWORK not in one], ids=_ids
+    )
+    def test_without_no_network_image_generation_is_left_to_the_harness(
+        self, restrictions: frozenset[Restriction]
+    ) -> None:
+        assert not any("image_generation" in token for token in sandbox(restrictions).options)
+
     def test_no_vcs_writes_is_enforced_by_adding_nothing(self) -> None:
         """The mechanism is the harness's own default, so the rendering carries no extra override.
 
