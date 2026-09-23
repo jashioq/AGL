@@ -246,6 +246,32 @@ class TestTheSetCollapsesOntoOneScalar:
         assert "sandbox_workspace_write.network_access=false" in options
         assert "web_search=disabled" in options
 
+    @pytest.mark.parametrize(
+        "restrictions", [one for one in _ALL_SUBSETS if Restriction.NO_NETWORK in one], ids=_ids
+    )
+    def test_no_network_turns_the_connector_feature_off_under_either_sandbox_mode(
+        self, restrictions: frozenset[Restriction]
+    ) -> None:
+        """0.155.1 hands a ChatGPT sign-in's connector tools to the model in both modes by default.
+
+        Measured with this module's own argv, a stand-in ChatGPT credential and a loopback stand-in
+        for the ChatGPT backend: the connector server's tools were among those the model could
+        call under `read-only`, and under `workspace-write` with the network off. With
+        `features.apps=false` the harness never started that server, and a server the run
+        supplied itself stayed.
+        """
+        options = sandbox(restrictions).options
+        assert "features.apps=false" in options
+        assert options[options.index("features.apps=false") - 1] == "-c"
+
+    @pytest.mark.parametrize(
+        "restrictions", [one for one in _ALL_SUBSETS if Restriction.NO_NETWORK not in one], ids=_ids
+    )
+    def test_without_no_network_the_connector_feature_is_left_to_the_harness(
+        self, restrictions: frozenset[Restriction]
+    ) -> None:
+        assert not any("features.apps" in token for token in sandbox(restrictions).options)
+
     def test_no_vcs_writes_is_enforced_by_adding_nothing(self) -> None:
         """The mechanism is the harness's own default, so the rendering carries no extra override.
 

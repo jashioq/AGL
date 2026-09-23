@@ -29,6 +29,7 @@ import pytest
 from agl.ports.errors import InputError
 from agl.ports.ids import RunLabel
 from agl.ports.run import RunSpec
+from agl.sdk._workflow import Run, workflow
 from agl.sdk.params import (
     RESERVED_FLAGS,
     RefusingParser,
@@ -79,6 +80,10 @@ class Unstorable:
     """
 
     tags: list[str] = arg("--tags")
+
+@workflow
+async def takes_nothing(run: Run) -> None:
+    """A bare `Run`, so its params class is the empty one `agl.sdk` does not export."""
 
 # --- the worked example --------------------------------------------------------------------------
 
@@ -186,7 +191,7 @@ def test_an_unsupported_field_type_is_refused_by_name() -> None:
     class Bad:
         tags: list[str] = arg("-t", "--tags")
 
-    with pytest.raises(InputError, match=r"Bad\.tags is a list\[str\]"):
+    with pytest.raises(InputError, match=r"Bad\.tags is declared as list\[str\]"):
         parser_for(Bad)
 
 def test_a_default_of_an_unsupported_type_is_refused_before_the_class_exists() -> None:
@@ -392,6 +397,18 @@ def test_a_field_type_neither_direction_can_carry_is_refused() -> None:
     no parse in front of it, so the read side refuses it too, in the same four-type vocabulary."""
     with pytest.raises(InputError, match="a str, an int, a float or a bool"):
         from_json(Unstorable, {"tags": ["a", "b"]})
+
+def test_a_record_holding_parameters_for_a_workflow_taking_none_is_refused_in_words() -> None:
+    """`api.resume` hands this the class `Workflow.params` read off a bare `Run`, whose own path is
+    private, so the refusal says what the class means instead of naming it."""
+    with pytest.raises(InputError) as refusal:
+        from_json(takes_nothing.params, {"request": "add oauth"})
+    message = str(refusal.value)
+    assert message.startswith(
+        "the stored parameters are not those of a workflow that takes no parameters: missing [], "
+        "unexpected [\"'request'\"]. "
+    )
+    assert "_NoParams" not in message
 
 def test_from_json_refuses_something_that_is_not_a_params_dataclass() -> None:
     with pytest.raises(InputError, match="not a dataclass"):

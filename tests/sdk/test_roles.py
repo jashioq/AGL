@@ -75,6 +75,7 @@ from agl.ports.agent import (
     model_of,
 )
 from agl.ports.errors import EXIT_CODES, AglError, InputError, UpstreamError, exit_code_for
+from agl.ports.integration import Conflict
 from agl.ports.run import JsonValue
 from agl.sdk._engine.journal import base_of
 from agl.sdk._engine.prompts import composed
@@ -382,6 +383,16 @@ def test_a_non_class_in_accepts_is_refused_at_the_decoration_that_declared_it() 
 
     assert "'Request'" in str(refusal.value), "the refusal did not quote the entry as written"
     assert "has to be a class" in str(refusal.value)
+
+def test_a_generic_of_an_exported_type_in_accepts_is_named_by_its_agl_sdk_path() -> None:
+    """`list[Conflict]` is not a class, and the refusal quotes it as an author imports it."""
+    with pytest.raises(InputError) as refusal:
+
+        @role(model=Claude.SONNET, accepts=(list[Conflict],))
+        def listed() -> Role:
+            return Role(name="review", instructions=_REVIEW)
+
+    assert "declares ['list[agl.sdk.Conflict]'] in `accepts=`" in str(refusal.value)
 
 def test_a_class_that_isinstance_refuses_is_caught_at_the_decoration_by_a_probe_call() -> None:
     """The other half of "every entry has to be a class": some classes `isinstance` will not take.

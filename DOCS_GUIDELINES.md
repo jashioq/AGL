@@ -6,11 +6,14 @@ House style for the AGL documentation at agents-gl.com. Read it before changing 
 
 ## Scope
 
+- The docs are for engineers building workflows. They say what AGL does for a workflow and how
+  to use it. How AGL or a backend implements it stays out, and so does anything only a
+  contributor to AGL needs.
 - The site documents the public surface: `agl.sdk` and the `agl` CLI. Nothing else gets a page.
-- Pages describe the code on `main`. The live site deploys on release, so it matches what
+- Pages describe the code on `main`. Deploy the site on release, so it matches what
   `uv tool install agents-gl` installs.
-- When a docstring, the help text or the README disagrees with the code, the page follows the
-  code and the disagreement goes in the session report.
+- When a docstring or the help text disagrees with the code, the page follows the code and the
+  disagreement goes in the session report.
 - Docs change in the same commit as the code they describe.
 
 ## Page types
@@ -20,7 +23,7 @@ Every page is exactly one type.
 | Type | Section | Answers | Keeps out |
 |---|---|---|---|
 | Tutorial | Get started | "Get me to a first success." | Options, edge cases, explanation longer than a sentence |
-| API | Build workflows | "How do I use this?" | How AGL implements it, which belongs on a feature page |
+| API | Build workflows | "How do I use this?" | How AGL implements it |
 | Feature | Features | "What does AGL do, and what are the rules?" | Signatures and parameter lists, which belong on the API page |
 | Reference | Reference | "What exactly is the flag, key, path or code?" | Narrative |
 | Example | Examples | A complete workflow, explained | Nothing yet: a placeholder until release |
@@ -35,8 +38,8 @@ writing a fact, search `docs/` for it.
 
 | Fact | Home |
 |---|---|
-| What a step's fingerprint covers, and what re-runs | Features › Memoized steps and resume |
-| How each restriction is enforced on Claude Code and on Codex | Features › Restrictions |
+| What makes a recorded step run again | Features › Memoized steps and resume |
+| What each restriction takes away | The `Restriction` API page |
 | Placeholder grammar and storable values | Features › Typed inputs and results |
 | Worktree paths, branch names and name rules | Reference › Files and branches |
 | `[tool.agl]` keys, project settings and environment variables | Reference › Configuration |
@@ -71,8 +74,9 @@ writing a fact, search `docs/` for it.
 
 1. What you get, in one paragraph, described as behaviour rather than adjectives.
 2. One concrete run, walked through in order: what AGL does and what you see.
-3. The rules and edge cases, as tables when they are a list.
-4. Every difference between Claude Code and Codex, stated plainly.
+3. The rules and edge cases an author can run into, as tables when they are a list.
+4. A difference between Claude Code and Codex only where it changes what the author writes or
+   gets back.
 5. Where you meet it in the SDK: links to the API pages.
 
 ### Tutorial page
@@ -86,8 +90,8 @@ Never title a section "Step 1". Step is an AGL word.
 
 ### Reference page
 
-Tables, no narrative. Wherever possible a test keeps them true: `--help` output comes from golden
-captures, and the exit-code table is compared with `agl.ports.errors.EXIT_CODES`.
+Tables, no narrative. Keep them true with a test wherever possible: take `--help` output from
+golden captures, and compare the exit-code table with `agl.ports.errors.EXIT_CODES`.
 
 ## Linking
 
@@ -99,7 +103,11 @@ captures, and the exit-code table is compared with `agl.ports.errors.EXIT_CODES`
   full path.
 - Name only exported types. An unexported type can't be linked, and in a signature it renders as
   a plain name with no warning. Describe it in words.
-- Link to a section of another page with a relative path and its anchor. The build checks both.
+- A name inside a longer code expression stays unlinked, as in
+  `Claude.OPUS(effort=ClaudeEffort.HIGH)`. If the reader needs the link, name it in the
+  sentence around the expression.
+- Link to a section of another page with a relative path and its anchor, so the build can check
+  both.
 - Link text says where it goes. Never "here" or "this page".
 
 In prose:
@@ -125,7 +133,7 @@ In prose:
   section.
 - Every snippet file passes ruff and `mypy --strict`, and imports nothing from AGL except
   `agl.sdk`. Every example workflow loads in a test the way `agl workflows <name>` loads it.
-- Shell commands, TOML and terminal output may be written on the page. `--help` output comes from
+- Shell commands, TOML and terminal output may be written on the page. Take `--help` output from
   the golden captures.
 - Code that claims to be complete contains no `...` and no placeholders. The `agl new` scaffold is
   the exception, because its `...` is what the file really contains.
@@ -148,7 +156,7 @@ These words mean these things everywhere: pages, docstrings, help text and print
 | Word | Means | Not |
 |---|---|---|
 | workflow | An `async` function decorated with `@workflow`, declared by a workflow directory | pipeline, script |
-| workflow directory | A directory under the workspace whose `pyproject.toml` declares workflows | package, unless you mean the Python package |
+| workflow directory | A directory directly under `<AGL_HOME>/workspace/workflows/` whose `pyproject.toml` declares workflows | package, unless you mean the Python package |
 | run | One execution of a workflow, named by its label | job, session |
 | `Run` | The object a workflow receives. Always in code font | the run object |
 | `agl run` | The command. Always in code font | |
@@ -160,7 +168,7 @@ These words mean these things everywhere: pages, docstrings, help text and print
 | effort | The reasoning level given with `effort=` | reasoning mode |
 | record | What AGL keeps for a run: `run.json` and its step entries | cache |
 | replay | A step returning its recorded value without running an agent | cache hit |
-| worktree | A git checkout AGL makes for a run, and for each `run.worktree(name)` | sandbox |
+| worktree | A git checkout AGL makes for a run, and for each `run.worktree(namespace)` | sandbox |
 | namespace | The name given to `run.worktree` | |
 | land, landing | Merging a child's work into its parent with `integrate()` | merge queue |
 | build gate | The project's `build` command, which every landing must pass | CI |
@@ -170,7 +178,7 @@ These words mean these things everywhere: pages, docstrings, help text and print
 | board | A `Screen` without answers | dashboard |
 | question | A `Screen` with answers | human in the loop |
 | project | A repository AGL registered on its first `agl run` | |
-| workspace | `<AGL_HOME>/workspace`, where workflow directories live | |
+| workspace | `<AGL_HOME>/workspace`, which holds the workflow directories in its `workflows/` | |
 | preflight | The checks AGL makes before a run's first step | |
 
 ## Claims the docs don't make
@@ -178,9 +186,8 @@ These words mean these things everywhere: pages, docstrings, help text and print
 Each of these was believed and turned out false in the code. Update this list when the code
 changes.
 
-- Restrictions are not a sandbox. Say how each backend enforces each one. `NO_NETWORK` takes
-  away the agent's network tools; on Claude Code, shell commands can still reach the network,
-  and that is intended.
+- Restrictions say what an agent may not do. Don't call them a sandbox, and don't describe how a
+  backend enforces them.
 - `agl resume` refuses a run whose workflow directory changed. Never promise "edit a prompt and
   resume".
 - There is no merge queue. Landings into one target take turns.
@@ -206,6 +213,7 @@ changes.
 - One idea per paragraph. Short paragraphs.
 - A number or a rule, never an adjective: no "fast", "powerful", "seamless", "simply", "just" or
   "easily".
+- Spelling follows AGENTS.md.
 - A docstring summary is one short clause: no colon and second half, no "so that".
 - A docstring leaves AGL's machinery out: fingerprints, replay, the record and canonicalising.
 - A docstring keeps a consequence only where it destroys the author's work.
@@ -213,15 +221,20 @@ changes.
 
 ## Docstrings
 
-Docstrings are published word for word as the API reference.
+Docstrings become the API reference, word for word.
 
 - Google style: `Args:`, `Returns:`, `Raises:`.
 - A function or method summary says what it does, starting with a verb ending in -s: "Runs …",
-  "Returns …". A class summary says what the class is for, without its name.
+  "Returns …".
+- A property summary is a noun phrase that says what the value is.
+- A class summary says what the class is for, without its name, unless the name is also the plain
+  word for the thing, as with `Claude`, `OpenAI` and `Text`.
 - An `Args:` entry starts with "The" or "A". A boolean says what happens when it is true and when
   it is false. A default says what the default does.
-- `Returns:` starts with "The" and says when the result is `None`.
+- `Returns:` starts with "The" and says when the result is `None`. A boolean `Returns:` says when
+  it is `True` and when it is `False`.
 - `Raises:` lists every AGL error a caller can meet.
-- Every public field, enum member and exported type alias has a docstring. Without one it doesn't
-  render.
+- Every public field, enum member and exported type alias has a docstring, because without one it
+  doesn't render. The exception is the plumbing listed in `PLUMBING` in
+  `tests/test_docstring_fields.py`, which stays undocumented so it stays off the page.
 - References to other SDK names follow the linking rules.

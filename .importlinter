@@ -88,8 +88,8 @@ forbidden_modules =
     agl.ports.fetch
 
 
-# 3. Vendor containment: each vendor SDK is visible to exactly one adapter package, so
-#    installing one vendor never drags in the other's SDK.
+# 3. Vendor containment: each vendor SDK is imported by exactly one adapter package. Both SDKs are
+#    [project] dependencies, so an import this contract refuses would otherwise succeed.
 #    Fail-closed on its source side - that is the whole `agl` tree, so any package added in a
 #    later stage is covered the moment it exists; only the two expressions below escape. The
 #    forbidden side is the hand-maintained half and fails open: a third vendor SDK is contained by

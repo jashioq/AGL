@@ -27,9 +27,11 @@ and the dependency goes to a package index where none does.
 """
 
 from pathlib import Path
+from typing import Final
 import pytest
 from agl.config.inspection import listed
-from agl.config.registry import GROUP
+from agl.config.questions import Removal
+from agl.config.registry import GROUP, discovered
 from agl.config.removal import RemovableEntry, entries_named, removable
 from agl.ports.errors import ConflictError, InputError, NotFoundError
 from agl.ports.home_layout import STAGING_PREFIX, AglHome, workflows_dir
@@ -184,6 +186,61 @@ def test_an_entry_declaring_nothing_is_still_one_a_removal_can_take(
         entry.symlink_to(tmp_path / "gone", target_is_directory=True)
 
     assert removable(home, "stray") == RemovableEntry(entry, (), linked=kind == "dangling link")
+
+# What the question says of an entry whose project file yields no declaration AGL reads.
+_NOTHING_RUNNABLE: Final = "declares no workflow AGL can run"
+
+@pytest.mark.parametrize(
+    ("directory", "pyproject", "declares"),
+    [
+        pytest.param("half_written", b"[project\n", _NOTHING_RUNNABLE, id="unparsed"),
+        pytest.param(
+            "undeclared",
+            b'[project]\nname = "undeclared"\nversion = "0.1.0"\n',
+            _NOTHING_RUNNABLE,
+            id="no entry point table",
+        ),
+        pytest.param(
+            "unusable",
+            _pyproject("unusable", declares="unusable = 3"),
+            _NOTHING_RUNNABLE,
+            id="not a string",
+        ),
+        pytest.param(
+            "unkeyed",
+            _pyproject("unkeyed") + b'\n[tool.agl]\nrequire = "agents-gl>=0.0.1"\n',
+            _NOTHING_RUNNABLE,
+            id="unknown key",
+        ),
+        pytest.param(
+            "misconfigured",
+            _pyproject("misconfigured") + b'\n[tool.agl]\nconfig = [""]\n',
+            _NOTHING_RUNNABLE,
+            id="unreadable config line",
+        ),
+        pytest.param(
+            "calendar", _pyproject("calendar"), "declares 'calendar'", id="standard library"
+        ),
+        pytest.param("pytest", _pyproject("pytest"), "declares 'pytest'", id="found first"),
+    ],
+)
+def test_the_removal_question_is_true_of_every_directory_discovery_refuses(
+    tmp_path: Path, directory: str, pyproject: bytes, declares: str
+) -> None:
+    """One directory per reason `agl workflows` lists one as declaring nothing AGL can run.
+
+    The first five yield no declaration AGL reads: a project file that does not parse, one with no
+    entry point table, one whose declaration is not a string, and two that declare a workflow
+    beside a `[tool.agl]` table AGL refuses, for an unknown key or a `config` line it cannot read.
+    "declares no workflow" was false of those two. A name Python would import from the standard
+    library, or from a module found first on the path, is refused after its declaration is read,
+    so the question names it.
+    """
+    home = _home(tmp_path)
+    standing = _standing(home, directory, pyproject)
+
+    assert [broken.directory for broken in discovered(home).broken] == [directory]
+    assert str(Removal(removable(home, directory))) == f"{standing} {declares}. Remove it?"
 
 # --- a name that reaches nothing ----------------------------------------------------------------
 

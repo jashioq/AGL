@@ -128,11 +128,11 @@ _ABSENT: Final[Mapping[str, str]] = {
 _OFF_THE_SURFACE: Final[Mapping[str, str]] = {
     "agl.sdk.testing": "the scripting vocabulary, re-exported by `agl/testing.py` beside the "
     "`harness` that is useless without it - one front door for a test, one for a workflow",
-    "agl.sdk._declarations": "internal: the two helpers `params.py`, `tools.py` and `_workflow.py` "
-    "read an author's declaration with - `annotations_of` resolves its annotations and `named` "
-    "names a class in the refusal when they will not resolve. Both are public spellings, as every "
-    "private module's members are: the underscore is on the module and is what says the surface, "
-    "so this listing is what keeps them off the door and not the names themselves",
+    "agl.sdk._declarations": "internal: `annotations_of` resolves the annotations of an author's "
+    "dataclass for `params.py` and `tools.py`, and `named` names a type in a refusal, by its "
+    "`agl.sdk` path where it has one. Both are public spellings, as every private module's members "
+    "are: the underscore is on the module and is what says the surface, so this listing is what "
+    "keeps them off the door and not the names themselves",
     "agl.sdk._engine.services": "internal: `sdk/_engine/__init__.py` says it is not part of the "
     "surface a workflow author imports",
     "agl.sdk._engine.journal": "internal, for the same reason",

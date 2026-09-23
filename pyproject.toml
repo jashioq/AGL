@@ -79,11 +79,11 @@ dev = [
     "import-linter>=2.13",
 ]
 
-# An allowlist, because hatchling's default sdist is "everything git does not ignore" and this
-# repository is not shaped like a package. Measured with this table deleted, that default builds a
-# 1.9 MB archive around a 170 KB wheel: `scratchpad/`'s throwaway working notes, the whole of
-# `tests/`, `reference/`'s read-only extracts, `scripts/`, `DOCS_GUIDELINES.md`, `.vscode/`,
-# `.claude/` and both tool caches - `.grimp_cache/` and `.import_linter_cache/` - all ride along.
+# An allowlist, because hatchling's default sdist is everything the root `.gitignore` does not
+# exclude, and this repository is not shaped like a package. Measured with this table deleted, that
+# default builds a 1.6 MB archive around a 270 KB wheel: the whole of `tests/`, `reference/`'s
+# read-only extracts, `scripts/`, `DOCS_GUIDELINES.md`, `.github/`, `.vscode/`, `.claude/` and both
+# tool caches - `.grimp_cache/` and `.import_linter_cache/` - all ride along.
 # An upload is irrevocable and the version number cannot be reissued once it is on PyPI, so the
 # failure worth designing against is something shipping that was never meant to leave this machine.
 # As an allowlist, a directory added to the repo tomorrow does not ship until it is named here; as

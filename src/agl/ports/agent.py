@@ -49,7 +49,7 @@ class ModelId(StrEnum):
         """The vendor whose tool runs this model.
 
         Returns:
-            The vendor, which is what routes a step on this model to a backend.
+            The vendor.
         """
         prefix = self.value.partition(":")[0]
         try:
@@ -228,7 +228,7 @@ class Restriction(StrEnum):
     """Takes away the agent's shell, and the other tools a backend runs commands through."""
 
     NO_NETWORK = "no_network"
-    """Takes away the agent's network tools. On Claude Code, its shell still reaches the network."""
+    """Takes away the agent's network tools."""
 
 class Capability(StrEnum):
     """Something a role needs its agent to be able to do."""

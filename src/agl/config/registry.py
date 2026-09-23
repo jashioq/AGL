@@ -11,6 +11,7 @@ from agl.config import distribution, workspace_path
 from agl.config.toml_file import RESERVED_KEYS, quoted, read_document
 from agl.ports.errors import ConflictError, InputError, NotFoundError
 from agl.ports.home_layout import AglHome, workflows_dir
+from agl.sdk._declarations import named
 
 __all__ = [
     "GROUP",
@@ -156,9 +157,9 @@ def load[T](points: Iterable[EntryPoint], name: str, kind: type[T]) -> T:
     if not isinstance(loaded, kind):
         raise InputError(
             f"the workflow {name!r} is declared as {point.value!r}, which loaded and turned out "
-            f"to be a {_describe(type(loaded))} rather than a {_describe(kind)}. The {GROUP} line "
-            f"declaring {name!r} is pointing at the wrong object: what belongs to the right of "
-            f"the colon is the name `@workflow` is bound to, which is the decorated function's "
+            f"to be an instance of {named(type(loaded))} rather than of {named(kind)}. The {GROUP} "
+            f"line declaring {name!r} is pointing at the wrong object: what belongs to the right "
+            f"of the colon is the name `@workflow` is bound to, which is the decorated function's "
             f"own, the decorator being what turns that function into the thing AGL runs. AGL only "
             f"read what was declared"
         )
@@ -246,9 +247,6 @@ def _uninstalled(name: str, point: EntryPoint, missing: str) -> str:
 
 def _package(module: str) -> str:
     return module.partition(".")[0]
-
-def _describe(kind: type[object]) -> str:
-    return f"{kind.__module__}.{kind.__qualname__}"
 
 def _declared(directory: Path, home: AglHome) -> Discovery:
     path = directory / _PYPROJECT_FILE

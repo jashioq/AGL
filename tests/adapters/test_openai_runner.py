@@ -79,6 +79,7 @@ import ast
 import asyncio
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -525,6 +526,71 @@ async def test_the_command_line_carries_every_setting_that_makes_a_session_agls(
     )
     assert "--dangerously-bypass-approvals-and-sandbox" not in argv, "the sandbox is the mechanism"
     assert "--approve-for-me" not in argv, "that widens the sandbox that is the whole mechanism"
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("restrictions", "sandboxed"),
+    [
+        (
+            frozenset({Restriction.NO_NETWORK}),
+            ["-s", "workspace-write", "-c", "sandbox_workspace_write.network_access=false"],
+        ),
+        (frozenset({Restriction.NO_NETWORK, Restriction.NO_FILE_WRITES}), ["-s", "read-only"]),
+    ],
+    ids=["workspace-write", "read-only"],
+)
+async def test_no_network_composes_exactly_this_command_line_under_either_sandbox_mode(
+    tmp_path: Path, restrictions: frozenset[Restriction], sandboxed: list[str]
+) -> None:
+    """The whole command line for `NO_NETWORK`, token for token, read off the process started.
+
+    Every other test here asks whether a token is present. This one pins the list, so a token
+    that goes missing, moves or arrives unannounced under either sandbox mode fails here. Only
+    the port and the path token of AGL's own server change between runs, so only those are
+    masked. `web_search=disabled` and `features.apps=false` take network tools away from the
+    model rather than from its commands: the web tool, and a ChatGPT sign-in's connector tools.
+    """
+    stub = Stub(tmp_path, steps=[{"say": started()}])
+    task = AgentTask(
+        instructions="Say hi.",
+        workspace=workspace(tmp_path),
+        model=OpenAI.LUNA,
+        restrictions=restrictions,
+        tools=(),
+    )
+
+    await drive(stub, task)
+
+    argv = [re.sub(r"127\.0\.0\.1:\d+/[^/]+/", "127.0.0.1:PORT/TOKEN/", arg) for arg in stub.argv()]
+    assert argv == [
+        "exec",
+        "--json",
+        "--color",
+        "never",
+        "--skip-git-repo-check",
+        "--ignore-rules",
+        "--ignore-user-config",
+        "--ephemeral",
+        "-c",
+        "project_doc_max_bytes=0",
+        "-c",
+        "skills.include_instructions=false",
+        "-c",
+        "features.plugins=false",
+        "-c",
+        'approval_policy="never"',
+        *sandboxed,
+        "-c",
+        "web_search=disabled",
+        "-c",
+        "features.apps=false",
+        "-m",
+        "gpt-5.6-luna",
+        "-c",
+        'mcp_servers.agl={url="http://127.0.0.1:PORT/TOKEN/agl",tool_timeout_sec=86400,'
+        'startup_timeout_sec=30,default_tools_approval_mode="auto"}',
+        "-",
+    ]
 
 @pytest.mark.asyncio
 async def test_every_command_line_refuses_the_rollout_and_the_plugin_clone_the_harness_would_write(

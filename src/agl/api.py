@@ -66,7 +66,7 @@ class Listing:
 
 @dataclass(frozen=True, slots=True)
 class Finished:
-    """A walk that returned: the steps served off the ledger, and the branch left free to take."""
+    """A walk that returned: the steps served from the record, and the branch left free to take."""
 
     steps: int
 
@@ -162,11 +162,11 @@ async def resume(
             f"run {str(label)!r} was started by {spec.workflow!r}, and that workflow's own "
             f"directory is not what it was then: {_moved(spec.workflow_digests, measured)}. A run "
             f"digests every file there but bytecode and any `.DS_Store`, and AGL refuses a "
-            f"resume that disagrees rather than migrating one: every step already on this run's "
-            f"ledger was produced by those files as they stood. So this run finishes against them "
+            f"resume that disagrees rather than migrating one: every step already in this run's "
+            f"record was produced by those files as they stood. So this run finishes against them "
             f"and no others - put the directory back to what it was when the run started, out of "
             f"version control or from wherever the earlier copy is. Otherwise `agl clear {label}` "
-            f"drops the ledger and starts the run again on the {spec.workflow!r} you have now."
+            f"drops the record and starts the run again on the {spec.workflow!r} you have now."
         )
 
     given = params.from_json(wf.params, spec.params)

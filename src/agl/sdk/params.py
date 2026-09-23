@@ -114,7 +114,7 @@ def arg(*flags: str, default: Any = MISSING, help: str = "") -> Any:
         The `dataclasses.field` to assign to the annotated field.
 
     Raises:
-        InputError: No flags, a flag `agl run` uses or `argparse` refuses, or a bad default.
+        InputError: No flags, a flag `agl run` uses or can't accept, or a bad default.
     """
     if not flags:
         raise InputError(
@@ -236,13 +236,14 @@ def from_json[T](params: type[T], data: Mapping[str, JsonValue]) -> T:
     missing = [name for name in declared if name not in data]
     unknown = sorted(repr(key) for key in data if key not in declared)
     if missing or unknown:
+        whose = f"{kind}'s" if declared else "those of a workflow that takes no parameters"
         raise InputError(
-            f"the stored parameters are not {kind}'s: missing {missing}, unexpected {unknown}. A "
+            f"the stored parameters are not {whose}: missing {missing}, unexpected {unknown}. A "
             f"record carries the parameters the run was started with, and `agl resume` digests "
-            f"the workflow's own directory before it reads them - so a record whose keys are not "
-            f"this class's was written against a class that comparison does not cover: one "
-            f"declared outside that directory, or a run started from entry points a caller handed "
-            f"over rather than a workspace. Put the class back, or `agl clear` the run"
+            f"the workflow's own directory before it reads them - so a record whose keys do not "
+            f"match was written against a class that comparison does not cover: one declared "
+            f"outside that directory, or a run started from entry points a caller handed over "
+            f"rather than a workspace. Put the class back, or `agl clear` the run"
         )
     factory: Callable[..., T] = params
     return factory(
@@ -260,15 +261,15 @@ def _restored(where: str, hint: object, value: JsonValue) -> JsonValue:
             if isinstance(value, admitted):
                 return value
             raise InputError(
-                f"{where} is declared a {named(hint)} and the record holds {value!r}. A run's "
+                f"{where} is declared as {named(hint)} and the record holds {value!r}. A run's "
                 f"parameters are read back exactly as they were stored and never converted into "
                 f"what a field now says it holds, so this is the workflow's params class having "
                 f"moved under a version that did not"
             )
     raise InputError(
-        f"{where} is a {named(hint)}, and a parameter is a str, an int, a float or a bool: "
-        f"what a shell hands over as text and what `run.json` holds unchanged. This record was "
-        f"written when the field was one of the four, and reading it back needs it to still be"
+        f"{where} is declared as {named(hint)}, and a parameter is a str, an int, a float or a "
+        f"bool: what a shell hands over as text and what `run.json` holds unchanged. This record "
+        f"was written when the field was one of the four, and reading it back needs it to still be"
     )
 
 def _storable(where: str, value: object) -> JsonValue:
@@ -299,8 +300,8 @@ def _consumes(where: str, hint: object, default: object) -> dict[str, Any]:
         if hint is kind:
             return {"type": kind}
     raise InputError(
-        f"{where} is a {named(hint)}, and a parameter is a str, an int, a float or a bool: "
-        f"what a shell hands over as text and what `run.json` holds unchanged"
+        f"{where} is declared as {named(hint)}, and a parameter is a str, an int, a float or a "
+        f"bool: what a shell hands over as text and what `run.json` holds unchanged"
     )
 
 def _unusable_flag(flag: str) -> str | None:

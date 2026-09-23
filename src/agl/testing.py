@@ -150,7 +150,7 @@ class Harness:
                 f"`interrupt_after={after}` asks for a run interrupted before its first step has "
                 f"recorded anything, which is a run that did nothing - there would be no entry to "
                 f"replay and a resume would walk the whole workflow again. The smallest one that "
-                f"leaves something on the ledger is 1"
+                f"leaves something in the record is 1"
             )
         self._ledger.interrupt_after(after)
         try:

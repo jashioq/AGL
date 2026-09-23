@@ -10,11 +10,11 @@ another program's behaviour, and no test in this repository can settle it: asser
 `Bash(git commit *)` appears in a tuple proves the string was produced, not that Claude Code
 refuses a commit when it is handed one. That verification is a probe against the installed CLI,
 recorded in the module docstring with what it covered and what it could not. So the tests below
-assert two things it *can* settle - that every restriction renders something in both forms, and
-that every rule obeys the permission language's own grammar as this repo understands it - and the
-grammar half is deliberately written as rules rather than as a golden copy of the tuple: a test
-holding an expected list of forty-six strings is a second copy of the data, and it agrees with
-the first only because one person edited both.
+assert three things it *can* settle: that every restriction renders something in both forms, that
+every rule obeys the permission language's own grammar as this repo understands it, and that
+`NO_VCS_WRITES` denies exactly the git subcommands `_GIT_WRITE_SUBCOMMANDS` pins. The grammar half
+is written as rules rather than as a golden copy of the tuples. The subcommands are the one golden
+copy, on purpose: one added, dropped or repeated in the adapter fails here until both copies agree.
 
 Named `test_claude_code_translate.py`: `tests/` carries no `__init__.py` (see `tests/conftest.py`
 for why it must not), so pytest's module names are the bare filenames and two files of one name
@@ -37,6 +37,7 @@ from claude_agent_sdk import (
 )
 from claude_agent_sdk._errors import MessageParseError
 from agl.adapters.claude_code.translate import (
+    _GIT_WRITES,
     Restraint,
     activity,
     effort_level,
@@ -59,6 +60,19 @@ _RULE: Final = re.compile(r"^[A-Z][A-Za-z0-9]*(\((?P<specifier>.*)\))?$")
 # a different thing - it is matched at the tool level everywhere and draws no warning - so the
 # assertion below is about rules with a specifier, not about the names.
 _UNCONSULTED_PATH_RULES: Final = ("Write", "NotebookEdit", "MultiEdit", "Glob")
+
+# Every git subcommand `NO_VCS_WRITES` denies, written out a second time so that changing the set
+# takes an edit here as well as in the adapter.
+_GIT_WRITE_SUBCOMMANDS: Final = frozenset(
+    {
+        "add", "am", "apply", "bisect", "branch", "checkout", "cherry-pick", "clean", "clone",
+        "commit", "commit-tree", "config", "fast-import", "fetch", "filter-branch", "gc",
+        "hash-object", "init", "maintenance", "merge", "mktag", "mktree", "mv", "notes", "prune",
+        "pull", "push", "rebase", "reflog", "remote", "repack", "replace", "reset", "restore",
+        "revert", "rm", "sparse-checkout", "stash", "submodule", "switch", "symbolic-ref", "tag",
+        "update-index", "update-ref", "worktree", "write-tree",
+    }
+)
 
 _WORKSPACE: Final = Path("/trees/proj/agl-fix-auth")
 
@@ -242,6 +256,29 @@ class TestRestrictionsObeyThePermissionGrammar:
         watched disappear from a session's tool list.
         """
         assert expected in restraint(frozenset({member})).denied_tools
+
+class TestGitWrites:
+    """(a) `NO_VCS_WRITES` denies the pinned git subcommands, no more and no fewer."""
+
+    def test_no_vcs_writes_denies_exactly_the_pinned_git_subcommands_each_written_once(
+        self,
+    ) -> None:
+        """The set through the rules a session is handed, and the count through `_GIT_WRITES`.
+
+        `restraint` drops a repeated rule, so a subcommand written twice in `_GIT_WRITES` changes
+        no rule and only the count sees it.
+        """
+        rules = restraint(frozenset({Restriction.NO_VCS_WRITES})).denied_tools
+        denied = {rule for rule in rules if rule.startswith("Bash(git ")}
+        pinned = {f"Bash(git {name} *)" for name in _GIT_WRITE_SUBCOMMANDS}
+        assert denied == pinned, (
+            f"denied and not pinned: {sorted(denied - pinned)}; pinned and not denied: "
+            f"{sorted(pinned - denied)}. Change `_GIT_WRITES` and `_GIT_WRITE_SUBCOMMANDS` together"
+        )
+        assert len(_GIT_WRITES) == len(_GIT_WRITE_SUBCOMMANDS), (
+            f"`_GIT_WRITES` holds {len(_GIT_WRITES)} entries for {len(_GIT_WRITE_SUBCOMMANDS)} "
+            f"subcommands, so one of them is written twice"
+        )
 
 class TestModelNames:
     """(b) The tier alias for a model this adapter serves, and a refusal for anything else."""

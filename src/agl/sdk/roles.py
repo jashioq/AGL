@@ -19,6 +19,7 @@ from agl.ports.agent import (
 )
 from agl.ports.errors import InputError, UpstreamUnexpected
 from agl.ports.ids import StepName
+from agl.sdk._declarations import named
 from agl.sdk._engine.prompts import check_placeholders
 from agl.sdk.tools import ReportingTool
 
@@ -264,7 +265,7 @@ class RoleIncompleteError(UpstreamUnexpected):
 def _check_accepted_types(factory: str, accepts: tuple[type[object], ...]) -> None:
     # A parameterised generic and a union are not instances of `type` in CPython, so `list[str]`
     # and `int | str` are refused by this one test alongside a string, an instance and `None`.
-    unusable = sorted(repr(entry) for entry in accepts if not isinstance(entry, type))
+    unusable = sorted(named(entry) for entry in accepts if not isinstance(entry, type))
     if unusable:
         raise InputError(
             f"the role factory {factory!r} declares {unusable} in `accepts=`, and every entry "
@@ -278,7 +279,7 @@ def _check_accepted_types(factory: str, accepts: tuple[type[object], ...]) -> No
     # so the test above takes both, and CPython's `isinstance` then refuses either as its second
     # argument whatever the first one is. Nothing on the class marks it and `mypy --strict` passes
     # either at the call site, so calling `isinstance` is the only test there is.
-    unmatchable = sorted(repr(entry) for entry in accepts if not _matchable(entry))
+    unmatchable = sorted(named(entry) for entry in accepts if not _matchable(entry))
     if unmatchable:
         raise InputError(
             f"the role factory {factory!r} declares {unmatchable} in `accepts=`, and `isinstance` "

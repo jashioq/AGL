@@ -74,8 +74,9 @@ A framework for running AI agent workflows against code repositories.
 - Resume re-runs every line, so a workflow branches only on step results.
 - Replay skips the worker, so a step's effects must land in its workspace.
 - Fingerprints must match across processes. Test under several `PYTHONHASHSEED` values.
-- Payload class paths, `ChosenClaude` and `ChosenOpenAI` paths and fields, and enum values are
-  stored. Renaming one re-runs recorded steps.
+- Every dataclass in a step's inputs, role or result, `agl.ports` ones included, is fingerprinted
+  by its `module.qualname` and field names, and every enum by its value. Moving or renaming one
+  re-runs recorded steps.
 - Agent environments allowlist their vendor's namespace. A leaked `CLAUDE_CODE_EFFORT_LEVEL`
   beats `--effort`.
 - Model-keyed tables take `model_of`'s bare `ModelId`. A chosen effort type-checks and misses.

@@ -71,23 +71,23 @@ class ReportingTool[P]:
         return None if not problems else _refusal(self.name, problems)
 
     def read(self, value: object) -> P:
-        """Builds the payload dataclass from a value AGL saved.
+        """Builds the payload dataclass from a value.
 
         Args:
-            value: The saved value, as parsed JSON.
+            value: The value, as parsed JSON.
 
         Returns:
             The payload dataclass, built from that value.
 
         Raises:
-            InternalError: The value doesn't fit the payload, which is a bug in AGL.
+            InternalError: The value doesn't fit the payload.
         """
         instance, problems = self._read(value)
         if instance is None:
             raise InternalError(
                 f"a recorded {self.name} payload does not fit {named(self.payload)}: "
                 f"{_refusal(self.name, problems)}. AGL wrote this value and AGL is reading it, so "
-                f"the ledger and the payload type have come apart - the fingerprint should have "
+                f"the record and the payload type have come apart - the fingerprint should have "
                 f"discarded this entry. It covers a tool's name, description and derived schema, "
                 f"so a payload rule enforced only in `__post_init__` changes what converts while "
                 f"moving no digest: `tests/sdk/test_tools.py` is where that hole is pinned"
@@ -220,8 +220,8 @@ def _schema_for(hint: object, where: str, inside: tuple[type[Any], ...]) -> dict
     if isinstance(hint, type) and is_dataclass(hint):
         return _object_schema(hint, where, inside)
     raise InputError(
-        f"{where} is a {named(hint)}, which a tool payload cannot carry: {_SUPPORTED}. A "
-        f"payload is filled in as JSON by the model and converted back into this dataclass, and "
+        f"{where} is declared as {named(hint)}, which a tool payload cannot carry: {_SUPPORTED}. "
+        f"A payload is filled in as JSON by the model and converted back into this dataclass, and "
         f"where it is also a step's result it is stored and read back the same way, so a field "
         f"type that does not survive JSON unchanged is one nothing could return"
     )
@@ -235,7 +235,7 @@ def _instance(kind: type[Any], value: object, where: str, problems: list[str]) -
     try:
         return factory(**given)
     except Exception as raised:
-        problems.append(f"`{where}` is not a valid {named(kind)}: {raised}")
+        problems.append(f"`{where}` could not be built as {named(kind)}: {raised}")
         return None
 
 def _given(kind: type[Any], value: object, where: str, problems: list[str]) -> dict[str, object]:
@@ -312,7 +312,7 @@ def _wording(hint: object) -> str:
         return f"an array of {_wording(item)}"
     if isinstance(hint, type) and is_dataclass(hint):
         return f"an object with the fields of {hint.__qualname__}"
-    return f"a {named(hint)}, which is not a payload type at all"
+    return f"{named(hint)}, which is not a payload type at all"
 
 def _optional(hint: object) -> object | None:
     # `Optional[X]` and `X | None` are one type as of 3.14, so `UnionType` covers both spellings.

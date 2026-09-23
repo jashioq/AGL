@@ -182,7 +182,11 @@ def test_a_control_character_in_a_dependency_is_shown_escaped_and_never_raw() ->
             False,
             "/nowhere/workspace/workflows/triage declares 'label_prs', 'sort-issues'. Remove it?",
         ),
-        ((), False, "/nowhere/workspace/workflows/triage declares no workflow. Remove it?"),
+        (
+            (),
+            False,
+            "/nowhere/workspace/workflows/triage declares no workflow AGL can run. Remove it?",
+        ),
         (
             ("triage",),
             True,

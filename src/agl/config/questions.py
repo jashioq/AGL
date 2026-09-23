@@ -108,7 +108,7 @@ class Removal:
     def __str__(self) -> str:
         entry = self.removable
         named = ", ".join(repr(name) for name in entry.declared)
-        declares = f"declares {named}" if named else "declares no workflow"
+        declares = f"declares {named}" if named else "declares no workflow AGL can run"
         if entry.linked:
             return (
                 f"{entry.path} is a link and {declares}. Remove the link, keeping what it points "

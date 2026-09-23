@@ -316,8 +316,9 @@ def test_something_that_is_not_a_workflow_is_refused_with_the_registrys_input_er
     A `runtime_checkable` `Protocol` would have let anything carrying the right attribute names
     through, which is `config/registry.py`'s argument for wanting a real class to narrow to.
     """
-    with pytest.raises(InputError, match=r"agl\.sdk\._workflow\.Workflow"):
+    with pytest.raises(InputError) as refusal:
         registry.load([_point("tickets", "_not_a_workflow")], "tickets", Workflow)
+    assert "an instance of builtins.str rather than of agl.sdk.Workflow." in str(refusal.value)
 
 @pytest.mark.asyncio
 async def test_the_chain_api_py_will_write_carries_no_any(tmp_path: Path) -> None:
@@ -588,6 +589,22 @@ def test_an_unannotated_first_parameter_is_not_read_as_a_bare_run() -> None:
 def test_a_first_parameter_that_is_not_a_run_is_refused() -> None:
     """An annotation that resolves perfectly and names something a workflow is never handed."""
     assert "async function taking a `Run`" in _refused(_not_a_run)
+
+async def _annotated_as_a_workflow(run: Workflow) -> None:
+    """A class `agl.sdk` exports and a workflow is never handed, defined in `sdk/_workflow.py`."""
+
+async def _an_optional_run(run: Run | None) -> None:
+    """A `Run` inside a union, which is not a `Run` either."""
+
+def test_a_first_parameter_annotated_as_a_workflow_names_it_by_its_agl_sdk_path() -> None:
+    """The class is defined in `sdk/_workflow.py` and imported from `agl.sdk`, which is the path
+    the refusal prints."""
+    message = _refused(_annotated_as_a_workflow)
+    assert "annotates 'run' as agl.sdk.Workflow, and a workflow" in message
+    assert "agl.sdk._workflow" not in message
+
+def test_a_run_inside_a_union_is_named_by_its_agl_sdk_path_in_the_refusal() -> None:
+    assert "annotates 'run' as agl.sdk.Run | None, and a workflow" in _refused(_an_optional_run)
 
 def test_a_run_subclass_is_refused_rather_than_read_through() -> None:
     """`_MyRun[NoParams]` names a params class and is still refused, which is the deliberate half.

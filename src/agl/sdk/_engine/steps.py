@@ -187,7 +187,7 @@ def _curtailed(step: str, outcome: AgentOutcome) -> str:
         f"the backend stopped the agent for step {step!r} against its will - turns, tokens, time "
         f"or budget - so it may have got part of the way through what it was asked and no "
         f"further. This role reports through no tool, so it had no way to say it had finished and "
-        f"the ledger has nothing to tell a curtailed step from a completed one by: recording it "
+        f"the record has nothing to tell a curtailed step from a completed one by: recording it "
         f"would write an entry every resume replays as though the work had been done. Nothing was "
         f"recorded and it will run again on the next attempt - raise the limit, or give the role a "
         f"reporting tool so that finishing is something it has to say. It said this before it was "
