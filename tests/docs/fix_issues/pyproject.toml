@@ -1,0 +1,10 @@
+[project]
+name = "fix_issues"
+version = "0.1.0"
+
+[project.entry-points."agl.workflows"]
+fix_issues = "fix_issues:fix_issues"
+
+[tool.agl]
+requires = "agents-gl>=0.0.8"
+config = ["build"]

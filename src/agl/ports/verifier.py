@@ -6,7 +6,7 @@ __all__ = ["Verifier", "VerifierOutcome"]
 
 @dataclass(frozen=True, slots=True)
 class VerifierOutcome:
-    """Whether a verify command passed, with its exit status and output."""
+    """Whether a command passed, with its exit status and output."""
 
     passed: bool
     """`True` where the command exited 0, `False` for any other status and for a timeout."""

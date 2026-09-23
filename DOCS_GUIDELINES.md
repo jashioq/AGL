@@ -135,7 +135,10 @@ In prose:
 - AGL code on a page is always included from a real file under `tests/docs/`, whole or by marked
   section.
 - Every snippet file passes ruff and `mypy --strict`, and imports nothing from AGL except
-  `agl.sdk`. Every example workflow loads in a test the way `agl workflows <name>` loads it.
+  `agl.sdk`.
+- A file under `tests/docs/` is never named `test_*.py`, `*_test.py` or `conftest.py`; no two
+  modules outside a package share a basename; and no example directory takes a standard-library
+  module's name.
 - Shell commands, TOML and terminal output may be written on the page. Take `--help` output from
   the golden captures.
 - Code that claims to be complete contains no `...` and no placeholders. The `agl new` scaffold is
@@ -154,25 +157,25 @@ The section sits between `# --8<-- [start:call]` and `# --8<-- [end:call]` in th
 
 ## Building and checking
 
-The docs gate builds the site into `site/` and checks it in four steps. They live in
+The docs gate runs four checks, which build the site into `site/` and check it. They live in
 `scripts/docs`, which `./scripts/check` runs with the other gates as "docs site". The deploy,
 `.github/workflows/docs.yml`, runs the same script before it uploads `site/`, and runs only when
 dispatched by hand. To run the gate on its own, run `scripts/docs`.
 
-| Step | Does | Fails when |
+| Check | Does | Fails when |
 |---|---|---|
 | build | Deletes `.cache/`, then runs `zensical build --clean --strict` | Zensical reports an issue, such as an unresolved cross-reference or a link to a missing page or anchor, or can't find a snippet |
 | Griffe | Loads `agl` as mkdocstrings does and parses every docstring in it, including the ones no page renders | Griffe logs a record at WARNING or above, such as for an `Args:` entry the signature lacks, or any record that mentions "shadow" |
-| llms.txt | Writes `llms.txt`, `llms-full.txt` and the pages' Markdown copies with llmstxt-standalone | llmstxt-standalone fails, either file is missing, or a page in the nav has no Markdown copy |
+| llms.txt | Writes `llms.txt`, `llms-full.txt` and the pages' Markdown copies with llmstxt-standalone, then compares the pages under `docs/` with the nav | llmstxt-standalone fails, either file is missing, a page in the nav has no Markdown copy, or a page under `docs/` is not in the nav |
 | links | Runs lychee offline over every HTML file in `site/` except the theme's `404.html` | A link points at a missing file or anchor, including a link written in raw HTML |
 
-- The build and Griffe steps always run. The llms.txt and links steps read the build, so they run
-  only when it passed.
-- `scripts/docs` exits 0 when every step passes, 1 when any fails, and 2 when `.venv` lacks one of
-  its tools or the script is given an argument.
+- The build and Griffe checks always run. The llms.txt and links checks read the build, so they
+  run only when it passed.
+- `scripts/docs` exits 0 when every check passes, 1 when any fails, and 2 when `.venv` lacks one
+  of its tools or the script is given an argument.
 - A new page goes in both `nav` and `[project.plugins.llmstxt.sections]` in `zensical.toml`. Only
-  the pages that table lists get a Markdown copy, so the llms.txt step fails on a nav page it
-  leaves out. Nothing fails a page left out of the nav: it builds and publishes all the same.
+  the pages that table lists get a Markdown copy, so the llms.txt check fails on a nav page it
+  leaves out. It also fails on a page under `docs/` that the nav leaves out.
 - Links to other sites are never checked, because lychee runs offline.
 
 To preview the site, run `.venv/bin/zensical serve` from the repository root and open

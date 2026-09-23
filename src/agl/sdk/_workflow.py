@@ -31,7 +31,7 @@ __all__ = [
 
 @dataclass(frozen=True, slots=True)
 class Run[P = object]:
-    """The run a workflow is handed, with its params, steps and worktrees."""
+    """What a workflow receives to read its parameters, run steps and open worktrees."""
 
     params: P
     """The workflow's own parameters, as the flags on `agl run` filled them in."""
@@ -66,7 +66,7 @@ class Run[P = object]:
         """The terminal this run shows things on.
 
         Returns:
-            The [`Terminal`][agl.sdk.Terminal], shared with every child [`Run`][agl.sdk.Run].
+            The `Terminal`, shared with every child [`Run`][agl.sdk.Run].
         """
         return self.services.terminal
 
@@ -94,57 +94,61 @@ class Run[P = object]:
 
     @property
     def namespaces(self) -> tuple[Namespace, ...]:
-        """The worktree names from the top-level run down to this one.
+        """The worktree names from the top-level [`Run`][agl.sdk.Run] down to this one.
 
         Returns:
-            The namespaces this run was opened under, outermost first. Empty for the top-level run.
+            The namespaces this `Run` was opened under, outermost first. Empty for the
+                top-level `Run`.
         """
         return self.scope.namespaces
 
     async def step[R](self, role: Role[R], *inputs: object, commit: str | None = None) -> R:
-        """Runs a [`Role`][agl.sdk.Role] in the worktree this [`Run`][agl.sdk.Run] owns.
+        """Runs a `Role` in the worktree this [`Run`][agl.sdk.Run] owns.
 
         Args:
             role: The role to run, built by a `@role` function.
             inputs: The values the role accepts, at most one per type it declares.
-            commit: The message to commit the agent's work under. If omitted, the work is
-                thrown away: tracked edits are reverted, untracked files are deleted, and the
-                agent's own commits are dropped.
+            commit: The message to commit the agent's work under. If omitted, AGL throws the
+                work away: it reverts tracked edits, deletes untracked files and drops the agent's
+                own commits.
 
         Returns:
             The payload the role's reporting tool was called with, or `None` where the role
                 declares no reporting tool.
 
         Raises:
-            InputError: An input the role doesn't accept, two inputs of one type, or one that
-                can't be written down as JSON.
+            InputError: A role no `@role` function built, an input the role doesn't accept, two
+                inputs of one type, or one that can't be written down as JSON.
             agl.sdk.NotFoundError: The ref this worktree was cut from names nothing.
             agl.sdk.ConflictError: Another line of work is holding this worktree's place.
             agl.sdk.DeniedError: The backend behind the role's model doesn't offer something
                 the role requires.
-            agl.sdk.RoleIncompleteError: The agent stopped without reporting a result.
-            agl.sdk.UpstreamUnavailable: The agent's backend couldn't be started, or stopped
-                without answering.
+            agl.sdk.RoleIncompleteError: The agent never called the role's reporting tool, or
+                hit a limit in a role that has none.
+            agl.sdk.UpstreamUnavailable: AGL couldn't start the agent's backend, or the backend
+                stopped without answering.
             agl.sdk.UpstreamUnexpected: The agent's backend answered in a way AGL can't read.
         """
         return await self._steps.step(role, inputs, commit=commit)
 
     async def verify(self, command: str) -> VerifierOutcome:
-        """Runs a command in this run's worktree.
+        """Runs a command in the worktree this [`Run`][agl.sdk.Run] owns.
 
         Args:
             command: The shell command line to run. An empty one passes.
 
         Returns:
-            The [`VerifierOutcome`][agl.sdk.VerifierOutcome], whether the command passed or not.
-                A command that failed comes back as a value rather than a refusal.
+            The `VerifierOutcome`, even when the command fails. If a later step takes it as an
+                input and the command answers differently on a resume, even in its output, that
+                step runs again and throws away every commit made since the step or landing
+                before it.
 
         Raises:
             InputError: `command` isn't a string.
             agl.sdk.NotFoundError: The ref this worktree was cut from names nothing.
             agl.sdk.ConflictError: Another line of work is holding this worktree's place.
-            agl.sdk.UpstreamUnavailable: The command couldn't be started.
-            agl.sdk.UpstreamUnexpected: The command's output couldn't be read.
+            agl.sdk.UpstreamUnavailable: AGL couldn't start the command.
+            agl.sdk.UpstreamUnexpected: AGL couldn't read the command's output.
         """
         return await self._steps.verify(command)
 
@@ -153,16 +157,17 @@ class Run[P = object]:
 
         Args:
             namespace: The worktree's name, unique across the whole run, ignoring case. Asking
-                again for a name this run opened hands back that same child.
-            base: The `Run` or git ref to start from. If omitted, starts from where this run's
-                own line of work has reached. Ignored where the name is already open.
+                this `Run` again for a name it opened hands back that same child.
+            base: The `Run` to start from, as far as its steps and landings have got, or a git
+                ref. If omitted, starts from this `Run`. Where the name is already open, `base` has
+                no effect.
 
         Returns:
-            The child `Run`, which has its own checkout and shares this run's terminal.
+            The child `Run`, which shares this one's parameters and terminal.
 
         Raises:
-            InputError: The name is not one path segment and one git ref component, or it is
-                the reserved `_base`.
+            InputError: The name holds anything but the letters A to Z and a to z, digits, `.`,
+                `_` and `-`, breaks another rule for names, or is the reserved `_base`.
             agl.sdk.ConflictError: Another worktree in the run already has this name.
         """
         return cast(
@@ -173,17 +178,17 @@ class Run[P = object]:
         )
 
     async def integrate(self) -> Integration:
-        """Merges this run's work into the worktree of the [`Run`][agl.sdk.Run] it came from.
+        """Merges this child's work into the worktree of the [`Run`][agl.sdk.Run] that opened it.
 
         Returns:
-            The [`Integration`][agl.sdk.Integration]. On a conflict, finish it with its `retry`
-                or `abort`.
+            The `Integration`. On a conflict, finish it with its
+                [`retry`][agl.sdk.Integration.retry] or [`abort`][agl.sdk.Integration.abort].
 
         Raises:
-            InputError: This is the top-level run, or the workflow declares no `build` setting.
+            InputError: This is the top-level `Run`, or the workflow declares no `build` setting.
             agl.sdk.NotFoundError: A ref one of the two worktrees was cut from names nothing.
             agl.sdk.ConflictError: Another line of work is holding one of the two places.
-            agl.sdk.UpstreamUnavailable: Git or the build command couldn't be run.
+            agl.sdk.UpstreamUnavailable: AGL couldn't run Git or the build command.
             agl.sdk.UpstreamUnexpected: Git refused the landing, or answered unreadably.
         """
         if self._parent is None:

@@ -220,33 +220,26 @@ def prompt_file(path: str | Path) -> str:
         text = where.read_text(encoding="utf-8")
     except FileNotFoundError as missing:
         raise InputError(
-            f"there is no prompt file at {where}, so the role declared with it would have nothing "
-            f"to ask its agent. A relative path is resolved against the directory of the module "
-            f"that called `prompt_file` - never against the current directory - so this is the "
-            f"path {asked!r} names from where it was written"
+            f"There is no prompt file at {where}. Write a relative path from the directory of the "
+            f"module that calls `prompt_file`."
         ) from missing
     except IsADirectoryError as directory:
         raise InputError(
-            f"{where} is a directory, and a role's instructions are one prompt. Name the file "
-            f"inside it that this role is asking its agent to read"
+            f"The prompt file {where} is a directory. Name the file inside it that holds the "
+            f"prompt."
         ) from directory
     except UnicodeDecodeError as undecodable:
         raise InputError(
-            f"{where} is not UTF-8 text: {undecodable}. A prompt is read as UTF-8 and nothing "
-            f"here repairs one - a prompt read with replacement characters in it is a prompt "
-            f"nobody wrote, fingerprinted as though somebody had, and handed to a model that "
-            f"would answer it anyway"
+            f"The prompt file {where} is not UTF-8 at byte offset {undecodable.start}. Save it as "
+            f"UTF-8."
         ) from undecodable
     except OSError as unreadable:
         raise InputError(
-            f"{where} could not be read: {unreadable}. The prompt is read where the role is "
-            f"declared, so this is the role's factory failing rather than the step it was for"
+            f"The prompt file {where} can't be read: {unreadable.strerror or unreadable}."
         ) from unreadable
     if not text.strip():
         raise InputError(
-            f"the prompt file {where} is empty, and a role's instructions are the whole of what "
-            f"its agent is asked to do. `Role` refuses an empty prompt too, one line later, and "
-            f"`AgentTask` refuses it again at the dispatch"
+            f"The prompt file {where} is empty. Write what the role's agent is asked to do."
         )
     return text
 
@@ -259,12 +252,8 @@ def _check_accepted_types(factory: str, accepts: tuple[type[object], ...]) -> No
     unusable = sorted(named(entry) for entry in accepts if not isinstance(entry, type))
     if unusable:
         raise InputError(
-            f"the role factory {factory!r} declares {unusable} in `accepts=`, and every entry "
-            f"there has to be a class. An input is matched to a declared type by `isinstance` and "
-            f"recorded under that type's `__qualname__`, so an entry that is not a class can "
-            f"neither match a value nor name the `{{{{TypeName}}}}` a match would fill. Write the "
-            f"class itself - `accepts=(Ticket,)`, never `accepts=('Ticket',)` and never "
-            f"`accepts=(Ticket(),)`"
+            f'Role factory "{factory}" has entries in `accepts=` that are not classes: '
+            f"{', '.join(unusable)}. Write each as the class itself, as in `accepts=(Ticket,)`."
         )
     # `typing.Any` and a `Protocol` written without `@runtime_checkable` are instances of `type`,
     # so the test above takes both, and CPython's `isinstance` then refuses either as its second
@@ -273,28 +262,16 @@ def _check_accepted_types(factory: str, accepts: tuple[type[object], ...]) -> No
     unmatchable = sorted(named(entry) for entry in accepts if not _matchable(entry))
     if unmatchable:
         raise InputError(
-            f"the role factory {factory!r} declares {unmatchable} in `accepts=`, and `isinstance` "
-            f"refuses each of them as its second argument. An input is matched to a declared type "
-            f"by `isinstance`, so an entry that call will not take matches no value at all - left "
-            f"to the step it raises a bare `TypeError` from inside AGL at the first step that "
-            f"passes one, with whatever ran before that step already paid for. `typing.Any` is one "
-            f"of these and a `Protocol` declared without `@runtime_checkable` is the other: write "
-            f"`@runtime_checkable` above the protocol, or declare the class an input really is"
+            f'Role factory "{factory}" has entries in `accepts=` that `isinstance` refuses: '
+            f"{', '.join(unmatchable)}. Declare the class an input really is, or write "
+            f"`@runtime_checkable` above the protocol."
         )
     names = [kind.__qualname__ for kind in accepts]
     collided = sorted({name for name in names if names.count(name) > 1})
     if collided:
         raise InputError(
-            f"the role factory {factory!r} declares more than one `accepts=` entry under each of "
-            f"{collided}. A step's inputs are recorded one per declared type, under that type's "
-            f"`__qualname__`, and a prompt fills a `{{{{TypeName}}}}` from that one key - so two "
-            f"entries sharing a name are one slot, only one of them can ever be filled, and the "
-            f"scan comparing `accepts=` against the prompt reads one name where two were "
-            f"declared. Two classes written in two modules, or in two functions, share a "
-            f"`__qualname__`, so this is as often a collision as a repetition: declare one entry "
-            f"per name, renaming a class where both of them are really wanted. A subclass needs "
-            f"no entry of its own - it is matched under the base already declared - and one "
-            f"declared beside its base is a different name and is not this"
+            f'Role factory "{factory}" has entries in `accepts=` that share a name: '
+            f"{_quoted(collided)}. Give each class its own name, and declare each one once."
         )
 
 def _quoted(names: Sequence[str]) -> str:
@@ -311,11 +288,7 @@ def _beside_the_caller(caller: Mapping[str, object], asked: Path) -> Path:
     declared = caller.get("__file__")
     if not isinstance(declared, str):
         raise InputError(
-            f"`prompt_file({str(asked)!r})` was called from something with no `__file__` - a REPL, "
-            f"an `exec`, or a frozen import - so there is no module directory for a relative path "
-            f"to be relative to. Pass an absolute path. AGL will not fall back to the current "
-            f"directory: a workflow's prompts sit beside its code, in the workspace directory it "
-            f"was read from, and the directory `agl` was started in is the repository being "
-            f"worked on - the one place those prompts are certainly not"
+            f"The prompt path {asked} is relative, and `prompt_file` was called from code with no "
+            f"`__file__`, such as a REPL. Pass an absolute path."
         )
     return Path(declared).resolve().parent / asked

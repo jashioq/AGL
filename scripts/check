@@ -46,12 +46,12 @@ IMPORT_STATEMENT='^[[:space:]]*(import|from)\b'
 # Every name on this list is a paid-endpoint variable, and that is what makes sole ownership the
 # right rule for them: a write outside the owner is suspect whatever value it writes. AGL_HOME is
 # deliberately not on it, although tests/conftest.py pins that too. There the danger is the value
-# and not the write - ten test modules name it legitimately, four setting it in the process
-# environment to a temporary directory of their own and nine handing it to config/sources.py's
-# resolve_settings in a literal mapping that never reaches the environment at all, three doing
-# both. That mapping is the same ast.Dict this scan reads as a composed subprocess environment,
-# and no scan keyed on a name can tell a temporary directory from the operator's own. The probe
-# below is where AGL_HOME is held instead.
+# and not the write - test modules name it legitimately, setting it in the process environment to
+# a temporary directory of their own or handing it to config/sources.py's resolve_settings in a
+# literal mapping that never reaches the environment at all, and some do both. That mapping is the
+# same ast.Dict this scan reads as a composed subprocess environment, and no scan keyed on a name
+# can tell a temporary directory from the operator's own. The probe below is where AGL_HOME is held
+# instead.
 GUARDED_VARS="ANTHROPIC_BASE_URL ANTHROPIC_API_KEY OPENAI_BASE_URL OPENAI_API_KEY CODEX_HOME"
 GUARD_OWNER="tests/conftest.py"
 PROBE="tests/test_written_by_scripts_check_and_deleted_again.py"
@@ -679,7 +679,7 @@ fi
 # ---------------------------------------------------------------------------------------------
 # 9. Docs site
 #
-# The steps live in scripts/docs, so a deploy runs the same steps this gate ran.
+# The checks live in scripts/docs, so a deploy runs the same checks this gate ran.
 # ---------------------------------------------------------------------------------------------
 
 gate_header 9 "docs site" "scripts/docs"

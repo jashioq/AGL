@@ -108,6 +108,7 @@ class _Name:
     _RESERVED: ClassVar[Mapping[str, str]] = {}
 
     value: str
+    """The name as text."""
 
     def __post_init__(self) -> None:
         reason = (
@@ -142,7 +143,7 @@ class RunLabel(_Name):
 
 @dataclass(frozen=True, slots=True)
 class Namespace(_Name):
-    """A worktree's name, unique across the whole run, ignoring case."""
+    """A worktree's name, as given to [`run.worktree`][agl.sdk.Run.worktree]."""
 
     _KIND: ClassVar[str] = "namespace"
     _RESERVED: ClassVar[Mapping[str, str]] = {

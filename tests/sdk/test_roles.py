@@ -382,7 +382,7 @@ def test_a_non_class_in_accepts_is_refused_at_the_decoration_that_declared_it() 
             return Role(name="review", instructions=_REVIEW)
 
     assert "'Request'" in str(refusal.value), "the refusal did not quote the entry as written"
-    assert "has to be a class" in str(refusal.value)
+    assert "that are not classes" in str(refusal.value)
 
 def test_a_generic_of_an_exported_type_in_accepts_is_named_by_its_agl_sdk_path() -> None:
     """`list[Conflict]` is not a class, and the refusal quotes it as an author imports it."""
@@ -392,7 +392,7 @@ def test_a_generic_of_an_exported_type_in_accepts_is_named_by_its_agl_sdk_path()
         def listed() -> Role:
             return Role(name="review", instructions=_REVIEW)
 
-    assert "declares ['list[agl.sdk.Conflict]'] in `accepts=`" in str(refusal.value)
+    assert "`accepts=` that are not classes: list[agl.sdk.Conflict]." in str(refusal.value)
 
 def test_a_class_that_isinstance_refuses_is_caught_at_the_decoration_by_a_probe_call() -> None:
     """The other half of "every entry has to be a class": some classes `isinstance` will not take.

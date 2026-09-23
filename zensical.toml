@@ -7,6 +7,14 @@ site_dir = "site"
 strict = true
 nav = [
   { "Home" = "index.md" },
+  { "Build workflows" = [
+    { "Run" = [
+      { "Run" = "sdk/run.md" },
+      { "Run.step" = "sdk/run-step.md" },
+      { "Run.worktree" = "sdk/run-worktree.md" },
+      { "Run.integrate" = "sdk/run-integrate.md" },
+    ] },
+  ] },
   { "Examples" = ["examples/index.md"] },
 ]
 
@@ -80,7 +88,13 @@ scoped_crossrefs = true
 markdown_description = "AGL runs AI agent workflows against code repositories."
 full_output = "llms-full.txt"
 
-# Only the pages listed here get a Markdown copy, and with none listed the step fails.
+# Only the pages listed here get a Markdown copy, and with none listed the check fails.
 [project.plugins.llmstxt.sections]
 "Pages" = ["index.md"]
+"Build workflows" = [
+  "sdk/run.md",
+  "sdk/run-step.md",
+  "sdk/run-worktree.md",
+  "sdk/run-integrate.md",
+]
 "Examples" = ["examples/index.md"]

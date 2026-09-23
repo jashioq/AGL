@@ -9,7 +9,7 @@ REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)" || exit 2
 cd -- "$REPO_ROOT" || exit 2
 
 VENV_BIN="$REPO_ROOT/.venv/bin"
-STEPS=4
+CHECKS=4
 
 if [ "$#" -gt 0 ]; then
     printf 'scripts/docs takes no arguments, and was given "%s".\n' "$1" >&2
@@ -31,7 +31,7 @@ fi
 failed_names=""
 failures=0
 
-step() { # name, what it runs
+check() { # name, what it runs
     printf '%s-- %s\n$ %s\n\n' "${spacer:-}" "$1" "$2"
     spacer=$'\n'
 }
@@ -41,7 +41,7 @@ fail() { # name
     failures=$((failures + 1))
 }
 
-step "build" "rm -rf .cache && .venv/bin/zensical build --clean --strict"
+check "build" "rm -rf .cache && .venv/bin/zensical build --clean --strict"
 # A warm cache hides regressions.
 rm -rf .cache
 "$VENV_BIN/zensical" build --clean --strict
@@ -52,7 +52,8 @@ if [ "$build_status" -ne 0 ]; then
 fi
 
 # A strict build never fails on Griffe's records, and Griffe logs shadowing at DEBUG.
-step "Griffe" ".venv/bin/python - (loads \"agl\" as mkdocstrings does, then parses every docstring)"
+check "Griffe" \
+    ".venv/bin/python - (loads \"agl\" as mkdocstrings does, then parses every docstring)"
 "$VENV_BIN/python" - <<'PY'
 import logging
 import os
@@ -116,12 +117,12 @@ PY
 [ "$?" -eq 0 ] || fail "Griffe"
 
 if [ "$build_status" -ne 0 ]; then
-    printf '\nThe llms.txt and links steps did not run, because they read the build.\n'
+    printf '\nThe llms.txt and links checks did not run, because they read the build.\n'
 else
     bridge="$(mktemp "${TMPDIR:-/tmp}/agl-llmstxt.XXXXXX")" || exit 2
     trap 'rm -f "$bridge"' EXIT INT TERM
 
-    step "llms.txt" \
+    check "llms.txt" \
         ".venv/bin/llmstxt-standalone build --config <zensical.toml as JSON> --site-dir site"
     # llmstxt-standalone reads an mkdocs.yml, and JSON is YAML.
     "$VENV_BIN/python" - >"$bridge" <<'PY'
@@ -173,6 +174,16 @@ for page in pages(nav):
             f"List it under [project.plugins.llmstxt.sections] in zensical.toml."
         )
         missing += 1
+listed = set(pages(nav))
+for path in sorted(Path("docs").rglob("*.md")):
+    page = path.relative_to("docs").as_posix()
+    if page not in listed:
+        # Zensical builds and publishes a page the nav leaves out, and reports nothing.
+        print(
+            f'The page "{page}" in docs/ is not in the nav. '
+            f"List it under nav and [project.plugins.llmstxt.sections] in zensical.toml."
+        )
+        missing += 1
 raise SystemExit(1 if missing else 0)
 PY
     copies_status=$?
@@ -181,15 +192,17 @@ PY
     fi
 
     # Zensical never checks a link written in raw HTML.
-    step "links" ".venv/bin/lychee --config lychee.toml --root-dir $REPO_ROOT/site 'site/**/*.html'"
+    check "links" \
+        ".venv/bin/lychee --config lychee.toml --root-dir $REPO_ROOT/site 'site/**/*.html'"
     "$VENV_BIN/lychee" --config lychee.toml --root-dir "$REPO_ROOT/site" 'site/**/*.html'
     [ "$?" -eq 0 ] || fail "links"
 fi
 
 printf '\n'
 if [ "$failures" -eq 0 ]; then
-    printf 'All %s docs steps passed.\n' "$STEPS"
+    printf 'All %s docs checks passed.\n' "$CHECKS"
     exit 0
 fi
-printf '%s of %s docs steps failed: %s.\n' "$failures" "$STEPS" "$failed_names"
+printf '%s of %s docs checks failed: %s.\n' \
+    "$failures" "$CHECKS" "$failed_names"
 exit 1

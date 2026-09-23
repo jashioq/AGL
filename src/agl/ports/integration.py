@@ -8,10 +8,10 @@ __all__ = ["Conflict", "Integration", "IntegrationOutcome", "Integrator"]
 
 @dataclass(frozen=True, slots=True)
 class Conflict:
-    """The files that collided in a merge, with a summary."""
+    """The files that collided in a landing, if any, with a summary."""
 
     paths: tuple[str, ...]
-    """The files that collided, and empty where the collision names no file of its own."""
+    """The files left unresolved, and empty where the build gate refused or no file can be named."""
 
     summary: str
     """What collided and what state the parent is in, in words a screen can carry."""
@@ -48,7 +48,7 @@ class Integration(ABC):
         """What stopped the landing.
 
         Returns:
-            The [`Conflict`][agl.sdk.Conflict], or `None` if the work landed.
+            The `Conflict`, or `None` if the work landed.
         """
         ...
 
@@ -58,8 +58,8 @@ class Integration(ABC):
         """Whether a conflict is holding the parent.
 
         Returns:
-            `True` while a conflict holds the parent, `False` once `retry` has landed the work
-                or `abort` has given it up.
+            `True` while a conflict holds the parent, `False` once the work has landed or the
+                landing has ended without it.
         """
         ...
 
@@ -69,29 +69,31 @@ class Integration(ABC):
         """The build gate's outcome on the latest attempt.
 
         Returns:
-            The build's [`VerifierOutcome`][agl.sdk.VerifierOutcome], or `None` where no build
-                ran. It tells the two kinds of conflict apart: `None` means the work would not
-                combine, and set means it combined and then did not build.
+            The build's `VerifierOutcome`, or `None` where the latest attempt would not merge.
+                If a later step takes it as an input and the build answers differently on a
+                resume, even in its output, that step runs again and throws away every commit
+                made since the step or landing before it.
         """
         ...
 
     @property
     @abstractmethod
     def refused_by_the_gate(self) -> bool:
-        """Whether the build failed after a clean merge, which was then undone.
+        """Whether the build gate, not a merge conflict, stopped the landing.
 
         Returns:
-            `True` while the gate's refusal holds the parent, `False` otherwise.
+            `True` while the gate's refusal holds the parent, `False` while a merge conflict
+                holds it and once the landing has ended.
         """
         ...
 
     @abstractmethod
     async def retry(self) -> None:
-        """Tries the landing again, against the parent's checkout as it now stands.
+        """Tries the landing again, against the parent's worktree as it now stands.
 
         Raises:
-            InternalError: This landing already ended, in `retry` or in `abort`.
-            agl.sdk.UpstreamUnavailable: Git or the build command couldn't be run.
+            InternalError: The landing already ended.
+            agl.sdk.UpstreamUnavailable: AGL couldn't run Git or the build command.
             agl.sdk.UpstreamUnexpected: Git refused the landing, or answered unreadably.
         """
         ...
@@ -101,8 +103,8 @@ class Integration(ABC):
         """Gives up a conflicted landing, leaving the parent as it was before it.
 
         Raises:
-            agl.sdk.UpstreamUnavailable: Git couldn't be run, so the parent is still held.
-            agl.sdk.UpstreamUnexpected: Git refused, so the parent is still held.
+            agl.sdk.UpstreamUnavailable: AGL couldn't run Git.
+            agl.sdk.UpstreamUnexpected: Git refused.
         """
         ...
 

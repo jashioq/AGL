@@ -159,15 +159,12 @@ async def resume(
     measured = _digests(found, spec.workflow)
     if measured != spec.workflow_digests:
         raise ConflictError(
-            f"run {str(label)!r} was started by {spec.workflow!r}, and that workflow's own "
-            f"directory is not what it was then: {_moved(spec.workflow_digests, measured)}. A run "
-            f"digests every file there but bytecode and any `.DS_Store`, and AGL refuses a "
-            f"resume that disagrees rather than migrating one: every step already in this run's "
-            f"record was produced by those files as they stood. So this run finishes against them "
-            f"and no others - put the directory back to what it was when the run started, out of "
-            f"version control or from wherever the earlier copy is. Otherwise `agl clear {label}` "
-            f"deletes the run with its worktrees and branches, and `agl run {spec.workflow} -n "
-            f"{label}` then starts it again on the directory you have now."
+            f'Run "{label}" cannot be resumed, because the workflow directory of '
+            f'"{spec.workflow}" is not as it was when the run started: '
+            f"{_moved(spec.workflow_digests, measured)}. Put the directory back as it was, or run "
+            f"`agl clear {label}`, which deletes the run, its worktrees and branches, and any "
+            f"uncommitted work in them. Then `agl run {spec.workflow} -n {label}` with the same "
+            f"flags as before starts the run again."
         )
 
     given = params.from_json(wf.params, spec.params)
