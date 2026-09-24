@@ -1,6 +1,6 @@
 import sys
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Final
@@ -147,9 +147,14 @@ async def resume(
     record = await services.store.read_record(scope)
     if record is None:
         raise NotFoundError(
-            f"run {str(label)!r} does not exist - `agl run <workflow> -n {label}` starts one."
+            f'Run "{label}" does not exist. To start it, run `agl run <workflow> -n {label}`.'
         )
     spec = RunSpec.from_json(record)
+    if spec.finished:
+        raise ConflictError(
+            f'Run "{label}" finished, and its work is on branch "{spec.branch}". To free the '
+            f"label, run `agl clear {label}`, which deletes that branch."
+        )
 
     await _sync_workspace(syncer, home)
     found = _discovery(home, points)
@@ -318,6 +323,7 @@ async def _walk(
                         leases=leases,
                     )
                 )
+                await services.store.write_record(scope, replace(spec, finished=True).to_json())
     finally:
         leases.release_all()
     return Finished(steps=fingerprints.replays, branch=released.branch)

@@ -1,7 +1,7 @@
 """What `run.json` promises: its wire shape, an exact round trip, and params nobody interprets.
 
 Three properties carry this suite. The **wire shape** is written out literally rather than
-recomposed, because a later stage reading an older record depends on those eight key names, and a
+recomposed, because a later stage reading an older record depends on those nine key names, and a
 test that builds them the way the module does agrees with any bug it has. The **round trip** is
 checked in both directions and through a real `json.dumps`/`json.loads`, since a `dict` this module
 is happy with and `json` is not would be a file never written. And **opacity** - that nothing here
@@ -40,13 +40,14 @@ _WIRE: Final[dict[str, JsonValue]] = {
     "branch": "agl/auth",
     "params": {"request": "add oauth", "concurrent": 4},
     "created_at": "2026-08-18T09:14:02Z",
+    "finished": False,
 }
 _SPEC: Final = RunSpec.from_json(_WIRE)
 
 # --- The wire shape, and the round trip ---------------------------------------------------------
 
-def test_the_wire_shape_is_eight_keys_in_one_order_with_those_spellings() -> None:
-    """`run.json`, spelled out - eight keys, in that order, with those spellings."""
+def test_the_wire_shape_is_nine_keys_in_one_order_with_those_spellings() -> None:
+    """`run.json`, spelled out - nine keys, in that order, with those spellings."""
     assert _SPEC.to_json() == {
         "workflow": "tickets",
         "workflow_digests": {"roles.py": "a" * 64, "prompts/review.md": "b" * 64},
@@ -56,10 +57,11 @@ def test_the_wire_shape_is_eight_keys_in_one_order_with_those_spellings() -> Non
         "branch": "agl/auth",
         "params": {"request": "add oauth", "concurrent": 4},
         "created_at": "2026-08-18T09:14:02Z",
+        "finished": False,
     }
     assert tuple(_SPEC.to_json()) == (
         "workflow", "workflow_digests", "label", "base_ref", "base_sha", "branch", "params",
-        "created_at",
+        "created_at", "finished",
     )  # fmt: skip
     assert _SPEC.label == RunLabel("auth"), "the label is a validated type, not the string on disk"
     assert _SPEC.created_at == datetime(2026, 8, 18, 9, 14, 2, tzinfo=UTC)
@@ -85,6 +87,24 @@ def test_the_keys_are_written_out_so_a_field_rename_cannot_move_the_wire() -> No
     """The field names match the wire keys today, which is why `to_json` must not read them off."""
     assert tuple(_SPEC.to_json()) == run._WIRE_KEYS
     assert tuple(_SPEC.__dataclass_fields__) == run._WIRE_KEYS
+
+def test_a_record_written_without_the_finished_key_reads_as_a_run_not_finished() -> None:
+    """An older AGL wrote eight keys and no `finished`, and its runs must stay resumable."""
+    older = {key: value for key, value in _WIRE.items() if key != "finished"}
+
+    spec = RunSpec.from_json(older)
+
+    assert spec.finished is False
+    assert spec == _SPEC
+    assert spec.to_json() == {**older, "finished": False}
+
+def test_a_finished_record_round_trips_as_finished_through_a_real_encoder() -> None:
+    """`true` on the wire, `True` on the record, and both directions agree."""
+    finished = replace(_SPEC, finished=True)
+
+    assert finished.to_json() == {**_WIRE, "finished": True}
+    assert RunSpec.from_json(json.loads(json.dumps(finished.to_json()))) == finished
+    assert '"finished": true' in json.dumps(finished.to_json())
 
 # --- params are opaque --------------------------------------------------------------------------
 
@@ -404,6 +424,7 @@ def test_a_record_is_an_object_carrying_exactly_these_keys(payload: object) -> N
         ("params", None), ("params", []), ("params", "request=add oauth"),
         ("created_at", "yesterday"), ("created_at", ""), ("created_at", "2026-08-18"),
         ("created_at", 1755508442),
+        ("finished", "true"), ("finished", 1), ("finished", 0), ("finished", None),
     ],
 )  # fmt: skip
 def test_a_field_that_is_not_what_the_schema_says_is_refused(key: str, value: JsonValue) -> None:
@@ -440,10 +461,11 @@ def test_a_record_is_frozen() -> None:
 
 # --- What this module is not allowed to be ------------------------------------------------------
 
-def test_there_is_no_run_status() -> None:
-    """The module docstring argues the absence out. Pinned as a test rather than left to prose
-    because an empty enum is the easy thing to add here, and adding it is one field away from
-    storing it in `run.json` - a second source of truth that nothing updates.
+def test_the_record_keeps_whether_its_workflow_returned_and_no_status_enum() -> None:
+    """`finished` is the one fact about a run's end that `run.json` keeps. `api._walk` writes it
+    once, after the workflow returns, and nothing unsets it, so a crash before that write leaves it
+    false, which is the state a resume accepts. A status enum would be a claim a crash leaves behind
+    as a lie, and an empty one is the easy thing to add here, so its absence is pinned.
 
     **`checked_text` is on that list and is not a type.** It is the surrogate rule this module
     already applies to `base_ref`, made callable so that `api.run` can apply it to the *same value*

@@ -1,6 +1,6 @@
 import asyncio
 from collections.abc import Mapping, Sequence
-from typing import cast
+from typing import Final, cast
 from agl.ports.agent import AgentOutcome, AgentTask, StopReason, Tool, ToolResult
 from agl.ports.errors import InputError
 from agl.ports.home_layout import RunScope
@@ -16,6 +16,9 @@ from agl.sdk.roles import Role, RoleIncompleteError
 from agl.sdk.tools import ReportingTool
 
 __all__ = ["Steps"]
+
+# What git's cleanup strips from a message, and nothing else: "\v" or "\xa0" alone it records.
+_CLEANED_AWAY: Final = " \t\r\n"
 
 class Steps:
     def __init__(
@@ -41,21 +44,24 @@ class Steps:
     async def landing(self) -> tuple[Journal, Workspace]:
         return await self._namespace()
 
-    # No entry, no step lock and no restore. A tool handler calling this from inside a step would
-    # wait on the lock that step holds, and a restore would move the branch under a replayed step.
-    # So a verdict measures the checkout as it stands, which on a resume can be past the replayed
-    # head - AGENTS.md's "Invariants where a mistake is silent" carries that price.
+    # No restore: on a resume the checkout can be past the replayed head, and a restore loses that.
     async def verify(self, command: str) -> VerifierOutcome:
         if not isinstance(command, str):
             raise InputError(_not_a_command(command))
-        _, workspace = await self._namespace()
-        return await self._services.verifier.verify(command, workspace.path)
+        journal, workspace = await self._namespace()
+
+        async def _worker() -> VerifierOutcome:
+            return await self._services.verifier.verify(command, workspace.path)
+
+        return await journal.verify(command, _worker)
 
     async def step[R](
         self, role: Role[R], passed: Sequence[object], *, commit: str | None
     ) -> R:
         step = StepName(role.name)
         inputs = checked_inputs(role, passed, step=str(step))
+        if isinstance(commit, str) and not commit.strip(_CLEANED_AWAY):
+            raise InputError(_blank_commit(str(step)))
         await self._capabilities.require(self._services.agents, role, step=str(step))
         journal, workspace = await self._namespace()
 
@@ -173,6 +179,12 @@ def _not_a_command(command: object) -> str:
         f"Nothing was run and no checkout was opened for it. Pass a string: a declared "
         f"`run.config[\"build\"]` is one, an empty one included, and so is a gate the workflow's "
         f"own params carry"
+    )
+
+def _blank_commit(step: str) -> str:
+    return (
+        f'Step "{step}" has a commit message that is empty or only whitespace, which git '
+        "refuses. Write a message for `commit=`."
     )
 
 def _unreported(tool: str, outcome: AgentOutcome) -> str:

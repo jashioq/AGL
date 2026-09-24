@@ -656,6 +656,75 @@ async def test_changing_only_the_commit_message_does_not_invalidate_the_entry(
     subject = _git(repository, "log", "-1", "--format=%s", recorded).strip()
     assert subject == "implement T-01"
 
+# --- a blank `commit=`, refused before the agent starts ------------------------------------------
+#
+# git takes the trailing whitespace off every line of a `--message` and the empty lines off both
+# ends, then refuses a message with nothing left. It only sees the message once the agent has
+# worked, so `run.step` refuses one up front. The line is git's own and not `str.isspace()`'s:
+# `tests/adapters/test_git_parity.py` measures both sides of it, and the two lists below are its.
+
+_BLANK: Final = ("", " ", "\t", "\n", "\r", "  \t\n \r\n", "\n\n")
+
+_NOT_BLANK_TO_GIT: Final = ("\v", "\xa0")
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("message", _BLANK)
+async def test_a_blank_commit_message_is_refused_before_the_agent_starts_and_nothing_is_recorded(
+    repository: Path, tmp_path: Path, base: str, message: str
+) -> None:
+    """An agent that writes a file, so a commit would have something to record and git would
+    refuse the message at the end of the step, after the agent had been paid for."""
+    record = _Agent()
+    written = {FEATURE: b"the callback route\n"}
+    run = _run(repository, tmp_path, base, _agent(record, writes=written))
+
+    with pytest.raises(InputError) as raised:
+        await run.step(_role("implement", "implement T-01"), commit=message)
+
+    assert str(raised.value) == (
+        'Step "implement" has a commit message that is empty or only whitespace, which git '
+        "refuses. Write a message for `commit=`."
+    )
+    assert record.runs == [], "the agent ran for a step whose commit git was always going to refuse"
+    assert _entries(tmp_path, "implement") == []
+    assert _git(repository, "branch", "--list", "agl/*") == "", "a worktree was opened for it"
+
+@pytest.mark.asyncio
+async def test_a_blank_commit_message_is_refused_on_a_resume_before_the_recorded_step_replays(
+    repository: Path, tmp_path: Path, base: str
+) -> None:
+    """The refusal comes before the record is read, so a replay meets it as a first run does.
+
+    The first walk passes no `commit=` and its agent changes nothing. That is the entry an AGL
+    without the refusal wrote for `commit=""` as well: the message is outside the fingerprint, and
+    with nothing to commit git was never handed it.
+    """
+    record = _Agent()
+    role = _role("implement", "implement T-01")
+    await _run(repository, tmp_path, base, _agent(record)).step(role)
+    recorded = _entries(tmp_path, "implement")
+
+    with pytest.raises(InputError, match='Step "implement" has a commit message that is empty'):
+        await _run(repository, tmp_path, base, _agent(record)).step(role, commit="")
+
+    assert len(record.runs) == 1, "the resume ran the agent again"
+    assert _entries(tmp_path, "implement") == recorded
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("message", _NOT_BLANK_TO_GIT)
+async def test_a_message_git_records_is_not_refused_though_python_calls_it_whitespace(
+    repository: Path, tmp_path: Path, base: str, message: str
+) -> None:
+    """A vertical tab and a no-break space are `str.isspace()`, and git commits under either."""
+    record = _Agent()
+    written = {FEATURE: b"the callback route\n"}
+    run = _run(repository, tmp_path, base, _agent(record, writes=written))
+
+    await run.step(_role("implement", "implement T-01"), commit=message)
+
+    assert len(record.runs) == 1
+    assert FEATURE in _tree(repository, _text(_one(tmp_path, "implement"), "head"))
+
 # --- the ending a step that did not come back gets -----------------------------------------------
 #
 # One ending runs on every path out of the worker, and which of the two it is turns on whether the

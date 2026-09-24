@@ -118,7 +118,8 @@ class Run[P = object]:
 
         Raises:
             InputError: A role no `@role` function built, an input the role doesn't accept, two
-                inputs of one type, or one that can't be written down as JSON.
+                inputs of one type, one that can't be written down as JSON, or a `commit` that's
+                empty or only whitespace.
             agl.sdk.NotFoundError: The ref this worktree was cut from names nothing.
             agl.sdk.ConflictError: Another line of work is holding this worktree's place.
             agl.sdk.DeniedError: The backend behind the role's model doesn't offer something
@@ -138,13 +139,10 @@ class Run[P = object]:
             command: The shell command line to run. An empty one passes.
 
         Returns:
-            The `VerifierOutcome`, even when the command fails. If a later step takes it as an
-                input and the command answers differently on a resume, even in its output, that
-                step runs again and throws away every commit made since the step or landing
-                before it.
+            The `VerifierOutcome`, even when the command fails.
 
         Raises:
-            InputError: `command` isn't a string.
+            InputError: `command` isn't a string, or can't be written down as JSON.
             agl.sdk.NotFoundError: The ref this worktree was cut from names nothing.
             agl.sdk.ConflictError: Another line of work is holding this worktree's place.
             agl.sdk.UpstreamUnavailable: AGL couldn't start the command.

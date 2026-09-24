@@ -7,12 +7,12 @@ first two tests are that defect closed from each side, and they are asserted aga
 verifier because `FakeVerifier` ignores `workdir` and would pass against the old route as well.
 
 **What a verification is not is the other half of this file.** It reads no project setting, so a
-workflow declaring nothing can still verify; it passes `""` through; it hands back the verifier's
-own outcome, a failing one included, rather than raising; and it writes no entry. That last one has
-a price on a resume, which the real-git test at the bottom pins rather than leaves to be
-rediscovered: a step replayed from the ledger does not touch the checkout, so a verdict taken
-between replayed steps is taken on the checkout as it stands, which can be past the head the
-ledger replayed. "Invariants where a mistake is silent" in `AGENTS.md` says what that costs.
+workflow declaring nothing can still verify; it passes `""` through; and it hands back the
+verifier's own outcome, a failing one included, rather than raising. It does write an entry, under
+the `Run` that ran it, and `test_verify_record.py` holds what a resume does with one. The real-git
+test at the bottom pins what is left of the old price: a verify with no recorded outcome runs, and
+a step replayed from the ledger does not touch the checkout, so it runs on the checkout as it
+stands, which can be past the head the ledger replayed.
 """
 
 import subprocess
@@ -31,7 +31,7 @@ from agl.config import container, registry
 from agl.ports.agent import AgentOutcome, Claude, Restriction, StopReason
 from agl.ports.errors import InputError, exit_code_for
 from agl.ports.home_layout import AglHome, RunScope
-from agl.ports.ids import ProjectName, RunLabel
+from agl.ports.ids import Namespace, ProjectName, RunLabel
 from agl.ports.tree_layout import TreesRoot
 from agl.ports.verifier import Verifier, VerifierOutcome
 from agl.sdk._engine.services import Services
@@ -183,10 +183,12 @@ async def test_a_child_that_only_verified_has_its_checkout_given_back_when_the_r
     assert fakes.repository.tip(f"agl/_work/{LABEL}/{CHILD}") is None
 
 @pytest.mark.asyncio
-async def test_a_verification_writes_no_entry_on_the_ledger(tmp_path: Path) -> None:
+async def test_a_verification_writes_an_entry_on_the_ledger_under_the_child_that_ran_it(
+    tmp_path: Path,
+) -> None:
     fakes = await _ran(tmp_path, "from_a_child", _Recording())
 
-    assert await fakes.store.namespaces(SCOPE) == ()
+    assert await fakes.store.namespaces(SCOPE) == (Namespace(CHILD),)
 
 # --- real git and a real shell ------------------------------------------------------------------
 
@@ -263,15 +265,15 @@ async def test_a_real_shell_run_from_a_child_prints_the_childs_checkout_as_its_d
     assert Path(verdict.output.strip()) == (tmp_path / "trees" / str(LABEL) / CHILD).resolve()
 
 @pytest.mark.asyncio
-async def test_a_verdict_between_replayed_steps_is_taken_on_the_checkout_as_it_stands(
+async def test_a_verify_with_no_recorded_outcome_runs_on_the_checkout_as_it_stands(
     repository: Path, tmp_path: Path
 ) -> None:
-    """The price of recording nothing, pinned so that changing it is a decision and not a tidy-up.
+    """What a verify costs where the record holds no outcome for it, as a record from before
+    verifies were recorded holds none.
 
-    The first walk commits twice. The second replays the first step, which leaves the checkout where
-    the first walk left it, and verifies: the command sees the second commit, not the first. A
-    workflow branching on that verdict - a gate fed forward into the next step's inputs - can miss
-    its next fingerprint on a resume, and a miss restores the branch back to the replayed head.
+    The first walk commits twice and verifies nothing. The second replays the first step, which
+    leaves the checkout where the first walk left it, and verifies: the command runs, and sees the
+    second commit, not the first.
     """
     services = _real(repository, tmp_path)
     base = _git(repository, "rev-parse", "HEAD").strip()

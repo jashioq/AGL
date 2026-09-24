@@ -609,7 +609,8 @@ def test_a_placeholder_naming_a_type_the_factory_does_not_accept_is_refused() ->
 
     Nothing at run time would say so. The step composes, dispatches, records and replays, and the
     agent is handed `Not provided` where the author put a value - so this is refused at the
-    declaration or it is not refused at all.
+    declaration or it is not refused at all. The message names the placeholder it found and the
+    other side, what the factory accepts, even when that is nothing.
     """
 
     @role(model=Claude.SONNET)
@@ -618,8 +619,27 @@ def test_a_placeholder_naming_a_type_the_factory_does_not_accept_is_refused() ->
 
     with pytest.raises(InputError) as refusal:
         misspelled()
-    assert "['Requst']" in str(refusal.value), "the refusal did not name the placeholder it found"
-    assert "accepts []" in str(refusal.value), "the refusal did not name the other side"
+    assert str(refusal.value) == (
+        'Role factory "misspelled" built role "review" with placeholders that no class in '
+        '`accepts=` fills: "{{Requst}}". It accepts no classes, so correct each placeholder, or '
+        "add its class to `accepts=`."
+    )
+
+def test_an_unfillable_placeholder_refusal_names_every_class_the_factory_does_accept() -> None:
+    """The other side of that message when it is not empty: the classes are what a misspelled
+    placeholder is compared against, so they stand beside it."""
+
+    @role(model=Claude.SONNET, accepts=(Request,))
+    def misspelled() -> Role:
+        return Role(name="review", instructions="review {{Tickts}} against {{Request}}")
+
+    with pytest.raises(InputError) as refusal:
+        misspelled()
+    assert str(refusal.value) == (
+        'Role factory "misspelled" built role "review" with placeholders that no class in '
+        '`accepts=` fills: "{{Tickts}}". It accepts "Request", so correct each placeholder, or '
+        "add its class to `accepts=`."
+    )
 
 def test_an_accepted_type_no_placeholder_names_is_refused_at_the_declaration() -> None:
     """The forgotten placeholder and the stale declaration, which are also one shape.
@@ -627,7 +647,8 @@ def test_an_accepted_type_no_placeholder_names_is_refused_at_the_declaration() -
     This is the direction that costs the most and shows the least: the value is matched, keyed and
     hashed into the step's digest, so two calls differing only in it are two addresses over one
     prompt - each paid for, neither replaying the other, and the agent never told what it was
-    triaging.
+    triaging. The message names the accepted type and the placeholders the instructions do hold,
+    even when they hold none.
     """
 
     @role(model=Claude.SONNET, accepts=(Request,))
@@ -636,8 +657,27 @@ def test_an_accepted_type_no_placeholder_names_is_refused_at_the_declaration() -
 
     with pytest.raises(InputError) as refusal:
         forgetful()
-    assert "['Request']" in str(refusal.value), "the refusal did not name the accepted type"
-    assert "the placeholders in its instructions are []" in str(refusal.value)
+    assert str(refusal.value) == (
+        'Role factory "forgetful" built role "review" with no placeholder for these classes in '
+        '`accepts=`: "Request". Its instructions hold no placeholders, so write "{{Request}}" '
+        "where each value belongs, or drop its class from `accepts=`."
+    )
+
+def test_an_unnamed_class_refusal_lists_the_placeholders_the_instructions_do_hold() -> None:
+    """The other half of that message when the prompt names some accepted classes and not all:
+    what it does hold is beside the spelling of what it lacks."""
+
+    @role(model=Claude.SONNET, accepts=(Request, Tickets))
+    def forgetful() -> Role:
+        return Role(name="review", instructions=_REVIEW_REQUEST)
+
+    with pytest.raises(InputError) as refusal:
+        forgetful()
+    assert str(refusal.value) == (
+        'Role factory "forgetful" built role "review" with no placeholder for these classes in '
+        '`accepts=`: "Tickets". Its instructions hold only "{{Request}}", so write "{{Tickets}}" '
+        "where each value belongs, or drop its class from `accepts=`."
+    )
 
 def test_padded_braces_are_refused_and_the_message_spells_the_one_that_works() -> None:
     """`{{ Request }}` is the reflex, and the strict grammar's one real cost without this refusal.
@@ -645,8 +685,8 @@ def test_padded_braces_are_refused_and_the_message_spells_the_one_that_works() -
     Jinja, Handlebars, Mustache and Vue all pad the braces, so this is what an author types before
     they have read anything. It matches nothing here: it is not substituted, and the scan above
     does not see it either - so the sets agree, the declaration passes, and the prompt reaches a
-    model with the author's own markup in it. Refused, and the message carries the spelling that
-    works rather than only the rule.
+    model with the author's own markup in it. Refused, and the message quotes what was written
+    and carries the spelling that works rather than only the rule.
     """
 
     @role(model=Claude.SONNET, accepts=(Request,))
@@ -655,8 +695,29 @@ def test_padded_braces_are_refused_and_the_message_spells_the_one_that_works() -
 
     with pytest.raises(InputError) as refusal:
         padded()
-    assert "['{{ Request }}']" in str(refusal.value), "the refusal did not quote what was written"
-    assert "['{{Request}}']" in str(refusal.value), "the refusal did not spell the one that works"
+    assert str(refusal.value) == (
+        'Role factory "padded" built role "review" with placeholders that AGL does not '
+        'substitute, because of whitespace inside their braces: "{{ Request }}". Write '
+        '"{{Request}}" instead.'
+    )
+
+def test_braces_padded_across_lines_are_quoted_on_one_line_with_the_fix_once() -> None:
+    """`_PADDED` takes any whitespace, so a newline can sit inside what is quoted, and the refusal
+    reaches a terminal as `agl: <message>` on one line. Two paddings of one name are two things
+    written and one spelling that works."""
+
+    @role(model=Claude.SONNET, accepts=(Request,))
+    def padded() -> Role:
+        return Role(name="review", instructions="review {{\n\tRequest\n}} against {{ Request}}")
+
+    with pytest.raises(InputError) as refusal:
+        padded()
+    assert "\n" not in str(refusal.value)
+    assert str(refusal.value) == (
+        'Role factory "padded" built role "review" with placeholders that AGL does not '
+        'substitute, because of whitespace inside their braces: "{{\\n\\tRequest\\n}}", '
+        '"{{ Request}}". Write "{{Request}}" instead.'
+    )
 
 def test_braces_that_are_not_nearly_a_placeholder_leave_a_declaration_alone() -> None:
     """The other side of that refusal, and what keeps it from being a rule about braces.

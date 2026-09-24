@@ -15,7 +15,7 @@ type JsonValue = None | bool | int | float | str | list[JsonValue] | dict[str, J
 
 _WIRE_KEYS: Final = (
     "workflow", "workflow_digests", "label", "base_ref", "base_sha", "branch", "params",
-    "created_at",
+    "created_at", "finished",
 )
 
 # The `Z` and not `isoformat`'s `+00:00`, and whole seconds, which is all this wire form holds.
@@ -154,6 +154,9 @@ class RunSpec:
 
     created_at: datetime
 
+    finished: bool = False
+    """`True` once the workflow has returned, and from then on `agl resume` refuses the run."""
+
     def __post_init__(self) -> None:
         for name, value in (
             ("workflow", self.workflow), ("base_ref", self.base_ref), ("branch", self.branch),
@@ -186,6 +189,7 @@ class RunSpec:
             "branch": self.branch,
             "params": _checked_params(self.params),
             "created_at": wire_moment(self.created_at),
+            "finished": self.finished,
         }
 
     @classmethod
@@ -203,6 +207,8 @@ class RunSpec:
         """
         if not isinstance(data, Mapping):
             raise InternalError(f"a run record is a JSON object, not a {type(data).__name__}")
+        # Older AGL versions wrote records without "finished".
+        data = {"finished": False, **data}
         _WIRE.check(data)
         digests = data["workflow_digests"]
         if not isinstance(digests, Mapping):
@@ -215,6 +221,12 @@ class RunSpec:
             raise InternalError(
                 f"run.json's 'params' is a {type(params).__name__}, and a workflow's params are a "
                 f"JSON object - whatever the workflow chose to put in it"
+            )
+        finished = data["finished"]
+        if not isinstance(finished, bool):
+            raise InternalError(
+                f'The "finished" key in run.json holds a {type(finished).__name__}, not true or '
+                f"false."
             )
         try:
             label = RunLabel(_WIRE.text(data, "label"))
@@ -230,6 +242,7 @@ class RunSpec:
             branch=_WIRE.text(data, "branch"),
             params=params,
             created_at=created_at,
+            finished=finished,
         )
 
 def _check_sha(value: str) -> None:

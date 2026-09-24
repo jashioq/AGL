@@ -139,6 +139,14 @@ def _fakes(tmp_path: Path) -> container.FakeServices:
     """Target #8's deployment, seeded so `History` has a default ref and a commit to resolve."""
     return container.fakes(TreesRoot(tmp_path / "trees"), files={"src/a.txt": b"one\n"})
 
+def _leave_unfinished(harness: container.FakeServices) -> None:
+    """Put the record back as it stood before the workflow returned, which is what a run
+    interrupted after its last line leaves, so `agl resume` walks it rather than refusing it."""
+    store = harness.services.store
+    record = asyncio.run(store.read_record(SCOPE))
+    assert record is not None, "no run.json was written for this run"
+    asyncio.run(store.write_record(SCOPE, {**record, "finished": False}))
+
 def _main(harness: container.FakeServices, *argv: str, syncer: Syncer | None = None) -> int:
     """One `agl` invocation, with this module's workflows in place of what is installed.
 
@@ -220,6 +228,7 @@ def test_a_resume_runs_the_workflow_the_record_names_with_the_params_it_stored(
     flagged_with.clear()
     harness = _fakes(tmp_path)
     assert _main(harness, "run", "flagged", "-n", "auth", "-r", "add oauth", "-c", "4") == 0
+    _leave_unfinished(harness)
 
     assert _main(harness, "resume", "auth") == 0
 
@@ -238,6 +247,7 @@ def test_a_finished_resume_is_named_the_way_the_run_command_names_one(
     """
     harness = _fakes(tmp_path)
     assert _main(harness, "run", "flagged", "-n", "auth", "-r", "x") == 0
+    _leave_unfinished(harness)
     capsys.readouterr()
 
     assert _main(harness, "resume", "auth") == 0
@@ -261,9 +271,53 @@ def test_resuming_a_label_with_no_record_exits_three(
 
     captured = capsys.readouterr()
     assert captured.err == (
-        "agl: run 'auth' does not exist - `agl run <workflow> -n auth` starts one.\n"
+        'agl: Run "auth" does not exist. To start it, run `agl run <workflow> -n auth`.\n'
     )
     assert captured.out == ""
+
+def test_resuming_a_finished_run_exits_four_and_names_its_branch_and_the_clear(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`api.resume`'s `ConflictError` for a run whose workflow returned, through the handler: 4 out
+    of the one table, the sentence after the program's name, and the workflow not entered again."""
+    flagged_with.clear()
+    harness = _fakes(tmp_path)
+    assert _main(harness, "run", "flagged", "-n", "auth", "-r", "x") == 0
+    capsys.readouterr()
+
+    assert _main(harness, "resume", "auth") == 4
+
+    captured = capsys.readouterr()
+    assert captured.err == (
+        'agl: Run "auth" finished, and its work is on branch "agl/auth". To free the label, run '
+        "`agl clear auth`, which deletes that branch.\n"
+    )
+    assert captured.out == ""
+    assert flagged_with == [FlaggedParams(request="x", concurrent=3)]
+
+def test_agl_clear_frees_a_finished_runs_label_as_the_refusal_says(tmp_path: Path) -> None:
+    """The move the refusal names is one that works: after `agl clear auth`, `agl run -n auth`
+    starts a new run under the label instead of being refused for the old one."""
+    harness = _fakes(tmp_path)
+    assert _main(harness, "run", "flagged", "-n", "auth", "-r", "x") == 0
+    assert _main(harness, "resume", "auth") == 4
+
+    assert _main(harness, "clear", "auth") == 0
+
+    assert _main(harness, "run", "flagged", "-n", "auth", "-r", "again") == 0
+
+def test_a_finished_run_is_refused_before_the_resume_installs_anything(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The refusal reads only the record, so it comes before the install: with an installer that
+    could not be started, the answer is the refusal's 4 and not the 6 a missing uv gets."""
+    harness = _fakes(tmp_path)
+    assert _main(harness, "run", "flagged", "-n", "auth", "-r", "x") == 0
+    capsys.readouterr()
+
+    assert _main(harness, "resume", "auth", syncer=_Unstartable()) == 4
+
+    assert "uv" not in capsys.readouterr().err
 
 def test_a_label_the_filesystem_would_not_take_exits_two(tmp_path: Path) -> None:
     """`RunLabel` validates on the way in and its `InputError` is the same 2 `agl run` answers with.
@@ -361,6 +415,7 @@ def test_a_resume_that_replayed_two_steps_says_so_on_stderr_and_names_the_clear(
     halt.clear()
     harness = _fakes(tmp_path)
     assert _main(harness, "run", "stepping", "-n", "auth", "-r", "x") == 0
+    _leave_unfinished(harness)
     capsys.readouterr()
 
     assert _main(harness, "resume", "auth") == 0
@@ -417,6 +472,7 @@ def test_a_run_says_nothing_because_a_label_with_a_ledger_is_refused_not_replaye
     assert "Replayed" not in first.err
     assert first.out == 'Run "auth" finished and left its changes on branch: agl/auth\n'
 
+    _leave_unfinished(harness)
     assert _main(harness, "resume", "auth") == 0
     capsys.readouterr()
 
@@ -442,6 +498,7 @@ def test_an_install_this_command_could_not_finish_stops_the_resume_before_it_wal
     """
     harness = _fakes(tmp_path)
     assert _main(harness, "run", "flagged", "-n", "auth", "-r", "add oauth") == 0
+    _leave_unfinished(harness)
     flagged_with.clear()
     capsys.readouterr()
     installer = FakeSyncer()
@@ -465,6 +522,7 @@ def test_an_installer_that_could_not_be_started_stops_the_resume_before_it_walks
     """
     harness = _fakes(tmp_path)
     assert _main(harness, "run", "flagged", "-n", "auth", "-r", "add oauth") == 0
+    _leave_unfinished(harness)
     flagged_with.clear()
     capsys.readouterr()
 

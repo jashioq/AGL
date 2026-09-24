@@ -95,7 +95,7 @@ SCOPE: Final = RunScope(PROJECT, LABEL)
 # published shape of the file is what this asserts and a record that agreed with itself would pass.
 WIRE_KEYS: Final = frozenset(
     {"workflow", "workflow_digests", "label", "base_ref", "base_sha", "branch", "params",
-     "created_at"}
+     "created_at", "finished"}
 )
 
 @dataclass(frozen=True)
@@ -208,6 +208,13 @@ async def _record(harness: container.FakeServices) -> dict[str, JsonValue]:
     assert record is not None, "no run.json was written for this run"
     return record
 
+async def _leave_unfinished(services: Services) -> None:
+    """Put the record back as it stood before the workflow returned, which is what a run
+    interrupted after its last line leaves, so `api.resume` walks it rather than refusing it."""
+    record = await services.store.read_record(SCOPE)
+    assert record is not None, "no run.json was written for this run"
+    await services.store.write_record(SCOPE, {**record, "finished": False})
+
 async def _run(
     harness: container.FakeServices, name: str = "probe",
     argv: Sequence[str] = ("-r", "add oauth"), *, base_ref: str | None = None,
@@ -255,6 +262,7 @@ async def test_the_record_holds_exactly_the_published_fields(tmp_path: Path) -> 
     assert record["branch"] == run_branch(LABEL) == "agl/auth"
     assert record["created_at"] == "2026-08-18T09:14:02Z"
     assert record["params"] == {"request": "add oauth", "concurrent": 3}
+    assert record["finished"] is True
     # Written by AGL and read back by AGL: the record survives the round trip it exists for.
     assert RunSpec.from_json(record).label == LABEL
 
@@ -1070,6 +1078,7 @@ async def test_a_resume_refuses_a_declared_key_the_project_file_has_lost_since_t
     _directory(home, "gated", _configuring("gated", "probe", '["lint"]'))
     services = replace(_fakes(tmp_path).services, config={"lint": "ruff check"})
     await api.run(services, PROJECT, "gated", LABEL, ("-r", "add oauth"), home=home)
+    await _leave_unfinished(services)
     probe = _Readiness()
 
     with pytest.raises(InputError) as refused:
@@ -1213,6 +1222,7 @@ async def test_a_resume_reaches_the_venv_its_own_install_just_built(tmp_path: Pa
     _directory(home, "triage", _declaring("triage", "stepping"))
     harness = _fakes(tmp_path)
     await api.run(harness.services, PROJECT, "triage", LABEL, (), syncer=_Installer(), home=home)
+    await _leave_unfinished(harness.services)
     assert str(_site(home)) not in sys.path
     installer = _Installer(_site(home))
 
@@ -1251,6 +1261,7 @@ async def test_a_resume_refuses_a_workflow_that_a_module_installed_since_now_sha
         syncer=_Installer(_site(home)),
         home=home,
     )
+    await _leave_unfinished(harness.services)
     installer = _Installer(_site(home), plants=_SHADOWED_LATER)
 
     with pytest.raises(InputError) as refused:

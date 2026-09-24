@@ -194,6 +194,13 @@ def _run(services: container.Services) -> Run[None]:
     """A root `Run` on a bundle, with no repository behind it - nothing here takes a step."""
     return Run(params=None, services=services, scope=SCOPE, base=BASE)
 
+async def _leave_unfinished(services: container.Services) -> None:
+    """Put the record back as it stood before the workflow returned, which is what a run
+    interrupted after its last line leaves, so `api.resume` walks it rather than refusing it."""
+    record = await services.store.read_record(SCOPE)
+    assert record is not None, "no run.json was written for this run"
+    await services.store.write_record(SCOPE, {**record, "finished": False})
+
 # --- run.terminal is the bundle's terminal --------------------------------------------------------
 
 def test_run_terminal_is_the_object_in_the_bundle(tmp_path: Path) -> None:
@@ -342,6 +349,7 @@ async def test_a_workflow_can_show_a_screen_through_api_resume(tmp_path: Path) -
     """
     harness = _fakes(tmp_path)
     await api.run(harness.services, PROJECT, "showing", LABEL, (), points=POINTS)
+    await _leave_unfinished(harness.services)
     answers.clear()
     terminals.clear()
 
@@ -366,6 +374,7 @@ async def test_the_terminal_is_entered_once_around_a_resumed_workflow(tmp_path: 
     recorder = _Recording()
     services = harness.with_terminal(recorder).services
     await api.run(services, PROJECT, "showing", LABEL, (), points=POINTS)
+    await _leave_unfinished(services)
     recorder.entered = 0
 
     await api.resume(services, PROJECT, LABEL, points=POINTS)

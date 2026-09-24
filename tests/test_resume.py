@@ -39,6 +39,7 @@ typed; that a run's number is always nought is a consequence of `api.run` refusi
 a record, and is asserted here as a claim about the count rather than left implied.
 """
 
+import asyncio
 import sys
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
@@ -185,6 +186,17 @@ async def two_steps(run: Run[ResumeParams]) -> None:
     produced.append(await run.step(second()))
 
 @workflow
+async def cancelling(run: Run[ResumeParams]) -> None:
+    """`two_steps` cancelled between its steps, which is how Ctrl-C reaches a workflow: on SIGINT
+    `asyncio.run` cancels its main task, and raises `KeyboardInterrupt` only once that has unwound.
+    """
+    handed.append(run)
+    produced.append(await run.step(first()))
+    if interrupt:
+        raise asyncio.CancelledError(interrupt[0])
+    produced.append(await run.step(second()))
+
+@workflow
 async def branching(run: Run[ResumeParams]) -> None:
     """One step here and one in a child worktree, so a replay of it spans two namespaces.
 
@@ -227,6 +239,7 @@ def _point(name: str, attribute: str) -> EntryPoint:
 
 POINTS: Final = (
     _point("two_steps", "two_steps"),
+    _point("cancelling", "cancelling"),
     _point("branching", "branching"),
     _point("quiet", "quiet"),
     _point("halting", "halting"),
@@ -265,6 +278,12 @@ async def _record(harness: container.FakeServices) -> dict[str, JsonValue]:
     record = await harness.services.store.read_record(SCOPE)
     assert record is not None, "no run.json was written for this run"
     return record
+
+async def _leave_unfinished(harness: container.FakeServices) -> None:
+    """Put the record back as it stood before the workflow returned, which is what a run
+    interrupted after its last line leaves, so `api.resume` walks it rather than refusing it."""
+    record = await _record(harness)
+    await harness.services.store.write_record(SCOPE, {**record, "finished": False})
 
 async def _start(
     harness: container.FakeServices,
@@ -339,7 +358,9 @@ async def test_a_resumed_run_replays_the_completed_step_and_runs_only_the_rest(
     ], "the replayed step did not hand back the value its entry recorded"
 
 @pytest.mark.asyncio
-async def test_resuming_a_finished_run_runs_no_worker_at_all(tmp_path: Path) -> None:
+async def test_resuming_a_run_that_died_after_its_last_step_runs_no_worker_at_all(
+    tmp_path: Path,
+) -> None:
     """The other end of the sweep: everything is on the ledger, so nothing is asked of an agent.
 
     This is the case that separates "replays" from "happens to produce the same answer" - both
@@ -350,6 +371,7 @@ async def test_resuming_a_finished_run_runs_no_worker_at_all(tmp_path: Path) -> 
     _clear()
 
     await _start(harness)
+    await _leave_unfinished(harness)
     assert dispatched == ["do the first thing", "do the second thing"]
 
     _clear()
@@ -380,12 +402,130 @@ async def test_the_workflow_is_handed_its_params_as_the_dataclass_the_record_sto
     _clear()
 
     await _start(harness, argv=("-r", "add oauth", "-c", "4"))
+    await _leave_unfinished(harness)
     _clear()
     await _resume(harness)
 
     assert isinstance(handed[0].params, ResumeParams)
     assert handed[0].params == ResumeParams(request="add oauth", concurrent=4)
     assert type(handed[0].params.concurrent) is int
+
+# --- a run whose workflow returned is finished ----------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_a_run_whose_workflow_returned_is_refused_a_resume_with_exit_four(
+    tmp_path: Path,
+) -> None:
+    """A finished run's work is on its branch, and all a resume could still do is move it back.
+
+    `ConflictError`, exit 4, before anything is spent: the workflow is not entered again, no agent
+    is paid, and the record is left as the run wrote it. The message is asserted whole: where the
+    work is, and what freeing the label costs.
+    """
+    dispatched: list[str] = []
+    harness = _fakes(tmp_path, dispatched)
+    _clear()
+    await _start(harness)
+    before = await _record(harness)
+    assert before["finished"] is True, "the workflow returned and the record does not say so"
+    _clear()
+
+    with pytest.raises(ConflictError) as caught:
+        await _resume(harness)
+
+    assert str(caught.value) == (
+        'Run "auth" finished, and its work is on branch "agl/auth". To free the label, run '
+        "`agl clear auth`, which deletes that branch."
+    )
+    assert exit_code_for(caught.value) == 4
+    assert handed == [], "a resume of a finished run entered its workflow again"
+    assert dispatched == ["do the first thing", "do the second thing"]
+    assert await _record(harness) == before, "the refused resume changed the record"
+
+@pytest.mark.asyncio
+async def test_a_crashed_run_records_no_finish_and_its_resumed_return_records_one(
+    tmp_path: Path,
+) -> None:
+    """`finished` is written when the workflow returns, whichever invocation walked it there.
+
+    A crash between the two steps leaves it false, so the resume is accepted; the resumed workflow
+    returns, so the record then says finished and the next resume is refused.
+    """
+    dispatched: list[str] = []
+    harness = _fakes(tmp_path, dispatched)
+    _clear()
+    interrupt.append("killed between the two steps")
+    with pytest.raises(Interrupted):
+        await _start(harness)
+    assert (await _record(harness))["finished"] is False, "a run that crashed reads as finished"
+
+    _clear()
+    await _resume(harness)
+
+    assert (await _record(harness))["finished"] is True, "a resumed run returned and is unmarked"
+    with pytest.raises(ConflictError):
+        await _resume(harness)
+
+@pytest.mark.asyncio
+async def test_a_run_that_ended_with_a_stop_is_not_finished_and_resumes(
+    tmp_path: Path,
+) -> None:
+    """A `Stop` is a deliberate end and not a return, so the record stays unfinished and the resume
+    walks the workflow again, here to the same `Stop`."""
+    dispatched: list[str] = []
+    harness = _fakes(tmp_path, dispatched)
+    _clear()
+    with pytest.raises(ReviewNotConverging):
+        await _start(harness, "halting", ())
+    assert (await _record(harness))["finished"] is False, "a run that stopped reads as finished"
+
+    _clear()
+    with pytest.raises(ReviewNotConverging):
+        await _resume(harness)
+
+    assert len(handed) == 1, "the resume did not enter the stopped run's workflow again"
+    assert (await _record(harness))["finished"] is False
+
+@pytest.mark.asyncio
+async def test_a_run_cancelled_the_way_ctrl_c_cancels_one_is_not_finished_and_resumes(
+    tmp_path: Path,
+) -> None:
+    """A cancellation is not a return: the record stays unfinished, and the resume replays the
+    first step and pays for the second."""
+    dispatched: list[str] = []
+    harness = _fakes(tmp_path, dispatched)
+    _clear()
+    interrupt.append("Ctrl-C between the two steps")
+    with pytest.raises(asyncio.CancelledError):
+        await _start(harness, "cancelling")
+    assert (await _record(harness))["finished"] is False, "a cancelled run reads as finished"
+
+    _clear()
+    replayed = await _resume(harness)
+
+    assert replayed.steps == 1
+    assert dispatched == ["do the first thing", "do the second thing"]
+    assert (await _record(harness))["finished"] is True
+
+@pytest.mark.asyncio
+async def test_a_record_from_before_finished_was_kept_resumes_as_an_unfinished_run(
+    tmp_path: Path,
+) -> None:
+    """An older AGL wrote no `finished` key, even for a run that returned, and such a record reads
+    as a run that did not finish: the resume is accepted, and its return marks the run finished."""
+    dispatched: list[str] = []
+    harness = _fakes(tmp_path, dispatched)
+    _clear()
+    await _start(harness)
+    older = {key: value for key, value in (await _record(harness)).items() if key != "finished"}
+    await harness.services.store.write_record(SCOPE, older)
+
+    _clear()
+    replayed = await _resume(harness)
+
+    assert replayed.steps == 2
+    assert dispatched == ["do the first thing", "do the second thing"]
+    assert await _record(harness) == {**older, "finished": True}
 
 # --- what the walk replayed, counted --------------------------------------------------------------
 #
@@ -442,7 +582,7 @@ async def test_a_run_that_took_two_steps_of_its_own_replayed_neither_of_them(
     assert dispatched == ["do the first thing", "do the second thing"]
 
 @pytest.mark.asyncio
-async def test_resuming_a_finished_run_counts_every_step_the_ledger_already_held(
+async def test_resuming_a_run_that_died_after_its_last_step_counts_every_step_it_held(
     tmp_path: Path,
 ) -> None:
     """The far end of the sweep, where the count is the whole workflow and no agent is paid.
@@ -456,6 +596,7 @@ async def test_resuming_a_finished_run_counts_every_step_the_ledger_already_held
     _clear()
 
     await _start(harness)
+    await _leave_unfinished(harness)
     _clear()
     replayed = await _resume(harness)
 
@@ -484,6 +625,7 @@ async def test_the_count_spans_namespaces_and_holds_a_child_worktrees_replayed_s
         "the child never got a namespace of its own, so this run has one journal and the count "
         "below would be right for the wrong reason"
     )
+    await _leave_unfinished(harness)
 
     _clear()
     replayed = await _resume(harness)
@@ -491,7 +633,7 @@ async def test_the_count_spans_namespaces_and_holds_a_child_worktrees_replayed_s
     assert replayed.steps == 2
     assert dispatched == ["do the first thing", "do the second thing"]
 
-# --- the record is read and never written --------------------------------------------------------
+# --- the record is rewritten only to mark the run finished ---------------------------------------
 
 class _Counting(Store):
     """The bundle's own store with a note taken of every write it is asked for, and nothing changed.
@@ -541,35 +683,31 @@ class _Counting(Store):
         await self._store.remove(scope)
 
 @pytest.mark.asyncio
-async def test_a_resume_does_not_rewrite_run_json(tmp_path: Path) -> None:
-    """The pin, from the side only a resume can show it from - and `api.resume`'s bold claim.
+async def test_a_resume_rewrites_run_json_only_to_mark_the_run_finished(tmp_path: Path) -> None:
+    """The pin, from the side only a resume can show it from.
 
     Both hands that could move the record are moved between the two invocations: the clock, so a
     `created_at` rewritten with "now" would differ, and the repository's default branch, so a
     `base_sha` re-resolved from `base_ref` would name the commit that landed rather than the one
     the run was cut from.
 
-    **The count is what measures the claim, and the equality below it does not.** `api.resume` says
-    "The record is read and never rewritten", and comparing the contents afterwards is strictly
-    weaker than that: `RunSpec.from_json(record).to_json()` is a fixpoint over the wire shape, so a
-    resume that read the record and wrote the very same mapping back would leave every field equal
-    and every assertion about them green. That write is not nothing. It is a port call, and on a
-    `FilesystemStore` it rewrites the file, moves its mtime, and turns a crash mid-resume into a
-    truncated record that was never meant to move - which is `ports/store.py`'s "the one value in
-    AGL that has no other copy anywhere".
+    **The count is what measures the claim, and the equality below it does not.** A resume writes
+    the record once, after its workflow returns, and that write moves `finished` and nothing else.
+    `RunSpec.from_json(record).to_json()` is a fixpoint over the wire shape, so a resume that also
+    wrote what it read back at the start would leave every field equal and be visible only here.
 
     **The run's own write is what makes the count non-vacuous.** One `write_record` before the
-    interruption and not one more afterwards, so a counter that never counted anything would fail
-    the first assertion rather than pass the second. The equality is kept beside it because it says
-    which *fields* a rewrite would have moved, and the clock and the landed commit are arranged for
-    exactly that.
+    interruption, so a counter that never counted anything would fail the first assertion rather
+    than pass the second.
     """
     dispatched: list[str] = []
     harness = _fakes(tmp_path, dispatched)
     counting = _Counting(harness.store)
     harness = harness.with_store(counting)
     _clear()
-    await _start(harness)
+    interrupt.append("killed between the two steps")
+    with pytest.raises(Interrupted):
+        await _start(harness)
     before = await _record(harness)
     pinned = before["base_sha"]
     assert isinstance(pinned, str)
@@ -586,16 +724,15 @@ async def test_a_resume_does_not_rewrite_run_json(tmp_path: Path) -> None:
     _clear()
     await _resume(harness)
 
-    assert counting.wrote == [SCOPE], (
-        "a resume called `Store.write_record`. `api.resume` promises the record is read and never "
-        "rewritten, and the contents being unchanged is not that promise: the wire shape is a "
-        "fixpoint, so a resume rewriting what it read is invisible in the record and visible only "
-        "here - as a moved mtime on a real store, and as a truncated `run.json` if it dies partway"
+    assert counting.wrote == [SCOPE, SCOPE], (
+        "a resume that returned wrote the record other than once, and the one write it owes is "
+        "the one that marks the run finished"
     )
-    assert await _record(harness) == before, (
-        "a resume rewrote the record. `base_sha` pins the resolved commit so that a commit landing "
-        "on `main` between run and resume cannot move the first step's starting head - a "
-        "resume that re-resolved and stored the answer performs the failure the field prevents"
+    assert await _record(harness) == {**before, "finished": True}, (
+        "a resume rewrote more of the record than `finished`. `base_sha` pins the resolved commit "
+        "so that a commit landing on `main` between run and resume cannot move the first step's "
+        "starting head - a resume that re-resolved and stored the answer performs the failure the "
+        "field prevents"
     )
     assert handed[0].base == pinned, "the resumed run started from somewhere other than the pin"
 
@@ -661,6 +798,7 @@ async def test_a_resume_reopens_base_from_the_pin_even_when_the_workflow_takes_n
     _clear()
 
     await api.run(services, PROJECT, "quiet", LABEL, (), points=POINTS)
+    await _leave_unfinished(harness)
     pinned = (await _record(harness))["base_sha"]
     assert isinstance(pinned, str)
     landed = harness.repository.record(
@@ -702,7 +840,7 @@ async def test_a_label_with_no_record_is_a_not_found_and_reads_as_runs_mirror(
         await _resume(harness)
 
     assert str(caught.value) == (
-        "run 'auth' does not exist - `agl run <workflow> -n auth` starts one."
+        'Run "auth" does not exist. To start it, run `agl run <workflow> -n auth`.'
     )
     assert exit_code_for(caught.value) == 3
     assert handed == [], "a resume of a run that does not exist invoked a workflow anyway"
@@ -730,6 +868,7 @@ async def test_params_the_workflows_current_class_will_not_take_are_refused(
     harness = _fakes(tmp_path, dispatched)
     _clear()
     await _start(harness, "drifting", ("-r", "add oauth"), points=BEFORE)
+    await _leave_unfinished(harness)
 
     with pytest.raises(InputError) as caught:
         await _resume(harness, points=AFTER)
@@ -749,6 +888,7 @@ async def test_a_workflow_the_record_names_and_nothing_registers_is_a_not_found(
     harness = _fakes(tmp_path, dispatched)
     _clear()
     await _start(harness, "quiet", ())
+    await _leave_unfinished(harness)
 
     with pytest.raises(NotFoundError) as caught:
         await _resume(harness, points=(_point("two_steps", "two_steps"),))
@@ -847,6 +987,7 @@ async def test_a_file_edited_in_the_workflow_directory_refuses_the_resume_and_is
     directory = _directory(home)
     _clear()
     await api.run(harness.services, PROJECT, "triage", LABEL, (), home=home)
+    await _leave_unfinished(harness)
     before = await _record(harness)
 
     (directory / "prompts" / "review.md").write_text("# review\n\nsay it differently\n", "utf-8")
@@ -882,6 +1023,7 @@ async def test_a_file_added_beside_the_workflow_and_one_taken_away_are_told_apar
     directory = _directory(home)
     _clear()
     await api.run(harness.services, PROJECT, "triage", LABEL, (), home=home)
+    await _leave_unfinished(harness)
 
     (directory / "prompts" / "plan.md").write_text("# plan\n", encoding="utf-8")
     (directory / "roles.py").unlink()
@@ -910,6 +1052,7 @@ async def test_a_directory_rewritten_wholesale_names_five_files_and_counts_the_r
     directory = _directory(home)
     _clear()
     await api.run(harness.services, PROJECT, "triage", LABEL, (), home=home)
+    await _leave_unfinished(harness)
 
     for index in range(15):
         (directory / f"step{index:02d}.py").write_text(f"STEP = {index}\n", encoding="utf-8")
@@ -935,6 +1078,7 @@ async def test_a_run_recorded_clean_resumes_after_finder_leaves_a_ds_store_in_it
     directory = _directory(home)
     _clear()
     await api.run(harness.services, PROJECT, "triage", LABEL, (), home=home)
+    await _leave_unfinished(harness)
 
     (directory / ".DS_Store").write_bytes(b"\x00\x00\x00\x01Bud1")
     (directory / "prompts" / ".DS_Store").write_bytes(b"\x00\x00\x00\x01Bud1")
@@ -976,6 +1120,7 @@ async def test_a_resume_of_an_untouched_directory_replays_although_the_run_impor
     _clear()
 
     await api.run(harness.services, PROJECT, IMPORTED, LABEL, (), home=home)
+    await _leave_unfinished(harness)
     await api.resume(harness.services, PROJECT, LABEL, home=home)
 
     assert (directory / "__pycache__").is_dir(), (
@@ -1122,6 +1267,7 @@ async def test_the_params_rebuild_refuses_before_preflight_spends_a_turn(tmp_pat
     harness = _fakes(tmp_path, dispatched)
     _clear()
     await _start(harness, "drifting", ("-r", "add oauth"), points=BEFORE)
+    await _leave_unfinished(harness)
     runner = _NotReady()
     services = replace(harness.services, agents=runner)
 
@@ -1211,8 +1357,8 @@ async def test_a_resume_refused_at_preflight_takes_no_lock_and_writes_nothing(
     run refused at preflight must leave nothing under `AGL_HOME`, or an operator has to `agl clear`
     a run that never started before retrying the one they meant. A resume *requires* a record to
     exist, so its absence is not available as the assertion; what a refused resume owes is the
-    record it found, unmoved - `api.resume`'s "The record is read and never rewritten" - and not one
-    new step on the ledger.
+    record it found, unmoved - a resume writes the record only once its workflow returns - and not
+    one new step on the ledger.
 
     The run in front is what stops that being a claim about an empty store. It is interrupted
     between its two steps, so there is exactly one record and one entry standing when the resume is
@@ -1260,9 +1406,9 @@ async def test_a_resume_refused_at_preflight_takes_no_lock_and_writes_nothing(
         "in this test holds of a resume that refused above it for some reason of its own"
     )
     assert counting.wrote == [], (
-        "a resume refused at preflight rewrote `run.json`. `api.resume` promises the record is "
-        "read and never rewritten, and the invocation with least business moving it is the one "
-        "that declined to walk the run at all"
+        "a resume refused at preflight rewrote `run.json`. A resume writes the record only once "
+        "its workflow returns, and the invocation with least business moving it is the one that "
+        "declined to walk the run at all"
     )
     assert counting.entries == [], "a resume refused at preflight appended a step to the ledger"
     assert await _record(harness) == before, (

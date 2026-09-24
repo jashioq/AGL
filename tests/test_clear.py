@@ -287,6 +287,13 @@ async def _clear(harness: container.FakeServices) -> api.Cleared:
     """`agl clear auth`, and the listing of what it took away."""
     return await api.clear(harness.services, PROJECT, LABEL)
 
+async def _leave_unfinished(harness: container.FakeServices) -> None:
+    """Put the record back as it stood before the workflow returned, which is what a run
+    interrupted after its last line leaves, so `api.resume` walks it rather than refusing it."""
+    record = await harness.services.store.read_record(SCOPE)
+    assert record is not None, "no run.json was written for this run"
+    await harness.services.store.write_record(SCOPE, {**record, "finished": False})
+
 def _merged(harness: container.FakeServices) -> None:
     """Move the base ref up to the run's own branch: the world in which the work has landed.
 
@@ -760,6 +767,7 @@ async def test_a_clear_aimed_at_a_live_resume_refuses_too(tmp_path: Path) -> Non
     harness = _fakes(tmp_path)
     await _start(harness, "clearing")
     assert len(refused) == 1, "the run's own claim is what the other test is about"
+    await _leave_unfinished(harness)
 
     await api.resume(harness.services, PROJECT, LABEL, points=POINTS)
 
@@ -802,7 +810,7 @@ async def test_a_label_with_no_record_is_a_not_found_and_reads_as_the_third_of_t
     with pytest.raises(NotFoundError) as absent:
         await api.resume(harness.services, PROJECT, RunLabel("other"), points=POINTS)
     assert str(absent.value) == (
-        "run 'other' does not exist - `agl run <workflow> -n other` starts one."
+        'Run "other" does not exist. To start it, run `agl run <workflow> -n other`.'
     )
 
 @pytest.mark.asyncio

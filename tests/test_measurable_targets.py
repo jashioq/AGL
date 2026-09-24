@@ -139,8 +139,8 @@ from agl.config.schema import AgentSettings
 from agl.ports.agent import Provider
 from agl.ports.fetch import FetchedFile
 from agl.ports.get_request import RepositoryAtRef
-from agl.ports.home_layout import AglHome, workflows_dir
-from agl.ports.ids import ProjectName
+from agl.ports.home_layout import AglHome, RunScope, workflows_dir
+from agl.ports.ids import ProjectName, RunLabel
 from agl.ports.tree_layout import TreesRoot, run_branch, worktree_branch
 from agl.sdk import Claude, Namespace, Role, Run, Workflow, arg, role, workflow
 from agl.testing import AgentTask, Reply
@@ -1021,6 +1021,14 @@ def _eight_agent(task: AgentTask) -> Reply:
     """An agent that says it did something and touches nothing - no worktree state is asserted."""
     return Reply(says="done")
 
+def _leave_unfinished(fakes: container.FakeServices, scope: RunScope) -> None:
+    """Put the record back as it stood before the workflow returned, which is what a run
+    interrupted after its last line leaves, so `agl resume` walks it rather than refusing it."""
+    store = fakes.services.store
+    record = asyncio.run(store.read_record(scope))
+    assert record is not None, "no run.json was written for this run"
+    asyncio.run(store.write_record(scope, {**record, "finished": False}))
+
 def test_every_declared_command_runs_on_fakes_with_no_way_out(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1047,7 +1055,8 @@ def test_every_declared_command_runs_on_fakes_with_no_way_out(
     that reach it are `new`, `get`, `update`, `run` and `resume`, the commands a sync is folded
     into - and `fetcher` is a `FakeFetcher` holding the one workflow the `get` row asks for, served
     again at a later commit once that row has run, so the `update` row finds its ref moved; it is
-    the field whose real default would open a socket.
+    the field whose real default would open a socket. The `run` row's record is then put back as
+    a run interrupted after its last line leaves it, because `agl resume` refuses a finished run.
     Nothing here reaches into a module's internals; the only patching in this test is the poison,
     which is the assertion rather than the arrangement.
 
@@ -1105,6 +1114,8 @@ def test_every_declared_command_runs_on_fakes_with_no_way_out(
         statuses[name] = main.main(argv, compose=compose)
         if name == "get":
             fetcher.serves(_EIGHT_REPOSITORY, _EIGHT_UPDATE, commit=_EIGHT_MOVED)
+        if name == "run":
+            _leave_unfinished(fakes, RunScope(ProjectName(repo.name), RunLabel("auth")))
 
     assert statuses == dict.fromkeys(driven, 0), (
         f"the commands answered {statuses}. Target #8 is that every one of them runs end-to-end on "

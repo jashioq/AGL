@@ -14,9 +14,11 @@ from agl.ports.home_layout import RunScope
 from agl.ports.ids import StepName
 from agl.ports.run import JsonValue, WireShape, checked_text, wire_moment
 from agl.ports.store import Store
+from agl.ports.verifier import VerifierOutcome
 from agl.ports.workspace import Workspace
 
 __all__ = [
+    "VERIFY_STEP",
     "Entry",
     "Fingerprints",
     "Journal",
@@ -25,6 +27,14 @@ __all__ = [
     "read_entry",
     "write_entry",
 ]
+
+# A role may take this name too: a role's bases are sha256 digests, so no digest is shared.
+VERIFY_STEP: Final = StepName("run.verify")
+
+# One base for every verify, so its ordinal alone is its point in the `Run`.
+_VERIFY_POINT: Final = str(VERIFY_STEP)
+
+_VERIFY_FIELDS: Final = frozenset({"command", "passed", "status", "output"})
 
 _SEPARATORS: Final = (",", ":")
 
@@ -272,6 +282,40 @@ class Journal:
             self._last_good = head
             return result
 
+    async def verify(
+        self, command: str, worker: Callable[[], Awaitable[VerifierOutcome]]
+    ) -> VerifierOutcome:
+        checked_text(command, "`run.verify`'s command")
+        # Held while a step or a landing works in this worktree, which is then at no recorded head.
+        if self._running.locked():
+            return await worker()
+        head = self._last_good
+        digest = self._fingerprints.digest(self._scope, VERIFY_STEP, _VERIFY_POINT)
+        entry = await read_entry(self._store, self._scope, VERIFY_STEP, digest)
+        if entry is not None:
+            recorded, outcome = _verify_entry(entry.value, self._scope)
+            if recorded == command and entry.head == head:
+                self._fingerprints.claim(self._scope, VERIFY_STEP, _VERIFY_POINT)
+                return outcome
+
+        outcome = await worker()
+        value: dict[str, JsonValue] = {
+            "command": command,
+            "passed": outcome.passed,
+            "status": outcome.status,
+            "output": outcome.output,
+        }
+        _check_result(value, f'the outcome of `run.verify` for "{command}"')
+        await write_entry(
+            self._store,
+            self._scope,
+            VERIFY_STEP,
+            digest,
+            Entry(fingerprint=digest, value=value, head=head, at=self._clock.now()),
+        )
+        self._fingerprints.claim(self._scope, VERIFY_STEP, _VERIFY_POINT)
+        return outcome
+
     async def _end(self, commit: str | None) -> None:
         ending = asyncio.create_task(self._ending(commit))
         cancellation: asyncio.CancelledError | None = None
@@ -299,6 +343,23 @@ class Journal:
             await self._workspace.commit_all(commit)
         else:
             await self._workspace.restore(self._last_good)
+
+def _verify_entry(value: JsonValue, scope: RunScope) -> tuple[str, VerifierOutcome]:
+    if isinstance(value, dict) and value.keys() == _VERIFY_FIELDS:
+        command, passed, status, output = (
+            value["command"], value["passed"], value["status"], value["output"]
+        )
+        if (
+            isinstance(command, str)
+            and isinstance(passed, bool)
+            and isinstance(status, int)
+            and not isinstance(status, bool)
+            and isinstance(output, str)
+        ):
+            return command, VerifierOutcome(passed=passed, status=status, output=output)
+    raise InternalError(
+        f'Run "{scope.label}" holds a recorded `run.verify` outcome that AGL did not write.'
+    )
 
 def _dumps(value: JsonValue) -> str:
     # `ensure_ascii=True` writes an astral character and the surrogate pair encoding it as the same

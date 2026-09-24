@@ -1,5 +1,6 @@
+import json
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Final
 from agl.ports.errors import InputError
 from agl.sdk._engine.journal import canonical_json
@@ -69,40 +70,30 @@ def _spelled(name: str) -> str:
 
 def _padded_braces(factory: str, role: str, padded: Mapping[str, str]) -> str:
     return (
-        f"the role {role!r}, built by the factory {factory!r}, writes {sorted(padded)} in its "
-        f"instructions, and a placeholder is spelled `{{{{Name}}}}` with nothing inside the braces "
-        f"but the name. Padded, it is literal text: nothing substitutes it, the agent is handed it "
-        f"exactly as it stands, and the scan that compares a prompt against `accepts=` does not "
-        f"see it either - so a placeholder written this way fails in silence, which is the one "
-        f"thing this refusal exists to stop. The name is matched against a type's `__qualname__` "
-        f"and there is no space in one, so a spelling that had to be trimmed before it matched "
-        f"would be a second spelling of one placeholder with nothing holding the two together. "
-        f"Every templating engine an author has written pads the braces, so this is the reflex "
-        f"rather than a rare slip: write {sorted(set(padded.values()))} instead"
+        f'Role factory "{factory}" built role "{role}" with placeholders that AGL does not '
+        f"substitute, because of whitespace inside their braces: {_quoted(padded)}. Write "
+        f"{_quoted(set(padded.values()))} instead."
     )
 
 def _unfillable(
     factory: str, role: str, unfillable: frozenset[str], declared: frozenset[str]
 ) -> str:
+    accepted = _quoted(declared) if declared else "no classes"
     return (
-        f"the role {role!r}, built by the factory {factory!r}, writes the placeholders "
-        f"{sorted(unfillable)} and accepts {sorted(declared)}, so nothing can ever fill them. A "
-        f"step's inputs are recorded under the name of the declared type each was matched to, so a "
-        f"placeholder naming a type this role does not accept stands for a value no call can "
-        f"supply: it renders `{_MISSING}` at every step this role ever runs, and the run pays for "
-        f"each of them. Either the name is misspelled, or the type belongs in `accepts=` on the "
-        f"factory's own decorator - `@role(model=..., accepts=(...))`, which is where it is "
-        f"declared and never on the `Role` itself"
+        f'Role factory "{factory}" built role "{role}" with placeholders that no class in '
+        f"`accepts=` fills: {_quoted(map(_spelled, unfillable))}. It accepts {accepted}, so "
+        f"correct each placeholder, or add its class to `accepts=`."
     )
 
 def _unnamed(factory: str, role: str, unnamed: frozenset[str], written: frozenset[str]) -> str:
+    named = f"only {_quoted(map(_spelled, written))}" if written else "no placeholders"
     return (
-        f"the role {role!r}, built by the factory {factory!r}, accepts {sorted(unnamed)} and "
-        f"writes no placeholder for any of them - the placeholders in its instructions are "
-        f"{sorted(written)}. An input reaches the text its agent is handed through `{{{{Name}}}}` "
-        f"and through nothing else, so a value of an accepted type nothing names is validated, "
-        f"keyed and fingerprinted and then dropped: the step is paid for and answered without the "
-        f"thing it was about, and two calls differing only in that value are two digests over one "
-        f"prompt, so neither ever replays the other. Write `{{{{TypeName}}}}` where the value "
-        f"belongs, or drop the type from `accepts=` on the factory"
+        f'Role factory "{factory}" built role "{role}" with no placeholder for these classes in '
+        f"`accepts=`: {_quoted(unnamed)}. Its instructions hold {named}, so write "
+        f"{_quoted(map(_spelled, unnamed))} where each value belongs, or drop its class from "
+        f"`accepts=`."
     )
+
+# `_PADDED`'s `\s` takes a newline or a tab, which `json.dumps` escapes onto the message's one line.
+def _quoted(texts: Iterable[str]) -> str:
+    return ", ".join(json.dumps(text, ensure_ascii=False) for text in sorted(texts))
