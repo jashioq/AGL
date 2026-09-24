@@ -369,7 +369,7 @@ async def test_the_patch_is_a_unified_diff_that_the_repositorys_own_configuratio
 async def test_contains_is_true_once_a_line_of_work_has_been_merged_into_the_base(
     history: History, provider: WorkspaceProvider, repository: Path, base: str
 ) -> None:
-    """Gap 3: the shape the one consumer actually meets, which the suite has no way to build.
+    """Gap 3: the merged shape a landing meets, which the suite has no way to build.
 
     `GatedIntegration._conclude` asks whether a landing the `Integrator` reported clean really did
     put the source's head into the target, and in life that means merged. The suite can only commit

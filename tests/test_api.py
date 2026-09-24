@@ -62,6 +62,7 @@ from agl.ports.agent import (
 from agl.ports.errors import (
     ConflictError,
     InputError,
+    InternalError,
     NotFoundError,
     UpstreamError,
     UpstreamUnavailable,
@@ -96,6 +97,18 @@ SCOPE: Final = RunScope(PROJECT, LABEL)
 WIRE_KEYS: Final = frozenset(
     {"workflow", "workflow_digests", "label", "base_ref", "base_sha", "branch", "params",
      "created_at", "finished"}
+)
+
+# The two answers `run` gives a label a run already holds: only the finished one leaves out
+# `agl resume`, which refuses a finished run.
+FINISHED_TAKEN: Final = (
+    'Run "auth" already exists and has finished, with its work on branch "agl/auth". To free the '
+    "label, run `agl clear auth`, which deletes that branch."
+)
+UNFINISHED_TAKEN: Final = (
+    'Run "auth" already exists and has not finished. To continue it, run `agl resume auth`, or to '
+    "free the label, run `agl clear auth`, which deletes the run, its worktrees and branches, and "
+    "any uncommitted work in them."
 )
 
 @dataclass(frozen=True)
@@ -428,11 +441,70 @@ async def test_the_same_label_twice_is_refused_in_the_refusals_own_words(tmp_pat
     with pytest.raises(ConflictError) as caught:
         await _run(harness)
 
-    assert str(caught.value) == (
-        "run 'auth' already exists - `agl resume auth` or `agl clear auth`."
-    )
+    assert str(caught.value) == FINISHED_TAKEN
     assert exit_code_for(caught.value) == 4
     assert len(handed) == 1, "the refused run invoked the workflow anyway"
+
+@pytest.mark.asyncio
+async def test_a_label_held_by_a_run_that_stopped_names_resume_as_well_as_clear(
+    tmp_path: Path,
+) -> None:
+    """A `Stop` leaves the run unfinished, so `agl resume` can still take it on and is named
+    beside `agl clear`, with what the clear deletes."""
+    raised.clear()
+    harness = _fakes(tmp_path)
+    with pytest.raises(ReviewNotConverging):
+        await _run(harness, name="halting", argv=[])
+    before = await _record(harness)
+
+    with pytest.raises(ConflictError) as caught:
+        await _run(harness, name="halting", argv=[])
+
+    assert str(caught.value) == UNFINISHED_TAKEN
+    assert exit_code_for(caught.value) == 4
+    assert len(raised) == 1, "the refused run invoked the workflow anyway"
+    assert await _record(harness) == before, "the refused run changed the record"
+
+@pytest.mark.asyncio
+async def test_a_label_whose_record_predates_the_finished_key_is_refused_naming_resume(
+    tmp_path: Path,
+) -> None:
+    """An older AGL wrote no `finished` key, and `api.resume` reads such a record as unfinished
+    and takes it on, so `run` names `agl resume` for it too."""
+    handed.clear()
+    harness = _fakes(tmp_path)
+    await _run(harness)
+    older = {key: value for key, value in (await _record(harness)).items() if key != "finished"}
+    await harness.services.store.write_record(SCOPE, older)
+
+    with pytest.raises(ConflictError) as caught:
+        await _run(harness)
+
+    assert str(caught.value) == UNFINISHED_TAKEN
+    assert len(handed) == 1, "the refused run invoked the workflow anyway"
+
+@pytest.mark.asyncio
+async def test_a_label_whose_record_resume_cannot_read_is_refused_in_resumes_own_words(
+    tmp_path: Path,
+) -> None:
+    """Whether the run finished is read the way `api.resume` reads it, so a record that says
+    neither true nor false is refused by `run` exactly as `resume` refuses it, and `run` never
+    sends the operator to a resume that would refuse."""
+    handed.clear()
+    harness = _fakes(tmp_path)
+    await _run(harness)
+    garbled = {**(await _record(harness)), "finished": "yes"}
+    await harness.services.store.write_record(SCOPE, garbled)
+
+    with pytest.raises(InternalError) as ran:
+        await _run(harness)
+    with pytest.raises(InternalError) as resumed:
+        await api.resume(harness.services, PROJECT, LABEL, points=POINTS)
+
+    assert str(ran.value) == str(resumed.value)
+    assert str(ran.value) == 'The "finished" key in run.json holds a str, not true or false.'
+    assert len(handed) == 1, "the refused run invoked the workflow anyway"
+    assert await _record(harness) == garbled, "the refused run rewrote the record"
 
 @pytest.mark.asyncio
 async def test_a_deliverable_branch_that_already_exists_refuses_the_run(tmp_path: Path) -> None:
@@ -461,6 +533,11 @@ async def test_a_deliverable_branch_that_already_exists_refuses_the_run(tmp_path
         await _run(harness, base_ref="main")
 
     assert exit_code_for(caught.value) == 4
+    assert str(caught.value) == (
+        'Run "auth" cannot start, because branch "agl/auth" already exists with no record of that '
+        "run. Use another label, or see what is on the branch with `git log agl/auth` and free "
+        "the label with `git branch -D agl/auth`, which deletes that branch."
+    )
     assert branch in str(caught.value), "the refusal does not name the branch that is in the way"
     assert f"git branch -D {branch}" in str(caught.value), (
         "the refusal does not say how to free the label. `agl clear` is not the answer and must "

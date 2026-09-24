@@ -23,16 +23,8 @@ __all__ = ["Capabilities", "check", "checked_inputs"]
 type _Declaration = Callable[..., object]
 
 _FROM_TOOLS: Final = (
-    f". {str(Capability.TOOL_CALLING)!r} is in this role's `requires` because it declares `tools`: "
-    f"`sdk/roles.py` folds it in at declaration time, so there is no line in the workflow to go "
-    f"looking for. Either this role names a model whose backend can call a tool, or it offers none "
-    f"- and a role with no tools is an effect step, whose result is `null`"
-)
-
-_FROM_NO_DECLARATION: Final = (
-    ". This role accepts nothing at all, which is what a `Role(...)` built by hand carries: the "
-    "declaration is bound onto a `Role` by `RoleFactory.__call__`, so one that no factory was "
-    "called for holds none - and a factory written `@role(model=...)` declares none either"
+    f'; its tools are what require "{Capability.TOOL_CALLING}", and a role with no tools makes its '
+    "step return `None`"
 )
 
 # `adapters/openai/runner.py`'s `check_ready` spawns one local process and pays nothing;
@@ -289,52 +281,49 @@ def _unmet(
 ) -> str:
     wanted = sorted(str(member) for member in missing)
     offered = sorted(str(member) for member in held)
-    model = model_of(role.model)
+    offers = f"only {_quoted(offered)}" if offered else "none"
+    them = "it" if len(wanted) == 1 else "them"
     message = (
-        f"the role handed to step {step!r} cannot run on {str(model)!r}: it requires "
-        f"{wanted}, which the backend serving that model does not offer - it reports {offered}. "
-        f"A capability is what a backend can be asked for at all, so this does not clear up on "
-        f"its own: either the role names a model whose backend has it, or it stops requiring it"
+        f'Step "{step}" cannot run on "{model_of(role.model)}", because the backend serving that '
+        f"model does not offer what its role requires: {_quoted(wanted)}. It offers {offers}, so "
+        f"name a model whose backend offers {them}, or stop requiring {them}"
     )
     if Capability.TOOL_CALLING in missing and role.tools:
         message += _FROM_TOOLS
-    return message
+    return f"{message}."
 
 def _unaccepted(step: str, role: Role[object], value: object) -> str:
     offered = type(value).__qualname__
     accepted = sorted(declared.__qualname__ for declared in role.accepts)
-    message = (
-        f"step {step!r} was handed a {offered}, and the role it names accepts {accepted}. An input "
-        f"is matched to a declared type by `isinstance` and recorded under that type's name, so "
-        f"one nothing declared has no name to go under: it would reach neither the fingerprint "
-        f"nor the agent, and the step would be paid for and answered without it. `accepts=` is "
-        f"declared on the role's factory - `@role(model=..., accepts=({offered},))` - and never "
-        f"on the `Role` itself, so the declaration is readable without calling the factory"
+    declared = ", ".join((*accepted, offered))
+    fact = f'Step "{step}" was passed a value of class "{offered}", which its role does not accept.'
+    if not accepted:
+        return (
+            f"{fact} It accepts nothing, like any `Role(...)` built by hand or by a factory with "
+            "no `accepts=`, so build it with a factory that declares the class, as in "
+            f"`@role(model=..., accepts=({declared},))`."
+        )
+    return (
+        f'{fact} It accepts only {_quoted(accepted)}, so add "{offered}" to `accepts=` on the '
+        f"role's factory, as in `@role(model=..., accepts=({declared}))`."
     )
-    if not role.accepts:
-        message += _FROM_NO_DECLARATION
-    return message
 
 def _ambiguous(step: str, value: object, matched: Sequence[type[object]]) -> str:
     offered = type(value).__qualname__
     both = sorted(declared.__qualname__ for declared in matched)
     return (
-        f"step {step!r} was handed a {offered}, which is an instance of {both} - every one of the "
-        f"types the role it names accepts that could take it, and none of them a subclass of the "
-        f"rest. An input is recorded under the name of the declared type it matched, so a value "
-        f"matching two unrelated declarations has no single name to go under, and choosing one "
-        f"here would be a rule living in the framework about which of the author's own types this "
-        f"step meant. Accept the one this role reads, or make one of them a subclass of the other "
-        f"- a value matching both then goes under the narrower, which is a declared answer"
+        f'Step "{step}" was passed a value of class "{offered}", which is an instance of more than '
+        f"one class its role accepts, none of them a subclass of the rest: {_quoted(both)}. Accept "
+        "only the one the role reads, or make one of them a subclass of the rest, so the value is "
+        "taken as the subclass."
     )
 
 def _passed_twice(step: str, name: str) -> str:
     return (
-        f"step {step!r} was handed two {name} values, and a step's inputs are recorded one per "
-        f"declared type, under the name of the type each was matched to - so a subclass of {name} "
-        f"is recorded under {name} as well. The second would take the first's place in the "
-        f"fingerprint and in the prompt, so one of the two would be paid for and never read - and "
-        f"two walks differing only in the value that was dropped would share a digest, the second "
-        f"replaying the first's result. A role that needs two of something declares one type "
-        f"holding both"
+        f'Step "{step}" was passed two "{name}" values, and it takes one value per class its role '
+        f'accepts, counting a subclass of "{name}" as "{name}". To pass both, declare one class '
+        "that holds them and accept that."
     )
+
+def _quoted(names: Sequence[str]) -> str:
+    return ", ".join(f'"{name}"' for name in names)

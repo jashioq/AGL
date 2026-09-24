@@ -52,10 +52,10 @@ thing that survives its own process.
 
 **Everything is constructed here rather than through `config.container`.** `container.real()` also
 builds agent runners, a routing runner and a terminal, none of which a programme with no agent in it
-has any use for, and two of which would want credentials. What a programme needs is the three ports
-the replay loop actually touches - a `Store`, a `WorkspaceProvider` and a `Clock` - so those three
-are named here directly. Tests are outside `agl.*`, so contract 5 has nothing to say about it, and
-`tests/adapters/` already imports adapters the same way.
+has any use for, and two of which would want credentials. What a programme needs is the four ports
+the replay loop actually touches - a `Store`, a `WorkspaceProvider`, a `History` and a `Clock` - so
+those four are named here directly. Tests are outside `agl.*`, so contract 5 has nothing to say
+about it, and `tests/adapters/` already imports adapters the same way.
 
 **Two shapes this instrument stands in for, and neither is being built here.**
 
@@ -88,10 +88,12 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Final
 from agl.adapters.filesystem.store import FilesystemStore
+from agl.adapters.git.history import GitHistory
 from agl.adapters.git.workspace import GitWorkspaceProvider
 from agl.adapters.system_clock import SystemClock
 from agl.ports.agent import Claude, Restriction, Tool, ToolResult
 from agl.ports.clock import Clock
+from agl.ports.history import History
 from agl.ports.home_layout import AglHome, RunScope
 from agl.ports.ids import Namespace, ProjectName, RunLabel, StepName
 from agl.ports.run import JsonValue
@@ -330,11 +332,13 @@ class _Programme:
         config: Config,
         store: Store,
         provider: WorkspaceProvider,
+        history: History,
         clock: Clock,
     ) -> None:
         self.config = config
         self._store = store
         self._provider = provider
+        self._history = history
         self._clock = clock
         self._label = RunLabel(config.label)
         self._scope = RunScope(ProjectName(config.project), self._label)
@@ -360,7 +364,13 @@ class _Programme:
             scope = self._scope if namespace is None else self._scope.inside(Namespace(namespace))
             self._workspaces[namespace] = workspace
             self._journals[namespace] = Journal(
-                self._store, scope, workspace, self._clock, self._fingerprints, self.config.base
+                self._store,
+                scope,
+                workspace,
+                self._history,
+                self._clock,
+                self._fingerprints,
+                self.config.base,
             )
         return self._journals[namespace]
 
@@ -774,11 +784,11 @@ def driver_path() -> Path:
     return Path(__file__).resolve()
 
 async def _drive(config: Config) -> None:
-    """Build the three ports the replay loop touches, then walk the programme.
+    """Build the four ports the replay loop touches, then walk the programme.
 
-    `FilesystemStore` and `GitWorkspaceProvider` and `SystemClock` by name, and nothing else: the
-    container's `real()` would additionally build agent runners and a terminal that a programme
-    with no agent in it has no use for.
+    `FilesystemStore`, `GitWorkspaceProvider`, `GitHistory` and `SystemClock` by name, and nothing
+    else: the container's `real()` would additionally build agent runners and a terminal that a
+    programme with no agent in it has no use for.
     """
     programme = PROGRAMMES.get(config.programme)
     if programme is None:
@@ -787,6 +797,7 @@ async def _drive(config: Config) -> None:
         config,
         FilesystemStore(AglHome(Path(config.home))),
         GitWorkspaceProvider(Path(config.repo), TreesRoot(Path(config.trees))),
+        GitHistory(Path(config.repo)),
         SystemClock(),
     )
     run.at_start()

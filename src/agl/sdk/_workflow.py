@@ -118,8 +118,8 @@ class Run[P = object]:
 
         Raises:
             InputError: A role no `@role` function built, an input the role doesn't accept, two
-                inputs of one type, one that can't be written down as JSON, or a `commit` that's
-                empty or only whitespace.
+                inputs of one type, one that can't be written down as JSON, or a `commit` that
+                isn't a string or is empty or only whitespace.
             agl.sdk.NotFoundError: The ref this worktree was cut from names nothing.
             agl.sdk.ConflictError: Another line of work is holding this worktree's place.
             agl.sdk.DeniedError: The backend behind the role's model doesn't offer something

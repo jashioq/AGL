@@ -83,7 +83,11 @@ def _print_replays(label: RunLabel, finished: api.Finished) -> None:
         file=sys.stderr,
     )
 
+# Silent for a run left holding a landing: it is not finished, and `sdk/_engine/teardown.py` has
+# already said so on stderr, naming the resume that finishes it.
 def _print_finished(label: RunLabel, finished: api.Finished) -> None:
+    if not finished.settled:
+        return
     left = "" if finished.branch is None else f" and left its changes on branch: {finished.branch}"
     print(f'Run "{label}" finished{left}')
 

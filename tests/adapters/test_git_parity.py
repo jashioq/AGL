@@ -554,7 +554,7 @@ async def test_a_move_is_a_rename_from_both_and_a_rewritten_move_is_a_pair_from_
 async def test_contains_agrees_including_the_reflexive_case(
     pair: Mapping[str, _Bundle],
 ) -> None:
-    """`GatedIntegration._conclude`'s one question, in the four shapes it meets.
+    """Whether the work at one state is already in another, in the four shapes it takes.
 
     An implementation answering differently from the other decides differently about whether a merge
     happened, and the two failures are not symmetric: a wrong `False` re-lands and then raises, a
@@ -615,6 +615,34 @@ async def test_restore_removes_untracked_leavings_on_both(
 
     for answer in (await _alike(pair, scenario)).values():
         assert answer == (_body("as recorded"), None, False, True)
+
+async def test_restore_forward_to_a_state_left_behind_moves_head_branch_and_files_on_both(
+    pair: Mapping[str, _Bundle],
+) -> None:
+    """A replay's fast-forward, asked of both: a checkout restored back past its second state,
+    which nothing then reaches, is still asked whether the repository holds that state and whether
+    it lies ahead, and is restored forward to it. The branch comes with the checkout."""
+
+    async def scenario(bundle: _Bundle) -> tuple[bool, bool, bool, bool, bytes | None]:
+        workspace = await bundle.provider.open(LABEL, CHILD, bundle.base)
+        _put(workspace, ALPHA, _body("the first state"))
+        first = await workspace.commit_all("the first state")
+        _put(workspace, BETA, _body("the state a restore leaves behind"))
+        second = await workspace.commit_all("the state a restore leaves behind")
+        await workspace.restore(first)
+        held = await bundle.history.exists(second)
+        ahead = await bundle.history.contains(first, second)
+        await workspace.restore(second)
+        return (
+            held,
+            ahead,
+            await workspace.head() == second,
+            await bundle.history.resolve(workspace.branch) == second,
+            _get(workspace, BETA),
+        )
+
+    for answer in (await _alike(pair, scenario)).values():
+        assert answer == (True, True, True, True, _body("the state a restore leaves behind"))
 
 async def test_reopening_carries_uncommitted_work_on_both(
     pair: Mapping[str, _Bundle],
@@ -934,7 +962,7 @@ async def test_a_commit_message_git_cleans_away_to_nothing_is_refused_by_both(
     A `commit=` template that renders empty is how a workflow reaches this, and it is exactly the
     fake-drift failure: the step passes `--dry-run` and dies in anger with `Aborting commit due to
     empty
-    commit message.` - which `GitWorkspaceProvider` hands to `UpstreamUnexpected`, exit 70, on a
+    commit message.` - which `GitWorkspaceProvider` hands to `UpstreamUnexpected`, exit 6, on a
     message the fake used to record without comment.
 
     **Both halves are asserted, because refusing too much is the same drift facing backwards.**

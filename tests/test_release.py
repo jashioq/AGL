@@ -618,7 +618,7 @@ async def test_a_checkout_that_will_not_go_is_named_and_the_run_still_succeeds(
 
     finished = await api.run(services, PROJECT, "landing", LABEL, (), points=POINTS)
 
-    assert finished == api.Finished(steps=0, branch=None)
+    assert finished == api.Finished(steps=0, branch=None, settled=True)
     printed = capsys.readouterr()
     assert str(CHILD) in printed.err and "_base" in printed.err, (
         f"the release met a refusal at both addresses and named neither of them: {printed.err!r}"

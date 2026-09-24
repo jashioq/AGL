@@ -828,9 +828,11 @@ async def test_a_label_with_no_record_is_a_not_found_and_reads_as_runs_mirror(
     a loud error rather than a silent replay of something unrelated.
 
     Both messages are asserted here, in one test, because the claim is about the pair: `run` says
-    the label is taken and names the verbs that free it, `resume` says it is free and names the verb
-    that takes it. A change to either wording that stopped them reading as one vocabulary fails
-    here rather than being noticed by an operator holding two terminals.
+    the label is taken and names the verb that frees it, with `agl resume` beside it while the run
+    has not finished, and `resume` says it is free and names the verb that takes it. Each opens on
+    the run's name and says "already exists" where the other says "does not exist". A change to
+    either wording that stopped them reading as one vocabulary fails here rather than being noticed
+    by an operator holding two terminals.
     """
     dispatched: list[str] = []
     harness = _fakes(tmp_path, dispatched)
@@ -848,7 +850,21 @@ async def test_a_label_with_no_record_is_a_not_found_and_reads_as_runs_mirror(
     await _start(harness)
     with pytest.raises(ConflictError) as taken:
         await _start(harness)
-    assert str(taken.value) == "run 'auth' already exists - `agl resume auth` or `agl clear auth`."
+    assert str(taken.value) == (
+        'Run "auth" already exists and has finished, with its work on branch "agl/auth". To free '
+        "the label, run `agl clear auth`, which deletes that branch."
+    )
+
+    await _leave_unfinished(harness)
+    with pytest.raises(ConflictError) as held:
+        await _start(harness)
+    assert str(held.value) == (
+        'Run "auth" already exists and has not finished. To continue it, run `agl resume auth`, '
+        "or to free the label, run `agl clear auth`, which deletes the run, its worktrees and "
+        "branches, and any uncommitted work in them."
+    )
+    assert str(caught.value).startswith('Run "auth" does not exist')
+    assert all(str(said.value).startswith('Run "auth" already exists') for said in (taken, held))
 
 @pytest.mark.asyncio
 async def test_params_the_workflows_current_class_will_not_take_are_refused(

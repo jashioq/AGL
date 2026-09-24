@@ -10,6 +10,7 @@ from typing import Final
 from agl.ports.agent import ModelChoice, Restriction, Tool
 from agl.ports.clock import Clock
 from agl.ports.errors import InputError, InternalError
+from agl.ports.history import History
 from agl.ports.home_layout import RunScope
 from agl.ports.ids import StepName
 from agl.ports.run import JsonValue, WireShape, checked_text, wire_moment
@@ -192,6 +193,7 @@ class Journal:
         store: Store,
         scope: RunScope,
         workspace: Workspace,
+        history: History,
         clock: Clock,
         fingerprints: Fingerprints,
         base: str,
@@ -199,6 +201,7 @@ class Journal:
         self._store = store
         self._scope = scope
         self._workspace = workspace
+        self._history = history
         self._clock = clock
         self._fingerprints = fingerprints
         if not base:
@@ -251,7 +254,7 @@ class Journal:
             )
             digest = self._fingerprints.digest(self._scope, name, base)
             entry = await read_entry(self._store, self._scope, name, digest)
-            if entry is not None:
+            if entry is not None and await self._catch_up(entry.head):
                 self._fingerprints.claim(self._scope, name, base)
                 self._fingerprints.replay()
                 self._last_good = entry.head
@@ -315,6 +318,19 @@ class Journal:
         )
         self._fingerprints.claim(self._scope, VERIFY_STEP, _VERIFY_POINT)
         return outcome
+
+    async def _catch_up(self, recorded: str) -> bool:
+        if not await self._history.exists(recorded):
+            return False
+        at = await self._workspace.head()
+        if await self._history.contains(recorded, at):
+            return True
+        # Diverged: reached when an input returns to a value an earlier walk recorded.
+        if not await self._history.contains(at, recorded):
+            return False
+        # Moves the branch with the checkout, as the step's own commit did on the walk that ran it.
+        await self._workspace.restore(recorded)
+        return True
 
     async def _end(self, commit: str | None) -> None:
         ending = asyncio.create_task(self._ending(commit))

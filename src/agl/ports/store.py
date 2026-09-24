@@ -7,7 +7,7 @@ from agl.ports.run import JsonValue
 __all__ = ["Store"]
 
 class Store(ABC):
-    """Everything AGL records, behind one port: a record per run, and an entry per step run."""
+    """Where AGL keeps a run's record and the entries its steps and verifies write."""
 
     @abstractmethod
     async def read_record(self, scope: RunScope) -> dict[str, JsonValue] | None:
@@ -35,7 +35,7 @@ class Store(ABC):
     async def read_entry(
         self, scope: RunScope, step: StepName, digest: str
     ) -> dict[str, JsonValue] | None:
-        """One recorded run of one step. The whole of what replay decides on.
+        """Reads back one entry that a step or a verify wrote.
 
         Args:
             scope: which line of work ran it; one step name under two namespaces is two entries

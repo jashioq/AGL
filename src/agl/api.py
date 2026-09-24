@@ -66,12 +66,16 @@ class Listing:
 
 @dataclass(frozen=True, slots=True)
 class Finished:
-    """A walk that returned: the steps served from the record, and the branch left free to take."""
+    """A walk that returned: the steps served from the record, the branch left free to take, and
+    whether every landing settled."""
 
     steps: int
 
     branch: str | None
     """`None` where a checkout still holds it, which git would refuse to check out."""
+
+    settled: bool
+    """`False` where a landing was left unsettled, so the run is not finished."""
 
 async def run(
     services: Services,
@@ -96,20 +100,16 @@ async def run(
     given = params.parse(wf.params, argv, prog=_program(name))
 
     scope = RunScope(project, label)
-    if await services.store.read_record(scope) is not None:
-        raise ConflictError(
-            f"run {str(label)!r} already exists - `agl resume {label}` or `agl clear {label}`."
-        )
+    record = await services.store.read_record(scope)
+    if record is not None:
+        raise ConflictError(_taken(label, RunSpec.from_json(record)))
 
     branch = run_branch(label)
     if await services.history.exists(branch):
         raise ConflictError(
-            f"the branch {branch!r} already exists, so run {str(label)!r} cannot start: AGL would "
-            f"attach this run to that line of work and carry on from wherever it got to, with "
-            f"whatever `--from` said ignored. AGL did not leave it - `clear` takes a run's own "
-            f"branch away with everything else it held, so a branch by this name with no record "
-            f"beside it is one something else made. `git log {branch}` is what is on it, `git "
-            f"branch -D {branch}` frees the label, and any other label starts a run of its own."
+            f'Run "{label}" cannot start, because branch "{branch}" already exists with no record '
+            f"of that run. Use another label, or see what is on the branch with `git log {branch}` "
+            f"and free the label with `git branch -D {branch}`, which deletes that branch."
         )
 
     await preflight.check(services.agents, services.history, wf.fn, _warn)
@@ -190,7 +190,7 @@ async def resume(
 async def clear(services: Services, project: ProjectName, label: RunLabel) -> Cleared:
     scope = RunScope(project, label)
     if await services.store.read_record(scope) is None:
-        raise NotFoundError(f"run {str(label)!r} does not exist - there is nothing to clear.")
+        raise NotFoundError(f'Run "{label}" does not exist, so there is nothing to clear.')
 
     worktrees: list[str] = []
     branches: list[str] = []
@@ -309,6 +309,7 @@ async def _walk(
     leases = Leases()
     fingerprints = Fingerprints()
     worktrees: Worktrees[Run[object]] = Worktrees()
+    settled = False
     try:
         async with teardown.releasing(services, scope, worktrees, leases, _warn) as released:
             async with services.terminal:
@@ -323,10 +324,14 @@ async def _walk(
                         leases=leases,
                     )
                 )
-                await services.store.write_record(scope, replace(spec, finished=True).to_json())
+                settled = not leases.unsettled
+                if settled:
+                    await services.store.write_record(
+                        scope, replace(spec, finished=True).to_json()
+                    )
     finally:
         leases.release_all()
-    return Finished(steps=fingerprints.replays, branch=released.branch)
+    return Finished(steps=fingerprints.replays, branch=released.branch, settled=settled)
 
 # Two sources, because neither alone is the set a clear has to take. The ledger holds every
 # namespace that recorded a step, one whose checkout and branch have already gone included; the
@@ -410,6 +415,19 @@ def _refused(outcome: SyncOutcome) -> str:
         f"could not be reached and a package that will not build all arrive here as the same "
         f"non-zero exit - so what uv said is printed whole below rather than "
         f"summarised:\n\n{outcome.output.rstrip()}"
+    )
+
+def _taken(label: RunLabel, spec: RunSpec) -> str:
+    if spec.finished:
+        return (
+            f'Run "{label}" already exists and has finished, with its work on branch '
+            f'"{spec.branch}". To free the label, run `agl clear {label}`, which deletes that '
+            "branch."
+        )
+    return (
+        f'Run "{label}" already exists and has not finished. To continue it, run '
+        f"`agl resume {label}`, or to free the label, run `agl clear {label}`, which deletes the "
+        "run, its worktrees and branches, and any uncommitted work in them."
     )
 
 # Without a home there was no walk, so there is no project file to check. Without a directory the

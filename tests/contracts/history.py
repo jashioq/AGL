@@ -75,7 +75,7 @@ not entitle anybody to believe.
    `integration.py`'s, this suite has no way to land anything, and so the ancestry asserted here is
    the kind that comes from committing in one place - a true case, a false case, a reflexive one
    and a divergence. The shape the engine meets after a successful merge is not built here, and
-   that is the whole of the gap, there being exactly one consumer and its question being the merge.
+   that is the whole of the gap.
 
 4. **`UpstreamUnavailable`.** Nothing here can make a repository unreachable, and inventing a member
    that could would be inventing a port. `NotFoundError` is the one refusal this suite provokes.
@@ -379,16 +379,17 @@ class HistoryContract(HistoryChangeContract):
     ) -> None:
         """Is X already in Y - a true case, a false case, a reflexive one, and a divergence.
 
-        Asked in one place: `GatedIntegration._conclude` puts it to a landing the `Integrator` has
-        just reported clean - is the source's head in the head that came back - and lands once more
-        if the answer is no, then raises `InternalError`. So all four answers below decide between
-        "settled" and "that merge did not happen", and an implementation answering a constant either
-        never settles a landing or settles one that moved nothing.
+        The question is whether the work at one state is already in another. A landing the
+        `Integrator` has just reported clean is one thing it decides - is the source's head in the
+        head that came back - and AGL lands once more if the answer is no, then raises
+        `InternalError`. So all four answers below decide between "settled" and "that merge did not
+        happen", and an implementation answering a constant either never settles a landing or
+        settles one that moved nothing.
 
         **The reflexive case is the port's answer and not one tool's.** A source that has committed
         nothing since the target last took its work is already inside it, and the landing is done -
-        which holds only if a state is already inside itself. That is the reading, argued from the
-        consumer the port names.
+        which holds only if a state is already inside itself. That is the reading, argued from what
+        a landing needs.
 
         The divergence is the state a landing starts from. Two children cut from one base, each with
         work of its own, and neither contains the other: answering `True` there is how a merge that

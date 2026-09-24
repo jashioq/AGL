@@ -77,7 +77,8 @@ import json
 import subprocess
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from pathlib import Path
+from enum import StrEnum
+from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import Final, assert_type
 import pytest
@@ -531,9 +532,14 @@ async def test_an_agent_that_never_reports_leaves_no_entry_and_the_step_runs_aga
     silent = _run(repository, tmp_path, base, _agent(record, reports=False, says="I have finished"))
     role = _role("review", "review", read_only=True)
 
-    with pytest.raises(RoleIncompleteError, match="report"):
+    with pytest.raises(RoleIncompleteError) as raised:
         await silent.step(role)
 
+    assert str(raised.value) == (
+        'Step "review" recorded nothing and runs again on the next attempt, because its agent '
+        'stopped without calling "report" after saying "I have finished". The agent ended its own '
+        'turn, so ask for the report through "report" in the prompt.'
+    )
     assert _entries(tmp_path, "review") == [], "a step with no result recorded one anyway"
 
     with pytest.raises(RoleIncompleteError):
@@ -552,9 +558,22 @@ async def test_an_agent_that_never_reports_leaves_no_entry_and_the_step_runs_aga
 @pytest.mark.parametrize(
     ("stop", "fix"),
     [
-        (StopReason.LIMIT, "raise the limit"),
-        (StopReason.COMPLETED, "the prompt is what did not read"),
-        (None, "did not say why it stopped"),
+        pytest.param(
+            StopReason.LIMIT,
+            "The backend stopped it at a turn, token, time or budget limit, so raise the limit.",
+            id="limit",
+        ),
+        pytest.param(
+            StopReason.COMPLETED,
+            'The agent ended its own turn, so ask for the report through "report" in the prompt.',
+            id="completed",
+        ),
+        pytest.param(
+            None,
+            "The backend did not say why it stopped, so raise the limit, or ask for the report "
+            'through "report" in the prompt.',
+            id="None",
+        ),
     ],
 )
 async def test_the_incomplete_message_sends_the_reader_to_the_fix_the_stop_reason_implies(
@@ -563,9 +582,9 @@ async def test_the_incomplete_message_sends_the_reader_to_the_fix_the_stop_reaso
     """`AgentOutcome.stop_reason`'s own distinction, spent where that field says it should be.
 
     "It ran out of turns" and "it decided it was finished" send a reader to different fixes - raise
-    the limit, or fix the prompt - and `None` says the message can offer neither. The agent's
-    closing text is quoted with all three, because it is what it said instead of reporting and it
-    is the only evidence there is.
+    the limit, or fix the prompt - and `None` says the message can offer neither, so it names both.
+    The agent's closing text is quoted with all three, because it is what it said instead of
+    reporting and it is the only evidence there is.
     """
     record = _Agent()
     said = "I read the diff and it looked fine to me"
@@ -574,7 +593,10 @@ async def test_the_incomplete_message_sends_the_reader_to_the_fix_the_stop_reaso
     with pytest.raises(RoleIncompleteError) as raised:
         await run.step(_role("review", "review", read_only=True))
 
-    assert fix in str(raised.value)
+    assert str(raised.value) == (
+        'Step "review" recorded nothing and runs again on the next attempt, because its agent '
+        f'stopped without calling "report" after saying "{said}". {fix}'
+    )
     assert said in str(raised.value), "the one thing the agent did say was dropped from the report"
 
 # --- what `commit=` does, and when it does it ----------------------------------------------------
@@ -724,6 +746,135 @@ async def test_a_message_git_records_is_not_refused_though_python_calls_it_white
 
     assert len(record.runs) == 1
     assert FEATURE in _tree(repository, _text(_one(tmp_path, "implement"), "head"))
+
+# --- a `commit=` that is not a str, refused before the agent starts ------------------------------
+#
+# `None` is `commit=` left out. Any other value that is not a str reached git only after the agent
+# had worked, and only when it had changed something: real git took `bytes` or a path as the
+# message, and every other value failed with a `TypeError` from `subprocess`, not an AGL error. A
+# str subclass is a str: git is handed its text, and the blank check reads that text.
+
+_NOT_A_STR: Final = (
+    (5, "int"),
+    (0, "int"),
+    (True, "bool"),
+    (False, "bool"),
+    (1.5, "float"),
+    (b"implement T-01", "bytes"),
+    (bytearray(b"implement T-01"), "bytearray"),
+    (PurePosixPath("implement T-01"), "PurePosixPath"),
+    (["implement T-01"], "list"),
+    ({"message": "implement T-01"}, "dict"),
+    (object(), "object"),
+)
+
+class _Message(StrEnum):
+    """Commit messages a workflow keeps as an enum, whose members are str subclass instances."""
+
+    IMPLEMENT = "implement T-01"
+    BLANK = " \n"
+
+class _Wording(str):
+    """A str subclass with nothing of its own, so its text is the only thing about it."""
+
+    __slots__ = ()
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("message", "kind"), _NOT_A_STR)
+async def test_a_commit_message_that_is_not_a_str_is_refused_before_the_agent_starts(
+    repository: Path, tmp_path: Path, base: str, message: object, kind: str
+) -> None:
+    """An agent that writes a file, so a commit would have something to record and the message
+    would reach git only after the agent had been paid for."""
+    record = _Agent()
+    written = {FEATURE: b"the callback route\n"}
+    run = _run(repository, tmp_path, base, _agent(record, writes=written))
+    role = _role("implement", "implement T-01")
+
+    with pytest.raises(InputError) as raised:
+        await run.step(role, commit=message)  # type: ignore[arg-type]
+
+    assert str(raised.value) == (
+        f'Step "implement" has a commit message of type "{kind}", not "str". Pass a string to '
+        "`commit=`."
+    )
+    assert record.runs == [], "the agent ran for a step whose commit message was never a str"
+    assert _entries(tmp_path, "implement") == []
+    assert _git(repository, "branch", "--list", "agl/*") == "", "a worktree was opened for it"
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("message", "kind"), _NOT_A_STR)
+async def test_a_commit_message_that_is_not_a_str_is_refused_before_a_step_replays(
+    repository: Path, tmp_path: Path, base: str, message: object, kind: str
+) -> None:
+    """The first walk passes no `commit=` and its agent changes nothing. That is the entry an AGL
+    without the refusal wrote for any of these values: with nothing to commit, git was never
+    handed the message.
+    """
+    record = _Agent()
+    role = _role("implement", "implement T-01")
+    await _run(repository, tmp_path, base, _agent(record)).step(role)
+    recorded = _entries(tmp_path, "implement")
+    resumed = _run(repository, tmp_path, base, _agent(record))
+
+    with pytest.raises(InputError, match=f'of type "{kind}", not "str"'):
+        await resumed.step(role, commit=message)  # type: ignore[arg-type]
+
+    assert len(record.runs) == 1, "the resume ran the agent again"
+    assert _entries(tmp_path, "implement") == recorded
+
+@pytest.mark.asyncio
+async def test_a_commit_of_none_is_no_commit_and_the_agents_work_is_thrown_away(
+    repository: Path, tmp_path: Path, base: str
+) -> None:
+    """`None` is what `commit=` defaults to, so passing it is leaving `commit=` out."""
+    record = _Agent()
+    left = {SEEDED: EDITED, SCRATCH: b"half a thought\n"}
+    run = _run(repository, tmp_path, base, _agent(record, writes=left))
+
+    assert await run.step(_role("review", "review"), commit=None) == Summary("review #0")
+
+    workspace = await _checkout(repository, tmp_path, base)
+    assert len(record.runs) == 1
+    assert _git(workspace.path, "status", "--porcelain") == ""
+    assert _git(workspace.path, "rev-parse", "HEAD").strip() == base
+    assert _text(_one(tmp_path, "review"), "head") == base
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "message", [_Message.IMPLEMENT, _Wording("implement T-01")], ids=["enum", "bare"]
+)
+async def test_a_str_subclass_is_a_str_and_git_records_the_text_it_holds(
+    repository: Path, tmp_path: Path, base: str, message: str
+) -> None:
+    """The type check is `isinstance`, as `commit: str | None` is for a type checker."""
+    record = _Agent()
+    written = {FEATURE: b"the callback route\n"}
+    run = _run(repository, tmp_path, base, _agent(record, writes=written))
+
+    await run.step(_role("implement", "implement T-01"), commit=message)
+
+    recorded = _text(_one(tmp_path, "implement"), "head")
+    assert FEATURE in _tree(repository, recorded)
+    assert _git(repository, "log", "-1", "--format=%s", recorded).strip() == "implement T-01"
+
+@pytest.mark.asyncio
+async def test_a_str_subclass_holding_only_whitespace_is_refused_as_a_blank_message(
+    repository: Path, tmp_path: Path, base: str
+) -> None:
+    """A str subclass passes the type check and meets the blank check, as any str does."""
+    record = _Agent()
+    written = {FEATURE: b"the callback route\n"}
+    run = _run(repository, tmp_path, base, _agent(record, writes=written))
+
+    with pytest.raises(InputError) as raised:
+        await run.step(_role("implement", "implement T-01"), commit=_Message.BLANK)
+
+    assert str(raised.value) == (
+        'Step "implement" has a commit message that is empty or only whitespace, which git '
+        "refuses. Write a message for `commit=`."
+    )
+    assert record.runs == []
 
 # --- the ending a step that did not come back gets -----------------------------------------------
 #
@@ -1095,7 +1246,12 @@ async def test_an_effect_step_stopped_at_the_backends_limit_raises_and_records_n
     with pytest.raises(RoleIncompleteError) as raised:
         await run.step(_effect("implement", "implement T-01"), commit="implement T-01")
 
-    assert "raise the limit" in str(raised.value)
+    assert str(raised.value) == (
+        'Step "implement" recorded nothing and runs again on the next attempt, because its agent '
+        "was stopped by the backend at a turn, token, time or budget limit after saying "
+        f'"{said}". Its role has no reporting tool for saying it finished, so raise the limit, or '
+        "give the role one."
+    )
     assert said in str(raised.value), "the one thing the agent did say was dropped from the report"
     assert _entries(tmp_path, "implement") == [], (
         "a curtailed effect step recorded `null`, which is what a finished one records - so the "
@@ -2051,8 +2207,13 @@ async def test_an_input_of_an_undeclared_type_names_both_sides_and_spends_nothin
     with pytest.raises(InputError) as refusal:
         await run.step(_ticket_and_highs("triage {{Ticket}} and {{Highs}}"), Summary("nope"))
 
-    assert "Summary" in str(refusal.value), "the refusal did not name the type that was passed"
-    assert "['Highs', 'Ticket']" in str(refusal.value), (
+    assert str(refusal.value) == (
+        'Step "triage" was passed a value of class "Summary", which its role does not accept. It '
+        'accepts only "Highs", "Ticket", so add "Summary" to `accepts=` on the role\'s factory, as '
+        "in `@role(model=..., accepts=(Highs, Ticket, Summary))`."
+    )
+    assert '"Summary"' in str(refusal.value), "the refusal did not name the type that was passed"
+    assert '"Highs", "Ticket"' in str(refusal.value), (
         "the refusal did not name what the role accepts, which is the half that is not on screen "
         "at the line the author has to change"
     )
@@ -2074,9 +2235,14 @@ async def test_two_inputs_of_one_type_are_refused_rather_than_one_replacing_the_
     run = _run(repository, tmp_path, base, _agent(record))
     role = _one_ticket("triage {{Ticket}}")
 
-    with pytest.raises(InputError, match="two Ticket values"):
+    with pytest.raises(InputError) as refusal:
         await run.step(role, Ticket("T-01"), Ticket("T-07"))
 
+    assert str(refusal.value) == (
+        'Step "triage" was passed two "Ticket" values, and it takes one value per class its role '
+        'accepts, counting a subclass of "Ticket" as "Ticket". To pass both, declare one class '
+        "that holds them and accept that."
+    )
     assert record.runs == []
     assert not (tmp_path / "trees").exists()
 
@@ -2101,7 +2267,13 @@ async def test_a_role_no_factory_built_accepts_nothing_and_the_refusal_says_wher
     with pytest.raises(InputError) as refusal:
         await run.step(bare, Ticket("T-01"))
 
-    assert "accepts nothing at all" in str(refusal.value)
+    assert str(refusal.value) == (
+        'Step "triage" was passed a value of class "Ticket", which its role does not accept. It '
+        "accepts nothing, like any `Role(...)` built by hand or by a factory with no `accepts=`, "
+        "so build it with a factory that declares the class, as in "
+        "`@role(model=..., accepts=(Ticket,))`."
+    )
+    assert "accepts nothing" in str(refusal.value)
     assert "@role(model=..., accepts=(Ticket,))" in str(refusal.value)
     assert record.runs == []
 
@@ -2128,11 +2300,17 @@ async def test_an_input_matching_two_unrelated_declared_types_is_refused_and_not
             _ticket_and_highs("triage {{Ticket}} and {{Highs}}"), Both(count=3, name="T-01")
         )
 
-    assert "['Highs', 'Ticket']" in str(refusal.value), (
+    assert str(refusal.value) == (
+        'Step "triage" was passed a value of class "Both", which is an instance of more than one '
+        'class its role accepts, none of them a subclass of the rest: "Highs", "Ticket". Accept '
+        "only the one the role reads, or make one of them a subclass of the rest, so the value is "
+        "taken as the subclass."
+    )
+    assert '"Highs", "Ticket"' in str(refusal.value), (
         "the refusal did not name the declarations that tied, which is the half not on screen at "
         "the line the author has to change"
     )
-    assert "Both" in str(refusal.value)
+    assert '"Both"' in str(refusal.value)
     assert record.runs == []
     assert not (tmp_path / "trees").exists(), "an ambiguous input provisioned a checkout anyway"
 
@@ -2155,10 +2333,15 @@ async def test_a_subclass_and_its_declared_base_land_under_one_name_and_are_refu
     run = _run(repository, tmp_path, base, _agent(record))
     role = _one_ticket("triage {{Ticket}}")
 
-    with pytest.raises(InputError, match="two Ticket values") as refusal:
+    with pytest.raises(InputError) as refusal:
         await run.step(role, Ticket("T-01"), Urgent("T-07"))
 
-    assert "subclass of Ticket is recorded under Ticket" in str(refusal.value)
+    assert str(refusal.value) == (
+        'Step "triage" was passed two "Ticket" values, and it takes one value per class its role '
+        'accepts, counting a subclass of "Ticket" as "Ticket". To pass both, declare one class '
+        "that holds them and accept that."
+    )
+    assert 'counting a subclass of "Ticket" as "Ticket"' in str(refusal.value)
     assert record.runs == []
     assert not (tmp_path / "trees").exists()
 

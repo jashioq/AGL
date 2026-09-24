@@ -7,11 +7,12 @@ reaches the same point with the same command at the same recorded head gets the 
 back without the command running. Anywhere else the command runs, and its command, head and
 outcome overwrite the entry at that point, so no entry holds the old outcome any more.
 
-**The head is the one the `Run` has recorded, not the checkout's.** A replayed step does not move
-the checkout, so on a resume the checkout can stand past the head the steps replayed so far. A
-verify keyed on the checkout would miss in exactly the case this exists for, which is the one the
-real-git tests at the bottom walk: `implement_and_check`, interrupted after its fix commit and
-resumed, as probe P1 of the docs session found it losing that commit.
+**The head is the one the `Run` has recorded, not the checkout's.** A replayed step moves the
+checkout only forward to its recorded head, never back, so on a resume the checkout can stand past
+the head the steps replayed so far. A verify keyed on the checkout would miss in exactly the case
+this exists for, which is the one the real-git tests at the bottom walk: `implement_and_check`,
+interrupted after its fix commit and resumed, as probe P1 of the docs session found it losing that
+commit.
 
 **A verify made while a step or a landing holds its worktree is not recorded.** A step's tool
 handler that verifies is part of that step's worker, which a replay skips, so an entry for it would
@@ -106,6 +107,7 @@ def _walk(
         fakes.services.store,
         SCOPE,
         workspace,
+        fakes.services.history,
         fakes.services.clock,
         Fingerprints() if fingerprints is None else fingerprints,
         head,
@@ -704,9 +706,10 @@ async def test_resuming_implement_and_check_after_an_interrupt_keeps_the_fix_com
 ) -> None:
     """P1's scenario B1. The review takes the build's outcome at the first commit; the fix goes
     in; the run is interrupted before it ends. On the resume the checkout is at the fix, where the
-    build now passes, so a verify that ran again would hand the review another input, the review
-    would run again, and the worktree would be reset to the first commit, taking the fix off
-    `agl/test`. The recorded outcome is handed back instead, and every step replays."""
+    build now passes, so a verify that ran again would hand the review another input: the review
+    would run again from the first commit, and the fix would replay and move the checkout forward
+    to its commit again. The recorded outcome is handed back instead, so neither the build nor an
+    agent runs, and every step replays."""
     first = await _walked(repository, tmp_path, resume=False)
     fixed = _git(repository, "rev-parse", "agl/test")
     checkout = tmp_path / "trees" / "test" / "_base"

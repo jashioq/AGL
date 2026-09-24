@@ -155,7 +155,8 @@ class RunSpec:
     created_at: datetime
 
     finished: bool = False
-    """`True` once the workflow has returned, and from then on `agl resume` refuses the run."""
+    """`True` once the workflow has returned with every landing settled, and from then on
+    `agl resume` refuses the run."""
 
     def __post_init__(self) -> None:
         for name, value in (

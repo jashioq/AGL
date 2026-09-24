@@ -64,8 +64,8 @@ class _Ledger(Store):
         self._after: int | None = None
         self._written = 0
 
-    def interrupt_after(self, steps: int | None) -> None:
-        self._after = steps
+    def interrupt_after(self, entries: int | None) -> None:
+        self._after = entries
         self._written = 0
 
     async def read_record(self, scope: RunScope) -> dict[str, JsonValue] | None:
@@ -92,9 +92,10 @@ class _Ledger(Store):
         )
         self._written += 1
         if self._after is not None and self._written >= self._after:
+            counted = "entry" if self._written == 1 else "entries"
             raise _Interrupted(
-                f"the harness interrupted this run after {self._written} step(s) recorded, which "
-                f"is what `interrupt_after={self._after}` asked for"
+                f"The harness interrupted the run after it recorded {self._written} {counted}, as "
+                f"`interrupt_after={self._after}` asked."
             )
 
     async def namespaces(self, scope: RunScope) -> tuple[Namespace, ...]:

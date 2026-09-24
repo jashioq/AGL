@@ -790,20 +790,24 @@ async def test_a_clear_aimed_at_a_live_resume_refuses_too(tmp_path: Path) -> Non
 async def test_a_label_with_no_record_is_a_not_found_and_reads_as_the_third_of_three(
     tmp_path: Path,
 ) -> None:
-    """The three refusals, read as the set they are: `run` says the label is taken and names the
-    two verbs that free it, `resume` says it is free and names the verb that takes it, and `clear`
-    says it is free and there is therefore nothing to take away.
+    """The three refusals, read as the set they are: `run` says the label is taken, by a run or by
+    a branch with no run recorded, and names what frees it, with `agl resume` beside it only while
+    the run has not finished; `resume` says it is free and names the verb that takes it; and
+    `clear` says it is free and there is therefore nothing to take away.
 
     All three messages are asserted here, in one test, because the claim is about the vocabulary
-    rather than about any one sentence. A change to one of them that stopped them reading as one
-    family fails here rather than being noticed by an operator holding three terminals.
+    rather than about any one sentence. One family means each opens on `Run "<label>"` and states
+    one fact, with "already exists" on one side and "does not exist" on the other, and that a
+    command freeing the label is named with what it deletes. A change to one of them that stopped
+    them reading as one family fails here rather than being noticed by an operator holding three
+    terminals.
     """
     harness = _fakes(tmp_path)
 
     with pytest.raises(NotFoundError) as caught:
         await _clear(harness)
 
-    assert str(caught.value) == "run 'auth' does not exist - there is nothing to clear."
+    assert str(caught.value) == 'Run "auth" does not exist, so there is nothing to clear.'
     assert exit_code_for(caught.value) == 3
 
     await _start(harness, "quiet")
@@ -812,6 +816,38 @@ async def test_a_label_with_no_record_is_a_not_found_and_reads_as_the_third_of_t
     assert str(absent.value) == (
         'Run "other" does not exist. To start it, run `agl run <workflow> -n other`.'
     )
+
+    with pytest.raises(ConflictError) as finished:
+        await _start(harness, "quiet")
+    assert str(finished.value) == (
+        'Run "auth" already exists and has finished, with its work on branch "agl/auth". To free '
+        "the label, run `agl clear auth`, which deletes that branch."
+    )
+
+    await _leave_unfinished(harness)
+    with pytest.raises(ConflictError) as unfinished:
+        await _start(harness, "quiet")
+    assert str(unfinished.value) == (
+        'Run "auth" already exists and has not finished. To continue it, run `agl resume auth`, '
+        "or to free the label, run `agl clear auth`, which deletes the run, its worktrees and "
+        "branches, and any uncommitted work in them."
+    )
+
+    stray = RunLabel("stray")
+    harness.repository.move(run_branch(stray), await harness.services.history.resolve("main"))
+    with pytest.raises(ConflictError) as branched:
+        await api.run(harness.services, PROJECT, "quiet", stray, (), points=POINTS)
+    assert str(branched.value) == (
+        'Run "stray" cannot start, because branch "agl/stray" already exists with no record of '
+        "that run. Use another label, or see what is on the branch with `git log agl/stray` and "
+        "free the label with `git branch -D agl/stray`, which deletes that branch."
+    )
+
+    said = [
+        ("auth", caught.value), ("auth", finished.value), ("auth", unfinished.value),
+        ("other", absent.value), ("stray", branched.value),
+    ]
+    assert all(str(refusal).startswith(f'Run "{label}" ') for label, refusal in said)
 
 @pytest.mark.asyncio
 async def test_clearing_the_same_run_twice_refuses_the_second_time(tmp_path: Path) -> None:

@@ -449,7 +449,8 @@ def test_the_existing_label_refusal_is_printed_as_written(
 
     captured = capsys.readouterr()
     assert captured.err == (
-        "agl: run 'auth' already exists - `agl resume auth` or `agl clear auth`.\n"
+        'agl: Run "auth" already exists and has finished, with its work on branch "agl/auth". To '
+        "free the label, run `agl clear auth`, which deletes that branch.\n"
     )
     assert captured.out == ""
 

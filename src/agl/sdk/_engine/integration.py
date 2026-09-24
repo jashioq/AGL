@@ -31,7 +31,8 @@ class Leases:
 
     # A lease is held from `integrate()` until something settles the landing, and `_settle` is the
     # only thing that lets one go during a walk - so one still live is a landing left unsettled,
-    # which `sdk/_engine/teardown.py` reads to decide whether a checkout may be taken back.
+    # which `sdk/_engine/teardown.py` reads to decide whether a checkout may be taken back and
+    # `api._walk` whether the run finished.
     @property
     def unsettled(self) -> bool:
         return bool(self._live)

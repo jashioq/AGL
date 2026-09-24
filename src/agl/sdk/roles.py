@@ -160,8 +160,9 @@ class RoleFactory[**P, R]:
             The `Role` the function returned, carrying this factory's model and accepted types.
 
         Raises:
-            InputError: The prompt and `accepts=` don't name the same set of types, or the
-                `Role` the function returned is refused.
+            InputError: A placeholder in the prompt has whitespace inside its braces, the prompt
+                and `accepts=` don't name the same set of types, or the `Role` the function
+                returned is refused.
         """
         built = replace(
             self._declaration(*args, **kwargs), _model=self.model, _accepts=self.accepts

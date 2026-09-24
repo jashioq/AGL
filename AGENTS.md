@@ -73,6 +73,8 @@ A framework for running AI agent workflows against code repositories.
 - A red build gate discards a hand-resolved conflict.
 - Resume re-runs every line, so a workflow branches only on step results.
 - Replay skips the worker, so a step's effects must land in its workspace.
+- A verify matches its entry on the chain's head, not the checkout's, or a resume runs its
+  command again.
 - Fingerprints must match across processes. Test under several `PYTHONHASHSEED` values.
 - Every dataclass in a step's inputs, role or result, `agl.ports` ones included, is fingerprinted
   by its `module.qualname` and field names, and every enum by its value. Moving or renaming one

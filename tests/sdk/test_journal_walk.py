@@ -170,6 +170,7 @@ def _journal(
         harness.services.store,
         scope,
         workspace,
+        harness.services.history,
         harness.services.clock,
         Fingerprints() if fingerprints is None else fingerprints,
         base,
@@ -487,6 +488,91 @@ async def test_a_base_that_advanced_between_runs_does_not_invalidate_earlier_ste
     assert await _step(resumed, SPEC, spec) == {"spec": "oauth"}
     assert await _step(resumed, TICKETS, tickets) == {"tickets": ["T-01", "T-02", "T-03"]}
     assert (spec.runs, tickets.runs) == (0, 0)
+
+# --- a hit stands the checkout at its recorded head ----------------------------------------------
+#
+# The chain is never read from the worktree, and the worktree is made to follow the chain: a hit
+# whose recorded head is ahead of the checkout moves the checkout and its branch forward to it. One
+# the checkout has diverged from, or one the repository never held, is a miss. The same three over
+# real git, with the cases that reach them, are in `test_replayed_commits.py`.
+
+@pytest.mark.asyncio
+async def test_a_hit_ahead_of_the_checkout_moves_it_and_its_branch_to_the_recorded_head(
+    tmp_path: Path,
+) -> None:
+    """The checkout is put back at the first step's head between the walks, as a miss's restore
+    leaves it. The second step's hit moves it forward, files and branch, and runs nothing."""
+    harness, workspace, base = await _opened(tmp_path)
+    journal = _journal(harness, workspace, base)
+
+    def _specifies() -> None:
+        _write(workspace, "src/a.txt", b"two\n")
+
+    def _tickets() -> None:
+        _write(workspace, "src/b.txt", b"the tickets\n")
+
+    await _step(journal, SPEC, _Worker(does=_specifies), commit="spec")
+    after_spec = await workspace.head()
+    await _step(journal, TICKETS, _Worker(does=_tickets), commit="tickets")
+    after_tickets = await workspace.head()
+    await workspace.restore(after_spec)
+
+    resumed = Fingerprints()
+    walk = _journal(harness, workspace, base, fingerprints=resumed)
+    spec, tickets = _Worker(), _Worker()
+    await _step(walk, SPEC, spec, commit="spec")
+    await _step(walk, TICKETS, tickets, commit="tickets")
+
+    assert (spec.runs, tickets.runs, resumed.replays) == (0, 0, 2)
+    assert await workspace.head() == after_tickets
+    assert harness.repository.tip(workspace.branch) == after_tickets
+    assert (workspace.path / "src/b.txt").read_bytes() == b"the tickets\n"
+
+@pytest.mark.asyncio
+async def test_a_hit_on_a_line_the_checkout_is_not_on_runs_its_worker_again(
+    tmp_path: Path,
+) -> None:
+    """The checkout is moved onto a line of its own between the walks, so the recorded head is
+    neither behind it nor ahead of it. The step runs again from the chain's head, and that line
+    leaves the branch."""
+    harness, workspace, base = await _opened(tmp_path)
+
+    def _specifies() -> None:
+        _write(workspace, "src/a.txt", b"two\n")
+
+    await _step(_journal(harness, workspace, base), SPEC, _Worker(does=_specifies), commit="spec")
+    await workspace.restore(base)
+    _write(workspace, "src/elsewhere.txt", b"somebody else's\n")
+    elsewhere = await workspace.commit_all("somebody else's")
+
+    resumed = Fingerprints()
+    spec = _Worker(does=_specifies)
+    await _step(_journal(harness, workspace, base, fingerprints=resumed), SPEC, spec, commit="spec")
+
+    assert (spec.runs, resumed.replays) == (1, 0)
+    assert not harness.repository.contains(elsewhere, await workspace.head())
+    assert not (workspace.path / "src/elsewhere.txt").exists()
+
+@pytest.mark.asyncio
+async def test_a_hit_whose_recorded_head_the_repository_does_not_hold_runs_again(
+    tmp_path: Path,
+) -> None:
+    """An entry whose head names no state of this repository, well-formed so that nothing refuses
+    it for its shape. The step runs, and its entry is written again over the same address."""
+    harness, workspace, base = await _opened(tmp_path)
+    absent = hashlib.sha256(b"a state no repository here recorded").hexdigest()
+    entry = Entry(fingerprint=_digest(base), value="old", head=absent, at=harness.clock.now())
+    await harness.services.store.write_entry(SCOPE, SPEC, _digest(base), entry.to_json())
+
+    resumed = Fingerprints()
+    spec = _Worker("new")
+    walk = _journal(harness, workspace, base, fingerprints=resumed)
+
+    assert await _step(walk, SPEC, spec) == "new"
+    assert (spec.runs, resumed.replays) == (1, 0)
+    rewritten = await _entry_at(harness, SPEC, _digest(base))
+    assert rewritten is not None
+    assert (rewritten.value, rewritten.head) == ("new", base)
 
 # --- `advance`: the third writer of the chain ----------------------------------------------------
 
@@ -925,6 +1011,7 @@ async def test_the_counter_is_taken_before_the_walk_can_suspend(tmp_path: Path) 
         _SuspendingStore(harness.services.store),
         SCOPE,
         _Suspending(raw),
+        harness.services.history,
         harness.services.clock,
         _Watching(taken),
         base,
@@ -1031,6 +1118,7 @@ async def test_two_gathered_steps_in_one_namespace_do_not_overlap(tmp_path: Path
         _SuspendingStore(harness.services.store),
         SCOPE,
         workspace,
+        harness.services.history,
         harness.services.clock,
         Fingerprints(),
         base,

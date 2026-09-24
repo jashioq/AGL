@@ -1257,6 +1257,11 @@ async def test_a_role_requiring_what_its_backend_lacks_is_refused_with_the_membe
         await run.step(builder())
 
     assert exit_code_for(caught.value) == 5
+    assert str(caught.value) == (
+        'Step "build" cannot run on "claude:opus", because the backend serving that model does '
+        'not offer what its role requires: "shell". It offers only "file_edit", "tool_calling", so '
+        "name a model whose backend offers it, or stop requiring it."
+    )
     assert "shell" in str(caught.value)
     assert stub.ran == []
 
@@ -1282,8 +1287,44 @@ async def test_a_missing_tool_calling_says_that_tools_put_it_there(tmp_path: Pat
         await run.step(reporter())
 
     said = str(caught.value)
+    assert said == (
+        'Step "report" cannot run on "claude:opus", because the backend serving that model does '
+        'not offer what its role requires: "tool_calling". It offers only "file_edit", "shell", so '
+        'name a model whose backend offers it, or stop requiring it; its tools are what require '
+        '"tool_calling", and a role with no tools makes its step return `None`.'
+    )
     assert "tool_calling" in said
     assert "tools" in said
+
+@pytest.mark.asyncio
+async def test_a_backend_offering_nothing_is_refused_with_every_missing_capability_named(
+    tmp_path: Path,
+) -> None:
+    """Two members missing and none held: both are named, and the backend is said to offer none
+    rather than to offer an empty list."""
+    harness = _fakes(tmp_path)
+    stub = _Stub(offers=frozenset())
+    run = await _direct(harness, stub)
+
+    @role(model=Claude.OPUS)
+    def building_reporter() -> Role[_Found]:
+        return Role(
+            name="build",
+            instructions="run the build, then report what it said",
+            tools=[reporting_tool("report_build", "report what the build said", _Found)],
+            requires={Capability.SHELL},
+        )
+
+    with pytest.raises(DeniedError) as caught:
+        await run.step(building_reporter())
+
+    assert str(caught.value) == (
+        'Step "build" cannot run on "claude:opus", because the backend serving that model does '
+        'not offer what its role requires: "shell", "tool_calling". It offers none, so name a '
+        "model whose backend offers them, or stop requiring them; its tools are what require "
+        '"tool_calling", and a role with no tools makes its step return `None`.'
+    )
+    assert stub.ran == []
 
 @pytest.mark.asyncio
 async def test_a_role_that_typed_the_member_itself_gets_no_extra_clause(tmp_path: Path) -> None:
@@ -1303,8 +1344,8 @@ async def test_a_role_that_typed_the_member_itself_gets_no_extra_clause(tmp_path
     with pytest.raises(DeniedError) as caught:
         await run.step(builder())
 
-    assert "declares `tools`" not in str(caught.value)
-    assert "folds it in" not in str(caught.value)
+    assert "its tools are what require" not in str(caught.value)
+    assert "tools" not in str(caught.value)
 
 @pytest.mark.asyncio
 async def test_a_role_built_inside_a_workflow_is_checked_at_the_step_it_is_handed_to(
@@ -1343,7 +1384,13 @@ async def test_a_role_built_inside_a_workflow_is_checked_at_the_step_it_is_hande
         await _start(harness, "replacing", agents=stub)
 
     said = str(caught.value)
-    assert "'implement'" in said, "the refusal does not name the step the role was handed to"
+    assert said == (
+        'Step "implement" cannot run on "claude:opus", because the backend serving that model '
+        'does not offer what its role requires: "tool_calling". It offers only "file_edit", '
+        '"shell", so name a model whose backend offers it, or stop requiring it; its tools are '
+        'what require "tool_calling", and a role with no tools makes its step return `None`.'
+    )
+    assert '"implement"' in said, "the refusal does not name the step the role was handed to"
     assert "tool_calling" in said
     assert "tools" in said
     # The same class and the same code as a declared role's would have been, pinned here because

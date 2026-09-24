@@ -11,8 +11,8 @@ workflow declaring nothing can still verify; it passes `""` through; and it hand
 verifier's own outcome, a failing one included, rather than raising. It does write an entry, under
 the `Run` that ran it, and `test_verify_record.py` holds what a resume does with one. The real-git
 test at the bottom pins what is left of the old price: a verify with no recorded outcome runs, and
-a step replayed from the ledger does not touch the checkout, so it runs on the checkout as it
-stands, which can be past the head the ledger replayed.
+a step replayed from the ledger moves the checkout only forward to its recorded head, never back,
+so the verify runs on the checkout as it stands, which can be past the head the ledger replayed.
 """
 
 import subprocess
@@ -164,6 +164,10 @@ async def test_a_command_that_is_not_a_string_is_refused_before_a_checkout_is_op
         await _ran(tmp_path, "with_no_text", gate)
 
     assert exit_code_for(refused.value) == exit_code_for(InputError)
+    assert str(refused.value) == (
+        'The command passed to `run.verify` is of type "NoneType", not "str", so it ran nothing '
+        'and opened no checkout. Pass a string, such as `run.config["build"]`.'
+    )
     assert "`run.verify`" in str(refused.value)
     assert gate.calls == []
     assert not (tmp_path / "trees" / str(LABEL) / CHILD).exists()

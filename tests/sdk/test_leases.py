@@ -101,6 +101,7 @@ def _journal(harness: container.FakeServices, workspace: Workspace, base: str) -
         harness.services.store,
         SCOPE,
         workspace,
+        harness.services.history,
         harness.services.clock,
         Fingerprints(),
         base,

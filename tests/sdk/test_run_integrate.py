@@ -845,13 +845,6 @@ def _point() -> EntryPoint:
     """The registration line, constructed rather than installed - `test_api.py`'s seam."""
     return EntryPoint(name="walks-away", value=f"{__name__}:walks_away", group=registry.GROUP)
 
-async def _leave_unfinished(harness: container.FakeServices) -> None:
-    """Put the record back as it stood before the workflow returned, which is what a run
-    interrupted after its last line leaves, so `api.resume` walks it rather than refusing it."""
-    record = await harness.services.store.read_record(SCOPE)
-    assert record is not None, "no run.json was written for this run"
-    await harness.services.store.write_record(SCOPE, {**record, "finished": False})
-
 @pytest.mark.asyncio
 async def test_run_exit_gives_the_lease_back_and_leaves_the_adapters_hold_alone(
     tmp_path: Path,
@@ -915,8 +908,8 @@ async def test_resume_exit_gives_the_lease_back_the_way_run_exit_does(tmp_path: 
     is a fact about the repository and not about a `FakeIntegrator` - so the resumed walk replays
     both steps, reaches the same `integrate()` and is answered with a conflict by the target that is
     still holding the first one. It ends there, holding a lease taken by a `Leases` that only
-    `api.resume` can release. The first run's record is left as an interrupted run leaves it,
-    because `api.resume` refuses a run whose workflow returned.
+    `api.resume` can release. The first run returned with its landing unsettled, so it is not
+    finished and `api.resume` walks it.
 
     **The release is asserted by asking for it again**, exactly as above and for the same reason: a
     lease is not observable, and a second integration into the same target either returns or waits
@@ -929,7 +922,6 @@ async def test_resume_exit_gives_the_lease_back_the_way_run_exit_does(tmp_path: 
     points: Sequence[EntryPoint] = (_point(),)
 
     await api.run(harness.services, PROJECT, "walks-away", LABEL, (), points=points)
-    await _leave_unfinished(harness)
     await api.resume(harness.services, PROJECT, LABEL, points=points)
 
     assert len(_LEFT_HOLDING) == 4, "the resumed workflow did not reach the end it was written for"
@@ -1251,14 +1243,13 @@ async def test_a_resumed_run_meeting_a_held_landing_refuses_an_undeclared_build_
     with, so a resume re-calling `integrate()` is the remaining path. Entry points handed over read
     no `pyproject.toml`, so the bundle a resume is given can lack `build` where the first run's had
     it. The refusal still comes before `Integrator.land`: the gate never runs, and the hold is left
-    for an invocation that can gate it. The first run's record is left as an interrupted run leaves
-    it, because `api.resume` refuses a run whose workflow returned.
+    for an invocation that can gate it. The first run returned with its landing unsettled, so it is
+    not finished and `api.resume` walks it.
     """
     _LEFT_HOLDING.clear()
     harness = _harness(tmp_path)
     points: Sequence[EntryPoint] = (_point(),)
     await api.run(harness.services, PROJECT, "walks-away", LABEL, (), points=points)
-    await _leave_unfinished(harness)
     gate = _Recorded(passed=True)
     bare = replace(harness.services, verifier=gate, config={})
 

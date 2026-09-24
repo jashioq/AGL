@@ -1,4 +1,5 @@
 import asyncio
+import json
 from collections.abc import Mapping, Sequence
 from typing import Final, cast
 from agl.ports.agent import AgentOutcome, AgentTask, StopReason, Tool, ToolResult
@@ -60,6 +61,8 @@ class Steps:
     ) -> R:
         step = StepName(role.name)
         inputs = checked_inputs(role, passed, step=str(step))
+        if commit is not None and not isinstance(commit, str):
+            raise InputError(_non_str_commit(str(step), commit))
         if isinstance(commit, str) and not commit.strip(_CLEANED_AWAY):
             raise InputError(_blank_commit(str(step)))
         await self._capabilities.require(self._services.agents, role, step=str(step))
@@ -69,7 +72,7 @@ class Steps:
         tools: list[Tool] = []
         for declared in role.tools:
             if isinstance(declared, ReportingTool):
-                capture = _Capture(declared)
+                capture = _Capture(str(step), declared)
                 tools.append(capture.tool)
             else:
                 tools.append(declared)
@@ -122,6 +125,7 @@ class Steps:
                         self._services.store,
                         self._scope,
                         workspace,
+                        self._services.history,
                         self._services.clock,
                         self._fingerprints,
                         base,
@@ -131,7 +135,8 @@ class Steps:
             return self._opened
 
 class _Capture[P]:
-    def __init__(self, declaration: ReportingTool[P]) -> None:
+    def __init__(self, step: str, declaration: ReportingTool[P]) -> None:
+        self._step = step
         self._declaration = declaration
         self._payload: dict[str, JsonValue] | None = None
         self.tool = Tool(
@@ -163,7 +168,7 @@ class _Capture[P]:
 
     def reported(self, outcome: AgentOutcome) -> JsonValue:
         if self._payload is None:
-            raise RoleIncompleteError(_unreported(self._declaration.name, outcome))
+            raise RoleIncompleteError(_unreported(self._step, self._declaration.name, outcome))
         return self._payload
 
     def read(self, value: object) -> P:
@@ -174,11 +179,14 @@ def _namespace_of(scope: RunScope) -> Namespace | None:
 
 def _not_a_command(command: object) -> str:
     return (
-        f"`run.verify` was handed {command!r}, a {type(command).__name__}, and what it runs is one "
-        f"command line handed to a shell exactly as written - so there is no text here to run. "
-        f"Nothing was run and no checkout was opened for it. Pass a string: a declared "
-        f"`run.config[\"build\"]` is one, an empty one included, and so is a gate the workflow's "
-        f"own params carry"
+        f'The command passed to `run.verify` is of type "{type(command).__name__}", not "str", so '
+        'it ran nothing and opened no checkout. Pass a string, such as `run.config["build"]`.'
+    )
+
+def _non_str_commit(step: str, commit: object) -> str:
+    return (
+        f'Step "{step}" has a commit message of type "{type(commit).__name__}", not "str". Pass a '
+        "string to `commit=`."
     )
 
 def _blank_commit(step: str) -> str:
@@ -187,37 +195,33 @@ def _blank_commit(step: str) -> str:
         "refuses. Write a message for `commit=`."
     )
 
-def _unreported(tool: str, outcome: AgentOutcome) -> str:
+def _unreported(step: str, tool: str, outcome: AgentOutcome) -> str:
     return (
-        f"the agent finished without ever calling {tool!r}, so this step produced no result: "
-        f"nothing was recorded and it will run again on the next attempt. {_because(outcome)} It "
-        f"said this instead of reporting: {outcome.text!r}"
+        f'Step "{step}" recorded nothing and runs again on the next attempt, because its agent '
+        f'stopped without calling "{tool}" after saying {_quoted(outcome.text)}. '
+        f"{_because(outcome, tool)}"
     )
 
 def _curtailed(step: str, outcome: AgentOutcome) -> str:
     return (
-        f"the backend stopped the agent for step {step!r} against its will - turns, tokens, time "
-        f"or budget - so it may have got part of the way through what it was asked and no "
-        f"further. This role reports through no tool, so it had no way to say it had finished and "
-        f"the record has nothing to tell a curtailed step from a completed one by: recording it "
-        f"would write an entry every resume replays as though the work had been done. Nothing was "
-        f"recorded and it will run again on the next attempt - raise the limit, or give the role a "
-        f"reporting tool so that finishing is something it has to say. It said this before it was "
-        f"stopped: {outcome.text!r}"
+        f'Step "{step}" recorded nothing and runs again on the next attempt, because its agent was '
+        "stopped by the backend at a turn, token, time or budget limit after saying "
+        f"{_quoted(outcome.text)}. Its role has no reporting tool for saying it finished, so raise "
+        "the limit, or give the role one."
     )
 
-def _because(outcome: AgentOutcome) -> str:
+def _because(outcome: AgentOutcome, tool: str) -> str:
     if outcome.stop_reason is StopReason.LIMIT:
-        return (
-            "The backend stopped it against its will - turns, tokens, time or budget - so it may "
-            "simply have run out of room before it reported: raise the limit."
-        )
+        return "The backend stopped it at a turn, token, time or budget limit, so raise the limit."
     if outcome.stop_reason is StopReason.COMPLETED:
         return (
-            "It ended its own turn, having decided it was finished, so the limit is not what it "
-            "reached: the prompt is what did not read as asking for a report through that tool."
+            f'The agent ended its own turn, so ask for the report through "{tool}" in the prompt.'
         )
     return (
-        "The backend did not say why it stopped, so neither a limit it reached nor a prompt that "
-        "never asked for the report can be ruled out from here."
+        "The backend did not say why it stopped, so raise the limit, or ask for the report "
+        f'through "{tool}" in the prompt.'
     )
+
+# An agent's closing message can run to paragraphs, which `json.dumps` escapes onto one line.
+def _quoted(text: str) -> str:
+    return json.dumps(text, ensure_ascii=False)

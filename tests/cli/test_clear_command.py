@@ -341,7 +341,7 @@ def test_clearing_a_label_with_no_record_exits_three(
     assert _main(harness, "clear", "auth") == 3
 
     captured = capsys.readouterr()
-    assert captured.err == "agl: run 'auth' does not exist - there is nothing to clear.\n"
+    assert captured.err == 'agl: Run "auth" does not exist, so there is nothing to clear.\n'
     assert captured.out == ""
 
 def test_a_label_the_filesystem_would_not_take_exits_two(tmp_path: Path) -> None:
