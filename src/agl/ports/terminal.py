@@ -48,36 +48,36 @@ type Component = Text | Row | Rows
 
 @dataclass(frozen=True, slots=True)
 class Choice[T]:
-    """An answer a person can pick, with the value it returns."""
+    """An answer picked by its number, with the value it returns."""
 
     label: str
-    """What the person reads beside this answer."""
+    """The text shown for this answer."""
 
     value: T
-    """What [`Terminal.show`][agl.sdk.Terminal.show] returns when the person picks it."""
+    """What [`Terminal.show`][agl.sdk.Terminal.show] returns when this answer is picked."""
 
 @dataclass(frozen=True, slots=True)
 class TextInput[T]:
-    """An answer a person types, with the function that turns it into a value."""
+    """An answer typed as a line, with the function that turns it into a value."""
 
     label: str
-    """What the person reads above the box they type in."""
+    """The text shown for this answer, and again where its line is typed."""
 
     maps: Callable[[str], T] = field(compare=False, repr=False)
-    """Called with what the person typed; what it returns is the answer."""
+    """Called with the typed line; what it returns is the answer."""
 
 type Response[T] = Choice[T] | TextInput[T]
-"""One answer a person can give on a [`Screen`][agl.sdk.Screen]."""
+"""One answer a [`Screen`][agl.sdk.Screen] offers."""
 
 @dataclass(frozen=True, slots=True, init=False)
 class Screen[T = None]:
-    """What a person is shown, and the answers they can give."""
+    """What the terminal shows, and the answers it takes."""
 
     body: Component
-    """What the person is shown. A plain string becomes a [`Text`][agl.sdk.Text]."""
+    """What the screen shows. A plain string becomes a [`Text`][agl.sdk.Text]."""
 
     responses: tuple[Response[T], ...]
-    """The answers on offer. With none, the screen is a board and nothing waits for a person."""
+    """The answers on offer. With none, the screen is a board and nothing waits for an answer."""
 
     def __init__(self, body: str | Component, responses: Sequence[Response[T]] = ()) -> None:
         object.__setattr__(self, "body", _coerced(body))
@@ -87,7 +87,7 @@ def _coerced[C: Component](value: str | C) -> Text | C:
     return Text(value) if isinstance(value, str) else value
 
 class Terminal(ABC):
-    """How a workflow talks to a person."""
+    """How a workflow shows screens and asks questions in the terminal."""
 
     @abstractmethod
     async def show[T](
@@ -98,7 +98,7 @@ class Terminal(ABC):
         priority: int = 0,
         **params: object,
     ) -> T:
-        """Shows a [`Screen`][agl.sdk.Screen] to a person and returns their answer.
+        """Shows a [`Screen`][agl.sdk.Screen] in the terminal and returns the answer.
 
         Args:
             view: The function returning the `Screen`. It runs every frame, so keep it short
@@ -108,11 +108,11 @@ class Terminal(ABC):
             params: The arguments passed to `view` every frame.
 
         Returns:
-            The value of the answer the person gave, or `None` where the screen offered none.
+            The value of the answer given, or `None` where the screen offered none.
 
         Raises:
             agl.sdk.UpstreamUnavailable: A screen with answers reached a terminal that takes no
-                input, which has nobody to answer it.
+                input.
         """
         ...
 

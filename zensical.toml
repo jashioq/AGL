@@ -7,14 +7,38 @@ site_dir = "site"
 strict = true
 nav = [
   { "Home" = "index.md" },
-  { "Build workflows" = [
-    { "Run" = [
-      { "Run" = "sdk/run.md" },
-      { "Run.step" = "sdk/run-step.md" },
-      { "Run.worktree" = "sdk/run-worktree.md" },
-      { "Run.integrate" = "sdk/run-integrate.md" },
-    ] },
+  { "Run workflows" = [
+    "run-workflows/index.md",
+    { "Configuration" = "run-workflows/configuration.md" },
+    { "Exit codes" = "run-workflows/exit-codes.md" },
   ] },
+  { "Build workflows" = [
+    "build/index.md",
+    { "Run" = [
+      "build/run/index.md",
+      { "Run.step()" = "build/run/step.md" },
+      { "Run.worktree()" = "build/run/worktree.md" },
+      { "Run.integrate()" = "build/run/integrate.md" },
+      { "Run.verify()" = "build/run/verify.md" },
+      { "Run.terminal" = "build/run/terminal.md" },
+      { "Run.config" = "build/run/config.md" },
+      { "Run.params" = "build/run/params.md" },
+      { "Run.label" = "build/run/label.md" },
+      { "Run.namespaces" = "build/run/namespaces.md" },
+    ] },
+    { "Role" = [
+      "build/role/index.md",
+      { "Model and effort" = "build/role/model-and-effort.md" },
+      { "Accept input parameters" = "build/role/accept-input-parameters.md" },
+      { "Prompt" = "build/role/prompt.md" },
+      { "Restrict agent permissions" = "build/role/restrict-agent-permissions.md" },
+      { "Tools and return types" = "build/role/tools-and-return-types.md" },
+      { "Agent activity" = "build/role/agent-activity.md" },
+    ] },
+    { "Stop" = "build/stop.md" },
+  ] },
+  { "Download workflows" = ["download/index.md"] },
+  { "Publish workflows" = ["publish/index.md"] },
   { "Examples" = ["examples/index.md"] },
 ]
 
@@ -78,6 +102,8 @@ docstring_style = "google"
 # Tables split at the `|` of a union type in the Markdown copies.
 docstring_section_style = "list"
 show_root_heading = true
+# Every `:::` block sits under a page's `## Reference` heading.
+heading_level = 3
 # mkdocstrings shows source by default.
 show_source = false
 relative_crossrefs = true
@@ -90,11 +116,33 @@ full_output = "llms-full.txt"
 
 # Only the pages listed here get a Markdown copy, and with none listed the check fails.
 [project.plugins.llmstxt.sections]
-"Pages" = ["index.md"]
-"Build workflows" = [
-  "sdk/run.md",
-  "sdk/run-step.md",
-  "sdk/run-worktree.md",
-  "sdk/run-integrate.md",
+"Home" = ["index.md"]
+"Run workflows" = [
+  "run-workflows/index.md",
+  "run-workflows/configuration.md",
+  "run-workflows/exit-codes.md",
 ]
+"Build workflows" = [
+  "build/index.md",
+  "build/run/index.md",
+  "build/run/step.md",
+  "build/run/worktree.md",
+  "build/run/integrate.md",
+  "build/run/verify.md",
+  "build/run/terminal.md",
+  "build/run/config.md",
+  "build/run/params.md",
+  "build/run/label.md",
+  "build/run/namespaces.md",
+  "build/role/index.md",
+  "build/role/model-and-effort.md",
+  "build/role/accept-input-parameters.md",
+  "build/role/prompt.md",
+  "build/role/restrict-agent-permissions.md",
+  "build/role/tools-and-return-types.md",
+  "build/role/agent-activity.md",
+  "build/stop.md",
+]
+"Download workflows" = ["download/index.md"]
+"Publish workflows" = ["publish/index.md"]
 "Examples" = ["examples/index.md"]

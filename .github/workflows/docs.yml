@@ -21,7 +21,7 @@ jobs:
       - uses: astral-sh/setup-uv@v10.0.1
       # Docs tools only, as Griffe reads src/ statically; 3.14, as requires-python has no ceiling.
       - run: uv sync --only-group docs --python 3.14
-      # The docs gate's four steps from ./scripts/check, which leave site/ ready to upload.
+      # The docs gate's four checks from ./scripts/check, which leave site/ ready to upload.
       - run: scripts/docs
       - uses: actions/upload-pages-artifact@v5
         with:

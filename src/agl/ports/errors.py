@@ -31,7 +31,7 @@ class ConflictError(AglError):
     """Something already there conflicts with the call; AGL won't overwrite it."""
 
 class DeniedError(AglError):
-    """AGL refuses the call; retrying won't work until something changes."""
+    """The call is refused; retrying won't work until something changes."""
 
 class UpstreamError(AglError):
     """A tool or service AGL calls failed."""

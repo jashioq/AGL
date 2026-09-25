@@ -6,4 +6,5 @@ version = "0.1.0"
 implement = "implement:implement"
 
 [tool.agl]
-requires = "agents-gl>=0.0.8"
+requires = "agents-gl>=0.0.9"
+config = []

@@ -105,7 +105,7 @@ def arg(*flags: str, default: Any = MISSING, help: str = "") -> Any:
     """Declares a field of a params dataclass as a command-line flag.
 
     Args:
-        flags: The flag's spellings, such as `-n` and `--name`. At least one.
+        flags: The flag's spellings, such as `-r` and `--request`. At least one.
         default: The value when the flag isn't given. If omitted, the flag is required. A `bool`
             field must use `default=False`.
         help: The text `agl workflows <workflow>` shows beside the flag.

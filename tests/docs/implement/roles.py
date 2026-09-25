@@ -10,21 +10,19 @@ from agl.sdk import (
     role,
 )
 
-@dataclass(frozen=True, slots=True)
+# --8<-- [start:definitions]
+@dataclass(frozen=True)
 class Summary:
-    text: str = describe("what you changed, in a sentence or two")
-
-record_summary = reporting_tool(
-    "record_summary",
-    "Record what you changed. Call it exactly once, when the work is done.",
-    Summary,
-)
+    text: str = describe("What you changed.")
 
 @role(model=Claude.OPUS(effort=ClaudeEffort.HIGH), accepts=(str,))
-def implementer() -> Role[Summary]:
+def builder_role() -> Role[Summary]:
     return Role(
-        name="implement",
-        instructions=prompt_file("prompts/implement.md"),
+        name="builder",
+        instructions=prompt_file("prompts/builder.md"),
         restrictions={Restriction.NO_NETWORK},
-        tools=(record_summary,),
+        tools=[reporting_tool("report", "Say what you changed.", Summary)],
     )
+
+builder = builder_role()
+# --8<-- [end:definitions]
