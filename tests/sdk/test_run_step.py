@@ -704,8 +704,8 @@ async def test_a_blank_commit_message_is_refused_before_the_agent_starts_and_not
         await run.step(_role("implement", "implement T-01"), commit=message)
 
     assert str(raised.value) == (
-        'Step "implement" has a commit message that is empty or only whitespace, which git '
-        "refuses. Write a message for `commit=`."
+        'Step "implement" has a commit message that is empty or only spaces, tabs and line '
+        "breaks, which git refuses. Write a message for `commit=`."
     )
     assert record.runs == [], "the agent ran for a step whose commit git was always going to refuse"
     assert _entries(tmp_path, "implement") == []
@@ -871,8 +871,8 @@ async def test_a_str_subclass_holding_only_whitespace_is_refused_as_a_blank_mess
         await run.step(_role("implement", "implement T-01"), commit=_Message.BLANK)
 
     assert str(raised.value) == (
-        'Step "implement" has a commit message that is empty or only whitespace, which git '
-        "refuses. Write a message for `commit=`."
+        'Step "implement" has a commit message that is empty or only spaces, tabs and line '
+        "breaks, which git refuses. Write a message for `commit=`."
     )
     assert record.runs == []
 

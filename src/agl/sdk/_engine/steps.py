@@ -191,8 +191,8 @@ def _non_str_commit(step: str, commit: object) -> str:
 
 def _blank_commit(step: str) -> str:
     return (
-        f'Step "{step}" has a commit message that is empty or only whitespace, which git '
-        "refuses. Write a message for `commit=`."
+        f'Step "{step}" has a commit message that is empty or only spaces, tabs and line breaks, '
+        "which git refuses. Write a message for `commit=`."
     )
 
 def _unreported(step: str, tool: str, outcome: AgentOutcome) -> str:

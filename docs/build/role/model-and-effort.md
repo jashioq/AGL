@@ -23,11 +23,11 @@ Without an effort, a model runs at its tool's default.
 
 ::: agl.sdk.ModelId
     options:
-      members:
-        - provider
+      members: false
 
 ::: agl.sdk.Claude
     options:
+      show_attribute_values: false
       members:
         - OPUS
         - SONNET
@@ -36,6 +36,7 @@ Without an effort, a model runs at its tool's default.
 
 ::: agl.sdk.ClaudeEffort
     options:
+      show_attribute_values: false
       members:
         - LOW
         - MEDIUM
@@ -45,6 +46,7 @@ Without an effort, a model runs at its tool's default.
 
 ::: agl.sdk.OpenAI
     options:
+      show_attribute_values: false
       members:
         - SOL
         - TERRA
@@ -53,6 +55,7 @@ Without an effort, a model runs at its tool's default.
 
 ::: agl.sdk.OpenAIEffort
     options:
+      show_attribute_values: false
       members:
         - LOW
         - MEDIUM

@@ -87,14 +87,12 @@ their questions aren't asked again.
 
 ::: agl.sdk.ReportingTool
     options:
-      members:
-        - name
-        - description
-        - payload
-        - rejection
-        - read
+      members: false
 
 ::: agl.sdk.describe
+    options:
+      separate_signature: true
+      overloads_only: true
 
 ::: agl.sdk.tool
 
@@ -106,11 +104,7 @@ their questions aren't asked again.
 
 ::: agl.sdk.Tool
     options:
-      members:
-        - name
-        - description
-        - payload_schema
-        - handler
+      members: false
 
 ::: agl.sdk.JsonValue
 

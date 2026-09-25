@@ -10,7 +10,6 @@ from agl.sdk import (
     role,
 )
 
-# --8<-- [start:definitions]
 @dataclass(frozen=True)
 class Summary:
     text: str = describe("What you changed.")
@@ -25,4 +24,3 @@ def builder_role() -> Role[Summary]:
     )
 
 builder = builder_role()
-# --8<-- [end:definitions]

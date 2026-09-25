@@ -11,8 +11,7 @@ outcome overwrite the entry at that point, so no entry holds the old outcome any
 checkout only forward to its recorded head, never back, so on a resume the checkout can stand past
 the head the steps replayed so far. A verify keyed on the checkout would miss in exactly the case
 this exists for, which is the one the real-git tests at the bottom walk: `implement_and_check`,
-interrupted after its fix commit and resumed, as probe P1 of the docs session found it losing that
-commit.
+interrupted after its fix commit and resumed.
 
 **A verify made while a step or a landing holds its worktree is not recorded.** A step's tool
 handler that verifies is part of that step's worker, which a replay skips, so an entry for it would
@@ -562,7 +561,7 @@ async def test_a_landings_build_gate_is_never_recorded_and_runs_again_on_a_resum
         _value(LINT, VerifierOutcome(passed=True, status=0, output="lint passed\n")),
     ]
 
-# --- P1: implement_and_check, over real git ----------------------------------------------------
+# --- implement_and_check, over real git ---------------------------------------------------------
 
 REQUEST: Final = "add a --verbose flag"
 FINDING: Final = "the flag is parsed and never read"
@@ -570,7 +569,7 @@ FIX: Final = "fix.txt"
 
 @dataclass(frozen=True, slots=True)
 class Review:
-    """What the review reports through its tool, as the docs example's own `Review` does."""
+    """What the review reports through its tool."""
 
     findings: list[str] = describe("what is wrong, one item per finding, each naming its file")
 
@@ -582,7 +581,7 @@ record_review = reporting_tool(
 
 @role(model=Claude.OPUS, accepts=(str, Review))
 def implementer() -> Role[None]:
-    """The docs example's implementer, with its prompt written inline."""
+    """The implementer: handed the request, and the review's findings for the fix."""
     return Role(
         name="implement",
         instructions="Make this change: {{str}}\n\nThe last review found: {{Review}}",
@@ -590,7 +589,7 @@ def implementer() -> Role[None]:
 
 @role(model=Claude.OPUS, accepts=(str, VerifierOutcome))
 def reviewer() -> Role[Review]:
-    """The docs example's reviewer: read-only, and handed the build's outcome."""
+    """The reviewer: read-only, and handed the build's outcome."""
     return Role(
         name="review",
         instructions="Review the last commit against: {{str}}\n\nThe build: {{VerifierOutcome}}",
@@ -600,7 +599,7 @@ def reviewer() -> Role[Review]:
 
 @dataclass(frozen=True, slots=True)
 class Parameters:
-    """The docs example's parameters."""
+    """The workflow's parameters: the request, given with `-r`."""
 
     request: str = arg("-r", "--request", help="what you want done")
 
@@ -609,7 +608,8 @@ reviewing = reviewer()
 
 @workflow
 async def implement_and_check(run: Run[Parameters]) -> None:
-    """The shape of `tests/docs/implement_and_check`, less the board it shows."""
+    """A review handed a verify's outcome, and the fix for what it finds: the case a recorded
+    verify exists for."""
     request = run.params.request
     await run.step(implementing, request, commit="do what was asked")
     checked = await run.verify(run.config["build"])
@@ -704,12 +704,12 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 async def test_resuming_implement_and_check_after_an_interrupt_keeps_the_fix_commit_on_its_branch(
     repository: Path, tmp_path: Path
 ) -> None:
-    """P1's scenario B1. The review takes the build's outcome at the first commit; the fix goes
-    in; the run is interrupted before it ends. On the resume the checkout is at the fix, where the
-    build now passes, so a verify that ran again would hand the review another input: the review
-    would run again from the first commit, and the fix would replay and move the checkout forward
-    to its commit again. The recorded outcome is handed back instead, so neither the build nor an
-    agent runs, and every step replays."""
+    """The review takes the build's outcome at the first commit; the fix goes in; the run is
+    interrupted before it ends. On the resume the checkout is at the fix, where the build now
+    passes, so a verify that ran again would hand the review another input: the review would run
+    again from the first commit, and the fix would replay and move the checkout forward to its
+    commit again. The recorded outcome is handed back instead, so neither the build nor an agent
+    runs, and every step replays."""
     first = await _walked(repository, tmp_path, resume=False)
     fixed = _git(repository, "rev-parse", "agl/test")
     checkout = tmp_path / "trees" / "test" / "_base"

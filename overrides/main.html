@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+
+{#- Zensical 0.0.63 never sets page.is_homepage, which base.html tests to title the homepage
+    with the site name alone, so Home would read "Home - AGL". -#}
+{% block htmltitle %}
+  {% if page.url == nav.homepage.url %}
+    <title>{{ config.site_name }}</title>
+  {% else %}
+    {{ super() }}
+  {% endif %}
+{% endblock %}

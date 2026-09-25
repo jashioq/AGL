@@ -1,4 +1,4 @@
-# AGL
+# Agents, Graphs, Loops
 
 Run Claude Code and Codex agents as workflows you write in Python. AGL can use your subscription limits so API keys are optional.
 

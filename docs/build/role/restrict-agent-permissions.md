@@ -24,6 +24,7 @@ away from the agent.
 
 ::: agl.sdk.Restriction
     options:
+      show_attribute_values: false
       members:
         - NO_VCS_WRITES
         - NO_FILE_WRITES

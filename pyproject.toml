@@ -4,10 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agents-gl"
-# 0.0.1 and not 0.1.0: the first upload is a name claim rather than a release. A version number on
-# PyPI is spent permanently - yanking a release does not free the number for reuse - so the one
-# that buys the name sits below anything an operator would read as a first version of the software.
-version = "0.0.9"
+version = "0.1.0"
 description = "A framework for running AI agent workflows against code repositories."
 # This file rendered *is* the body of the PyPI project page; there is no other prose on it.
 readme = "README.md"
@@ -46,14 +43,19 @@ classifiers = [
 # `packaging.specifiers`' and nothing here compares strings. It arrives today as a transitive
 # dependency of pytest, which is a dev tool: an `agl` installed by an operator gets what this list
 # names and nothing a `[dependency-groups]` entry pulled in beside it.
-dependencies = ["claude-agent-sdk>=0.2.140", "packaging>=25.0", "rich>=15.0.0"]
+#
+# `claude-agent-sdk` is pinned to the one release that bundles Claude Code 2.1.277, the version
+# `adapters/claude_code/_version.py` names as tested. The adapter starts the bundled binary
+# unless `cli_path` names another, so a looser bound installs a newer one and Claude runs warn.
+dependencies = ["claude-agent-sdk==0.2.157", "packaging>=25.0", "rich>=15.0.0"]
 
-# Both labels point at the repository because there is nowhere else to send anyone yet: no
-# documentation site, and no tracker apart from the repo's own. Two labels rather than one because
-# PyPI lists each by name in its sidebar, so a reader scanning for either finds it.
+# Homepage and Repository both point at the repository, and there is no tracker apart from the
+# repo's own. Two labels rather than one because PyPI lists each by name in its sidebar, so a
+# reader scanning for either finds it.
 [project.urls]
 Homepage = "https://github.com/jashioq/AGL"
 Repository = "https://github.com/jashioq/AGL"
+Documentation = "https://agents-gl.com"
 
 [project.scripts]
 agl = "agl.cli.main:main"

@@ -40,11 +40,7 @@ it before the agent starts.
 
 ::: agl.sdk.RoleFactory
     options:
-      show_attribute_values: false
       members:
-        - name
-        - model
-        - accepts
         - __call__
 
 ::: agl.sdk.Role
@@ -56,11 +52,10 @@ it before the agent starts.
         - tools
         - requires
         - on_activity
-        - model
-        - accepts
 
 ::: agl.sdk.Capability
     options:
+      show_attribute_values: false
       members:
         - FILE_EDIT
         - SHELL

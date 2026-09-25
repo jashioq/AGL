@@ -84,7 +84,7 @@ VERIFY: Final = "run.verify"
 
 @dataclass(frozen=True, slots=True)
 class Review:
-    """What the review reports through its tool, as the docs example's own `Review` does."""
+    """What the review reports through its tool."""
 
     findings: list[str] = describe("what is wrong, one item per finding, each naming its file")
 
@@ -96,7 +96,7 @@ record_review = reporting_tool(
 
 @role(model=Claude.OPUS, accepts=(str, Review))
 def implementer() -> Role[None]:
-    """The docs example's implementer, with its prompt written inline."""
+    """The implementer: handed the request, and the review's findings for the fix."""
     return Role(
         name="implement",
         instructions="Make this change: {{str}}\n\nThe last review found: {{Review}}",
@@ -104,7 +104,7 @@ def implementer() -> Role[None]:
 
 @role(model=Claude.OPUS, accepts=(str, VerifierOutcome))
 def reviewer() -> Role[Review]:
-    """The docs example's reviewer: read-only, and handed a build's outcome."""
+    """The reviewer: read-only, and handed a build's outcome."""
     return Role(
         name="review",
         instructions="Review the last commit against: {{str}}\n\nThe build: {{VerifierOutcome}}",
@@ -114,7 +114,7 @@ def reviewer() -> Role[Review]:
 
 @dataclass(frozen=True, slots=True)
 class Parameters:
-    """The docs example's parameters."""
+    """The workflow's parameters: the request, given with `-r`."""
 
     request: str = arg("-r", "--request", help="what you want done")
 
@@ -123,7 +123,8 @@ reviewing = reviewer()
 
 @workflow
 async def implement_and_check(run: Run[Parameters]) -> None:
-    """The shape of `tests/docs/implement_and_check`, and a last look at the checkout."""
+    """A review handed a verify's outcome, and the fix for what it finds, then a last look at
+    the checkout."""
     request = run.params.request
     await run.step(implementing, request, commit=FIRST)
     checked = await run.verify(run.config["build"])
