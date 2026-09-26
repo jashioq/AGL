@@ -1,6 +1,6 @@
 # Docs guidelines
 
-House style for the AGL documentation at agents-gl.com. Read it before changing anything under
+House style for the AGL documentation at agents-gl.org. Read it before changing anything under
 `docs/`, `overrides/` or `tests/docs/`, or a docstring in `src/agl/sdk/` or `src/agl/ports/`. If a
 brief contradicts it, stop and ask.
 

@@ -55,7 +55,7 @@ dependencies = ["claude-agent-sdk==0.2.157", "packaging>=25.0", "rich>=15.0.0"]
 [project.urls]
 Homepage = "https://github.com/jashioq/AGL"
 Repository = "https://github.com/jashioq/AGL"
-Documentation = "https://agents-gl.com"
+Documentation = "https://agents-gl.org"
 
 [project.scripts]
 agl = "agl.cli.main:main"

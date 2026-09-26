@@ -1,6 +1,6 @@
 [project]
 site_name = "AGL"
-site_url = "https://agents-gl.com/"
+site_url = "https://agents-gl.org/"
 repo_url = "https://github.com/jashioq/AGL"
 docs_dir = "docs"
 site_dir = "site"
