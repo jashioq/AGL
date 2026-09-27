@@ -1,5 +1,7 @@
 # implement_and_review
 
+Source: [`AGL-workflows/implement_and_review`](https://github.com/jashioq/AGL-workflows/tree/main/implement_and_review)
+
 `implement_and_review` has Claude Code make the change you ask for, and Codex review it. Claude
 Code fixes what a review finds, for up to three reviews. A clean review finishes the run, with the
 work committed on `agl/<label>`. A third review with findings stops it.
@@ -105,6 +107,40 @@ def ask_question() -> Tool:
 ```
 
 See [Asking questions](../build/role/tools-and-return-types.md#asking-questions).
+
+### Terminal display
+
+The workflow first shows `board` with `opened(run.terminal)`, and the terminal redraws it on every
+frame. Each role's `watch` calls `report`, which stores the agent's latest activity line for the
+board.
+
+[`display.py`](https://github.com/jashioq/AGL-workflows/blob/d39353e3a6dae853d1ba368fa47ffc5ff3a9c82b/implement_and_review/display.py):
+
+```python
+now = {"agent": "", "line": ""}
+...
+def report(agent: str, line: str) -> None:
+    now["agent"] = agent
+    now["line"] = line
+
+
+async def opened(run_terminal: Terminal) -> None:
+    global terminal
+    terminal = run_terminal
+    await terminal.show(board, since=monotonic())
+...
+def board(*, since: float) -> Screen:
+    return Screen(
+        Rows([
+            Row(f"implement and review  {_elapsed(since)}"),
+            Row(""),
+            Row(f"{now['agent']}  {now['line'][:60]}"),
+        ])
+    )
+```
+
+See [`Run.terminal`](../build/run/terminal.md) and
+[Agent activity](../build/role/agent-activity.md).
 
 ### The loop
 
