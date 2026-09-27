@@ -26,7 +26,7 @@ async def implement(run: Run) -> None:
 ```toml
 [project]
 name = "implement"
-version = "0.1.0"
+version = "0.1.1"
 
 [project.entry-points."agl.workflows"]
 implement = "implement:implement"
