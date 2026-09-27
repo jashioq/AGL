@@ -42,6 +42,7 @@ nav = [
   { "Examples" = [
     "examples/index.md",
     { "implement_and_review" = "examples/implement_and_review.md" },
+    { "chat" = "examples/chat.md" },
   ] },
 ]
 
@@ -159,4 +160,5 @@ full_output = "llms-full.txt"
 "Examples" = [
   "examples/index.md",
   "examples/implement_and_review.md",
+  "examples/chat.md",
 ]
