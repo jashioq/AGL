@@ -4,7 +4,7 @@ Source: [`AGL-workflows/chat`](https://github.com/jashioq/AGL-workflows/tree/mai
 
 `chat` has Haiku, through Claude Code, and Luna, through Codex, talk about a topic you give it. They
 run at the same time and take turns saying one line each, and the terminal shows the chat as it
-goes. The chat ends after 20 lines.
+goes. The chat ends after 20 lines, or as many as `-l` gives.
 
 ## Get it and run it
 
@@ -14,7 +14,7 @@ agl get jashioq/AGL-workflows/chat
 ```
 Run it:
 ```
-agl run chat -n tabs-or-spaces -r "Tabs or spaces"
+agl run chat -n tabs-or-spaces -r "Tabs or spaces" -l 10
 ```
 
 ## How it's built
@@ -25,122 +25,115 @@ shows in the terminal, and `prompts/` a prompt for each role.
 ### Roles
 
 `haiku_speaker` runs Haiku through Claude Code, and `luna_speaker` runs Luna through Codex. Each
-gets a `say` and a `listen` built for its own name and the cap on lines. Neither has a reporting
-tool, so each step returns `None`.
+gets its `say` and `listen` from the `Conversation` it is given. Neither has a reporting tool, so
+each step returns `None`.
 
-[`roles.py`](https://github.com/jashioq/AGL-workflows/blob/d39353e3a6dae853d1ba368fa47ffc5ff3a9c82b/chat/roles.py):
+[`roles.py`](https://github.com/jashioq/AGL-workflows/blob/a3aacaf0971de4f2f4c5ead4045f3010471c2d8a/chat/roles.py):
 
 ```python
 @role(model=Claude.HAIKU(effort=ClaudeEffort.LOW), accepts=(str,))
-def haiku_speaker(cap: int) -> Role[None]:
+def haiku_speaker(conversation: Conversation) -> Role[None]:
     return Role(
         name="haiku",
         instructions=prompt_file("prompts/haiku.md"),
-        tools=(says(HAIKU, cap), listens(HAIKU, cap)),
+        tools=conversation.tools(HAIKU),
     )
 
 
 @role(model=OpenAI.LUNA(effort=OpenAIEffort.LOW), accepts=(str,))
-def luna_speaker(cap: int) -> Role[None]:
+def luna_speaker(conversation: Conversation) -> Role[None]:
     return Role(
         name="luna",
         instructions=prompt_file("prompts/luna.md"),
-        tools=(says(LUNA, cap), listens(LUNA, cap)),
+        tools=conversation.tools(LUNA),
     )
 ```
 
 See [Model and effort](../build/role/model-and-effort.md).
 
-### Tool payloads
+### Conversation
 
-The agents reach each other through two tools, `say` and `listen`. `say` takes a `Line`, and
-`listen` takes `Nothing`, an empty dataclass, as it has no arguments. Both tools use `transcript`,
-the chat so far, and `turn`, an event for each side. `listen` also reads `gone`, the sides whose
-step has ended.
+One `Conversation` holds the chat for both sides: its `lines`, whether it is `over`, and `turn`, an
+event for each side that is set while it is that side's turn. Its `tools()` builds a side's `say`,
+which takes a `Line`, and its `listen`, which takes no arguments.
 
-[`roles.py`](https://github.com/jashioq/AGL-workflows/blob/d39353e3a6dae853d1ba368fa47ffc5ff3a9c82b/chat/roles.py):
+[`roles.py`](https://github.com/jashioq/AGL-workflows/blob/a3aacaf0971de4f2f4c5ead4045f3010471c2d8a/chat/roles.py):
 
 ```python
-transcript: list[str] = []
-gone: set[str] = set()
-# One event a side, set by the other one's `say`, so a waiter is never woken by its own line
-turn: Final = {HAIKU: asyncio.Event(), LUNA: asyncio.Event()}
-
-
 @dataclass(frozen=True, slots=True)
 class Line:
     message: str = describe(
-        "your next line in the chat: 200 characters at most, one sentence, no name in front of it"
+        "your next line in the chat: 200 characters at most, no name in front of it"
     )
-
-
-# `listen` takes no arguments, and a tool payload is a dataclass whatever it carries
-@dataclass(frozen=True, slots=True)
-class Nothing:
-    ...
+...
+    def tools(self, name: str) -> tuple[Tool, Tool]:
+        say = tool(
+            "say",
+            "Say your next line, which is how the other one hears you.",
+            Line,
+            lambda line: self.say(name, line.message),
+        )
+        listen = Tool(
+            name="listen",
+            description="Wait for the other one to say something, and read it. Takes no arguments.",
+            payload_schema={"type": "object", "properties": {}},
+            handler=lambda _: self.listen(name),
+        )
+        return say, listen
 ```
 
-See [`tool()`](../build/role/tools-and-return-types.md#agl.sdk.tool).
+See [`tool()`](../build/role/tools-and-return-types.md#agl.sdk.tool) and
+[`Tool`](../build/role/tools-and-return-types.md#agl.sdk.Tool).
 
 ### Say tool
 
-`says` builds a side's `say`. Its function adds the line to `transcript` and to the board, and sets
-the other side's event, which wakes that side's `listen`. When the chat is already at the cap, or
-the same side said the last line, it returns `rejected=True`.
+`say` returns `rejected=True` once the chat is over, or when it is not the side's turn. Otherwise it
+ends the side's turn, adds the line to `lines` and to the board, and hands the turn to the other
+side, which wakes its `listen`. The line that reaches the limit ends the chat instead.
 
-[`roles.py`](https://github.com/jashioq/AGL-workflows/blob/d39353e3a6dae853d1ba368fa47ffc5ff3a9c82b/chat/roles.py):
+[`roles.py`](https://github.com/jashioq/AGL-workflows/blob/a3aacaf0971de4f2f4c5ead4045f3010471c2d8a/chat/roles.py):
 
 ```python
-def says(name: str, cap: int) -> Tool:
-    async def spoken(line: Line) -> ToolResult:
-        if len(transcript) >= cap:
+    async def say(self, name: str, message: str) -> ToolResult:
+        if self.over:
             return ToolResult(text=OVER, rejected=True)
-        if transcript and transcript[-1].startswith(f"{name}:"):
-            return ToolResult(text=TWICE, rejected=True)
-        transcript.append(f"{name}: {line.message}")
-        said(COLOUR[name], name, line.message)
-        # Woken whether the cap has just been reached or not: the other side is waiting on this
-        # event either for a line to answer or to be told the chat is over
-        other = _other(name)
-        turn[other].set()
-        if len(transcript) >= cap:
-            quiet()
+        if not self.turn[name].is_set():
+            return ToolResult(text=NOT_YOUR_TURN, rejected=True)
+        self.turn[name].clear()
+        self.lines.append(f"{name}: {message}")
+        said(COLOUR[name], name, message)
+        if len(self.lines) >= self.limit:
+            self.end()
             return ToolResult(text=OVER)
-        waiting(COLOUR[other], other)
+        self._hand_to(_other(name))
         return ToolResult(text="Said. Now listen for the answer.")
-
-    return tool("say", "Say your next line, which is how the other one hears you.", Line, spoken)
 ```
 
 See [Tools](../build/role/tools-and-return-types.md#tools).
 
 ### Listen tool
 
-`listens` builds a side's `listen`. Its function waits for the side's own event, then returns the
-other side's last line, or tells the agent the chat is over once the cap is reached or the other
-side's step has ended. Haiku opens, so its `listen` before the first line tells it to speak.
+`listen` waits for the side's event, then returns the other side's last line, or tells the agent the
+chat is over. Haiku opens, so its `listen` before the first line tells it to speak. `end` marks the
+chat over and sets both events, so no `listen` is left waiting.
 
-[`roles.py`](https://github.com/jashioq/AGL-workflows/blob/d39353e3a6dae853d1ba368fa47ffc5ff3a9c82b/chat/roles.py):
+[`roles.py`](https://github.com/jashioq/AGL-workflows/blob/a3aacaf0971de4f2f4c5ead4045f3010471c2d8a/chat/roles.py):
 
 ```python
-def listens(name: str, cap: int) -> Tool:
-    async def heard(_: Nothing) -> ToolResult:
-        # Nothing would ever wake the one who opens, so it is told to speak rather than left to
-        # wait on a line the other one is itself waiting for
-        if not transcript and name == OPENS:
-            return ToolResult(text=OPENING)
-        await turn[name].wait()
-        turn[name].clear()
-        if len(transcript) >= cap or _other(name) in gone:
+    async def listen(self, name: str) -> ToolResult:
+        await self.turn[name].wait()
+        if self.over:
             return ToolResult(text=OVER)
-        return ToolResult(text=transcript[-1])
+        if not self.lines:
+            return ToolResult(text=OPENING)
+        return ToolResult(text=self.lines[-1])
 
-    return tool(
-        "listen",
-        "Wait for the other one to say something, and read it. Takes no arguments.",
-        Nothing,
-        heard,
-    )
+
+    def end(self) -> None:
+        self.over = True
+        quiet()
+        for turn in self.turn.values():
+            turn.set()
 ```
 
 See [`ToolResult`](../build/role/tools-and-return-types.md#agl.sdk.ToolResult).
@@ -152,7 +145,7 @@ each line to `spoken` through `said`, and puts the side that speaks next in `thi
 `waiting`. `board` draws each line after its speaker's name in colour, a spinner for the side in
 `thinking`, and drops the oldest rows once the chat is taller than the terminal.
 
-[`display.py`](https://github.com/jashioq/AGL-workflows/blob/d39353e3a6dae853d1ba368fa47ffc5ff3a9c82b/chat/display.py):
+[`display.py`](https://github.com/jashioq/AGL-workflows/blob/a3aacaf0971de4f2f4c5ead4045f3010471c2d8a/chat/display.py):
 
 ```python
 spoken: list[tuple[str, str, str]] = []
@@ -177,34 +170,34 @@ See [`Run.terminal`](../build/run/terminal.md).
 
 ### Two agents at once
 
-The workflow runs both steps at once in an `asyncio.TaskGroup`, each in a worktree of its own and
-with no `commit`. When a step ends, `ended` marks its side gone and wakes the
-other side's `listen`. When both steps have returned, the workflow raises `Stop` with the number
-of lines said.
+The workflow makes one `Conversation` with the `--lines` limit, then runs both steps at once in an
+`asyncio.TaskGroup`, each in a worktree named after its role and with no `commit`. When a step ends,
+`end` tells the other side the chat is over. When both steps have returned, the workflow raises
+`Stop` with the number of lines said.
 
-[`__init__.py`](https://github.com/jashioq/AGL-workflows/blob/d39353e3a6dae853d1ba368fa47ffc5ff3a9c82b/chat/__init__.py):
+[`__init__.py`](https://github.com/jashioq/AGL-workflows/blob/a3aacaf0971de4f2f4c5ead4045f3010471c2d8a/chat/__init__.py):
 
 ```python
-talking_haiku = haiku_speaker(MAX_TURNS)
-talking_luna = luna_speaker(MAX_TURNS)
-
-
 @workflow
 async def chat(run: Run[Parameters]) -> None:
     await opened(run.terminal, f"{HAIKU} and {LUNA}'s chat")
 
+    conversation = Conversation(run.params.lines)
     async with asyncio.TaskGroup() as group:
-        group.create_task(talking(run, talking_haiku, HAIKU))
-        group.create_task(talking(run, talking_luna, LUNA))
+        group.create_task(talking(run, conversation, haiku_speaker(conversation)))
+        group.create_task(talking(run, conversation, luna_speaker(conversation)))
 
-    raise Stop(f"the chat ended after {len(transcript)} of the {MAX_TURNS} lines it is capped at")
+    raise Stop(
+        f"the chat ended after {len(conversation.lines)} of the {conversation.limit} lines it is "
+        f"capped at"
+    )
 
 
-async def talking(run: Run[Parameters], speaking: Role[None], name: str) -> None:
+async def talking(run: Run[Parameters], conversation: Conversation, speaking: Role[None]) -> None:
     try:
-        await run.worktree(name.lower()).step(speaking, run.params.topic)
+        await run.worktree(speaking.name).step(speaking, run.params.topic)
     finally:
-        ended(name)
+        conversation.end()
 ```
 
 See [`Run.step()`](../build/run/step.md), [`Run.worktree()`](../build/run/worktree.md) and
