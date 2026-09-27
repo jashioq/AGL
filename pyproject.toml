@@ -100,15 +100,15 @@ default-groups = ["dev", "docs"]
 # An allowlist, because hatchling's default sdist is everything the root `.gitignore` does not
 # exclude, and this repository is not shaped like a package. Measured with this table deleted, that
 # default builds a 1.6 MB archive around a 270 KB wheel: the whole of `tests/`, `reference/`'s
-# read-only extracts, `scripts/`, `DOCS_GUIDELINES.md`, `.github/`, `.vscode/`, `.claude/` and both
-# tool caches - `.grimp_cache/` and `.import_linter_cache/` - all ride along.
+# read-only extracts, `scripts/`, `.github/`, `.vscode/`, `.claude/` and both tool caches -
+# `.grimp_cache/` and `.import_linter_cache/` - all ride along.
 # An upload is irrevocable and the version number cannot be reissued once it is on PyPI, so the
 # failure worth designing against is something shipping that was never meant to leave this machine.
 # As an allowlist, a directory added to the repo tomorrow does not ship until it is named here; as
 # exclusions, it ships until somebody notices.
 #
-# `AGENTS.md` is in the list rather than left behind with `DOCS_GUIDELINES.md` because `src/`'s
-# comments cite its headings by name, so it is the one document the shipped source refers to.
+# `AGENTS.md` is in the list because `src/`'s comments cite its headings by name, so it is the one
+# document the shipped source refers to.
 #
 # Every pattern is anchored with a leading `/`, and that slash is load-bearing rather than tidy.
 # Hatchling reads these as gitignore patterns, where a bare `README.md` matches at *any* depth: it

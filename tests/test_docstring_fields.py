@@ -169,13 +169,13 @@ stated as a floor and not as a measurement so that adding a documented callable 
 
 ## The presence half: on the front door, a name with no docstring renders as nothing
 
-**mkdocstrings leaves out a name that carries no docstring, and says nothing about it.**
-`DOCS_GUIDELINES.md` states it from the other end: every public field, enum member and exported
-type alias has one, or it is absent from the page. That failure looks exactly like a page written
-correctly, which is the same argument the two scans above make, so the third walk is a presence
-check - every name `src/agl/sdk/__init__.py`'s `__all__` holds, followed to the module that really
-writes it, and every public member of each. An attribute's and a type alias's docstring is read
-where Griffe reads one, as a bare string standing directly below the binding.
+**mkdocstrings leaves out a name that carries no docstring, and says nothing about it.** So every
+public field, enum member and exported type alias has one, or it is absent from the page. That
+failure looks exactly like a page written correctly, which is the same argument the two scans above
+make, so the third walk is a presence check - every name `src/agl/sdk/__init__.py`'s `__all__`
+holds, followed to the module that really writes it, and every public member of each. An attribute's
+and a type alias's docstring is read where Griffe reads one, as a bare string standing directly
+below the binding.
 
 **This half has an exemption list, and the argument against one does not reach it.** `PLUMBING`
 holds the members a `Run`, a `Workflow` and a `ReportingTool` carry for the framework rather than
@@ -838,8 +838,7 @@ def _renders_as_nothing(missing: Sequence[str]) -> str:
         + "\n"
         "The API reference is these docstrings rendered word for word, and mkdocstrings leaves a "
         "name with none off the page - silently, and looking exactly like a page written "
-        "correctly. So a field, an enum member and an exported type alias each carry one, which "
-        "is what `DOCS_GUIDELINES.md` says from the other end.\n"
+        "correctly. So a field, an enum member and an exported type alias each carry one.\n"
         "\n"
         "An attribute's docstring is a bare string on the line below the binding, which is the "
         "only place Griffe reads one from; a `def` and a `class` carry theirs inside. A member "

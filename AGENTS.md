@@ -58,7 +58,6 @@ A framework for running AI agent workflows against code repositories.
 
 ## The voice
 
-- `DOCS_GUIDELINES.md` governs SDK docstrings and `docs/`, `overrides/` and `tests/docs/`.
 - Terminal output is one capitalised sentence of fact, then at most the next move or what is lost.
   Warnings open `WARNING:`.
 - Names in double quotes. Versions and commits bare.
