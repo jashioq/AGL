@@ -163,11 +163,26 @@ _MODEL_NAMES: Final[Mapping[ModelId, str]] = MappingProxyType(
         Claude.OPUS: "opus",
         Claude.SONNET: "sonnet",
         Claude.HAIKU: "haiku",
+        Claude.FABLE: "fable",
+        # Dated, because the vendor's docs call `claude-opus-4-5`, `claude-sonnet-4-5` and
+        # `claude-haiku-4-5` aliases that resolve to the newest snapshot, and only an ID is pinned.
+        Claude.OPUS_4_5: "claude-opus-4-5-20251101",
+        Claude.SONNET_4_5: "claude-sonnet-4-5-20250929",
+        Claude.HAIKU_4_5: "claude-haiku-4-5-20251001",
+        Claude.OPUS_4_6: "claude-opus-4-6",
+        Claude.OPUS_4_7: "claude-opus-4-7",
+        Claude.OPUS_4_8: "claude-opus-4-8",
+        Claude.OPUS_5: "claude-opus-5",
+        Claude.OPUS_5_5: "claude-opus-5-5",
+        Claude.SONNET_4_6: "claude-sonnet-4-6",
+        Claude.SONNET_5: "claude-sonnet-5",
+        Claude.FABLE_5: "claude-fable-5",
+        Claude.FABLE_5_1: "claude-fable-5-1",
     }
 )
 
-# `ClaudeAgentOptions.effort` in SDK 0.2.157 is typed as the `EffortLevel` literal and reaches the
-# CLI as `--effort <level>` unvalidated; the CLI 2.1.277 it bundles lowers or drops a level the
+# `ClaudeAgentOptions.effort` in SDK 0.2.160 is typed as the `EffortLevel` literal and reaches the
+# CLI as `--effort <level>` unvalidated; the CLI 2.1.283 it bundles lowers or drops a level the
 # model does not offer rather than refusing it.
 _EFFORT_LEVELS: Final[Mapping[ClaudeEffort, EffortLevel]] = MappingProxyType(
     {
@@ -219,7 +234,7 @@ def effort_level(choice: ModelChoice) -> EffortLevel | None:
 def last_words(printed: str) -> str:
     return f"The CLI's last words were: {printed or '(it printed nothing)'}"
 
-# `ProcessError.stderr` is the fixed string "Check stderr output for details" in SDK 0.2.157 and
+# `ProcessError.stderr` is the fixed string "Check stderr output for details" in SDK 0.2.160 and
 # never the CLI's own: the SDK streams stderr to `options.stderr` instead of capturing it. So the
 # exception says nothing an operator can act on, and what `_session.Stderr` collected is the answer.
 def translated(error: ClaudeSDKError, printed: str) -> AglError:

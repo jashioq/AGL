@@ -131,9 +131,29 @@ def test_the_enum_values_are_the_strings_a_fingerprint_holds() -> None:
         "OPUS": "claude:opus",
         "SONNET": "claude:sonnet",
         "HAIKU": "claude:haiku",
+        "FABLE": "claude:fable",
+        "OPUS_4_5": "claude:claude-opus-4-5-20251101",
+        "OPUS_4_6": "claude:claude-opus-4-6",
+        "OPUS_4_7": "claude:claude-opus-4-7",
+        "OPUS_4_8": "claude:claude-opus-4-8",
+        "OPUS_5": "claude:claude-opus-5",
+        "OPUS_5_5": "claude:claude-opus-5-5",
+        "SONNET_4_5": "claude:claude-sonnet-4-5-20250929",
+        "SONNET_4_6": "claude:claude-sonnet-4-6",
+        "SONNET_5": "claude:claude-sonnet-5",
+        "HAIKU_4_5": "claude:claude-haiku-4-5-20251001",
+        "FABLE_5": "claude:claude-fable-5",
+        "FABLE_5_1": "claude:claude-fable-5-1",
         "SOL": "openai:sol",
         "TERRA": "openai:terra",
         "LUNA": "openai:luna",
+        "ASTRA": "openai:astra",
+        "GPT_5_6_SOL": "openai:gpt-5.6-sol",
+        "GPT_5_6_TERRA": "openai:gpt-5.6-terra",
+        "GPT_5_6_LUNA": "openai:gpt-5.6-luna",
+        "GPT_6_ASTRA": "openai:gpt-6-astra",
+        "GPT_6_SOL": "openai:gpt-6-sol",
+        "GPT_6_LUNA": "openai:gpt-6-luna",
     }
     assert {member.name: member.value for member in ClaudeEffort} == {
         "LOW": "low",
@@ -150,6 +170,17 @@ def test_the_enum_values_are_the_strings_a_fingerprint_holds() -> None:
         "MAX": "max",
         "ULTRA": "ultra",
     }
+
+def test_no_model_member_shares_a_value_and_so_silently_becomes_another_members_alias() -> None:
+    """A family member and the versioned member pinning its model run one model under two values.
+
+    An enum member written with a value another member already holds is not a second member but an
+    alias of the first: iteration skips it, so every parametrised sweep here and in the adapters'
+    suites would pass without ever reaching it.
+    """
+    for enum in (Claude, OpenAI):
+        aliases = [name for name, member in enum.__members__.items() if member.name != name]
+        assert not aliases, f"{enum.__name__} holds {aliases} as aliases of other members"
 
 def test_a_chosen_effort_is_recorded_under_its_class_path_and_two_field_names() -> None:
     """The rest of the stored format a composite contributes, pinned beside the enum values.

@@ -159,11 +159,11 @@ SKILL_MARKER: Final = "AGL-LEAK-SKILL-9f2c41"
 _PLAN: Final = "plan.json"
 _RECORD: Final = "record.json"
 
-# The two answers the harness gives about itself, spelled as the installed 0.155.1 spells them: the
+# The two answers the harness gives about itself, spelled as the installed 0.157.1 spells them: the
 # version line has the tool's own name in front of it, and a level sits under `effort` inside an
 # object beside the description the harness shows in its own menu. It is the release
 # `_version.TESTED` names, which is what makes the standing below `WITHIN` rather than a warning.
-_SPELLED_VERSION: Final = "codex-cli 0.155.1\n"
+_SPELLED_VERSION: Final = "codex-cli 0.157.1\n"
 
 def _listed(slug: str, levels: tuple[str, ...], fallback: str) -> dict[str, Any]:
     """One model as the harness's own listing writes it, down to the shape of a level."""
@@ -519,7 +519,7 @@ async def test_the_command_line_carries_every_setting_that_makes_a_session_agls(
         f"NO_NETWORK reached the harness as nothing: {argv}"
     )
     assert "web_search=disabled" in argv, f"NO_NETWORK left the harness its web tool: {argv}"
-    assert argv[argv.index("-m") + 1] == "gpt-5.6-luna", "the model is the slug, not the tier"
+    assert argv[argv.index("-m") + 1] == "gpt-6-luna", "the model is the slug, not the tier"
     assert argv[-1] == "-", (
         f"the last argument is {argv[-1]!r}. It is what tells the harness to read the instructions "
         f"from standard input, which is where the largest untrusted string in the system belongs"
@@ -588,7 +588,7 @@ async def test_no_network_composes_exactly_this_command_line_under_either_sandbo
         "-c",
         "features.image_generation=false",
         "-m",
-        "gpt-5.6-luna",
+        "gpt-6-luna",
         "-c",
         'mcp_servers.agl={url="http://127.0.0.1:PORT/TOKEN/agl",tool_timeout_sec=86400,'
         'startup_timeout_sec=30,default_tools_approval_mode="auto"}',
@@ -713,7 +713,7 @@ async def test_a_model_chosen_at_an_effort_carries_one_override_directly_after_t
     `codex exec` has no effort flag of its own, so the override is the only route and a second one
     would leave which of two levels wins to the harness's loader. The slug is asserted beside it
     because a table keyed by the bare member and looked up with the whole choice type-checks and
-    misses: `model_slug` would refuse the run, so `gpt-5.6-luna` on the command line is the
+    misses: `model_slug` would refuse the run, so `gpt-6-luna` on the command line is the
     evidence that the lookup was made with `model_of`.
     """
     stub = Stub(tmp_path, steps=[{"say": said("done")}, {"say": started()}])
@@ -722,7 +722,7 @@ async def test_a_model_chosen_at_an_effort_carries_one_override_directly_after_t
     argv = stub.argv()
 
     model_at = argv.index("-m")
-    assert argv[model_at + 1] == "gpt-5.6-luna", "the model is the slug of the bare member"
+    assert argv[model_at + 1] == "gpt-6-luna", "the model is the slug of the bare member"
     assert argv[model_at + 2 : model_at + 4] == ["-c", f'{_EFFORT_KEY}="{effort.value}"'], (
         f"the override for {effort!r} is not directly after the model: {argv}"
     )
@@ -2042,8 +2042,8 @@ async def test_the_version_probe_puts_both_of_the_harnesss_own_questions_and_rea
         catalogue=json.dumps(
             {
                 "models": [
-                    _listed("gpt-5.6-luna", ("low", "medium", "high", "xhigh", "max"), "medium"),
-                    _listed("gpt-5.6-sol", ("low", "medium"), "low"),
+                    _listed("gpt-6-luna", ("low", "medium", "high", "xhigh", "max"), "medium"),
+                    _listed("gpt-6-sol", ("low", "medium"), "low"),
                 ]
             }
         ),
@@ -2053,10 +2053,10 @@ async def test_the_version_probe_puts_both_of_the_harnesss_own_questions_and_rea
 
     assert stub.probed("version")["argv"] == ["--version"]
     assert stub.probed("catalogue")["argv"] == ["debug", "models"]
-    assert reported.version == "0.155.1", (
+    assert reported.version == "0.157.1", (
         f"the version came back as {reported.version!r} from {_SPELLED_VERSION!r}. The harness "
         f"prints its own name in front of the number, so a reading that keeps the whole line puts "
-        f"`codex-cli 0.155.1` where an ordering expects dotted digits and every run is then warned "
+        f"`codex-cli 0.157.1` where an ordering expects dotted digits and every run is then warned "
         f"about a version nothing could place"
     )
     assert reported.standing is Standing.WITHIN
@@ -2113,7 +2113,7 @@ async def test_neither_question_is_put_against_the_credential_home_this_process_
 async def test_a_listing_naming_a_model_this_adapter_does_not_serve_leaves_it_out(
     tmp_path: Path,
 ) -> None:
-    """The listing describes every model the account reaches, and AGL maps three of them.
+    """The listing describes every model the account reaches, and AGL maps six of them.
 
     Keyed by `ModelId` and not by slug, so a slug with no member behind it has no key to go under -
     and inventing one would put a name in a warning that no `@role(model=…)` could ever name.
@@ -2132,7 +2132,25 @@ async def test_a_listing_naming_a_model_this_adapter_does_not_serve_leaves_it_ou
 
     reported = await OpenAiRunner(stub.path).installation(OpenAI.LUNA)
 
-    assert reported.efforts == {OpenAI.LUNA: ModelEfforts(levels=("low",), default="low")}
+    assert reported.efforts == {OpenAI.GPT_5_6_LUNA: ModelEfforts(levels=("low",), default="low")}
+
+@pytest.mark.asyncio
+async def test_one_catalogue_entry_describes_the_family_member_and_the_versioned_one_alike(
+    tmp_path: Path,
+) -> None:
+    """A family member and the versioned member pinning its model share one slug and its levels.
+
+    `sdk/_engine/preflight.py` looks a role's levels up under its bare member, so a slug read into
+    one of the two only would leave a role on the other unwarned when it asks for a level the model
+    lacks - `ultra` on `gpt-6-luna`, whose listing on 0.157.1 stops at `max`, is that case.
+    """
+    luna = _listed("gpt-6-luna", ("low", "medium", "high", "xhigh", "max"), "medium")
+    stub = Stub(tmp_path, catalogue=json.dumps({"models": [luna]}))
+
+    reported = await OpenAiRunner(stub.path).installation(OpenAI.GPT_6_LUNA)
+
+    listed = ModelEfforts(levels=("low", "medium", "high", "xhigh", "max"), default="medium")
+    assert reported.efforts == {OpenAI.LUNA: listed, OpenAI.GPT_6_LUNA: listed}
 
 @pytest.mark.asyncio
 async def test_the_levels_come_back_in_the_order_the_catalogue_listed_them_and_never_sorted(
@@ -2140,7 +2158,7 @@ async def test_the_levels_come_back_in_the_order_the_catalogue_listed_them_and_n
 ) -> None:
     """The order is the harness's answer too, and the reading preserves it rather than deriving one.
 
-    Measured over 0.155.1's whole catalogue, each of its nine models lists an ascending prefix of
+    Measured over 0.157.1's whole catalogue, each of its eleven models lists an ascending prefix of
     `low, medium, high, xhigh, max, ultra`, so the last level a model lists is the most it reasons
     at - which is what `sdk/_engine/preflight.py`'s `_unlisted` names when a role asks for a level
     the model has not got. Nothing here checks that the order *is* ascending, because that is the
@@ -2153,7 +2171,7 @@ async def test_the_levels_come_back_in_the_order_the_catalogue_listed_them_and_n
     stub = Stub(
         tmp_path,
         catalogue=json.dumps(
-            {"models": [_listed("gpt-5.6-luna", ("max", "low", "high", "max"), "low")]}
+            {"models": [_listed("gpt-6-luna", ("max", "low", "high", "max"), "low")]}
         ),
     )
 
@@ -2187,7 +2205,7 @@ async def test_a_listing_that_cannot_be_read_costs_the_efforts_and_never_the_ver
 
     reported = await OpenAiRunner(stub.path).installation(OpenAI.LUNA)
 
-    assert reported.version == "0.155.1", f"a listing {why} took the version with it"
+    assert reported.version == "0.157.1", f"a listing {why} took the version with it"
     assert reported.efforts == {}
 
 @pytest.mark.parametrize(
@@ -2195,7 +2213,7 @@ async def test_a_listing_that_cannot_be_read_costs_the_efforts_and_never_the_ver
     [
         ({"version": _SPELLED_VERSION, "version_exit": 1}, "the subcommand failed"),
         ({"version": "codex-cli"}, "it printed only its own name"),
-        ({"version": "codex-cli 0.155.1 (build 7)"}, "it printed a third word"),
+        ({"version": "codex-cli 0.157.1 (build 7)"}, "it printed a third word"),
     ],
 )
 @pytest.mark.asyncio

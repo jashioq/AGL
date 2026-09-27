@@ -3,8 +3,8 @@ from typing import Final
 
 __all__ = ["withheld"]
 
-# Every name the CLI reads to configure itself begins with one of these two words: 694 distinct ones
-# in the 2.1.277 bundle, and a release adds more. So the namespace is what AGL answers for, rather
+# Every name the CLI reads to configure itself begins with one of these two words: 731 distinct ones
+# in the 2.1.283 bundle, and a release adds more. So the namespace is what AGL answers for, rather
 # than a list of names to refuse - one of those goes stale on the next release while still reading
 # like a guard.
 _VENDOR_PREFIXES: Final = ("CLAUDE", "ANTHROPIC")
@@ -60,7 +60,7 @@ _ALLOWED: Final[frozenset[str]] = frozenset(
 def withheld(parent: Mapping[str, str]) -> dict[str, str]:
     """Every vendor name this environment carries that AGL will not pass on, mapped to the blank."""
     # Blanked rather than dropped: `subprocess_cli` merges this over what it inherited and has no
-    # value meaning "as if it had never been exported". The empty string is what 2.1.277 reads as
+    # value meaning "as if it had never been exported". The empty string is what 2.1.283 reads as
     # nothing on each hazard measured - `CLAUDE_CODE_RESTRICTED`, `ANTHROPIC_DEFAULT_OPUS_MODEL` and
     # `CLAUDE_CODE_EFFORT_LEVEL` all behave as they do with the name unset.
     return {name: "" for name in parent if _blanked(name)}

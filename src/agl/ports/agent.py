@@ -65,8 +65,8 @@ class ModelId(StrEnum):
 class ClaudeEffort(StrEnum):
     """How long a Claude model reasons before answering."""
 
-    # The choices `claude --help` lists for `--effort` in Claude CLI 2.1.277, and the `EffortLevel`
-    # literal in `claude_agent_sdk/types.py` 0.2.157.
+    # The choices `claude --help` lists for `--effort` in Claude CLI 2.1.283, and the `EffortLevel`
+    # literal in `claude_agent_sdk/types.py` 0.2.160.
     LOW = "low"
     """The least reasoning of the five."""
 
@@ -85,9 +85,9 @@ class ClaudeEffort(StrEnum):
 class OpenAIEffort(StrEnum):
     """How long an OpenAI model reasons before answering."""
 
-    # The union of the reasoning levels the vendor CLI 0.155.1's model listing reports for the
-    # three models `OpenAI` names: `gpt-5.6-luna` lists every one of these but `ultra`, and none of
-    # the three lists `minimal` or `none`.
+    # The union of the reasoning levels the vendor CLI 0.157.1's model listing reports for the six
+    # models `OpenAI` names: `gpt-6-luna` and `gpt-5.6-luna` list every one of these but `ultra`,
+    # and none lists `minimal` or `none`.
     LOW = "low"
     """The least reasoning of the six."""
 
@@ -104,7 +104,7 @@ class OpenAIEffort(StrEnum):
     """More reasoning than `XHIGH`."""
 
     ULTRA = "ultra"
-    """The most reasoning of the six, and offered for some models only."""
+    """Reasoning with parts of the task handed to subagents, and offered for some models only."""
 
 class Claude(ModelId):
     """A Claude model a role can run on."""
@@ -117,6 +117,45 @@ class Claude(ModelId):
 
     HAIKU = "claude:haiku"
     """The model its backend runs as `haiku`."""
+
+    FABLE = "claude:fable"
+    """The model its backend runs as `fable`."""
+
+    OPUS_4_5 = "claude:claude-opus-4-5-20251101"
+    """The model its backend runs as `claude-opus-4-5-20251101`."""
+
+    OPUS_4_6 = "claude:claude-opus-4-6"
+    """The model its backend runs as `claude-opus-4-6`."""
+
+    OPUS_4_7 = "claude:claude-opus-4-7"
+    """The model its backend runs as `claude-opus-4-7`."""
+
+    OPUS_4_8 = "claude:claude-opus-4-8"
+    """The model its backend runs as `claude-opus-4-8`."""
+
+    OPUS_5 = "claude:claude-opus-5"
+    """The model its backend runs as `claude-opus-5`."""
+
+    OPUS_5_5 = "claude:claude-opus-5-5"
+    """The model its backend runs as `claude-opus-5-5`."""
+
+    SONNET_4_5 = "claude:claude-sonnet-4-5-20250929"
+    """The model its backend runs as `claude-sonnet-4-5-20250929`."""
+
+    SONNET_4_6 = "claude:claude-sonnet-4-6"
+    """The model its backend runs as `claude-sonnet-4-6`."""
+
+    SONNET_5 = "claude:claude-sonnet-5"
+    """The model its backend runs as `claude-sonnet-5`."""
+
+    HAIKU_4_5 = "claude:claude-haiku-4-5-20251001"
+    """The model its backend runs as `claude-haiku-4-5-20251001`."""
+
+    FABLE_5 = "claude:claude-fable-5"
+    """The model its backend runs as `claude-fable-5`."""
+
+    FABLE_5_1 = "claude:claude-fable-5-1"
+    """The model its backend runs as `claude-fable-5-1`."""
 
     def __call__(self, *, effort: ClaudeEffort) -> ChosenClaude:
         """Chooses how long this model reasons.
@@ -136,13 +175,34 @@ class OpenAI(ModelId):
     """An OpenAI model a role can run on."""
 
     SOL = "openai:sol"
-    """The model its backend runs as `gpt-5.6-sol`."""
+    """The model its backend runs as `gpt-6-sol`."""
 
     TERRA = "openai:terra"
     """The model its backend runs as `gpt-5.6-terra`."""
 
     LUNA = "openai:luna"
+    """The model its backend runs as `gpt-6-luna`."""
+
+    ASTRA = "openai:astra"
+    """The model its backend runs as `gpt-6-astra`."""
+
+    GPT_5_6_SOL = "openai:gpt-5.6-sol"
+    """The model its backend runs as `gpt-5.6-sol`."""
+
+    GPT_5_6_TERRA = "openai:gpt-5.6-terra"
+    """The model its backend runs as `gpt-5.6-terra`."""
+
+    GPT_5_6_LUNA = "openai:gpt-5.6-luna"
     """The model its backend runs as `gpt-5.6-luna`."""
+
+    GPT_6_ASTRA = "openai:gpt-6-astra"
+    """The model its backend runs as `gpt-6-astra`."""
+
+    GPT_6_SOL = "openai:gpt-6-sol"
+    """The model its backend runs as `gpt-6-sol`."""
+
+    GPT_6_LUNA = "openai:gpt-6-luna"
+    """The model its backend runs as `gpt-6-luna`."""
 
     def __call__(self, *, effort: OpenAIEffort) -> ChosenOpenAI:
         """Chooses how long this model reasons.
@@ -365,7 +425,7 @@ class ModelEfforts:
     """What one model reasons at, in its own tool's words: the levels offered, and the fallback."""
 
     # In the tool's own order and never sorted here, because the order is itself something the tool
-    # reported: the vendor CLI 0.155.1 lists every model's levels ascending, so its last entry is
+    # reported: the vendor CLI 0.157.1 lists every model's levels ascending, so its last entry is
     # the most that model reasons at, and a set would throw that away.
     levels: tuple[str, ...]
     """The tool's own spellings, which is why these are strings and not an effort enum's members."""

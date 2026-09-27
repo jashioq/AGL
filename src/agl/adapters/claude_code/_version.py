@@ -10,7 +10,7 @@ __all__ = ["TESTED", "TOOL", "probed"]
 
 TOOL: Final = "Claude Code CLI"
 
-# What the binary `claude_agent_sdk` 0.2.157 bundles reports for itself, and the release this
+# What the binary `claude_agent_sdk` 0.2.160 bundles reports for itself, and the release this
 # adapter's sessions were exercised against. `ports/agent.py`'s `ClaudeEffort` names the same one
 # as the source of its members, and the two move together.
 #
@@ -18,7 +18,7 @@ TOOL: Final = "Claude Code CLI"
 # separately installable, so upgrading the package replaces it and the earlier one is gone from the
 # machine that would have to re-exercise it. A span whose lower end nothing can reach again claims
 # a release was tested where all that is left is that it once was.
-TESTED: Final = VersionRange(lowest="2.1.277", highest="2.1.277")
+TESTED: Final = VersionRange(lowest="2.1.283", highest="2.1.283")
 
 _VERSION: Final = ("-v",)
 
@@ -83,7 +83,7 @@ async def _reported(binary: str) -> str | None:
             return None
         if child.returncode != 0:
             return None
-    # Measured output is `2.1.277 (Claude Code)`: the version is the first word, and the
+    # Measured output is `2.1.283 (Claude Code)`: the version is the first word, and the
     # parenthetical after it is the product's name rather than any part of one.
     words = said.decode("utf-8", errors="replace").split()
     return words[0] if words else None

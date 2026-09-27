@@ -100,9 +100,11 @@ import re
 import shutil
 import subprocess
 import sys
+import tomllib
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Mapping
 from dataclasses import replace
 from functools import cache
+from importlib import metadata
 from mmap import ACCESS_READ, mmap
 from pathlib import Path
 from typing import Any, Final, NoReturn
@@ -113,9 +115,11 @@ from claude_agent_sdk import ClaudeAgentOptions, ProcessError, SdkMcpTool
 from claude_agent_sdk._cli_version import __cli_version__
 from claude_agent_sdk._internal.transport import Transport
 from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITransport
+from packaging.requirements import Requirement
 from agl.adapters.claude_code import _session, _tools
 from agl.adapters.claude_code import runner as runner_module
 from agl.adapters.claude_code._environment import withheld
+from agl.adapters.claude_code._version import TESTED
 from agl.adapters.claude_code.runner import ClaudeCodeRunner
 from agl.adapters.claude_code.translate import CROSS_SESSION_DENIED, Restraint, restraint
 from agl.ports.agent import (
@@ -134,6 +138,7 @@ from agl.ports.agent import (
     StopReason,
     Tool,
     ToolResult,
+    VersionRange,
 )
 from agl.ports.errors import InputError, InternalError, UpstreamUnavailable, UpstreamUnexpected
 from agl.ports.run import JsonValue
@@ -651,6 +656,27 @@ async def test_check_ready_returns_against_a_harness_that_answers(harness: Loopb
         f"'ready' without asking anything is a preflight that admits a run it knows nothing about"
     )
 
+# How the bundled CLI introduces a repository's CLAUDE.md or AGENTS.md to the model, measured
+# through this loopback on 2.1.283: `Contents of <path> (project instructions, checked into the
+# codebase):`.
+INJECTED: Final = "(project instructions, checked into the codebase)"
+
+# The instruction file each run plants and the ones it takes away. 2.1.283 reads a repository's
+# AGENTS.md only where it has no CLAUDE.md, so the contract suite's repository, carrying both, can
+# show a CLAUDE.md leak and never an AGENTS.md one.
+INSTRUCTION_CASES: Final = (("CLAUDE.md", ()), ("AGENTS.md", ("CLAUDE.md",)))
+
+async def _sent_from(repo: Path, harness: Loopback) -> str:
+    """What one run in `repo` put on the wire: the one composed turn it added to the loopback."""
+    before = len(harness.turns())
+    await spawn(task_in(repo))
+    added = harness.turns()[before:]
+    assert len(added) == 1, (
+        f"one run in {repo} added {len(added)} composed turns to the loopback, and exactly one was "
+        f"expected: a run that composed none never reached the point this test reads"
+    )
+    return wire_text(added[0])
+
 @pytest.mark.asyncio
 @pytest.mark.skipif(not _cli(), reason=_NO_CLI)
 @pytest.mark.skipif(not _live(), reason=_NOT_OPTED_IN)
@@ -661,11 +687,12 @@ async def test_nothing_the_repository_wrote_reaches_the_model_in_the_request_tha
 
     `runner.py`'s docstring records it: a repository carrying a `CLAUDE.md` with a unique marker, a
     local endpoint standing in for the model API, and the marker present under
-    `setting_sources=None` and under `["user","project","local"]` and absent under `[]` - injected
-    as `<system-reminder> ... # claudeMd ... Contents of <repo>/CLAUDE.md (project instructions,
-    checked into the codebase)`. That was a one-off spike and this is the same measurement wired
-    into the suite, which is the difference between a claim that was true once and one that stays
-    true.
+    `setting_sources=None` and under `["user","project","local"]` and absent under `[]`. That was a
+    one-off spike and this is the same measurement wired into the suite, which is the difference
+    between a claim that was true once and one that stays true. The CLI's AGENTS.md loader is the
+    second run: the same repository with its `CLAUDE.md` taken away, which is the one layout where
+    that loader reads anything. Two runs in one test rather than two cases, so that the opt-in
+    still turns on the same count of tests it always has.
 
     It is the third and outermost of three hermeticity assertions, and each sees something the
     others cannot. The contract suite sees a leak an agent *acted on*. `init` above sees a
@@ -673,30 +700,35 @@ async def test_nothing_the_repository_wrote_reaches_the_model_in_the_request_tha
     model - the case where nothing was registered, nothing was acted on, and the file's contents
     went out in a system reminder anyway.
 
-    The workspace's own `CLAUDE.md` is asserted present first, and with its marker in it. Without
-    that control, "no marker in the request" and "no marker anywhere to find" are the same green.
+    The planted file is asserted present first, and with its marker in it. Without that control,
+    "no marker in the request" and "no marker anywhere to find" are the same green. `INJECTED` is
+    the second assertion and it needs no marker: it is the CLI's own heading for the file, so a
+    leak of a file nobody planted a marker in fails here too.
     """
-    repo = poisoned(tmp_path)
-    planted = (repo / "CLAUDE.md").read_text(encoding="utf-8")
-    assert markers_in(planted), (
-        f"the workspace's CLAUDE.md carries none of the {len(CONFIGURATIONS)} markers, so this "
-        f"test would report a clean request whether or not anything is being kept out of it"
-    )
+    for read, removed in INSTRUCTION_CASES:
+        repo = poisoned(tmp_path / read.split(".")[0].lower())
+        for name in removed:
+            (repo / name).unlink()
+        planted = (repo / read).read_text(encoding="utf-8")
+        assert markers_in(planted), (
+            f"the workspace's {read} carries none of the {len(CONFIGURATIONS)} markers, so this "
+            f"test would report a clean request whether or not anything is being kept out of it"
+        )
 
-    await spawn(task_in(repo))
-    sent = wire_text(harness.composed())
+        sent = await _sent_from(repo, harness)
 
-    assert not markers_in(sent), (
-        f"the request that left the machine carries {markers_in(sent)}, planted in the workspace "
-        f"by the contract suite's own fixture. The target repo contributes source code and "
-        f"nothing else, and there are {len(CONFIGURATIONS)} rows in that table which are none of "
-        f"AGL's to forward"
-    )
-    assert "claudeMd" not in sent, (
-        "the request carries a `# claudeMd` block, which is how Claude Code injects a repository's "
-        "CLAUDE.md into a session - the exact shape `setting_sources=[]` was measured to suppress. "
-        "A marker-free block would be this leak with nothing planted in it to notice"
-    )
+        assert not markers_in(sent), (
+            f"with {read} planted, the request that left the machine carries {markers_in(sent)}, "
+            f"planted in the workspace by the contract suite's own fixture. The target repo "
+            f"contributes source code and nothing else, and there are {len(CONFIGURATIONS)} rows "
+            f"in that table which are none of AGL's to forward"
+        )
+        assert INJECTED not in sent, (
+            f"the request carries {INJECTED!r}, the heading under which the CLI hands a "
+            f"repository's {read} to the model - the exact channel `setting_sources=[]` was "
+            f"measured to close. A marker-free file under that heading is this leak with nothing "
+            f"planted in it to notice"
+        )
 
 # --- The workspace path is a directory and never program text ------------------------------------
 
@@ -1779,7 +1811,7 @@ async def test_why_a_run_stopped_is_read_off_three_fields_and_may_be_none(
         f"{expected!r}. Three fields, consulted in the order of how much each one knows"
     )
 
-# The other fourteen `terminal_reason` values Claude Code 2.1.277 declares: everything
+# The other fourteen `terminal_reason` values Claude Code 2.1.283 declares: everything
 # `_session._TERMINAL_REASONS` does not name. Written out rather than derived from that table,
 # because a table checked against itself measures nothing - the release's own list is what this is,
 # and the test below reads it off the bundled binary to say so.
@@ -2228,7 +2260,7 @@ async def test_a_cli_that_dies_before_it_says_anything_reports_what_it_printed_i
     `"Check stderr output for details"` that `_internal/transport/subprocess_cli.py` writes for
     every non-zero exit. Everything actionable is in the stream `Stderr` collected.
 
-    The line scripted here is verbatim what CLI 2.1.277 prints when `CLAUDE_CODE_RESTRICTED`
+    The line scripted here is verbatim what CLI 2.1.283 prints when `CLAUDE_CODE_RESTRICTED`
     reaches it, which `adapters/claude_code/_environment.py` now keeps out of the child - so this
     is the class of failure and not that one cause.
     """
@@ -2781,9 +2813,10 @@ async def test_a_model_of_the_other_provider_at_an_effort_is_refused_before_anyt
 
 # --- The environment: what the allowlist lets past, and what a shell no longer decides -----------
 
-# Each of these was measured against the release `_version.TESTED` names, through `connect()` and
-# the `get_server_info` and `get_settings` control requests with no user message - so every row
-# below cost nothing. The value is what a shell might hold; the comment is what it did.
+# The first seven were measured against the release `_version.TESTED` names and the last three on
+# 2.1.277, through `connect()` and the `get_server_info` and `get_settings` control requests with no
+# user message - so every row below cost nothing. The value is what a shell might hold; the comment
+# is what it did.
 HAZARDS: Final[tuple[tuple[str, str, str], ...]] = (
     # The CLI refuses `bypassPermissions` outright and the process exits 1, so this one name ends
     # every run AGL takes. Read eight times in the bundle and new in 2.1.248.
@@ -2833,8 +2866,8 @@ def test_the_blank_a_withheld_name_gets_is_what_the_cli_reads_as_no_level() -> N
 
     Both look like "as if it had never been exported" and only one is. Measured through the bundled
     binary's own `get_settings`, which reports the resolver's output: with the level blank, a bare
-    `opus` session applies `high`, the model's own default, exactly as it does with the name unset;
-    with `unset` or `auto` it applies nothing at all, so a bare model's *sent* default
+    `opus` session applies `medium`, the model's own default, exactly as it does with the name
+    unset; with `unset` or `auto` it applies nothing at all, so a bare model's *sent* default
     becomes no parameter. This is asserted on the value rather than on the behaviour because the
     behaviour costs a CLI and the gate has none - `HAZARDS` above carries what the measurement was.
     """
@@ -3006,6 +3039,37 @@ async def test_the_binary_nothing_configured_resolves_to_is_the_one_the_sdk_woul
     assert reported.version == __cli_version__, (
         f"the bundled binary printed {reported.version!r} and the SDK records {__cli_version__!r} "
         f"as what it bundled. One of the two is wrong about the file that is actually there"
+    )
+
+# Where the SDK pin is written: the distribution's own metadata, beside `src/`.
+PYPROJECT: Final = Path(__file__).resolve().parents[2] / "pyproject.toml"
+
+SDK: Final = "claude-agent-sdk"
+
+def test_the_pinned_sdk_bundles_the_claude_code_release_the_adapter_calls_tested() -> None:
+    """The pin, the installed bundle and `TESTED` are one fact written in three places.
+
+    `pyproject.toml` pins `claude-agent-sdk` to a single release because the adapter starts the
+    binary that release bundles, and `_version.TESTED` names that binary's version. Moving any one
+    of the three alone passes every other gate: a pin moved without `TESTED` warns on every Claude
+    run, and a `TESTED` moved without the pin claims a release nothing here installs.
+
+    Read without a process: the installed distribution's metadata and the SDK's own record of its
+    bundle, so this reaches nothing and starts nothing. The test above is the one that asks the
+    binary itself, and it confirms that record against the file.
+    """
+    declared = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))["project"]["dependencies"]
+    pins = [str(pin.specifier) for pin in map(Requirement, declared) if pin.name == SDK]
+    installed = metadata.version(SDK)
+
+    assert pins == [f"=={installed}"], (
+        f"pyproject.toml declares {SDK} as {pins} and {installed} is installed. The pin is exact "
+        f"on purpose, and an environment synced from a different pin is testing another bundle"
+    )
+    assert TESTED == VersionRange(lowest=__cli_version__, highest=__cli_version__), (
+        f"{SDK} {installed} bundles Claude Code {__cli_version__} and `_version.TESTED` is "
+        f"{TESTED}. It names the bundled release and only that one, so that a run on the pinned "
+        f"SDK is a run on the binary AGL was tested against"
     )
 
 @pytest.mark.asyncio

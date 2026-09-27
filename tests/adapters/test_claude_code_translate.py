@@ -76,7 +76,7 @@ _GIT_WRITE_SUBCOMMANDS: Final = frozenset(
 
 _WORKSPACE: Final = Path("/trees/proj/agl-fix-auth")
 
-# What CLI 2.1.277 prints and exits 1 for when `CLAUDE_CODE_RESTRICTED` reaches it, observed
+# What CLI 2.1.283 prints and exits 1 for when `CLAUDE_CODE_RESTRICTED` reaches it, observed
 # through this adapter against the bundled binary. It is the whole answer to that failure, and
 # `str(ProcessError)` carries no word of it - the SDK's own `_internal/query.py` says why, calling
 # the transport's stderr "a generic placeholder" where it declines to carry it over.
@@ -281,11 +281,13 @@ class TestGitWrites:
         )
 
 class TestModelNames:
-    """(b) The tier alias for a model this adapter serves, and a refusal for anything else."""
+    """(b) The name a served model is sent to Claude Code as, and a refusal for anything else."""
 
     @pytest.mark.parametrize("model", list(Claude))
-    def test_every_claude_model_maps_to_an_alias(self, model: ModelId) -> None:
-        """Exhaustiveness, in the only place that can hold it.
+    def test_every_claude_model_maps_to_the_name_its_own_value_carries(
+        self, model: ModelId
+    ) -> None:
+        """Exhaustiveness, in the only place that can hold it, and the member's value as its name.
 
         `ModelId` is deliberately open to subclassing so the per-provider enums can extend it,
         which means no type checker can be asked whether the table below is complete. Parametrising
@@ -293,17 +295,43 @@ class TestModelNames:
         until `translate.py` says what to run for it, rather than failing at second zero of the
         first run that names it.
 
-        The alias is asserted to be one bare word - no dash, no digits, no date - because the
-        module's argument for an alias over `claude-opus-5` is that the string tracks a tier
-        rather than pinning a checkpoint, and a pinned id is what this would silently become.
+        The name is the member's value after its provider, so what a step's record holds and what
+        Claude Code is sent are one string, and a table entry that drifted from its member fails
+        here rather than running one model under another's name.
         """
         name = model_name(model)
         assert name, f"{model} mapped to an empty string, which Claude Code reads as no model"
-        assert re.fullmatch(r"[a-z]+", name), (
-            f"{model} maps to {name!r}. The adapter sends a tier alias, not a pinned model id: an "
-            f"alias tracks the recommended version for whatever provider the harness authenticates "
-            f"against, and a dated id needs an edit here on every release and dies when retired"
+        assert name == model.value.partition(":")[2], (
+            f"{model} maps to {name!r}, which is not the name its own value carries"
         )
+        assert not name.startswith("-"), "the name is handed to `--model` as its own argument"
+
+    def test_a_family_member_sends_an_alias_and_a_versioned_member_a_pinned_id(self) -> None:
+        """The whole table, pinned by hand, since which kind of name a member sends is the point.
+
+        An alias is one bare word, and Claude Code resolves it to the newest model of its family,
+        which is what a family member is for. A versioned member pins one model with its ID. Before
+        the 4.6 generation the vendor's short spellings, `claude-haiku-4-5` among them, are aliases
+        that resolve to the newest dated snapshot, so those three members send the dated ID.
+        """
+        assert {member.name: model_name(member) for member in Claude} == {
+            "OPUS": "opus",
+            "SONNET": "sonnet",
+            "HAIKU": "haiku",
+            "FABLE": "fable",
+            "OPUS_4_5": "claude-opus-4-5-20251101",
+            "OPUS_4_6": "claude-opus-4-6",
+            "OPUS_4_7": "claude-opus-4-7",
+            "OPUS_4_8": "claude-opus-4-8",
+            "OPUS_5": "claude-opus-5",
+            "OPUS_5_5": "claude-opus-5-5",
+            "SONNET_4_5": "claude-sonnet-4-5-20250929",
+            "SONNET_4_6": "claude-sonnet-4-6",
+            "SONNET_5": "claude-sonnet-5",
+            "HAIKU_4_5": "claude-haiku-4-5-20251001",
+            "FABLE_5": "claude-fable-5",
+            "FABLE_5_1": "claude-fable-5-1",
+        }
 
     @pytest.mark.parametrize("model", list(OpenAI))
     def test_a_model_this_adapter_does_not_serve_is_refused(self, model: ModelId) -> None:

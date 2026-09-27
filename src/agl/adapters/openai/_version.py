@@ -21,14 +21,14 @@ TOOL: Final = "Codex CLI"
 # this tool's argument parser exits 2 on a flag it does not know before it runs anything. So a
 # release where that flag is absent is one AGL does not merely go untested on but cannot start on,
 # and only a release the flag has been seen accepted on can honestly be claimed.
-TESTED: Final = VersionRange(lowest="0.155.1", highest="0.155.1")
+TESTED: Final = VersionRange(lowest="0.157.1", highest="0.157.1")
 
 _VERSION: Final = ("--version",)
 
 # A second spawn, and it is the only place a per-model level set is derivable without a paid call.
 # It asks for no credential: against a home holding none it prints the same catalogue the binary
-# carries, over no connection, and the three models below list the same levels and defaults there
-# as against an authenticated one.
+# carries, over no connection, and the three `gpt-5.6` models list the same levels and defaults
+# there as against an authenticated one.
 _CATALOGUE: Final = ("debug", "models")
 
 # `--version` writes `$CODEX_HOME/tmp/arg0/…` before it answers, and AGL sets no `CODEX_HOME`, so a
@@ -47,8 +47,13 @@ _LEVELS: Final = "supported_reasoning_levels"
 _LEVEL: Final = "effort"
 _DEFAULT: Final = "default_reasoning_level"
 
-_MODELS_BY_SLUG: Final[Mapping[str, ModelId]] = MappingProxyType(
-    {model_slug(model): model for model in OpenAI}
+# A tuple per slug, because `translate.py` gives a family member and the versioned member pinning
+# its model one slug, and the listing's one entry for that slug describes both.
+_MODELS_BY_SLUG: Final[Mapping[str, tuple[ModelId, ...]]] = MappingProxyType(
+    {
+        slug: tuple(model for model in OpenAI if model_slug(model) == slug)
+        for slug in map(model_slug, OpenAI)
+    }
 )
 
 async def probed(cli: str) -> Installation:
@@ -84,7 +89,7 @@ async def _output(
         return None
     return said if child.returncode == 0 else None
 
-# Measured output is exactly `codex-cli 0.155.1`: the tool's own name, then the version. Anything
+# Measured output is exactly `codex-cli 0.157.1`: the tool's own name, then the version. Anything
 # else is a spelling this reading was not written for, and reports nothing rather than a guess.
 def _spelled(said: bytes | None) -> str | None:
     if said is None:
@@ -109,20 +114,21 @@ def _catalogued(said: bytes | None) -> dict[ModelId, ModelEfforts]:
         if not isinstance(entry, dict):
             continue
         slug = entry.get(_SLUG)
-        model = _MODELS_BY_SLUG.get(slug) if isinstance(slug, str) else None
+        members = _MODELS_BY_SLUG.get(slug, ()) if isinstance(slug, str) else ()
         levels = _offered(entry.get(_LEVELS))
         # An entry naming no level at all is left out rather than kept as an empty set: a set says
         # what a model offers, and an empty one claims it offers nothing, which no listing said.
-        if model is not None and levels:
-            found[model] = ModelEfforts(levels=levels, default=_text(entry.get(_DEFAULT)))
+        if levels:
+            for model in members:
+                found[model] = ModelEfforts(levels=levels, default=_text(entry.get(_DEFAULT)))
     return found
 
 # Each entry is an object and not a bare level: the level is under `effort` beside a description
 # the tool writes for its own menu, and nothing here reports that description.
 #
 # The listing's order is kept rather than sorted, for the reason `ports/agent.py` gives beside
-# `ModelEfforts.levels`. Measured over 0.155.1's whole catalogue: each of its nine models lists an
-# ascending prefix of `low, medium, high, xhigh, max, ultra` - five reaching `ultra`, two stopping
+# `ModelEfforts.levels`. Measured over 0.157.1's whole catalogue: each of its eleven models lists an
+# ascending prefix of `low, medium, high, xhigh, max, ultra` - six reaching `ultra`, three stopping
 # at `max` and two at `xhigh` - and each level carries a description that ascends with it.
 def _offered(levels: object) -> tuple[str, ...]:
     if not isinstance(levels, list):
