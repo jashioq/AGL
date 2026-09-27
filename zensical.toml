@@ -39,7 +39,10 @@ nav = [
   ] },
   { "Download workflows" = ["download/index.md"] },
   { "Publish workflows" = ["publish/index.md"] },
-  { "Examples" = ["examples/index.md"] },
+  { "Examples" = [
+    "examples/index.md",
+    { "implement_and_review" = "examples/implement_and_review.md" },
+  ] },
 ]
 
 [project.validation]
@@ -153,4 +156,7 @@ full_output = "llms-full.txt"
 ]
 "Download workflows" = ["download/index.md"]
 "Publish workflows" = ["publish/index.md"]
-"Examples" = ["examples/index.md"]
+"Examples" = [
+  "examples/index.md",
+  "examples/implement_and_review.md",
+]

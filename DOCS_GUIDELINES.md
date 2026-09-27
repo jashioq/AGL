@@ -34,6 +34,15 @@ sentence case (Model and effort). Prose names them the same way, in code font.
   phrase for a property or field); short paragraphs, each followed by a short example, from the
   simplest call to the fullest, though a paragraph stating a rule or a limit may stand alone; a
   sub-heading only for a part that stands on its own; Reference, if it renders a name. No See also.
+- **Example page**, one per workflow in Examples: the title; a paragraph on what the workflow does
+  and what you end up with; Get it and run it, with the `agl get` line, any setting it needs and
+  one `agl run` line with its flags; How it's built, a section per main part in the order a reader
+  needs them, each a sentence or two, an excerpt, then links to the API pages it uses; Build your
+  own, a few pointers on what to change, each linking the page that covers it. An excerpt is 5 to
+  20 lines copied from its file as it is, where lines beside the point may be cut to `...`. The
+  file's name above it links to its source on GitHub at the commit the page describes, never at a
+  branch. The reader has read the rest of the docs, so show only what this workflow does its own
+  way, never what another page already explains, such as parameters or prompts.
 - **Command entry**, a section of Run workflows or Download workflows: headed by the command, then
   a code block with the command as you type it, what it does, and each option worth showing as a
   sentence ending in a colon and its example.
