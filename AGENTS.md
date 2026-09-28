@@ -4,26 +4,14 @@ A framework for running AI agent workflows against code repositories.
 
 ## How to work here
 
-- Verify with `./scripts/check`, not by reading source.
 - Report ambiguity rather than resolving it.
 - Do not commit unless asked.
-
-## The gates
-
-`./scripts/check` runs all nine gates every time. Name a gate, never number it.
-
-- Exit 0 is green, 1 a failure, 2 missing `.venv` tooling.
-- The module size ceiling only warns.
-- Green needs `Contracts: 5 kept, 0 broken.`, read as numbers.
 
 ## Traps
 
 - `.venv` installs AGL editable against the real `src/`, and `tests/conftest.py` adds only
   `tests/` to `sys.path`. So rsync a scratch copy without `.git`, `dist`, `.venv` and caches,
   symlink `.venv` in, export `PYTHONPATH=<copy>/src`, and check `agl.__file__`.
-- `~/.agl` is the operator's live workspace. Diff
-  `find ~/.agl -type f -print0 | xargs -0 shasum -a 256 | sort` before and after a gate run.
-  Never `xargs -I{}`.
 
 ## Layers
 

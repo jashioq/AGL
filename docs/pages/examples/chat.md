@@ -14,7 +14,7 @@ agl get jashioq/AGL-workflows/chat
 ```
 Run it:
 ```
-agl run chat -n tabs-or-spaces -r "Tabs or spaces" -l 10
+agl run chat -n ai-consciousness -r "How do we know when ai gain consciousness?" -l 10
 ```
 
 ## How it's built
