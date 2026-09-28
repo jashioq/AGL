@@ -9,3 +9,8 @@
     {{ super() }}
   {% endif %}
 {% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <!-- Cloudflare Web Analytics --><script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "c8e98b58ef214be4a258fe5e9864fc7b"}'></script><!-- End Cloudflare Web Analytics -->
+{% endblock %}
