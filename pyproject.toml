@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agents-gl"
-version = "0.1.1"
+version = "0.1.2"
 description = "A framework for running AI agent workflows against code repositories."
 # This file rendered *is* the body of the PyPI project page; there is no other prose on it.
 readme = "README.md"
