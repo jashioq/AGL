@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 #
-# Builds the docs site into site/ and checks it. scripts/check's docs gate and a deploy run this.
+# Builds the docs site into docs/site/ and checks it. The docs gate and a deploy run this.
 
 set -uo pipefail
 
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)" || exit 2
 # Snippet paths in zensical.toml resolve against the working directory.
-cd -- "$REPO_ROOT" || exit 2
+cd -- "$REPO_ROOT/docs" || exit 2
 
 VENV_BIN="$REPO_ROOT/.venv/bin"
 CHECKS=4
@@ -41,7 +41,7 @@ fail() { # name
     failures=$((failures + 1))
 }
 
-check "build" "rm -rf .cache && .venv/bin/zensical build --clean --strict"
+check "build" "cd docs && rm -rf .cache && ../.venv/bin/zensical build --clean --strict"
 # A warm cache hides regressions.
 rm -rf .cache
 "$VENV_BIN/zensical" build --clean --strict
@@ -53,7 +53,7 @@ fi
 
 # A strict build never fails on Griffe's records, and Griffe logs shadowing at DEBUG.
 check "Griffe" \
-    ".venv/bin/python - (loads \"agl\" as mkdocstrings does, then parses every docstring)"
+    "../.venv/bin/python - (loads \"agl\" as mkdocstrings does, then parses every docstring)"
 "$VENV_BIN/python" - <<'PY'
 import logging
 import os
@@ -77,7 +77,8 @@ kept = Kept()
 logging.getLogger().addHandler(kept)
 logging.getLogger().setLevel(logging.DEBUG)
 
-# mkdocstrings-python searches its `paths`, made absolute, and then `sys.path`.
+# mkdocstrings-python searches its `paths`, made absolute against zensical.toml's directory, and
+# then `sys.path`.
 loader = griffe.GriffeLoader(
     extensions=griffe.load_extensions(),
     search_paths=[
@@ -88,6 +89,10 @@ loader = griffe.GriffeLoader(
 )
 package = loader.load("agl", try_relative_path=False)
 loader.resolve_aliases(implicit=False, external=None)
+source = Path(handler["paths"][0]).resolve()
+if not Path(str(package.filepath)).resolve().is_relative_to(source):
+    print(f'Griffe loaded "agl" from {package.filepath}, outside {source}.')
+    raise SystemExit(1)
 
 def parse_every_docstring(item: griffe.Object | griffe.Alias) -> int:
     count = 0
@@ -123,7 +128,7 @@ else
     trap 'rm -f "$bridge"' EXIT INT TERM
 
     check "llms.txt" \
-        ".venv/bin/llmstxt-standalone build --config <zensical.toml as JSON> --site-dir site"
+        "../.venv/bin/llmstxt-standalone build --config <zensical.toml as JSON> --site-dir site"
     # llmstxt-standalone reads an mkdocs.yml, and JSON is YAML.
     "$VENV_BIN/python" - >"$bridge" <<'PY'
 import json
@@ -145,7 +150,9 @@ import tomllib
 from collections.abc import Iterator
 from pathlib import Path, PurePosixPath
 
-nav = tomllib.loads(Path("zensical.toml").read_text(encoding="utf-8"))["project"]["nav"]
+project = tomllib.loads(Path("zensical.toml").read_text(encoding="utf-8"))["project"]
+nav = project["nav"]
+docs_dir = Path(project["docs_dir"])
 
 def pages(entry: object) -> Iterator[str]:
     if isinstance(entry, str) and entry.endswith(".md") and "://" not in entry:
@@ -164,24 +171,24 @@ def copy_of(page: str) -> Path:
 missing = 0
 for name in ("llms.txt", "llms-full.txt"):
     if not Path("site", name).is_file():
-        print(f"site/{name} is missing.")
+        print(f"docs/site/{name} is missing.")
         missing += 1
 for page in pages(nav):
     if not copy_of(page).is_file():
         # llmstxt-standalone copies only the pages its sections list.
         print(
-            f'The nav page "{page}" has no Markdown copy at {copy_of(page)}. '
-            f"List it under [project.plugins.llmstxt.sections] in zensical.toml."
+            f'The nav page "{page}" has no Markdown copy at docs/{copy_of(page)}. '
+            f"List it under [project.plugins.llmstxt.sections] in docs/zensical.toml."
         )
         missing += 1
 listed = set(pages(nav))
-for path in sorted(Path("docs").rglob("*.md")):
-    page = path.relative_to("docs").as_posix()
+for path in sorted(docs_dir.rglob("*.md")):
+    page = path.relative_to(docs_dir).as_posix()
     if page not in listed:
         # Zensical builds and publishes a page the nav leaves out, and reports nothing.
         print(
-            f'The page "{page}" in docs/ is not in the nav. '
-            f"List it under nav and [project.plugins.llmstxt.sections] in zensical.toml."
+            f'The page "{page}" in docs/{docs_dir}/ is not in the nav. '
+            f"List it under nav and [project.plugins.llmstxt.sections] in docs/zensical.toml."
         )
         missing += 1
 raise SystemExit(1 if missing else 0)
@@ -193,8 +200,8 @@ PY
 
     # Zensical never checks a link written in raw HTML.
     check "links" \
-        ".venv/bin/lychee --config lychee.toml --root-dir $REPO_ROOT/site 'site/**/*.html'"
-    "$VENV_BIN/lychee" --config lychee.toml --root-dir "$REPO_ROOT/site" 'site/**/*.html'
+        "../.venv/bin/lychee --config lychee.toml --root-dir $REPO_ROOT/docs/site 'site/**/*.html'"
+    "$VENV_BIN/lychee" --config lychee.toml --root-dir "$REPO_ROOT/docs/site" 'site/**/*.html'
     [ "$?" -eq 0 ] || fail "links"
 fi
 

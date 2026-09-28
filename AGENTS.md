@@ -5,7 +5,6 @@ A framework for running AI agent workflows against code repositories.
 ## How to work here
 
 - Verify with `./scripts/check`, not by reading source.
-- `reference/` is read-only, and opened only when a task names it.
 - Report ambiguity rather than resolving it.
 - Do not commit unless asked.
 
@@ -20,8 +19,8 @@ A framework for running AI agent workflows against code repositories.
 ## Traps
 
 - `.venv` installs AGL editable against the real `src/`, and `tests/conftest.py` adds only
-  `tests/` to `sys.path`. So rsync a scratch copy without `.git`, `reference`, `dist`, `.venv` and
-  caches, symlink `.venv` in, export `PYTHONPATH=<copy>/src`, and check `agl.__file__`.
+  `tests/` to `sys.path`. So rsync a scratch copy without `.git`, `dist`, `.venv` and caches,
+  symlink `.venv` in, export `PYTHONPATH=<copy>/src`, and check `agl.__file__`.
 - `~/.agl` is the operator's live workspace. Diff
   `find ~/.agl -type f -print0 | xargs -0 shasum -a 256 | sort` before and after a gate run.
   Never `xargs -I{}`.

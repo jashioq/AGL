@@ -99,9 +99,9 @@ default-groups = ["dev", "docs"]
 
 # An allowlist, because hatchling's default sdist is everything the root `.gitignore` does not
 # exclude, and this repository is not shaped like a package. Measured with this table deleted, that
-# default builds a 1.6 MB archive around a 270 KB wheel: the whole of `tests/`, `reference/`'s
-# read-only extracts, `scripts/`, `.github/`, `.vscode/`, `.claude/` and both tool caches -
-# `.grimp_cache/` and `.import_linter_cache/` - all ride along.
+# default builds a 1.6 MB archive around a 265 KB wheel: the whole of `tests/`, `docs/`,
+# `scripts/`, `.github/`, `.claude/` and both tool caches - `.grimp_cache/` and
+# `.import_linter_cache/` - all ride along.
 # An upload is irrevocable and the version number cannot be reissued once it is on PyPI, so the
 # failure worth designing against is something shipping that was never meant to leave this machine.
 # As an allowlist, a directory added to the repo tomorrow does not ship until it is named here; as
@@ -111,9 +111,8 @@ default-groups = ["dev", "docs"]
 # document the shipped source refers to.
 #
 # Every pattern is anchored with a leading `/`, and that slash is load-bearing rather than tidy.
-# Hatchling reads these as gitignore patterns, where a bare `README.md` matches at *any* depth: it
-# pulled `reference/README.md` into the archive - one file out of the directory the allowlist was
-# written to keep out. Anchored, each name means the repository root and nothing else.
+# Hatchling reads these as gitignore patterns, where a bare `README.md` matches at *any* depth and
+# ships every nested one. Anchored, each name means the repository root and nothing else.
 [tool.hatch.build.targets.sdist]
 include = ["/src", "/pyproject.toml", "/README.md", "/LICENSE", "/AGENTS.md"]
 
@@ -130,9 +129,9 @@ mypy_path = "src"
 target-version = "py314"
 line-length = 100
 src = ["src", "tests"]
-# `reference/` holds read-only extracts from the previous implementation, `scratchpad/` throwaway
-# working files. Neither is part of the package, and a stray `.py` in either fails the lint gate.
-extend-exclude = ["reference", "scratchpad"]
+# `scratchpad/` holds throwaway working files. It is not part of the package, and a stray `.py` in
+# it fails the lint gate.
+extend-exclude = ["scratchpad"]
 
 [tool.ruff.lint]
 # `N` is pep8-naming, and it is what makes the naming convention mechanical rather

@@ -2,7 +2,7 @@
 site_name = "AGL"
 site_url = "https://agents-gl.org/"
 repo_url = "https://github.com/jashioq/AGL"
-docs_dir = "docs"
+docs_dir = "pages"
 site_dir = "site"
 strict = true
 nav = [
@@ -101,13 +101,14 @@ pymdownx.highlight.pygments_lang_class = true
 pymdownx.inlinehilite = {}
 pymdownx.superfences = {}
 pymdownx.tabbed.alternate_style = true
-# Resolved against the working directory, so build from the repository root.
-pymdownx.snippets.base_path = ["tests/docs"]
+# Resolved against the working directory, so build from `docs/`.
+pymdownx.snippets.base_path = ["../tests/docs"]
 pymdownx.snippets.check_paths = true
 pymdownx.snippets.dedent_subsections = true
 
 [project.plugins.mkdocstrings.handlers.python]
-paths = ["src"]
+# Resolved against this file. A path that misses falls back to the installed "agl" silently.
+paths = ["../src"]
 
 [project.plugins.mkdocstrings.handlers.python.options]
 docstring_style = "google"

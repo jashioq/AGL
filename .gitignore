@@ -7,9 +7,10 @@ __pycache__/
 .ruff_cache/
 dist/
 build/
-!/docs/build/
+!/docs/pages/build/
 *.egg-info/
 .DS_Store
 .idea/
-/site/
-/.cache/
+.vscode/
+/docs/site/
+/docs/.cache/

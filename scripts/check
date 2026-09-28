@@ -149,8 +149,8 @@ record_status "mypy --strict" $? ""
 #
 # Unused imports, undefined names, import order, dead style. Cheap to run and cheap to fix, and
 # the thing that keeps eighty separate authors writing one codebase instead of eighty. Rules and
-# exclusions live in pyproject.toml under [tool.ruff]; `reference/` is excluded there. This is a
-# gate, not advice: a lint finding fails the build. No --fix - the build reports, it does not edit.
+# exclusions live in pyproject.toml under [tool.ruff]. This is a gate, not advice: a lint finding
+# fails the build. No --fix - the build reports, it does not edit.
 # ---------------------------------------------------------------------------------------------
 
 gate_header 3 "lint" ".venv/bin/ruff check"
