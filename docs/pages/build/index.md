@@ -26,13 +26,13 @@ async def implement(run: Run) -> None:
 ```toml
 [project]
 name = "implement"
-version = "0.1.1"
+version = "0.1.2"
 
 [project.entry-points."agl.workflows"]
 implement = "implement:implement"
 
 [tool.agl]
-requires = "agents-gl>=0.1.0"
+requires = "agents-gl>=0.1.2"
 config = []
 ```
 

@@ -1,26 +1,11 @@
-from dataclasses import dataclass
-from agl.sdk import (
-    Claude,
-    ClaudeEffort,
-    Restriction,
-    Role,
-    describe,
-    prompt_file,
-    reporting_tool,
-    role,
-)
-
-@dataclass(frozen=True)
-class Summary:
-    text: str = describe("What you changed.")
+from agl.sdk import Claude, ClaudeEffort, Restriction, Role, prompt_file, role
 
 @role(model=Claude.OPUS(effort=ClaudeEffort.HIGH), accepts=(str,))
-def builder_role() -> Role[Summary]:
+def builder_role() -> Role:
     return Role(
         name="builder",
         instructions=prompt_file("prompts/builder.md"),
-        restrictions={Restriction.NO_NETWORK},
-        tools=[reporting_tool("report", "Say what you changed.", Summary)],
+        restrictions={Restriction.NO_NETWORK, Restriction.NO_VCS_WRITES},
     )
 
 builder = builder_role()
