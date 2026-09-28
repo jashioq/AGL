@@ -1,5 +1,7 @@
 # Agents, Graphs, Loops
 
+[![PyPI](https://img.shields.io/pypi/v/agents-gl?color=green)](https://pypi.org/project/agents-gl/)
+
 Run Claude Code and Codex agents as workflows you write in Python. AGL can use your subscription limits so API keys are optional.
 
 ```
