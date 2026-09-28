@@ -1,5 +1,7 @@
 # AGL
 
+[![PyPI](https://img.shields.io/pypi/v/agents-gl)](https://pypi.org/project/agents-gl/)
+
 Agents, Graphs, Loops
 
 AGL runs Claude Code and Codex agents as workflows you write in Python. Each step runs an agent on
