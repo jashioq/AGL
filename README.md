@@ -1,6 +1,6 @@
 # AGL
 
-[![PyPI](https://img.shields.io/pypi/v/agents-gl)](https://pypi.org/project/agents-gl/)
+[![PyPI](https://img.shields.io/pypi/v/agents-gl?color=green)](https://pypi.org/project/agents-gl/)
 
 Agents, Graphs, Loops
 
