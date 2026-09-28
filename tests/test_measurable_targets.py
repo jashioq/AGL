@@ -104,15 +104,16 @@ repository's convention rather than this file's indulgence.
 
 ## The one instrument this file could not build
 
-#5's pair is a `.importlinter` contract and a `scripts/check` grep gate. The contract's *refusal* is
-already fabricated and asserted in `tests/test_contract_firing.py`, so this file cites it. The
-gate's refusal is not fabricated here, and that is a stated limit rather than an oversight: the only
-way to make it fire would be to write the grep a third time, and a third copy is free to drift from
-the two it is meant to be checking - which is exactly the defect `tests/test_contract_listings.py`
-exists to prevent one floor down. What is asserted instead is that the gate exists, that its scope
-is the OpenAI adapter and no wider, and that it is **not vacuous**: the binary name really does
-occur inside the one directory allowed to hold it, so the grep has something to find.
-`scripts/check` is what runs the gate, and running it is how the gate is known to pass.
+#5's pair is a `[tool.importlinter]` contract and a `scripts/check` grep gate. The contract's
+*refusal* is already fabricated and asserted in `tests/test_contract_firing.py`, so this file cites
+it. The gate's refusal is not fabricated here, and that is a stated limit rather than an oversight:
+the only way to make it fire would be to write the grep a third time, and a third copy is free to
+drift from the two it is meant to be checking - which is exactly the defect
+`tests/test_contract_listings.py` exists to prevent one floor down. What is asserted instead is that
+the gate exists, that its scope is the OpenAI adapter and no wider, and that it is **not vacuous**:
+the binary name really does occur inside the one directory allowed to hold it, so the grep has
+something to find. `scripts/check` is what runs the gate, and running it is how the gate is known to
+pass.
 """
 
 import argparse
@@ -125,11 +126,10 @@ import socket
 import subprocess
 import tomllib
 from collections.abc import Iterator, Mapping
-from configparser import ConfigParser
 from dataclasses import dataclass, fields
 from importlib.metadata import EntryPoint
 from pathlib import Path
-from typing import Final, NoReturn
+from typing import Any, Final, NoReturn
 import pytest
 from agl import testing
 from agl.adapters.filesystem.store import FilesystemStore
@@ -154,7 +154,6 @@ CONTRACTS_DIR: Final = REPO_ROOT / "tests" / "contracts"
 PYPROJECT_FILE: Final = REPO_ROOT / "pyproject.toml"
 # Where the docs' example workflows live, relative to the root: the one place a declaration may be.
 DOCS_EXAMPLES: Final = Path("tests") / "docs"
-IMPORTLINTER_FILE: Final = REPO_ROOT / ".importlinter"
 CHECK_SCRIPT: Final = REPO_ROOT / "scripts" / "check"
 
 # The entry-point group, which outlives every workflow that was ever registered into it: it is what
@@ -338,18 +337,18 @@ def _is_docstring(statement: ast.stmt) -> bool:
         and isinstance(statement.value.value, str)
     )
 
-def _contract(number: str) -> Mapping[str, str]:
-    """One `.importlinter` contract, as the raw text of its keys. Numbers are stable by policy."""
-    config = ConfigParser()
-    config.read_string(IMPORTLINTER_FILE.read_text())
-    section = f"importlinter:contract:{number}"
-    assert config.has_section(section), (
-        f"there is no contract {number} in {IMPORTLINTER_FILE}. Contract numbers are stable by "
-        f"policy - see that file's header - so a renumbering is a change here, to "
-        f"tests/test_contract_listings.py and to tests/test_contract_firing.py, which resolve a "
-        f"number against that file too."
+def _contract(number: str) -> Mapping[str, Any]:
+    """One `[tool.importlinter]` contract, as parsed. Numbers are stable by policy."""
+    config = tomllib.loads(PYPROJECT_FILE.read_text())
+    contracts = config.get("tool", {}).get("importlinter", {}).get("contracts", [])
+    found = [contract for contract in contracts if contract.get("id") == number]
+    assert found, (
+        f"there is no contract {number} under [tool.importlinter] in {PYPROJECT_FILE}. Contract "
+        f"numbers are stable by policy - see that table's header - so a renumbering is a change "
+        f"here, to tests/test_contract_listings.py and to tests/test_contract_firing.py, which "
+        f"resolve a number against that table too."
     )
-    return dict(config[section])
+    return dict(found[0])
 
 def _shell_constant(name: str) -> str:
     """A `NAME="value"` assignment from `scripts/check`, read out of the script itself.
@@ -484,11 +483,11 @@ def test_only_the_composition_root_names_an_adapter() -> None:
     which no rule could hold, but that there is exactly one *place* a new backend is wired into,
     and it is the composition root.
 
-    This is `.importlinter`'s contract 5 asked from the other side and it is not redundant with it.
-    The contract asks whether anything broke a rule; this asks *where the wiring lives*, and it is
-    the answer to that question - one file - that makes #3's claim about what an author edits. A
-    module inside its own adapter package importing its own siblings is not a hit here and is not
-    what either rule is about.
+    This is `[tool.importlinter]`'s contract 5 asked from the other side and it is not redundant
+    with it. The contract asks whether anything broke a rule; this asks *where the wiring lives*,
+    and it is the answer to that question - one file - that makes #3's claim about what an author
+    edits. A module inside its own adapter package importing its own siblings is not a hit here and
+    is not what either rule is about.
     """
     reaching = {
         module: names
@@ -530,8 +529,8 @@ def test_there_is_one_config_section_per_agent_backend() -> None:
 # measurement, so it went with them. The clause itself is not in doubt and is not unmeasured: a
 # workflow now arrives from outside this distribution entirely, so what would have to hold is that
 # the SDK a workflow is written against never obliges it to name an adapter - which is the two
-# assertions above, plus `.importlinter` contract 5 refusing every `agl.* -> agl.adapters` that is
-# not the composition root.
+# assertions above, plus `[tool.importlinter]` contract 5 refusing every `agl.* -> agl.adapters`
+# that is not the composition root.
 
 # ================================================================================================
 # Target 4 - one run addresses two providers
@@ -558,7 +557,7 @@ def test_vendor_containment_is_a_pair_of_instruments() -> None:
     """Two instruments, one per vendor, each shaped by how that vendor is reached.
 
     The target asks for containment "tested two ways", and the two are not two copies of one test.
-    The Claude SDK is a Python import, so `.importlinter`'s contract 3 contains it and
+    The Claude SDK is a Python import, so `[tool.importlinter]`'s contract 3 contains it and
     import-linter refuses the import. The Codex CLI is a **binary**, so there is no import for a
     contract to see and `scripts/check`'s grep gate stands in for one. This asserts that both
     exist, that each is scoped to its own adapter, and that the grep has something to find.
@@ -582,12 +581,12 @@ def test_vendor_containment_is_a_pair_of_instruments() -> None:
     something. `scripts/check` is what runs it.
     """
     contract = _contract("3")
-    forbidden = set(contract["forbidden_modules"].split())
-    ignored = set(contract["ignore_imports"].split("\n"))
+    forbidden = set(contract["forbidden_modules"])
+    ignored = set(contract["ignore_imports"])
 
     assert "claude_agent_sdk" in forbidden, (
-        f"`.importlinter` contract 3 forbids {sorted(forbidden)} and `claude_agent_sdk` is not "
-        f"among them. That contract is the first of target #5's two instruments: without it a "
+        f"`[tool.importlinter]` contract 3 forbids {sorted(forbidden)} and `claude_agent_sdk` is "
+        f"not among them. That contract is the first of target #5's two instruments: without it a "
         f"vendor SDK is contained by nothing at all, and any module in the tree may import it - "
         f"an SDK `pyproject.toml` installs unconditionally, so the import would simply work."
     )
@@ -617,7 +616,7 @@ def test_vendor_containment_is_a_pair_of_instruments() -> None:
         f"searching for something that does not exist and would report zero violations against "
         f"any tree at all. A gate that cannot find its own subject is not containing it - this is "
         f"the same non-vacuity `tests/test_contract_firing.py` takes for every contract in "
-        f"`.importlinter`."
+        f"`[tool.importlinter]`."
     )
 
     declared = tomllib.loads(PYPROJECT_FILE.read_text())["project"]["dependencies"]
@@ -758,9 +757,9 @@ def _ports_with_an_abc() -> dict[str, tuple[str, ...]]:
     """Every `ports/` module declaring an ABC, and the ABCs it declares.
 
     An ABC is the thing a contract suite is written against: a port module of pure types promises
-    nothing an implementation could get wrong, and `.importlinter`'s contract 2 is what keeps the
-    two kinds apart. So the parity below is over the modules that declare a behaviour, derived by
-    reading the bases rather than by listing the modules.
+    nothing an implementation could get wrong, and `[tool.importlinter]`'s contract 2 is what keeps
+    the two kinds apart. So the parity below is over the modules that declare a behaviour, derived
+    by reading the bases rather than by listing the modules.
     """
     found: dict[str, tuple[str, ...]] = {}
     for path in sorted(PORTS_DIR.glob("*.py")):

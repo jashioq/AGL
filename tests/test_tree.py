@@ -69,8 +69,8 @@ contract at the real graph.
 **The one tree `grimp` reads correctly is the tree that drops `src/agl/__init__.py` too** - all
 eight children back, and the whole package in the graph. That tree fails the package-root gate,
 which prints that the file "does not exist. This gate has nothing to check, which is itself wrong."
-The gate is not tradable for this, and `.importlinter`'s comment on contract 5 is where the reason
-is written: `agl.*` does not include `agl` itself, adding it changes nothing because the pair
+The gate is not tradable for this, and `[tool.importlinter]`'s comment on contract 5 is where the
+reason is written: `agl.*` does not include `agl` itself, adding it changes nothing because the pair
 (agl, agl.adapters) is skipped as overlapping, so that file - and only that file - could import an
 adapter with every contract still reported kept. That comment ends "Do not drop that gate."
 

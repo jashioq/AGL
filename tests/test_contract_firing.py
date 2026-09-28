@@ -1,4 +1,4 @@
-"""Structural test: every contract in `.importlinter` refuses the violation it was written to
+"""Structural test: every contract in `[tool.importlinter]` refuses the violation it was written to
 refuse. Before this file, nothing in this suite had watched one of them say no.
 
 `tests/test_contract_listings.py` next door checks that the hand-maintained *listings* inside three
@@ -40,8 +40,8 @@ between writing and deleting would leave a broken tree behind. `grimp` builds on
 eight milliseconds here (measured, on a cold cache, `include_external_packages=True` and all), and
 import-linter's contract objects take that graph directly - `contract.check(graph, verbose=False)`
 is the same call `lint-imports` makes, from the same classes, over options parsed out of the same
-`.importlinter`. Nothing about the rules is restated here: the numbers, the types, the module lists
-and the ignore expressions are all read from the file under test.
+`[tool.importlinter]`. Nothing about the rules is restated here: the numbers, the types, the module
+lists and the ignore expressions are all read from the file under test.
 
 **Every check gets its own copy of the graph, and that is a requirement rather than tidiness.**
 `Contract.check`'s own docstring says the graph "may be mutated without affecting other contracts",
@@ -91,7 +91,7 @@ from importlinter.contracts.independence import IndependenceContract
 from importlinter.contracts.layers import LayersContract
 
 REPO_ROOT: Final = Path(__file__).resolve().parent.parent
-CONFIG_FILE: Final = REPO_ROOT / ".importlinter"
+CONFIG_FILE: Final = REPO_ROOT / "pyproject.toml"
 
 # The contract *types* AGL uses, and the classes import-linter checks them with. Not a registry
 # lookup: `importlinter.api.read_configuration` is the documented way in and it stops at the parsed
@@ -103,8 +103,8 @@ CONTRACT_CLASSES: Final[Mapping[str, type[Contract]]] = {
     "independence": IndependenceContract,
 }
 
-# Contract numbers are stable - `.importlinter`'s header says so, and a number there is the
-# section id import-linter reads - and the type is half of what a number means: contract 4
+# Contract numbers are stable - `[tool.importlinter]`'s header says so, and a number there is the
+# contract `id` import-linter reads - and the type is half of what a number means: contract 4
 # becoming a `forbidden` contract would leave every probe below still running and no longer
 # probing what it says it does. This is where every number is pinned,
 # `tests/test_contract_listings.py` having handed over the four it used to pin when it stopped
@@ -129,8 +129,8 @@ class Probe:
     is every number that goes broken, which includes `contract` and is asserted as a set, so a
     fabrication that grows a second victim is a change somebody has to come here and write down.
     `rule` is the sentence the fabrication violates, and it is what the failure message prints:
-    a reader who has never opened `.importlinter` should be able to tell from the output what was
-    supposed to happen.
+    a reader who has never opened `[tool.importlinter]` should be able to tell from the output what
+    was supposed to happen.
     """
 
     contract: str
@@ -234,7 +234,7 @@ PROBES: Final[tuple[Probe, ...]] = (
     ),
 )
 
-# --- Reading the real `.importlinter` and building the real contract objects ---------------------
+# --- Reading the real `[tool.importlinter]` and building the real contract objects --------------
 
 def _contract_options() -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """The real config, as `(session options, one options dict per contract)`."""
@@ -249,7 +249,7 @@ def _contract_options() -> tuple[dict[str, Any], list[dict[str, Any]]]:
 
 @pytest.fixture(scope="module")
 def contracts() -> Mapping[str, Contract]:
-    """Every contract in `.importlinter`, built by import-linter's own classes, keyed by number."""
+    """Every contract in `[tool.importlinter]`, built by import-linter's own classes, by number."""
     session, options = _contract_options()
     built: dict[str, Contract] = {}
     for contract in options:
@@ -361,7 +361,7 @@ def test_contract_1_breaks_on_a_top_level_member_no_layer_declares(
     so a new top-level package was not at the bottom of the stack but outside it - free to import
     `agl.ports` and `agl.adapters` directly, and be imported by anything, with every contract
     reported kept. A hand-maintained comparison in `tests/test_contract_listings.py` was what
-    noticed. That was replaced with `containers = agl` plus `exhaustive = True`, which is the
+    noticed. That was replaced with `containers = ["agl"]` plus `exhaustive = true`, which is the
     linter saying the same thing natively, and this is that rule under the same discipline as the
     rest of this file: it is not enough that the flag is in the config, the failure has to happen.
 
@@ -385,7 +385,7 @@ def test_contract_1_breaks_on_a_top_level_member_no_layer_declares(
 
     assert broken == {"1"}, (
         f"a top-level member of agl that no layer declares left contracts {sorted(broken)} broken, "
-        f"and contract 1 is supposed to be the one of them. `exhaustive = True` requires every "
+        f"and contract 1 is supposed to be the one of them. `exhaustive = true` requires every "
         f"child of the `agl` container to appear in `layers =`; without it - or with `containers` "
         f"removed, which silently disables it - an unlisted package is unpoliced by anything."
     )

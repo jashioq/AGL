@@ -76,8 +76,8 @@ along shortly. Relative imports are resolved rather than skipped, on
 `test_ports_stdlib_only.py`'s reasoning: there are none under `src/` today, and a scan that ignored
 every dotted import because of that would be a hole shaped exactly like the one it exists to close.
 
-**Why this is a test and not another `.importlinter` contract.** import-linter could express it -
-`protected` is the contract type - and the cost is not in writing it. `AGENTS.md`, and
+**Why this is a test and not another `[tool.importlinter]` contract.** import-linter could express
+it - `protected` is the contract type - and the cost is not in writing it. `AGENTS.md`, and
 `tests/test_contract_listings.py` and `tests/test_contract_firing.py` in their docstrings and in
 their data, all argue about the contracts there are, one by one. Another means editing every one of
 those, and `AGENTS.md`'s own instruction to refer to gates by name and never by number is the

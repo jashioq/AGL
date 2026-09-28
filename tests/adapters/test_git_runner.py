@@ -408,7 +408,7 @@ async def test_a_cancelled_call_raises_cancellation_and_not_an_agl_error(
 # pair; what is repeated here is only what is different about git.
 #
 # They are deliberately not folded into a shared helper: `AGENTS.md`'s "Deliberately not
-# built" refuses one, and `.importlinter`'s adapter-independence contract forbids one adapter
+# built" refuses one, and `[tool.importlinter]`'s adapter-independence contract forbids one adapter
 # importing another. Three implementations that have to agree is what these tests are for.
 
 # A git alias that exits at once and leaves something of its own behind holding the pipe. That is

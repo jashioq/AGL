@@ -28,12 +28,12 @@ classifiers = [
     "Topic :: Software Development :: Version Control :: Git",
 ]
 # Both SDKs unconditional, and that is not vendor containment being walked
-# back: what contains a vendor is `.importlinter`'s contract 3 and `config/container.py` importing
-# each one inside the function that constructs it, and neither of those reads package metadata.
-# `rich` could not be optional in any case - `container.py`'s real composition root refuses a run
-# outright when it cannot be imported, there being no headless display for `real()` to fall back to.
-# Nothing here for the OpenAI connector: that adapter drives the Codex CLI *binary*, which is
-# installed separately, so there is no distribution for this list to name.
+# back: what contains a vendor is `[tool.importlinter]`'s contract 3 and `config/container.py`
+# importing each one inside the function that constructs it, and neither of those reads package
+# metadata. `rich` could not be optional in any case - `container.py`'s real composition root
+# refuses a run outright when it cannot be imported, there being no headless display for `real()` to
+# fall back to. Nothing here for the OpenAI connector: that adapter drives the Codex CLI *binary*,
+# which is installed separately, so there is no distribution for this list to name.
 #
 # `packaging` is the one member that is no vendor SDK, and `NOT_A_VENDOR` in
 # tests/test_contract_listings.py is where that exception is written down rather than assumed.
@@ -221,3 +221,200 @@ asyncio_default_fixture_loop_scope = "function"
 # bounded, not permission to stop bounding them.
 timeout = 60
 timeout_method = "signal"
+
+# AGL's import contracts - the executable form of AGENTS.md's "Layers".
+#
+# Run them with `.venv/bin/lint-imports`, or (alongside every other gate) `scripts/check`.
+# A broken contract is a failing build, not a suggestion: if a contract here blocks a change,
+# either the change is in the wrong layer, or the architecture moved - and then
+# AGENTS.md's "Layers" is what changes first, and this table second.
+#
+# Contract numbers are stable, and what makes them load-bearing is inside this repository: a
+# number here is the contract `id` import-linter itself reads. Three test modules resolve one
+# against this table - tests/test_contract_firing.py's CONTRACT_TYPES builds a contract object per
+# number, tests/test_contract_listings.py names three contracts as constants, and
+# tests/test_measurable_targets.py's _contract looks one up - so a renumbering fails the build.
+[tool.importlinter]
+root_package = "agl"
+# Contract 3 forbids two *external* packages (claude_agent_sdk, rich), so the graph has to
+# extend past agl's own modules to see imports leaving the package.
+include_external_packages = true
+
+# 1. The one dependency rule, high to low. `sdk` and `adapters` sit at the same level and are
+#    independent of each other: `|` means neither may import the other (`:` would mean they may).
+#    `agl.testing` joins `agl.cli` at the top for the same reason: it is the harness
+#    a workflow author tests against, it imports `agl.api` and `agl.config` exactly as `agl.cli`
+#    does, and nothing in AGL imports it - so it is a sibling of the CLI rather than a layer of its
+#    own, and the `|` is what says the two may not import each other.
+#    Fail-closed, and it is `containers` plus `exhaustive = true` that made it so. An earlier
+#    spelling named absolute modules in `layers =`, and this contract then had no opinion about one
+#    it did not mention: a top-level member nobody added below was not at the bottom of the stack
+#    but outside it, free to import anything with every contract still kept, and a hand-maintained
+#    meta-test in tests/test_contract_listings.py was what noticed. Naming `agl` as the container
+#    makes the layers relative names and lets `exhaustive` require that every child of `agl` is one
+#    of them,
+#    so an unlisted package now breaks this contract and is named in the failure. The rewrite
+#    changes nothing about the ordering, and that is measured rather than assumed: every fabricated
+#    violation in tests/test_contract_firing.py, plus both directions of each `|` pair, was run
+#    against the old spelling and this one and returned an identical verdict. `api` layers as a
+#    module (src/agl/api.py) exactly as a package does - a layer only has to be in the graph, not
+#    be a directory.
+#    Two things `exhaustive` still does not reach, and neither is a hand-maintained list. Grimp
+#    models src/agl/__init__.py as the module `agl` itself, so it is the container rather than a
+#    child of it and no layer orders it or could; scripts/check's package-root gate - that file
+#    holds no import statements at all - is what guards it, as contract 5's comment says of the
+#    same file for its own reason. And a layer wrapped in parentheses is import-linter's spelling
+#    for one whose absence is tolerated, which makes it the one entry here that could name a module
+#    that does not exist and be reported by nobody: a required layer missing from the graph is
+#    refused outright, an optional one is skipped. There are none below; adding one is the moment
+#    to ask why.
+[[tool.importlinter.contracts]]
+id = "1"
+name = """\
+    Layers flow one way only: {cli, testing} -> api -> config -> {sdk, adapters} -> ports, \
+    neither pair imports the other, and every top-level member of agl is one of them"""
+type = "layers"
+containers = ["agl"]
+exhaustive = true
+layers = [
+    "cli | testing",
+    "api",
+    "config",
+    "sdk | adapters",
+    "ports",
+]
+
+# 2. Ring 1 has an inner ring: a type an ABC speaks must not depend on the ABC that speaks it,
+#    so the pure types stay importable by anything without dragging in the port interfaces.
+#    Fails open twice over, these being two hand-maintained lists: a ports/ module missing from
+#    `source_modules` may import any ABC, and one missing from `forbidden_modules` may be imported
+#    by every pure type. tests/test_contract_listings.py requires every one of them on exactly one.
+[[tool.importlinter.contracts]]
+id = "2"
+name = "Pure types in agl.ports never import the ABCs that speak them"
+type = "forbidden"
+source_modules = [
+    "agl.ports.errors",
+    "agl.ports.ids",
+    "agl.ports.run",
+    "agl.ports.home_layout",
+    "agl.ports.tree_layout",
+    "agl.ports.get_request",
+]
+forbidden_modules = [
+    "agl.ports.agent",
+    "agl.ports.workspace",
+    "agl.ports.integration",
+    "agl.ports.history",
+    "agl.ports.verifier",
+    "agl.ports.store",
+    "agl.ports.sync",
+    "agl.ports.terminal",
+    "agl.ports.clock",
+    "agl.ports.fetch",
+]
+
+# 3. Vendor containment: each vendor SDK is imported by exactly one adapter package. Both SDKs are
+#    [project] dependencies, so an import this contract refuses would otherwise succeed.
+#    Fail-closed on its source side - that is the whole `agl` tree, so any package added in a
+#    later stage is covered the moment it exists; only the two expressions below escape. The
+#    forbidden side is the hand-maintained half and fails open: a third vendor SDK is contained by
+#    nothing at all. tests/test_contract_listings.py is what notices - it reads [project]
+#    dependencies in pyproject.toml, which is where a vendor SDK actually gets added, and compares.
+#    `allow_indirect_imports = true` makes this a rule about import statements, which is what
+#    "imported only inside X" means: the container legitimately reaches claude_agent_sdk
+#    *through* agl.adapters.claude_code, and that path is not a violation.
+[[tool.importlinter.contracts]]
+id = "3"
+name = """\
+    A vendor SDK is imported only by its own adapter: claude_agent_sdk only inside \
+    agl.adapters.claude_code, rich only inside agl.adapters.rich_terminal"""
+type = "forbidden"
+source_modules = ["agl"]
+forbidden_modules = ["claude_agent_sdk", "rich"]
+allow_indirect_imports = true
+ignore_imports = [
+    "agl.adapters.claude_code.** -> claude_agent_sdk",
+    "agl.adapters.rich_terminal.** -> rich",
+]
+# Those two are the only permitted vendor imports in the repo, and they are held to import-linter's
+# default alerting: an ignore expression matching nothing in the graph is an error, so an exception
+# granted here stops being granted the moment nothing needs it. That default was suppressed with
+# `unmatched_ignore_imports_alerting = "none"` while the tree was empty and all four expressions
+# matched nothing; the suppression is gone, which is what this comment is now about. `warn` was the
+# other candidate and lost: a warning does not fail scripts/check, and a report that fails nothing
+# stops being read - which is how the debt got old in the first place.
+# What the flip found: `agl.adapters.claude_code -> claude_agent_sdk` and
+# `agl.adapters.rich_terminal -> rich` had been stale since the adapters were written, and are
+# gone above. Those two named the *package roots* - src/agl/adapters/claude_code/__init__.py and
+# src/agl/adapters/rich_terminal/__init__.py - and both are empty files; the SDK imports live in
+# the modules beside them, which is what `.**` covers. The import was not missing and has not been
+# added: `.**` matches every descendant and not the package
+# itself, so if an `__init__.py` ever does need its vendor, this contract breaks and the expression
+# comes back with somebody having been asked. That is the exception being granted deliberately
+# rather than inherited.
+# The setting is absent rather than written out as `error`. The default is the rule this contract
+# wants and restating it would put the same decision in two places, one of which could drift; the
+# argument for wanting it is the paragraph above, which no key could hold.
+
+# 4. Adapters are peers: each stands alone behind its port, and swapping one never disturbs
+#    another. agl.adapters.routing is deliberately excluded from this contract - it is the one
+#    adapter module permitted to import other adapters, because dispatching on
+#    task.model.provider to the vendor runners is its entire job.
+#    A member here is an adapter, not a directory: agl.adapters.system_clock is a single module
+#    because its port is one method, and it is listed for the same reason every package is. Being
+#    one file makes it no kind of exception - it is an ordinary peer that happens not to need a
+#    directory, and leaving it out would have left it free to import agl.adapters.git with every
+#    contract still kept, since contract 5 skips the (agl.adapters, agl.adapters) pair.
+#    Fails open, like contract 2 and like contract 3's forbidden half, and unlike contracts 1 and
+#    5: this list is hand-maintained, so an adapter added at a later stage is unpoliced until
+#    someone edits it. tests/test_contract_listings.py is what notices - it walks
+#    src/agl/adapters/ and fails if anything there is missing from this list.
+[[tool.importlinter.contracts]]
+id = "4"
+name = "No adapter imports another adapter (agl.adapters.routing is the one sanctioned exception)"
+type = "independence"
+modules = [
+    "agl.adapters.claude_code",
+    "agl.adapters.openai",
+    "agl.adapters.git",
+    "agl.adapters.shell",
+    "agl.adapters.filesystem",
+    "agl.adapters.rich_terminal",
+    "agl.adapters.system_clock",
+    "agl.adapters.uv",
+    "agl.adapters.github",
+]
+
+# 5. The composition root: config/container.py is the only module that says `new`.
+#    Fail-closed - the source is `agl.*`, every top-level package under agl, which re-expands as
+#    packages are added rather than being a hand-maintained list of modules that would silently
+#    miss agl/config/__init__.py and anything a later stage introduces.
+#    The (agl.adapters, agl.adapters) pair is skipped as self-overlapping, which is exactly why
+#    contract 4 exists to police imports *between* adapters.
+#    Blind spot: `agl.*` does not include `agl` itself, and adding it changes nothing - the pair
+#    (agl, agl.adapters) is skipped as overlapping too. So src/agl/__init__.py, and only that
+#    file, could import an adapter with every contract still kept; the package-root gate in
+#    scripts/check - that file holds no import statements at all - is what guards it. Do not
+#    drop that gate. (Named, not numbered: gates get inserted, and the numbers move.)
+#    `allow_indirect_imports = true` for the same reason as contract 3: cli -> config.container
+#    -> adapters is the sanctioned wiring path, and only the direct import is the violation.
+[[tool.importlinter.contracts]]
+id = "5"
+name = """\
+    Only agl.config.container imports agl.adapters: the composition root is the one place that \
+    may name an adapter"""
+type = "forbidden"
+source_modules = ["agl.*"]
+forbidden_modules = ["agl.adapters"]
+allow_indirect_imports = true
+ignore_imports = ["agl.config.container -> agl.adapters.**"]
+# One expression, held to import-linter's default alerting, for contract 3's reasons and with the
+# same history: `unmatched_ignore_imports_alerting = "none"` was set here while the container
+# constructed nothing and neither expression matched, and has since been removed. The flip
+# found `agl.config.container -> agl.adapters` stale and it is gone above - that expression named
+# the adapters package itself, and the composition root has never imported it as a whole. It
+# imports the modules it constructs from (`from agl.adapters.git.workspace import ...`), which is
+# what `.**` matches and is also the only shape a composition root has any use for. If the bare
+# package is ever imported here this contract breaks, and that is the right moment to ask what a
+# module wanted with `agl.adapters` and nothing under it.

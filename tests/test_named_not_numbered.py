@@ -43,9 +43,9 @@ Three shapes found in this tree are **not** on the list, and each is left off fo
 A number is a citation when it points into prose and an identifier when something resolves it. Both
 exemptions are the second kind, and both were checked by breaking them rather than by reading them.
 
-**Contract numbers.** Every `[importlinter:contract:N]` in `.importlinter` is a section id
+**Contract numbers.** Every contract `id` in `[tool.importlinter]` is an identifier
 import-linter itself consumes. `tests/test_contract_firing.py`'s `CONTRACT_TYPES` builds a
-contract object per number, `tests/test_contract_listings.py` names three of the sections as
+contract object per number, `tests/test_contract_listings.py` names three of the contracts as
 constants, and `tests/test_measurable_targets.py`'s `_contract` resolves one against the real file.
 Renumbering the last of them was tried: tests in `tests/test_contract_firing.py` and in this file
 fail, and every failure names it.
@@ -63,11 +63,11 @@ quietly, so it is a live citation there exactly as it is in the file that pins i
 other way would forbid the 26 target citations in seventeen other modules, every one of them already
 anchored, and would forbid them for being far away rather than for being fragile.
 
-**The exemption is by anchor and not by word.** `_live_numbers` reads the section ids out of the
-real `.importlinter` and the keys out of the real `SETTLED`, so a contract number nothing declares
-and a target number nothing settles are both reported like any other. That makes the exemption
-self-correcting: delete a contract and every citation of it turns into a finding here, which is the
-loud break the rule asks for and the reason this file is worth having.
+**The exemption is by anchor and not by word.** `_live_numbers` reads the contract ids out of the
+real `[tool.importlinter]` and the keys out of the real `SETTLED`, so a contract number nothing
+declares and a target number nothing settles are both reported like any other. That makes the
+exemption self-correcting: delete a contract and every citation of it turns into a finding here,
+which is the loud break the rule asks for and the reason this file is worth having.
 
 ## Why a text scan and not an AST one
 
@@ -89,11 +89,11 @@ for a blunt textual rule, a test for anything that parses one thing and compares
 - and `tests/test_ports_stdlib_only.py` gives the three criteria. This lands on the same side.
 
 The comparison is not textual on both ends. One end is source text; the other is a live set of
-numbers read out of a parsed `.importlinter` and a parsed `SETTLED`, and neither is a thing `grep`
-can hold. It has to be proved to fire, and the scan is a pure function over source text, so the
-fabricated cases at the bottom hand it one of every gated form and watch it answer - including the
-two that prove the exemptions are keyed on the anchor rather than on the word. And `mypy --strict`
-covers `tests/` and does not cover a bash heredoc.
+numbers read out of a parsed `[tool.importlinter]` and a parsed `SETTLED`, and neither is a thing
+`grep` can hold. It has to be proved to fire, and the scan is a pure function over source text, so
+the fabricated cases at the bottom hand it one of every gated form and watch it answer - including
+the two that prove the exemptions are keyed on the anchor rather than on the word. And
+`mypy --strict` covers `tests/` and does not cover a bash heredoc.
 
 ## What this does not close
 
@@ -118,9 +118,9 @@ its lone surrogate as `chr(0xD800)` for the same purpose. The scan reads this fi
 
 import ast
 import re
+import tomllib
 from collections.abc import Iterator, Mapping
 from collections.abc import Set as AbstractSet
-from configparser import ConfigParser
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -130,7 +130,7 @@ REPO_ROOT: Final = Path(__file__).resolve().parent.parent
 # The two trees the comment convention governs, which is the whole of the code in this repository.
 TREES: Final = ("src", "tests")
 
-IMPORTLINTER_FILE: Final = REPO_ROOT / ".importlinter"
+PYPROJECT_FILE: Final = REPO_ROOT / "pyproject.toml"
 TARGETS_FILE: Final = REPO_ROOT / "tests" / "test_measurable_targets.py"
 JOURNAL_FILE: Final = REPO_ROOT / "tests" / "sdk" / "test_journal.py"
 
@@ -140,9 +140,6 @@ CITED: Final = ("contract", "gate", "invariant", "part", "rule", "section", "sta
 
 # U+00A7, built rather than written, so this module holds no instance of what it forbids.
 SECTION_MARK: Final = chr(0xA7)
-
-# import-linter's own section id, minus the number it ends in.
-CONTRACT_PREFIX: Final = "importlinter:contract"
 
 # The mapping in `test_measurable_targets.py` whose keys are the twelve target numbers.
 TARGETS_SYMBOL: Final = "SETTLED"
@@ -193,8 +190,8 @@ def numbered_citations(source: str, *, live: Mapping[str, AbstractSet[int]]) -> 
     """Every numbered cross-reference in `source` whose number is not a live key of its kind.
 
     `live` maps a kind to the numbers something in this repository resolves - contract numbers to
-    `.importlinter`'s section ids, target numbers to `SETTLED`'s keys. A kind absent from it has no
-    exemption at all, which is the state every kind but those two is in.
+    `[tool.importlinter]`'s contract ids, target numbers to `SETTLED`'s keys. A kind absent from it
+    has no exemption at all, which is the state every kind but those two is in.
 
     Pure: takes text, returns findings, touches no disk. The fabricated cases at the bottom of this
     file depend on that, and they are what make the real comparison mean anything.
@@ -226,18 +223,15 @@ def _live_numbers() -> Mapping[str, frozenset[int]]:
     return {"contract": _contract_numbers(), "target": _target_numbers()}
 
 def _contract_numbers() -> frozenset[int]:
-    """Every `[importlinter:contract:N]` section id in the real `.importlinter`.
+    """Every numeric contract `id` under `[tool.importlinter]` in the real `pyproject.toml`.
 
-    Read with `ConfigParser` rather than by pattern, because that is what import-linter reads it
+    Read with `tomllib` rather than by pattern, because that is what import-linter reads it
     with: a number this cannot see is a number that is not a contract.
     """
-    config = ConfigParser()
-    config.read_string(IMPORTLINTER_FILE.read_text(encoding="utf-8"))
-    return frozenset(
-        int(section.rpartition(":")[2])
-        for section in config.sections()
-        if section.startswith(f"{CONTRACT_PREFIX}:") and section.rpartition(":")[2].isdigit()
-    )
+    config = tomllib.loads(PYPROJECT_FILE.read_text(encoding="utf-8"))
+    contracts = config.get("tool", {}).get("importlinter", {}).get("contracts", [])
+    ids = [str(contract.get("id", "")) for contract in contracts]
+    return frozenset(int(number) for number in ids if number.isdigit())
 
 def _target_numbers() -> frozenset[int]:
     """Every key of `SETTLED` in `tests/test_measurable_targets.py`, parsed out of the file.
@@ -286,9 +280,9 @@ def _points_at_something_deletable(shown: str, citation: Citation) -> str:
         f"{', '.join(JOURNAL_HEADINGS)}, and the modules citing them say those words.\n"
         f"\n"
         f"Two kinds of number are exempt, and both are exempt by anchor rather than by word: a "
-        f"contract number that is a section id in .importlinter, and a target number that is a key "
-        f"of SETTLED in tests/test_measurable_targets.py. Deleting either breaks a build, which is "
-        f"all this rule asks. {citation.number} is not one of those today, so if it is "
+        f"contract number that is a contract id in [tool.importlinter], and a target number that "
+        f"is a key of SETTLED in tests/test_measurable_targets.py. Deleting either breaks a build, "
+        f"which is all this rule asks. {citation.number} is not one of those today, so if it is "
         f"meant to be an identifier, the file that pins it is what changes first."
     )
 
@@ -321,7 +315,7 @@ def test_no_module_in_src_or_tests_cites_a_number_that_can_be_deleted_quietly() 
         f"citation, so a walk that found none of them would be green and checking nothing"
     )
 
-def test_the_contract_numbers_this_file_exempts_are_section_ids_import_linter_reads() -> None:
+def test_the_contract_numbers_this_file_exempts_are_contract_ids_import_linter_reads() -> None:
     """The first exemption's anchor, asserted rather than described.
 
     An empty set here would not fail the comparison above - it would make every contract citation a
@@ -330,12 +324,13 @@ def test_the_contract_numbers_this_file_exempts_are_section_ids_import_linter_re
     """
     numbers = _contract_numbers()
     assert numbers, (
-        f"{IMPORTLINTER_FILE} declares no [{CONTRACT_PREFIX}:N] section at all. Either the file "
-        f"moved or its sections are spelled some other way; either way the exemption in this file "
-        f"has lost its anchor and every contract cited by number is about to be reported"
+        f"{PYPROJECT_FILE} declares no numbered contract id under [tool.importlinter] at all. "
+        f"Either the table moved or its ids are spelled some other way; either way the exemption "
+        f"in this file has lost its anchor and every contract cited by number is about to be "
+        f"reported"
     )
     assert numbers == frozenset(range(1, max(numbers) + 1)), (
-        f"the contracts in {IMPORTLINTER_FILE} are numbered {sorted(numbers)}, which has a hole in "
+        f"the contracts in {PYPROJECT_FILE} are numbered {sorted(numbers)}, which has a hole in "
         f"it. A hole means a contract was deleted and the rest were not renumbered, so a citation "
         f"of the missing number now reads as a live identifier to everything except this test"
     )
@@ -423,7 +418,7 @@ def test_the_scan_reads_a_citation_wherever_prose_lives_and_not_only_in_a_commen
     ]
 
 def test_the_scan_is_silent_on_a_contract_number_the_import_config_actually_declares() -> None:
-    """The first exemption doing its job, against a number read out of the real `.importlinter`."""
+    """The first exemption doing its job, against a number read out of `[tool.importlinter]`."""
     live = _live_numbers()
     declared = min(live["contract"])
     assert not numbered_citations("# " + "contract " + str(declared), live=live)

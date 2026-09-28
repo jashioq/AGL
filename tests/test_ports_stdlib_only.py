@@ -14,7 +14,7 @@ forbids `claude_agent_sdk` and `rich` *by name*, which is the only thing a `forb
 do. Contract 2 governs the ring's inside. So the stdlib-only rule had no mechanism behind it at
 all.
 
-## Why `.importlinter` cannot express it, rather than nobody having written it down
+## Why `[tool.importlinter]` cannot express it, rather than nobody having written it down
 
 Every contract type import-linter has names the thing it forbids or the order it requires:
 `forbidden` takes the modules that may not be imported, `layers` an ordering, `independence` a set
@@ -26,8 +26,9 @@ or keep. The rule is only sayable the other way round, as "the root of every imp
 
 ## A test and not a `scripts/check` gate
 
-`scripts/check` holds the other two import rules `.importlinter` cannot express - the Codex binary
-grep and the package-root gate - and it would have taken this one. Three things decided otherwise.
+`scripts/check` holds the other two import rules `[tool.importlinter]` cannot express - the Codex
+binary grep and the package-root gate - and it would have taken this one. Three things decided
+otherwise.
 
 The rule needs judgement, and the judgements are the point: what counts as stdlib, what a relative
 import resolves to, whether a `TYPE_CHECKING` import is an import. The package-root gate can be a
@@ -54,9 +55,9 @@ block, so governing it is also the cheaper implementation - an exemption would b
 to write on purpose. It is the right rule regardless. A type imported under `TYPE_CHECKING` in a
 `ports/` module is a type in a port's signature, which every implementer and every caller must then
 have installed to type-check against; the import being invisible at runtime does not make the
-dependency less real, it makes it harder to notice. `.importlinter` agrees by omission - it does not
-set `exclude_type_checking_imports`, so import-linter counts these too, and a neighbour rule that
-did not would be disagreeing with the file it sits beside.
+dependency less real, it makes it harder to notice. `[tool.importlinter]` agrees by omission - it
+does not set `exclude_type_checking_imports`, so import-linter counts these too, and a neighbour
+rule that did not would be disagreeing with the config it sits beside.
 
 **Relative imports are resolved, not skipped.** There are none under `ports/` today. `from . import
 ids` is inside the ring and legal; `from ..sdk import Run` is not, and would be caught by contract 1
@@ -162,9 +163,9 @@ def _reaches_outside_the_ring(shown: str, finding: Foreign) -> str:
         f"nor part of agl.ports.\n"
         f"\n"
         f"AGENTS.md's \"Layers\" says `ports` imports nothing but stdlib, and this is "
-        f"the only thing in the repository that says it: no contract in .importlinter can, because "
-        f"every contract type there names what is forbidden or how modules are ordered, and the "
-        f"rule here is an allow list whose complement is every distribution there is.\n"
+        f"the only thing in the repository that says it: no contract in [tool.importlinter] can, "
+        f"because every contract type there names what is forbidden or how modules are ordered, "
+        f"and the rule here is an allow list whose complement is every distribution there is.\n"
         f"\n"
         f"It is the load-bearing half of the dependency rule. Everything in AGL may import ports, "
         f"so a dependency taken here is taken by every ring at once - a third-party type in a port "
@@ -178,8 +179,8 @@ def _reaches_outside_the_ring(shown: str, finding: Foreign) -> str:
         f"adapters/ if it imports a vendor SDK, and the port keeps speaking in types it can "
         f"define itself;\n"
         f" 2. change AGENTS.md's \"Layers\" first and this file second, which is the order the "
-        f".importlinter header sets for a rule that has genuinely moved. The `ports` line there "
-        f"states it and names this file as the thing that enforces it.\n"
+        f"[tool.importlinter] header sets for a rule that has genuinely moved. The `ports` line "
+        f"there states it and names this file as the thing that enforces it.\n"
         f"\n"
         f"A `TYPE_CHECKING` guard is not a third way. It is still an import, it is still in the "
         f"signature, and this scan reads the whole module."

@@ -1,15 +1,15 @@
-"""Structural test: three contracts in `.importlinter` are lists somebody typed, and this is what
-notices when a list and the thing it is meant to police stop agreeing.
+"""Structural test: three contracts in `[tool.importlinter]` are lists somebody typed, and this is
+what notices when a list and the thing it is meant to police stop agreeing.
 
 Two of the contracts are fail-closed and need nothing from this file. Contract 5's source is
 `agl.*`, which re-expands as packages are added, so a module introduced at a later stage is covered
 the moment it exists and its author need do nothing to be policed. **Contract 1 was a
-hand-maintained guard here and is now the second of those**: `containers = agl` plus
-`exhaustive = True` makes an unlisted child of
+hand-maintained guard here and is now the second of those**: `containers = ["agl"]` plus
+`exhaustive = true` makes an unlisted child of
 `agl` break that contract natively and by name, which is what a hand-maintained comparison in this
 file used to notice. A rule the linter enforces beats a rule a neighbour asserts, so the comparison
-went; `.importlinter`'s own comment on contract 1 records what the rewrite does and does not still
-reach. The three below cannot be written that way, and each fails open in its own
+went; `[tool.importlinter]`'s own comment on contract 1 records what the rewrite does and does not
+still reach. The three below cannot be written that way, and each fails open in its own
 direction:
 
   * **Contract 2** (`forbidden`) has *two* hand-maintained lists - `source_modules`, the pure
@@ -31,7 +31,7 @@ out to have the same shape, and one guard covered all four until contract 1's sh
 the linter. Without it, later work would be written under rules that were not being applied to it,
 and the first sign of it would have been two vendors quietly sharing a helper.
 
-`scripts/check`'s package-root gate is the precedent: a rule `.importlinter` cannot express,
+`scripts/check`'s package-root gate is the precedent: a rule `[tool.importlinter]` cannot express,
 enforced beside it rather than wished into it. This is a test rather than a shell gate only because
 what it compares - a parsed config against a walked tree - is easier to say in Python than in grep.
 `tests/test_ports_stdlib_only.py` is the other rule of that kind and was written to the same
@@ -41,7 +41,7 @@ is whether a contract that *is* listed correctly refuses anything when a violati
 ## The file is the source of truth and the world is the check
 
 Nothing below hardcodes which ports, vendors or adapters exist. Each listing is parsed out
-of the real `.importlinter` and compared against the real thing it polices: `src/agl/` for
+of the real `[tool.importlinter]` and compared against the real thing it polices: `src/agl/` for
 contracts 2 and 4, and `pyproject.toml`'s `[project] dependencies` for contract 3,
 which is where a vendor SDK actually gets added. A test carrying its own copy of any of those three
 lists would be a *second* hand-maintained list, free to drift from the first, and its agreement
@@ -104,7 +104,7 @@ touching no disk, so the fabricated tests at the bottom can hand each one a list
 that disagree in every way that matters and watch it say so. A structural test that reads a
 repository and finds it consistent looks identical whether it is checking anything or not; those
 tests are what tell the difference. Each real test additionally refuses to pass on an empty tree, a
-missing section or a missing list, which is the failure mode of a mistyped path.
+missing contract or a missing list, which is the failure mode of a mistyped path.
 
 ## One module, well past the ceiling
 
@@ -113,10 +113,10 @@ modules over that ceiling, eighteen of which are larger - and two ways of splitt
 considered and refused rather than overlooked.
 
 Splitting **per contract** would make three guards out of one, and what makes this one guard is
-precisely what the three would then have to share: one parse of `.importlinter`, one way of walking
-a directory, one shape of complaint, and one discipline of proving the comparison non-vacuous. The
-only seam that split could follow is the contract numbers, which are not a seam - they are three
-instances of one defect.
+precisely what the three would then have to share: one parse of `[tool.importlinter]`, one way of
+walking a directory, one shape of complaint, and one discipline of proving the comparison
+non-vacuous. The only seam that split could follow is the contract numbers, which are not a seam -
+they are three instances of one defect.
 
 Splitting **pure from impure** - the comparisons and their complaints in one module, the readers
 and the tests in another - is the seam this file genuinely draws, and it still does not pay. It
@@ -135,33 +135,32 @@ has never seen this file, and each with fabricated cases proving it can still sa
 import tomllib
 from collections.abc import Mapping
 from collections.abc import Set as AbstractSet
-from configparser import ConfigParser
 from pathlib import Path
 from typing import Final
 import pytest
 
 REPO_ROOT: Final = Path(__file__).resolve().parent.parent
-CONFIG_FILE: Final = REPO_ROOT / ".importlinter"
 PYPROJECT_FILE: Final = REPO_ROOT / "pyproject.toml"
 
 PACKAGE_DIR: Final = REPO_ROOT / "src" / "agl"
 PORTS_DIR: Final = PACKAGE_DIR / "ports"
 ADAPTERS_DIR: Final = PACKAGE_DIR / "adapters"
 
-# Contract numbers are stable - `.importlinter`'s own header says so, and a number there is the
-# section id import-linter reads - and each section's `type` is what this file reads its list as.
+# Contract numbers are stable - `[tool.importlinter]`'s own header says so, and a number there is
+# the contract `id` import-linter reads - and each contract's `type` is what this file reads its
+# list as.
 # The pairing is asserted below, so a renumbering fails here rather than silently pointing a
 # comparison at the wrong contract.
 # Contract 1 is absent because this file no longer reads it; `tests/test_contract_firing.py` pins
 # every number to its type, that being the file that builds a contract object per number.
-PURE_TYPES_SECTION: Final = "importlinter:contract:2"
-VENDOR_SECTION: Final = "importlinter:contract:3"
-ADAPTERS_SECTION: Final = "importlinter:contract:4"
+PURE_TYPES_CONTRACT: Final = "2"
+VENDOR_CONTRACT: Final = "3"
+ADAPTERS_CONTRACT: Final = "4"
 
 CONTRACTS: Final[Mapping[str, str]] = {
-    PURE_TYPES_SECTION: "forbidden",
-    VENDOR_SECTION: "forbidden",
-    ADAPTERS_SECTION: "independence",
+    PURE_TYPES_CONTRACT: "forbidden",
+    VENDOR_CONTRACT: "forbidden",
+    ADAPTERS_CONTRACT: "independence",
 }
 
 PORTS_PACKAGE: Final = "agl.ports"
@@ -175,10 +174,10 @@ PORT_EXEMPT: Final[Mapping[str, str]] = {
 
 # Top-level `.py` files under `adapters/` that are not adapters to be policed, each with the reason
 # it is not. Everything else there belongs in contract 4's `modules =` instead. Do not add an entry
-# to spare yourself an edit to `.importlinter`: an exemption here removes a module from the rule,
-# while a listing there applies it. Nothing is pre-authorised, and one hypothetical name was left
-# here early to say so - a shared `_process.py`, which the second vendor adapter was expected to
-# want and did not write: the git package kept `_runner.py`, the shell verifier and the OpenAI
+# to spare yourself an edit to `[tool.importlinter]`: an exemption here removes a module from the
+# rule, while a listing there applies it. Nothing is pre-authorised, and one hypothetical name was
+# left here early to say so - a shared `_process.py`, which the second vendor adapter was expected
+# to want and did not write: the git package kept `_runner.py`, the shell verifier and the OpenAI
 # runner each spawn their own, and no top-level module arrived. Two candidates that were written
 # have since been weighed here and refused: the port fake, 182 lines of which `claude_code/` and
 # `openai/` hold in common, and `Caller` with its two message constants, 24 byte-identical lines in
@@ -313,7 +312,8 @@ def adapter_drift(
 
 def _unclassified_port(shown: str, dotted: str) -> str:
     return (
-        f"src/agl/ports/{shown} appears in neither of contract 2's two lists in .importlinter.\n"
+        f"src/agl/ports/{shown} appears in neither of contract 2's two lists in "
+        f"[tool.importlinter].\n"
         f"\n"
         f"That contract keeps a type an ABC speaks from importing the ABC that speaks it, and it "
         f"does so with two hand-maintained lists: `source_modules`, the pure types, and "
@@ -323,8 +323,8 @@ def _unclassified_port(shown: str, dotted: str) -> str:
         f"shows up as a broken contract.\n"
         f"\n"
         f"Resolve it by adding this line to exactly one of the two lists under "
-        f"[{PURE_TYPES_SECTION}]:\n"
-        f"    {dotted}\n"
+        f"contract {PURE_TYPES_CONTRACT}:\n"
+        f"    \"{dotted}\",\n"
         f"\n"
         f"Which list is a design question and not one for this test: "
         f"`source_modules` if the module holds types an ABC speaks, `forbidden_modules` if it "
@@ -335,7 +335,7 @@ def _unclassified_port(shown: str, dotted: str) -> str:
 
 def _doubly_listed_port(entry: str) -> str:
     return (
-        f"contract 2 of .importlinter names {entry} in both `source_modules` and "
+        f"contract 2 of [tool.importlinter] names {entry} in both `source_modules` and "
         f"`forbidden_modules`.\n"
         f"\n"
         f"import-linter skips the pair a module makes with itself, so nothing breaks and nothing "
@@ -344,27 +344,28 @@ def _doubly_listed_port(entry: str) -> str:
         f"A reader deciding where the next module goes has just been told both answers.\n"
         f"\n"
         f"Resolve it by deciding which one it is and removing the other entry under "
-        f"[{PURE_TYPES_SECTION}]. A module that genuinely holds both a pure type and the ABC that "
-        f"speaks it is two modules."
+        f"contract {PURE_TYPES_CONTRACT}. A module that genuinely holds both a pure type and the "
+        f"ABC that speaks it is two modules."
     )
 
 def _stale_port(entry: str) -> str:
     return (
-        f"contract 2 of .importlinter names {entry}, which is not a module under src/agl/ports/.\n"
+        f"contract 2 of [tool.importlinter] names {entry}, which is not a module under "
+        f"src/agl/ports/.\n"
         f"\n"
         f"A contract naming a module that does not exist is quietly protecting nothing: it reads "
         f"as coverage and enforces none. import-linter refuses a missing *source* module outright, "
         f"so an entry that got as far as this test is on the forbidden side, where a name with "
         f"nothing behind it is dropped in silence.\n"
         f"\n"
-        f"Resolve it by removing that line under [{PURE_TYPES_SECTION}], or by restoring the "
-        f"module it names."
+        f"Resolve it by removing that line under contract {PURE_TYPES_CONTRACT}, or by restoring "
+        f"the module it names."
     )
 
 def _uncontained_vendor(distribution: str, imported: str) -> str:
     return (
         f"pyproject.toml names {distribution!r} in [project] dependencies, and contract 3 of "
-        f".importlinter does not contain it.\n"
+        f"[tool.importlinter] does not contain it.\n"
         f"\n"
         f"That contract is what keeps a vendor SDK visible to exactly one adapter package, so that "
         f"no module outside that package can reach the SDK at all. Its `forbidden_modules` is a "
@@ -376,8 +377,8 @@ def _uncontained_vendor(distribution: str, imported: str) -> str:
         f"there is and the import would simply work.\n"
         f"\n"
         f"Resolve it by adding the SDK's *import* name to `forbidden_modules` under "
-        f"[{VENDOR_SECTION}], plus one `ignore_imports` expression per module permitted to import "
-        f"it, in the shape the two already there use. This test guessed that name to be:\n"
+        f"contract {VENDOR_CONTRACT}, plus one `ignore_imports` expression per module permitted to "
+        f"import it, in the shape the two already there use. This test guessed that name to be:\n"
         f"    {imported}\n"
         f"\n"
         f"The guess is the distribution name lowercased with `-` and `.` turned into `_`, and "
@@ -389,7 +390,7 @@ def _uncontained_vendor(distribution: str, imported: str) -> str:
 
 def _stale_vendor(entry: str) -> str:
     return (
-        f"contract 3 of .importlinter forbids {entry}, which nothing in pyproject.toml's "
+        f"contract 3 of [tool.importlinter] forbids {entry}, which nothing in pyproject.toml's "
         f"[project] dependencies declares.\n"
         f"\n"
         f"A vendor contained but never depended on reads as coverage of an SDK AGL does not have, "
@@ -398,30 +399,31 @@ def _stale_vendor(entry: str) -> str:
         f"which is also what lets this contract keep working while the SDKs are uninstalled.\n"
         f"\n"
         f"Resolve it by removing that line and its `ignore_imports` expressions under "
-        f"[{VENDOR_SECTION}], or by restoring the dependency in pyproject.toml that declares it."
+        f"contract {VENDOR_CONTRACT}, or by restoring the dependency in pyproject.toml that "
+        f"declares it."
     )
 
 def _unlisted_package(name: str) -> str:
     return (
-        f"src/agl/adapters/{name}/ is an adapter package that contract 4 of .importlinter does "
-        f"not list.\n"
+        f"src/agl/adapters/{name}/ is an adapter package that contract 4 of [tool.importlinter] "
+        f"does not list.\n"
         f"\n"
         f"That contract's `modules =` is a hand-maintained list, so it fails open: an adapter "
         f"missing from it may import any other adapter with every contract still reported "
         f"kept. Contract 5 skips the (agl.adapters, agl.adapters) pair as self-overlapping, "
         f"which is exactly why contract 4 exists, so nothing else in the repo would object.\n"
         f"\n"
-        f"Resolve it by adding this line to `modules =` under [{ADAPTERS_SECTION}]:\n"
-        f"    {ADAPTERS_PACKAGE}.{name}\n"
+        f"Resolve it by adding this line to `modules =` under contract {ADAPTERS_CONTRACT}:\n"
+        f"    \"{ADAPTERS_PACKAGE}.{name}\",\n"
         f"\n"
         f"A package has no exemption route - ADAPTER_EXEMPT in this test is keyed by filename and "
         f"holds only single-file members. An adapter package that genuinely must import another "
-        f"adapter is an architecture change, made in .importlinter rather than exempted here."
+        f"adapter is an architecture change, made in [tool.importlinter] rather than exempted here."
     )
 
 def _unlisted_module(filename: str) -> str:
     return (
-        f"src/agl/adapters/{filename} is neither listed in contract 4 of .importlinter nor "
+        f"src/agl/adapters/{filename} is neither listed in contract 4 of [tool.importlinter] nor "
         f"exempted in this test.\n"
         f"\n"
         f"That contract's `modules =` is a hand-maintained list, so it fails open: a module "
@@ -430,8 +432,8 @@ def _unlisted_module(filename: str) -> str:
         f"\n"
         f"Two ways to resolve it, and they are not interchangeable:\n"
         f"  1. add `{ADAPTERS_PACKAGE}.{filename.removesuffix('.py')}` to `modules =` under "
-        f"[{ADAPTERS_SECTION}] - the answer for an ordinary adapter that happens to be one file "
-        f"rather than a directory, as system_clock.py is;\n"
+        f"contract {ADAPTERS_CONTRACT} - the answer for an ordinary adapter that happens to be one "
+        f"file rather than a directory, as system_clock.py is;\n"
         f'  2. add "{filename}" to ADAPTER_EXEMPT in this test with a one-line reason - the answer '
         f"only if the module is not an adapter behind a port at all, or is sanctioned to import "
         f"other adapters the way routing.py is."
@@ -439,41 +441,41 @@ def _unlisted_module(filename: str) -> str:
 
 def _stale_listing(entry: str) -> str:
     return (
-        f"contract 4 of .importlinter lists {entry}, which is not under src/agl/adapters/.\n"
+        f"contract 4 of [tool.importlinter] lists {entry}, which is not under src/agl/adapters/.\n"
         f"\n"
         f"A contract naming a module that does not exist is quietly protecting nothing: it reads "
         f"as coverage and enforces none, and the next reader counts it as one more adapter held "
         f"to the rule.\n"
         f"\n"
-        f"Resolve it by removing that line from `modules =` under [{ADAPTERS_SECTION}], or by "
-        f"restoring the adapter it names."
+        f"Resolve it by removing that line from `modules =` under contract {ADAPTERS_CONTRACT}, or "
+        f"by restoring the adapter it names."
     )
 
 # --- Reading the real config, the real tree and the real project metadata -----------------------
 
-def _section(name: str) -> Mapping[str, str]:
-    """One section of the real `.importlinter`, parsed."""
-    parser = ConfigParser()
-    with CONFIG_FILE.open(encoding="utf-8") as handle:
-        parser.read_file(handle)
-    assert name in parser, (
-        f"{CONFIG_FILE} has no [{name}] section. Contract numbers are stable by policy - see that "
-        f"file's header - so if a contract was renumbered, both the policy and this test need "
-        f"revisiting, along with tests/test_contract_firing.py and "
-        f"tests/test_measurable_targets.py's `_contract`, which resolve a number against that "
-        f"file too."
+def _contract(number: str) -> Mapping[str, object]:
+    """One contract of the real `[tool.importlinter]`, parsed."""
+    config = tomllib.loads(PYPROJECT_FILE.read_text(encoding="utf-8"))
+    contracts = config.get("tool", {}).get("importlinter", {}).get("contracts", [])
+    found = [contract for contract in contracts if contract.get("id") == number]
+    assert found, (
+        f"{PYPROJECT_FILE} has no contract with id {number!r} under [tool.importlinter]. Contract "
+        f"numbers are stable by policy - see that table's header - so if a contract was "
+        f"renumbered, both the policy and this test need revisiting, along with "
+        f"tests/test_contract_firing.py and tests/test_measurable_targets.py's `_contract`, which "
+        f"resolve a number against that table too."
     )
-    return parser[name]
+    return dict(found[0])
 
-def _listing(section: str, key: str) -> frozenset[str]:
-    """One contract's hand-maintained list, one entry per line."""
-    raw = _section(section).get(key)
-    assert raw is not None, (
-        f"[{section}] in {CONFIG_FILE} has no `{key} =` key. A contract missing one of its lists "
-        f"polices nothing that list covered, and every module in the tree it named is unguarded "
-        f"until it returns."
+def _listing(number: str, key: str) -> frozenset[str]:
+    """One contract's hand-maintained list."""
+    raw = _contract(number).get(key)
+    assert isinstance(raw, list), (
+        f"contract {number} in {PYPROJECT_FILE} has no `{key}` list. A contract missing one of its "
+        f"lists polices nothing that list covered, and every module in the tree it named is "
+        f"unguarded until it returns."
     )
-    return frozenset(line.strip() for line in raw.splitlines() if line.strip())
+    return frozenset(str(entry).strip() for entry in raw)
 
 def _members(directory: Path) -> tuple[frozenset[str], frozenset[str]]:
     """Directory names and top-level `.py` filenames directly under `directory`."""
@@ -525,15 +527,16 @@ def _declared_vendors() -> dict[str, str]:
 
 # --- The real comparisons ------------------------------------------------------------------------
 
-@pytest.mark.parametrize(("section", "expected"), sorted(CONTRACTS.items()))
+@pytest.mark.parametrize(("number", "expected"), sorted(CONTRACTS.items()))
 def test_each_contract_is_still_the_kind_of_contract_this_file_reads(
-    section: str, expected: str
+    number: str, expected: str
 ) -> None:
-    """Each section this file parses must be the one it thinks it is."""
-    contract_type = _section(section).get("type")
+    """Each contract this file parses must be the one it thinks it is."""
+    contract_type = _contract(number).get("type")
     assert contract_type == expected, (
-        f"[{section}] is a `{contract_type}` contract, not `{expected}`. This test reads that "
-        f"section's own list as the set of modules it holds to a rule; if the contract now means "
+        f"contract {number} is a `{contract_type}` contract, not `{expected}`. This test reads "
+        f"that contract's own list as the set of modules it holds to a rule; if the contract now "
+        f"means "
         f"something else, this test is guarding the wrong thing - and so is "
         f"tests/test_contract_firing.py's probe for that number, which pins the same pairing and "
         f"fails beside this one."
@@ -547,8 +550,8 @@ def test_every_module_under_ports_appears_on_exactly_one_side_of_contract_2() ->
         f"asserting nothing; check the path at the top of this file."
     )
     problems = port_drift(
-        _listing(PURE_TYPES_SECTION, "source_modules"),
-        _listing(PURE_TYPES_SECTION, "forbidden_modules"),
+        _listing(PURE_TYPES_CONTRACT, "source_modules"),
+        _listing(PURE_TYPES_CONTRACT, "forbidden_modules"),
         packages,
         modules,
         PORT_EXEMPT,
@@ -562,7 +565,7 @@ def test_every_vendor_sdk_in_project_dependencies_is_contained_by_contract_3() -
         f"{PYPROJECT_FILE}'s [project] dependencies yield no distribution name at all, so this "
         f"test is comparing contract 3 against an empty set and would pass on any listing at all."
     )
-    problems = vendor_drift(_listing(VENDOR_SECTION, "forbidden_modules"), vendors, NOT_A_VENDOR)
+    problems = vendor_drift(_listing(VENDOR_CONTRACT, "forbidden_modules"), vendors, NOT_A_VENDOR)
     assert not problems, "\n\n".join(problems)
 
 def test_every_adapter_appears_in_contract_4() -> None:
@@ -572,7 +575,7 @@ def test_every_adapter_appears_in_contract_4() -> None:
         f"{ADAPTERS_DIR} holds no adapter packages or modules at all. This test walked the wrong "
         f"directory and is asserting nothing; check the path at the top of this file."
     )
-    listed = _listing(ADAPTERS_SECTION, "modules")
+    listed = _listing(ADAPTERS_CONTRACT, "modules")
     problems = adapter_drift(listed, packages, modules, ADAPTER_EXEMPT)
     assert not problems, "\n\n".join(problems)
 
