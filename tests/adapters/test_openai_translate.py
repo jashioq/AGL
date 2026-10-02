@@ -222,7 +222,7 @@ class TestTheSetCollapsesOntoOneScalar:
     def test_no_network_turns_web_search_off_under_either_sandbox_mode(
         self, restrictions: frozenset[Restriction]
     ) -> None:
-        """0.157.1 offers a `web.run` tool under both modes by default, the network switch aside.
+        """0.160.0 offers a `web.run` tool under both modes by default, the network switch aside.
 
         Measured by capturing the request `codex exec` sent to a loopback endpoint with this
         module's own argv: the tool was there under `read-only` and under `workspace-write` with
@@ -278,7 +278,7 @@ class TestTheSetCollapsesOntoOneScalar:
     def test_no_network_turns_image_generation_off_under_either_sandbox_mode(
         self, restrictions: frozenset[Restriction]
     ) -> None:
-        """0.157.1 hands a ChatGPT sign-in's `image_gen__imagegen` to the model in both modes.
+        """0.160.0 hands a ChatGPT sign-in's `image_gen__imagegen` to the model in both modes.
 
         Measured with this module's own argv, a stand-in ChatGPT credential and a loopback stand-in
         for OpenAI: the tool was among those the model could call under `read-only`, and under
@@ -444,10 +444,10 @@ class TestModelSlugs:
 
         A family member runs the newest model of its family and a versioned member the one model
         its name gives. There is no `gpt-6-terra`, so `TERRA` stays on `gpt-5.6-terra` beside the
-        family members that moved to `gpt-6`.
+        family members that moved to `gpt-6`, and `gpt-6.1` holds a Sol alone.
         """
         assert {member.name: model_slug(member) for member in OpenAI} == {
-            "SOL": "gpt-6-sol",
+            "SOL": "gpt-6.1-sol",
             "TERRA": "gpt-5.6-terra",
             "LUNA": "gpt-6-luna",
             "ASTRA": "gpt-6-astra",
@@ -457,6 +457,7 @@ class TestModelSlugs:
             "GPT_6_ASTRA": "gpt-6-astra",
             "GPT_6_SOL": "gpt-6-sol",
             "GPT_6_LUNA": "gpt-6-luna",
+            "GPT_6_1_SOL": "gpt-6.1-sol",
         }
 
     @pytest.mark.parametrize("model", list(OpenAI))

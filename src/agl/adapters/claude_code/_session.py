@@ -16,7 +16,7 @@ from agl.ports.errors import UpstreamUnavailable, UpstreamUnexpected
 
 __all__ = ["Stderr", "outcome_of"]
 
-# The 2.1.283 bundle's result schema declares nineteen `terminal_reason` values, and these five are
+# The 2.1.286 bundle's result schema declares nineteen `terminal_reason` values, and these five are
 # the ones AGL's two stop reasons answer for without inventing anything; a value missing here is
 # refused in `outcome_of` rather than read off a weaker field. `budget_exhausted` is
 # `--max-budget-usd` reached, a cap a caller set, which is `max_turns`'s sibling and not a failure.
@@ -55,7 +55,7 @@ _OWN_ORIGIN: Final = "human"
 _STDERR_LINES: Final = 50
 
 # The SDK's stderr framer flushes a partial line only once it passes `max_buffer_size`, a megabyte
-# in 0.2.160, so a count of lines bounds nothing an error message can afford to carry. Characters
+# in 0.2.163, so a count of lines bounds nothing an error message can afford to carry. Characters
 # are the second bound, and both are taken off the end because a CLI's fatal line is its last.
 _STDERR_CHARACTERS: Final = 2_000
 

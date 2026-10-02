@@ -141,6 +141,7 @@ def test_the_enum_values_are_the_strings_a_fingerprint_holds() -> None:
         "SONNET_4_5": "claude:claude-sonnet-4-5-20250929",
         "SONNET_4_6": "claude:claude-sonnet-4-6",
         "SONNET_5": "claude:claude-sonnet-5",
+        "SONNET_5_5": "claude:claude-sonnet-5-5",
         "HAIKU_4_5": "claude:claude-haiku-4-5-20251001",
         "FABLE_5": "claude:claude-fable-5",
         "FABLE_5_1": "claude:claude-fable-5-1",
@@ -154,6 +155,7 @@ def test_the_enum_values_are_the_strings_a_fingerprint_holds() -> None:
         "GPT_6_ASTRA": "openai:gpt-6-astra",
         "GPT_6_SOL": "openai:gpt-6-sol",
         "GPT_6_LUNA": "openai:gpt-6-luna",
+        "GPT_6_1_SOL": "openai:gpt-6.1-sol",
     }
     assert {member.name: member.value for member in ClaudeEffort} == {
         "LOW": "low",

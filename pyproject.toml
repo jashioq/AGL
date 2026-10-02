@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agents-gl"
-version = "0.1.2"
+version = "0.1.3"
 description = "A framework for running AI agent workflows against code repositories."
 # This file rendered *is* the body of the PyPI project page; there is no other prose on it.
 readme = "README.md"
@@ -44,10 +44,10 @@ classifiers = [
 # dependency of pytest, which is a dev tool: an `agl` installed by an operator gets what this list
 # names and nothing a `[dependency-groups]` entry pulled in beside it.
 #
-# `claude-agent-sdk` is pinned to the one release that bundles Claude Code 2.1.283, the version
+# `claude-agent-sdk` is pinned to the one release that bundles Claude Code 2.1.286, the version
 # `adapters/claude_code/_version.py` names as tested. The adapter starts the bundled binary
 # unless `cli_path` names another, so a looser bound installs a newer one and Claude runs warn.
-dependencies = ["claude-agent-sdk==0.2.160", "packaging>=25.0", "rich>=15.0.0"]
+dependencies = ["claude-agent-sdk==0.2.163", "packaging>=25.0", "rich>=15.0.0"]
 
 # Homepage and Repository both point at the repository, and there is no tracker apart from the
 # repo's own. Two labels rather than one because PyPI lists each by name in its sidebar, so a

@@ -32,7 +32,7 @@ version = "0.1.0"
 implement = "implement:implement"
 
 [tool.agl]
-requires = "agents-gl>=0.1.2"
+requires = "agents-gl>=0.1.3"
 config = []
 ```
 

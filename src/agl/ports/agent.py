@@ -65,8 +65,8 @@ class ModelId(StrEnum):
 class ClaudeEffort(StrEnum):
     """How long a Claude model reasons before answering."""
 
-    # The choices `claude --help` lists for `--effort` in Claude CLI 2.1.283, and the `EffortLevel`
-    # literal in `claude_agent_sdk/types.py` 0.2.160.
+    # The choices `claude --help` lists for `--effort` in Claude CLI 2.1.286, and the `EffortLevel`
+    # literal in `claude_agent_sdk/types.py` 0.2.163.
     LOW = "low"
     """The least reasoning of the five."""
 
@@ -85,7 +85,7 @@ class ClaudeEffort(StrEnum):
 class OpenAIEffort(StrEnum):
     """How long an OpenAI model reasons before answering."""
 
-    # The union of the reasoning levels the vendor CLI 0.157.1's model listing reports for the six
+    # The union of the reasoning levels the vendor CLI 0.160.0's model listing reports for the seven
     # models `OpenAI` names: `gpt-6-luna` and `gpt-5.6-luna` list every one of these but `ultra`,
     # and none lists `minimal` or `none`.
     LOW = "low"
@@ -148,6 +148,9 @@ class Claude(ModelId):
     SONNET_5 = "claude:claude-sonnet-5"
     """The model its backend runs as `claude-sonnet-5`."""
 
+    SONNET_5_5 = "claude:claude-sonnet-5-5"
+    """The model its backend runs as `claude-sonnet-5-5`."""
+
     HAIKU_4_5 = "claude:claude-haiku-4-5-20251001"
     """The model its backend runs as `claude-haiku-4-5-20251001`."""
 
@@ -175,7 +178,7 @@ class OpenAI(ModelId):
     """An OpenAI model a role can run on."""
 
     SOL = "openai:sol"
-    """The model its backend runs as `gpt-6-sol`."""
+    """The model its backend runs as `gpt-6.1-sol`."""
 
     TERRA = "openai:terra"
     """The model its backend runs as `gpt-5.6-terra`."""
@@ -203,6 +206,9 @@ class OpenAI(ModelId):
 
     GPT_6_LUNA = "openai:gpt-6-luna"
     """The model its backend runs as `gpt-6-luna`."""
+
+    GPT_6_1_SOL = "openai:gpt-6.1-sol"
+    """The model its backend runs as `gpt-6.1-sol`."""
 
     def __call__(self, *, effort: OpenAIEffort) -> ChosenOpenAI:
         """Chooses how long this model reasons.
@@ -425,7 +431,7 @@ class ModelEfforts:
     """What one model reasons at, in its own tool's words: the levels offered, and the fallback."""
 
     # In the tool's own order and never sorted here, because the order is itself something the tool
-    # reported: the vendor CLI 0.157.1 lists every model's levels ascending, so its last entry is
+    # reported: the vendor CLI 0.160.0 lists every model's levels ascending, so its last entry is
     # the most that model reasons at, and a set would throw that away.
     levels: tuple[str, ...]
     """The tool's own spellings, which is why these are strings and not an effort enum's members."""

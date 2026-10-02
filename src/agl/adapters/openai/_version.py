@@ -21,7 +21,7 @@ TOOL: Final = "Codex CLI"
 # this tool's argument parser exits 2 on a flag it does not know before it runs anything. So a
 # release where that flag is absent is one AGL does not merely go untested on but cannot start on,
 # and only a release the flag has been seen accepted on can honestly be claimed.
-TESTED: Final = VersionRange(lowest="0.157.1", highest="0.157.1")
+TESTED: Final = VersionRange(lowest="0.160.0", highest="0.160.0")
 
 _VERSION: Final = ("--version",)
 
@@ -89,7 +89,7 @@ async def _output(
         return None
     return said if child.returncode == 0 else None
 
-# Measured output is exactly `codex-cli 0.157.1`: the tool's own name, then the version. Anything
+# Measured output is exactly `codex-cli 0.160.0`: the tool's own name, then the version. Anything
 # else is a spelling this reading was not written for, and reports nothing rather than a guess.
 def _spelled(said: bytes | None) -> str | None:
     if said is None:
@@ -127,9 +127,9 @@ def _catalogued(said: bytes | None) -> dict[ModelId, ModelEfforts]:
 # the tool writes for its own menu, and nothing here reports that description.
 #
 # The listing's order is kept rather than sorted, for the reason `ports/agent.py` gives beside
-# `ModelEfforts.levels`. Measured over 0.157.1's whole catalogue: each of its eleven models lists an
-# ascending prefix of `low, medium, high, xhigh, max, ultra` - six reaching `ultra`, three stopping
-# at `max` and two at `xhigh` - and each level carries a description that ascends with it.
+# `ModelEfforts.levels`. Measured over 0.160.0's whole catalogue: each of its eleven models lists an
+# ascending prefix of `low, medium, high, xhigh, max, ultra` - seven reaching `ultra`, three
+# stopping at `max` and one at `xhigh` - and each level carries a description that ascends with it.
 def _offered(levels: object) -> tuple[str, ...]:
     if not isinstance(levels, list):
         return ()

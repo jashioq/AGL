@@ -36,13 +36,13 @@ APPROVAL: Final[tuple[str, ...]] = ("-c", 'approval_policy="never"')
 # network with it unasked, and an override there is accepted and changes nothing at all.
 _NETWORK: Final = "sandbox_workspace_write.network_access"
 
-# Measured on 0.157.1: its default offers a `web.run` tool in both modes, past the network switch.
+# Measured on 0.160.0: its default offers a `web.run` tool in both modes, past the network switch.
 _WEB_SEARCH_OFF: Final = "web_search=disabled"
 
 # Measured on 0.157.1: under a ChatGPT sign-in its default offers connector tools in both modes.
 _CONNECTORS_OFF: Final = "features.apps=false"
 
-# Measured on 0.157.1: under a ChatGPT sign-in its default offers image generation in both modes.
+# Measured on 0.160.0: under a ChatGPT sign-in its default offers image generation in both modes.
 _IMAGE_GENERATION_OFF: Final = "features.image_generation=false"
 
 # Both `stable` and both on by default. Two rather than one because a harness whose working model is
@@ -102,8 +102,9 @@ _LABELS: Final[Mapping[str, str]] = MappingProxyType(
 
 _MODEL_SLUGS: Final[Mapping[ModelId, str]] = MappingProxyType(
     {
-        OpenAI.SOL: "gpt-6-sol",
-        # There is no `gpt-6-terra`: OpenAI's model list names GPT-6 Astra, Sol and Luna only.
+        OpenAI.SOL: "gpt-6.1-sol",
+        # There is no `gpt-6-terra`: OpenAI's model list names GPT-6 Astra, Sol and Luna only, and
+        # GPT-6.1 Sol alone.
         OpenAI.TERRA: "gpt-5.6-terra",
         OpenAI.LUNA: "gpt-6-luna",
         OpenAI.ASTRA: "gpt-6-astra",
@@ -113,6 +114,7 @@ _MODEL_SLUGS: Final[Mapping[ModelId, str]] = MappingProxyType(
         OpenAI.GPT_6_ASTRA: "gpt-6-astra",
         OpenAI.GPT_6_SOL: "gpt-6-sol",
         OpenAI.GPT_6_LUNA: "gpt-6-luna",
+        OpenAI.GPT_6_1_SOL: "gpt-6.1-sol",
     }
 )
 

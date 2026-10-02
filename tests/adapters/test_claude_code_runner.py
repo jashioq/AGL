@@ -657,11 +657,11 @@ async def test_check_ready_returns_against_a_harness_that_answers(harness: Loopb
     )
 
 # How the bundled CLI introduces a repository's CLAUDE.md or AGENTS.md to the model, measured
-# through this loopback on 2.1.283: `Contents of <path> (project instructions, checked into the
+# through this loopback on 2.1.286: `Contents of <path> (project instructions, checked into the
 # codebase):`.
 INJECTED: Final = "(project instructions, checked into the codebase)"
 
-# The instruction file each run plants and the ones it takes away. 2.1.283 reads a repository's
+# The instruction file each run plants and the ones it takes away. 2.1.286 reads a repository's
 # AGENTS.md only where it has no CLAUDE.md, so the contract suite's repository, carrying both, can
 # show a CLAUDE.md leak and never an AGENTS.md one.
 INSTRUCTION_CASES: Final = (("CLAUDE.md", ()), ("AGENTS.md", ("CLAUDE.md",)))
@@ -1811,7 +1811,7 @@ async def test_why_a_run_stopped_is_read_off_three_fields_and_may_be_none(
         f"{expected!r}. Three fields, consulted in the order of how much each one knows"
     )
 
-# The other fourteen `terminal_reason` values Claude Code 2.1.283 declares: everything
+# The other fourteen `terminal_reason` values Claude Code 2.1.286 declares: everything
 # `_session._TERMINAL_REASONS` does not name. Written out rather than derived from that table,
 # because a table checked against itself measures nothing - the release's own list is what this is,
 # and the test below reads it off the bundled binary to say so.
@@ -2260,7 +2260,7 @@ async def test_a_cli_that_dies_before_it_says_anything_reports_what_it_printed_i
     `"Check stderr output for details"` that `_internal/transport/subprocess_cli.py` writes for
     every non-zero exit. Everything actionable is in the stream `Stderr` collected.
 
-    The line scripted here is verbatim what CLI 2.1.283 prints when `CLAUDE_CODE_RESTRICTED`
+    The line scripted here is verbatim what CLI 2.1.286 prints when `CLAUDE_CODE_RESTRICTED`
     reaches it, which `adapters/claude_code/_environment.py` now keeps out of the child - so this
     is the class of failure and not that one cause.
     """

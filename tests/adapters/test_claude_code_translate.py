@@ -76,7 +76,7 @@ _GIT_WRITE_SUBCOMMANDS: Final = frozenset(
 
 _WORKSPACE: Final = Path("/trees/proj/agl-fix-auth")
 
-# What CLI 2.1.283 prints and exits 1 for when `CLAUDE_CODE_RESTRICTED` reaches it, observed
+# What CLI 2.1.286 prints and exits 1 for when `CLAUDE_CODE_RESTRICTED` reaches it, observed
 # through this adapter against the bundled binary. It is the whole answer to that failure, and
 # `str(ProcessError)` carries no word of it - the SDK's own `_internal/query.py` says why, calling
 # the transport's stderr "a generic placeholder" where it declines to carry it over.
@@ -328,6 +328,7 @@ class TestModelNames:
             "SONNET_4_5": "claude-sonnet-4-5-20250929",
             "SONNET_4_6": "claude-sonnet-4-6",
             "SONNET_5": "claude-sonnet-5",
+            "SONNET_5_5": "claude-sonnet-5-5",
             "HAIKU_4_5": "claude-haiku-4-5-20251001",
             "FABLE_5": "claude-fable-5",
             "FABLE_5_1": "claude-fable-5-1",

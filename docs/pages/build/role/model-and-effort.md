@@ -23,9 +23,9 @@ starts, AGL checks that each of them is ready, and refuses the run if one isn't.
 
 - `Claude` - `OPUS`, `SONNET`, `HAIKU`, `FABLE`, and the versioned `OPUS_4_5`, `OPUS_4_6`,
   `OPUS_4_7`, `OPUS_4_8`, `OPUS_5`, `OPUS_5_5`, `SONNET_4_5`, `SONNET_4_6`, `SONNET_5`,
-  `HAIKU_4_5`, `FABLE_5`, `FABLE_5_1`.
+  `SONNET_5_5`, `HAIKU_4_5`, `FABLE_5`, `FABLE_5_1`.
 - `OpenAI` - `SOL`, `TERRA`, `LUNA`, `ASTRA`, and the versioned `GPT_5_6_SOL`, `GPT_5_6_TERRA`,
-  `GPT_5_6_LUNA`, `GPT_6_ASTRA`, `GPT_6_SOL`, `GPT_6_LUNA`.
+  `GPT_5_6_LUNA`, `GPT_6_ASTRA`, `GPT_6_SOL`, `GPT_6_LUNA`, `GPT_6_1_SOL`.
 - `ClaudeEffort` - `LOW`, `MEDIUM`, `HIGH`, `XHIGH`, `MAX`.
 - `OpenAIEffort` - `LOW`, `MEDIUM`, `HIGH`, `XHIGH`, `MAX`, `ULTRA`.
 
@@ -54,6 +54,7 @@ Without an effort, a model runs at its tool's default.
         - SONNET_4_5
         - SONNET_4_6
         - SONNET_5
+        - SONNET_5_5
         - HAIKU_4_5
         - FABLE_5
         - FABLE_5_1
@@ -83,6 +84,7 @@ Without an effort, a model runs at its tool's default.
         - GPT_6_ASTRA
         - GPT_6_SOL
         - GPT_6_LUNA
+        - GPT_6_1_SOL
         - __call__
 
 ::: agl.sdk.OpenAIEffort
